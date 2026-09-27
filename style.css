@@ -1,0 +1,16 @@
+.multihog-companion-settings {
+    margin-bottom: 10px;
+}
+
+.multihog-companion-settings .inline-drawer-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.multihog-companion-settings .mhc-setting-row:hover {
+    opacity: 1;
+}
+
+#mhc_sync_now:hover {
+    filter: brightness(1.1);
+}

@@ -1,0 +1,42 @@
+<div class="multihog-companion-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b><i class="fa-solid fa-wand-magic-sparkles"></i> MultiHog Companion</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <p style="margin: 0 0 10px 0; font-size: 0.9em; opacity: 0.85;">
+                Enhances the Multihog D&D Framework by keeping SillyTavern personas and portraits synchronized with your active campaign.
+            </p>
+
+            <div class="mhc-setting-row" style="margin-bottom: 8px;">
+                <label class="checkbox_label" title="Automatically bind the character persona to the current chat session" style="display: flex; align-items: center; cursor: pointer;">
+                    <input id="mhc_persona_sync" type="checkbox" style="margin-right: 8px;">
+                    <span><b>Persona Sync:</b> Auto-bind character persona to chat</span>
+                </label>
+            </div>
+
+            <div class="mhc-setting-row" style="margin-bottom: 8px;">
+                <label class="checkbox_label" title="Automatically update the persona avatar when Multihog generates or changes character portrait" style="display: flex; align-items: center; cursor: pointer;">
+                    <input id="mhc_portrait_sync" type="checkbox" style="margin-right: 8px;">
+                    <span><b>Portrait Sync:</b> Auto-sync Multihog portrait into persona</span>
+                </label>
+            </div>
+
+            <div class="mhc-setting-row" style="margin-bottom: 12px;">
+                <label class="checkbox_label" title="Show subtle toast notifications when persona or portrait is synced" style="display: flex; align-items: center; cursor: pointer;">
+                    <input id="mhc_show_toasts" type="checkbox" style="margin-right: 8px;">
+                    <span>Show subtle sync notifications (toasts)</span>
+                </label>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 10px;">
+                <button id="mhc_sync_now" class="menu_button" style="display: flex; align-items: center; gap: 6px;">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                    <span>Sync Current Chat Now</span>
+                </button>
+                <span id="mhc_status" style="font-size: 0.85em; opacity: 0.7;">Ready</span>
+            </div>
+        </div>
+    </div>
+</div>

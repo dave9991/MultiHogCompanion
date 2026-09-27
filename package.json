@@ -1,0 +1,16 @@
+{
+  "name": "sillytavern-multihog-companion",
+  "version": "1.0.0",
+  "description": "Companion extension for Multihog D&D Framework in SillyTavern. Automatically binds personas to chats and syncs character portraits.",
+  "type": "module",
+  "keywords": [
+    "sillytavern",
+    "sillytavern-extension",
+    "multihog",
+    "dnd",
+    "persona",
+    "portrait"
+  ],
+  "author": "dlittle",
+  "license": "MIT"
+}

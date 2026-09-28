@@ -41,6 +41,64 @@
 
             <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;">
 
+            <!-- ── Smart Aspect-Ratio & Crop Bridge ── -->
+            <div class="mhc-aspect-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 1.3em;">📐</span>
+                        <b style="font-size: 1.05em;">Smart Aspect-Ratio &amp; Crop Bridge</b>
+                        <span style="font-size: 0.75em; padding: 2px 6px; border-radius: 4px; background: rgba(94,184,212,0.25); color: #88d4f0; border: 1px solid rgba(94,184,212,0.4);">ComfyUI &amp; Native</span>
+                    </div>
+                </div>
+
+                <p style="font-size: 0.85em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
+                    MultiHog triggers native image generation without explicit dimensions, causing SillyTavern to generate 1:1 squares that truncate heads in MultiHog's 16:9 scene containers. This bridge dynamically injects high-speed resolutions matching MultiHog's layout while maintaining a low VRAM footprint (~260k pixels).
+                </p>
+
+                <div class="mhc-setting-row" style="margin-bottom: 10px;">
+                    <label class="checkbox_label" title="Dynamically inject 16:9 for scenes and 1:1 for portraits during MultiHog image generation" style="display: flex; align-items: center; cursor: pointer;">
+                        <input id="mhc_aspect_ratio_bridge" type="checkbox" style="margin-right: 8px;">
+                        <span><b>Enable Aspect-Ratio Bridge:</b> Dynamic 16:9 scenes &amp; 1:1 portraits</span>
+                    </label>
+                </div>
+
+                <div id="mhc_aspect_ratio_controls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                    <!-- Scene Resolution -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 8px;">
+                        <div style="font-size: 0.82em; font-weight: bold; color: #88d4f0; margin-bottom: 6px;">
+                            🌄 Scene Art (16:9 Widescreen)
+                        </div>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <input id="mhc_scene_width" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="672" title="Width in pixels">
+                            <span style="opacity: 0.6; font-size: 0.85em;">&times;</span>
+                            <input id="mhc_scene_height" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="384" title="Height in pixels">
+                            <span style="font-size: 0.75em; opacity: 0.65; margin-left: 2px;">~258k px</span>
+                        </div>
+                    </div>
+
+                    <!-- Portrait Resolution -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 8px;">
+                        <div style="font-size: 0.82em; font-weight: bold; color: #aaddff; margin-bottom: 6px;">
+                            👤 Portrait Art (1:1 Square)
+                        </div>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <input id="mhc_portrait_width" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="512" title="Width in pixels">
+                            <span style="opacity: 0.6; font-size: 0.85em;">&times;</span>
+                            <input id="mhc_portrait_height" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="512" title="Height in pixels">
+                            <span style="font-size: 0.75em; opacity: 0.65; margin-left: 2px;">~262k px</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end;">
+                    <button id="mhc_aspect_ratio_reset" class="menu_button interactable" style="font-size: 0.78em; padding: 3px 8px; opacity: 0.75; background: none; border: 1px solid rgba(255,255,255,0.15);" title="Reset resolutions to 672x384 and 512x512">
+                        <i class="fa-solid fa-rotate-left"></i> Reset Resolutions
+                    </button>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;">
+
             <!-- ── PbtA Ruleset & Quick Start ── -->
             <div class="mhc-pbta-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px;">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">

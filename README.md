@@ -16,12 +16,19 @@ MultiHog Companion bridges the gap between Multihog's internal campaign state an
 * **The Problem:** Multihog generates and manages character portraits in its own storage, but SillyTavern's user persona remains stuck with the default blank placeholder avatar.
 * **The Fix:** Whenever Multihog generates or updates a character portrait (via character creation, AI Horde, or manual prompt rolls), MultiHog Companion pushes the portrait directly into the active SillyTavern Persona avatar file and busts the browser cache.
 
-### 3. ⚡ Zero-Overhead & Change Detection
+### 3. 📐 Smart Aspect-Ratio & Crop Bridge
+* **The Problem:** When MultiHog triggers native image generation (portraits, NPCs, or location scenes), it invokes SillyTavern's `/imagine` command without specifying `width` or `height`. SillyTavern and ComfyUI fall back to global square resolutions (`512x512`). In MultiHog's UI, location scenes are rendered in 16:9 containers (`aspect-ratio: 16 / 9; object-fit: cover;`), slicing off character heads, hats, and skylines.
+* **The VRAM-Safe Solution:** MultiHog Companion intercepts the `/imagine` command callback to detect MultiHog requests. When dimensions are omitted:
+  * **Scenes:** Injects **`672 × 384`** (16:9 widescreen), perfectly matching the ~258k pixel budget of 512×512 (~262k px) so images generate in seconds without VRAM spillover.
+  * **Portraits:** Injects **`512 × 512`** (1:1 square) to match MultiHog's 1:1 character avatar boxes.
+* **CSS Safety Net:** Automatically anchors scene crops to `object-position: center 20% !important` to protect pre-existing square images or 3rd-party images from severed heads.
+
+### 4. ⚡ Zero-Overhead & Change Detection
 * Caches synchronization stamps in `chat_metadata`.
 * Runs only when needed (on chat switch or when portrait content actually changes).
 * No redundant file uploads, lag, or continuous polling loops.
 
-### 4. 🎲 PbtA (Powered by the Apocalypse) Narrative Engine
+### 5. 🎲 PbtA (Powered by the Apocalypse) Narrative Engine
 * **2d6 Fiction-First Resolution:** Swaps D&D math (AC, BAB, initiative, HP bloat) for narrative 2d6 moves (10+ Strong Hit, 7–9 Weak Hit, 6- Miss / GM Move).
 * **Zero-Touch Dice Mechanics:** You never roll dice manually! SillyTavern secretly feeds pre-rolled 2d6 dice from its `[RNG_QUEUE]` to the Ref (LLM) on demand.
 * **Genre Stat Presets:** Built-in archetypes and attributes for **Fantasy**, **Sci-Fi / Cyberpunk**, **Anime / Shonen**, and **Modern / Horror**.
@@ -68,6 +75,9 @@ Navigate to **Extensions Settings** in SillyTavern and expand the **MultiHog Com
 | **Portrait Sync** | `Enabled` | Automatically pushes Multihog portraits into the SillyTavern persona avatar. |
 | **Subtle Notifications** | `Enabled` | Shows short toast popups when synchronization occurs. |
 | **Sync Current Chat Now** | Button | Manually triggers synchronization for the current chat on demand. |
+| **Aspect-Ratio Bridge** | `Enabled` | Intercepts `/imagine` to dynamically assign 16:9 for scenes and 1:1 for portraits. |
+| **Scene Resolution** | `672 × 384` | 16:9 widescreen resolution tuned to match the ~258k pixel budget of 512×512. |
+| **Portrait Resolution** | `512 × 512` | 1:1 square resolution matching character avatar containers. |
 | **Genre Preset** | `Fantasy` | Selects PbtA stats and moves for Fantasy, Sci-Fi, Anime, or Modern/Horror. |
 | **Load PbtA Cartridge** | Button | Applies PbtA prompts and modules to MultiHog without starting a new character. |
 | **⚡ Quick Start PbtA** | Button | Generates a PbtA character with genre stats, binds persona, and starts the adventure. |

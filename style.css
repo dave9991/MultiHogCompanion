@@ -14,3 +14,9 @@
 #mhc_sync_now:hover {
     filter: brightness(1.1);
 }
+
+/* MultiHog Companion: Anchor 16:9 scene crops towards the top to preserve heads */
+.rt-loc-popup-hero-wrap img,
+.rt-immersion-hero-wrap img {
+    object-position: center 20% !important;
+}

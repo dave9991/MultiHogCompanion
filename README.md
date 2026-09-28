@@ -21,8 +21,12 @@ MultiHog Companion bridges the gap between Multihog's internal campaign state an
 * Runs only when needed (on chat switch or when portrait content actually changes).
 * No redundant file uploads, lag, or continuous polling loops.
 
-### 4. 🔔 Subtle Toast Feedback
-* Unobtrusive, short-duration notifications when a persona is locked or a portrait is updated (can be toggled off in settings).
+### 5. 🎲 PbtA (Powered by the Apocalypse) Narrative Engine
+* **2d6 Fiction-First Resolution:** Swaps D&D math (AC, BAB, initiative rounds, HP bloat) for narrative 2d6 moves (10+ Strong Hit, 7–9 Weak Hit, 6- Miss / GM Move).
+* **Zero-Touch Dice Mechanics:** You never roll dice manually! SillyTavern secretly feeds pre-rolled 2d6 dice from its `[RNG_QUEUE]` to the Ref (LLM) on demand.
+* **Genre Stat Presets:** Built-in archetypes and attributes for **Fantasy**, **Sci-Fi / Cyberpunk**, **Anime / Shonen**, and **Modern / Horror**.
+* **Quick Start Integration:** One-click character creation and campaign start via MultiHog's Instant Action pipeline.
+* **One-Click Reversible:** Easily restore factory default D&D 5e settings anytime.
 
 ---
 
@@ -63,12 +67,18 @@ Navigate to **Extensions Settings** in SillyTavern and expand the **MultiHog Com
 | **Portrait Sync** | `Enabled` | Automatically pushes Multihog portraits into the SillyTavern persona avatar. |
 | **Subtle Notifications** | `Enabled` | Shows short toast popups when synchronization occurs. |
 | **Sync Current Chat Now** | Button | Manually triggers synchronization for the current chat on demand. |
+| **Genre Preset** | `Fantasy` | Selects PbtA stats and moves for Fantasy, Sci-Fi, Anime, or Modern/Horror. |
+| **Load PbtA Cartridge** | Button | Applies PbtA prompts and modules to MultiHog without starting a new character. |
+| **⚡ Quick Start PbtA** | Button | Generates a PbtA character with genre stats, binds persona, and starts the adventure. |
+| **Restore Stock D&D 5e** | Button | Restores MultiHog to factory D&D 5e prompts and systems. |
 
 ---
 
 ## ⌨️ Slash Commands
 
 * `/mhc-sync` — Manually trigger persona and portrait synchronization for the active chat.
+* `/mhc-pbta [genre]` — Load PbtA 2d6 ruleset into MultiHog (`fantasy`, `scifi`, `anime`, `horror`).
+* `/mhc-dnd` — Revert MultiHog back to factory default D&D 5e ruleset.
 
 ---
 

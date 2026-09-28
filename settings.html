@@ -6,9 +6,10 @@
         </div>
         <div class="inline-drawer-content">
             <p style="margin: 0 0 10px 0; font-size: 0.9em; opacity: 0.85;">
-                Enhances the Multihog D&D Framework by keeping SillyTavern personas and portraits synchronized with your active campaign.
+                Enhances the Multihog D&D Framework by synchronizing personas/portraits and providing ruleset engines like PbtA.
             </p>
 
+            <!-- ── Sync Toggles ── -->
             <div class="mhc-setting-row" style="margin-bottom: 8px;">
                 <label class="checkbox_label" title="Automatically bind the character persona to the current chat session" style="display: flex; align-items: center; cursor: pointer;">
                     <input id="mhc_persona_sync" type="checkbox" style="margin-right: 8px;">
@@ -30,12 +31,73 @@
                 </label>
             </div>
 
-            <div style="display: flex; gap: 8px; align-items: center; margin-top: 10px;">
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 16px;">
                 <button id="mhc_sync_now" class="menu_button" style="display: flex; align-items: center; gap: 6px;">
                     <i class="fa-solid fa-arrows-rotate"></i>
                     <span>Sync Current Chat Now</span>
                 </button>
                 <span id="mhc_status" style="font-size: 0.85em; opacity: 0.7;">Ready</span>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;">
+
+            <!-- ── PbtA Ruleset & Quick Start ── -->
+            <div class="mhc-pbta-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span style="font-size: 1.3em;">🎲</span>
+                    <b style="font-size: 1.05em;">PbtA Narrative Engine</b>
+                    <span style="font-size: 0.75em; padding: 2px 6px; border-radius: 4px; background: rgba(90,160,250,0.25); color: #88ccff; border: 1px solid rgba(90,160,250,0.4);">2d6 Moves</span>
+                </div>
+
+                <p style="font-size: 0.85em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
+                    Swaps D&D math for <b>Powered by the Apocalypse</b>: 2d6 rolls (10+ Full Success, 7–9 Mixed Success, 6- Miss / GM Move) and Harm clocks. <i>You never roll dice manually—SillyTavern supplies 2d6 secretly to the Ref.</i>
+                </p>
+
+                <!-- Genre Selector -->
+                <div style="margin-bottom: 10px;">
+                    <label style="font-size: 0.8em; font-weight: bold; opacity: 0.85; display: block; margin-bottom: 4px;">Choose Genre Preset:</label>
+                    <select id="mhc_pbta_genre" class="text_pole" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.9em;">
+                        <option value="fantasy">⚔️ Fantasy (Dungeon World / Fellowship)</option>
+                        <option value="scifi">🚀 Sci-Fi / Cyberpunk (The Sprawl / Scum)</option>
+                        <option value="anime">✨ Anime / Shonen (Masks / Heroic)</option>
+                        <option value="horror">🩸 Modern / Horror (Monster of the Week)</option>
+                    </select>
+                </div>
+
+                <!-- Live Genre Info Card -->
+                <div id="mhc_pbta_info" style="font-size: 0.82em; background: rgba(255,255,255,0.04); border-left: 3px solid #88ccff; padding: 8px 10px; margin-bottom: 12px; border-radius: 0 4px 4px 0;">
+                    <div id="mhc_pbta_stats_preview" style="font-weight: bold; color: #aaddff; margin-bottom: 3px;">
+                        Stats: Might, Agility, Wits, Heart, Arcana
+                    </div>
+                    <div id="mhc_pbta_moves_preview" style="opacity: 0.75; font-size: 0.95em;">
+                        Key Moves: Hack & Slash, Volley, Defy Danger, Cast a Spell
+                    </div>
+                </div>
+
+                <!-- Character Name (Optional) -->
+                <div style="margin-bottom: 12px;">
+                    <label style="font-size: 0.8em; opacity: 0.85; display: block; margin-bottom: 4px;">Character Name (Optional):</label>
+                    <input id="mhc_pbta_char_name" type="text" class="text_pole" placeholder="Leave empty for AI to choose..." style="width: 100%; box-sizing: border-box; font-size: 0.88em; padding: 4px 8px;">
+                </div>
+
+                <!-- Action Buttons -->
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; gap: 8px;">
+                        <button id="mhc_pbta_load_cartridge" class="menu_button interactable" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.88em; padding: 6px 10px;" title="Configures MultiHog prompts and modules for PbtA without starting a new character">
+                            <i class="fa-solid fa-gamepad"></i>
+                            <span>Load PbtA Cartridge</span>
+                        </button>
+
+                        <button id="mhc_pbta_quickstart" class="menu_button interactable" style="flex: 1.2; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.88em; padding: 6px 10px; background: rgba(80,180,120,0.2); border-color: rgba(80,180,120,0.5); color: #bbeecc;" title="Applies PbtA and immediately generates character and starts the adventure!">
+                            <i class="fa-solid fa-bolt"></i>
+                            <span>⚡ Quick Start PbtA</span>
+                        </button>
+                    </div>
+
+                    <button id="mhc_restore_dnd" class="menu_button interactable" style="font-size: 0.8em; padding: 4px 8px; opacity: 0.7; align-self: flex-start; background: none; border: 1px solid rgba(255,255,255,0.15);" title="Reverts MultiHog prompts back to factory default D&D 5e">
+                        <i class="fa-solid fa-rotate-left"></i> Restore Stock D&D 5e
+                    </button>
+                </div>
             </div>
         </div>
     </div>

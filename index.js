@@ -11,6 +11,11 @@ import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import {
+    PBTA_GENRES,
+    buildPbtACartridge,
+    buildPbtAQuickStartInstructions,
+} from './pbta-ruleset.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -359,6 +364,162 @@ function scheduleSync(reason = '', delay = 350) {
 }
 
 /**
+ * Applies the PbtA Game Cartridge to MultiHog settings.
+ * @param {string} genreKey
+ * @returns {Promise<boolean>}
+ */
+export async function applyPbtACartridge(genreKey = 'fantasy') {
+    const ctx = SillyTavern.getContext();
+    const s = ctx.extensionSettings?.rpg_tracker;
+    if (!s) {
+        showToast('error', 'Multihog D&D Framework not detected.', 'MultiHog Companion');
+        return false;
+    }
+
+    const cartridge = buildPbtACartridge(genreKey);
+    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+
+    // 1. Ensure cartridge exists in MultiHog's cartridge database
+    if (!s.gameCartridges) s.gameCartridges = [];
+    const idx = s.gameCartridges.findIndex(c => c.id === cartridge.id);
+    if (idx >= 0) {
+        s.gameCartridges[idx] = cartridge;
+    } else {
+        s.gameCartridges.push(cartridge);
+    }
+
+    // 2. Install unlocked base overrides into customSyspromptLibrary
+    if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
+    s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_'));
+    s.customSyspromptLibrary.push(...cartridge.payload.customSyspromptLibrary);
+
+    // 3. Update sysprompt modules (deactivate base sections replaced by overrides or not used)
+    s.syspromptModules = s.syspromptModules || {};
+    Object.assign(s.syspromptModules, cartridge.payload.syspromptModules);
+
+    // 4. Update stock prompts (character, party, combat)
+    s.stockPrompts = s.stockPrompts || {};
+    Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
+
+    // 5. Update RNG settings to pure queue mode (d6 pairs, zero player interruption)
+    s.rngEnabled = true;
+    s.rngQueueD20 = true;
+    s.rngQueueD100 = false;
+    s.diceFunctionTool = false;
+    s.diceD100Mode = false;
+
+    // 6. Update block order
+    s.blockOrder = [...cartridge.payload.blockOrder];
+    if (s.modules) {
+        Object.assign(s.modules, cartridge.payload.modules);
+    }
+
+    // 7. Save settings
+    saveSettingsDebounced();
+
+    // 8. Re-apply sysprompt via MultiHog runtime bridge if possible
+    try {
+        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
+        if (typeof bridge.autoApplySysprompt === 'function') await bridge.autoApplySysprompt(true);
+        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+    } catch (_) {
+        const applyBtn = document.getElementById('rpg_tracker_btn_apply_sysprompt');
+        if (applyBtn) applyBtn.click();
+    }
+
+    if (typeof globalThis._rpgSyncSettingsUi === 'function') {
+        globalThis._rpgSyncSettingsUi();
+    }
+
+    showToast('success', `PbtA ruleset (${genre.label}) applied to MultiHog! 🎲`, 'PbtA Engine Active');
+    return true;
+}
+
+/**
+ * Restores MultiHog to factory D&D 5e settings.
+ * @returns {Promise<boolean>}
+ */
+export async function restoreStockDnd() {
+    const ctx = SillyTavern.getContext();
+    const s = ctx.extensionSettings?.rpg_tracker;
+    if (!s) return false;
+
+    // 1. Remove PbtA overrides
+    if (s.customSyspromptLibrary) {
+        s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_'));
+    }
+
+    // 2. Re-enable standard base modules
+    if (s.syspromptModules) {
+        s.syspromptModules.role = true;
+        s.syspromptModules.rng_system = true;
+        s.syspromptModules.combat = true;
+        s.syspromptModules.ruleset_note = true;
+        s.syspromptModules.end_of_output_footer = true;
+        s.syspromptModules.xp_system = true;
+        s.syspromptModules.weapon_proficiencies = true;
+        s.syspromptModules.attacks_per_round = true;
+        s.syspromptModules.saving_throws = true;
+    }
+
+    // 3. Reset stock prompts (delete allows MultiHog to fall back to factory constants)
+    delete s.stockPrompts;
+
+    // 4. Reset block order
+    s.blockOrder = ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'SPELLS', 'XP', 'TIME'];
+    if (s.modules) {
+        s.modules.spells = true;
+    }
+
+    saveSettingsDebounced();
+
+    try {
+        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
+        if (typeof bridge.autoApplySysprompt === 'function') await bridge.autoApplySysprompt(true);
+        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+    } catch (_) {
+        const applyBtn = document.getElementById('rpg_tracker_btn_apply_sysprompt');
+        if (applyBtn) applyBtn.click();
+    }
+
+    if (typeof globalThis._rpgSyncSettingsUi === 'function') {
+        globalThis._rpgSyncSettingsUi();
+    }
+
+    showToast('info', 'Restored MultiHog to factory D&D 5e ruleset. 📦', 'Ruleset Restored');
+    return true;
+}
+
+/**
+ * Triggers Quick Start for a PbtA adventure.
+ * @param {string} genreKey
+ * @param {string} charName
+ * @returns {Promise<void>}
+ */
+export async function quickStartPbtA(genreKey = 'fantasy', charName = '') {
+    const ok = await applyPbtACartridge(genreKey);
+    if (!ok) return;
+
+    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const instructions = buildPbtAQuickStartInstructions(genreKey, charName);
+
+    try {
+        const qs = await import('../SillyTavern-MultihogDnDFramework/quickstart.js');
+        if (typeof qs.runQuickStart === 'function') {
+            showToast('info', `Starting ${genre.label} adventure...`, 'Quick Start');
+            await qs.runQuickStart(genre.multihogGenre, null, charName, instructions);
+        } else {
+            showToast('warning', 'Quick Start function not available. PbtA ruleset is active — type your first message!', 'MultiHog Companion');
+        }
+    } catch (err) {
+        console.error('[MultiHog Companion] Quick Start failed:', err);
+        showToast('error', `Quick Start failed: ${err.message}`, 'MultiHog Companion');
+    }
+}
+
+/**
  * Initialize extension settings UI and bind events.
  */
 async function initUI() {
@@ -402,6 +563,54 @@ async function initUI() {
                 syncBtn.prop('disabled', false);
             }
         });
+
+        // ── PbtA Ruleset Controls ──
+        const genreSelect = $('#mhc_pbta_genre');
+        const statsPreview = $('#mhc_pbta_stats_preview');
+        const movesPreview = $('#mhc_pbta_moves_preview');
+
+        function updateGenrePreview(key) {
+            const g = PBTA_GENRES[key] || PBTA_GENRES.fantasy;
+            if (statsPreview.length) statsPreview.text(`Stats: ${g.stats.join(', ')}`);
+            if (movesPreview.length) movesPreview.text(`Key Moves: ${g.moves.slice(0, 4).map(m => m.split(' — ')[0]).join(', ')}`);
+        }
+
+        genreSelect.on('change', function () {
+            updateGenrePreview($(this).val());
+        });
+        updateGenrePreview(genreSelect.val() || 'fantasy');
+
+        $('#mhc_pbta_load_cartridge').on('click', async function () {
+            const btn = $(this);
+            btn.prop('disabled', true);
+            try {
+                await applyPbtACartridge(genreSelect.val());
+            } finally {
+                btn.prop('disabled', false);
+            }
+        });
+
+        $('#mhc_pbta_quickstart').on('click', async function () {
+            const btn = $(this);
+            const charName = ($('#mhc_pbta_char_name').val() || '').trim();
+            btn.prop('disabled', true);
+            try {
+                await quickStartPbtA(genreSelect.val(), charName);
+            } finally {
+                btn.prop('disabled', false);
+            }
+        });
+
+        $('#mhc_restore_dnd').on('click', async function () {
+            if (!confirm('Revert MultiHog prompts and modules back to factory default D&D 5e?')) return;
+            const btn = $(this);
+            btn.prop('disabled', true);
+            try {
+                await restoreStockDnd();
+            } finally {
+                btn.prop('disabled', false);
+            }
+        });
     } catch (err) {
         console.error('[MultiHog Companion] Failed to load UI template:', err);
     }
@@ -414,7 +623,7 @@ jQuery(async () => {
     // 1. Initialize UI
     await initUI();
 
-    // 2. Register Slash Command
+    // 2. Register Slash Commands
     if (SlashCommandParser && SlashCommand) {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'mhc-sync',
@@ -423,6 +632,25 @@ jQuery(async () => {
                 return didWork ? 'MultiHog Companion sync completed.' : 'Already up to date.';
             },
             helpString: '<div>Manually synchronizes Multihog persona and portrait to the current chat.</div>',
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-pbta',
+            callback: async (args) => {
+                const genre = (args?.genre || args?._unnamed || 'fantasy').toString().trim().toLowerCase();
+                const ok = await applyPbtACartridge(genre);
+                return ok ? `PbtA ruleset (${genre}) loaded into MultiHog.` : 'Failed to load PbtA ruleset.';
+            },
+            helpString: '<div>Loads the PbtA (Powered by the Apocalypse) 2d6 ruleset cartridge into MultiHog. Usage: <code>/mhc-pbta [fantasy|scifi|anime|horror]</code></div>',
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-dnd',
+            callback: async () => {
+                const ok = await restoreStockDnd();
+                return ok ? 'MultiHog restored to factory D&D 5e ruleset.' : 'Failed to restore D&D ruleset.';
+            },
+            helpString: '<div>Restores MultiHog back to factory default D&D 5e ruleset.</div>',
         }));
     }
 

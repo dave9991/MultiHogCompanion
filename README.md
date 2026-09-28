@@ -21,12 +21,13 @@ MultiHog Companion bridges the gap between Multihog's internal campaign state an
 * Runs only when needed (on chat switch or when portrait content actually changes).
 * No redundant file uploads, lag, or continuous polling loops.
 
-### 5. 🎲 PbtA (Powered by the Apocalypse) Narrative Engine
-* **2d6 Fiction-First Resolution:** Swaps D&D math (AC, BAB, initiative rounds, HP bloat) for narrative 2d6 moves (10+ Strong Hit, 7–9 Weak Hit, 6- Miss / GM Move).
+### 4. 🎲 PbtA (Powered by the Apocalypse) Narrative Engine
+* **2d6 Fiction-First Resolution:** Swaps D&D math (AC, BAB, initiative, HP bloat) for narrative 2d6 moves (10+ Strong Hit, 7–9 Weak Hit, 6- Miss / GM Move).
 * **Zero-Touch Dice Mechanics:** You never roll dice manually! SillyTavern secretly feeds pre-rolled 2d6 dice from its `[RNG_QUEUE]` to the Ref (LLM) on demand.
 * **Genre Stat Presets:** Built-in archetypes and attributes for **Fantasy**, **Sci-Fi / Cyberpunk**, **Anime / Shonen**, and **Modern / Horror**.
 * **Quick Start Integration:** One-click character creation and campaign start via MultiHog's Instant Action pipeline.
 * **One-Click Reversible:** Easily restore factory default D&D 5e settings anytime.
+* 👉 **Full Documentation:** See **[PBTA.md](PBTA.md)** for detailed mechanics, stat arrays, and move lists.
 
 ---
 

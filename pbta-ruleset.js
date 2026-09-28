@@ -173,12 +173,15 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy') {
     const statsExample = genre.stats.map((s, idx) => `${s} ${idx === 0 ? '+2' : idx < 3 ? '+1' : idx === 3 ? '+0' : '-1'}`).join(', ');
 
     return {
-        character: `Main character's core stats. MECHANICS ONLY: Never include narrative background or physical appearance in [CHARACTER]. Use this exact format:
+        character: `Main character's core stats. MECHANICS ONLY: Never include narrative background or physical appearance in [CHARACTER].
+NO D&D MECHANICS: Never write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns". Use PbtA concepts: Harm (+1 Harm), positioning, and modifiers (+1 forward, +1 hold).
+Format:
 [CHARACTER]
 {{user}} (Archetype): Harm: 0/5 | Armor: 0
 Stats: ${statsExample}
-Moves: Move1 (trigger and mechanical effect), Move2 (trigger and mechanical effect)
-Gear: Signature weapon/item (tags), everyday gear
+Moves: Move 1 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning]) | Move 2 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning])
+Gear: Signature weapon/item (tags), travel gear
+Wealth: Coin 3 (or setting currency)
 Conditions: None
 Hold/Forward: None
 XP: 0/5
@@ -188,7 +191,7 @@ Status: Healthy
         party: `Companion and party members. MECHANICS ONLY. Use this format for each member:
 Name (Archetype): Harm: 0/5 | Armor: 0
 Stats: ${statsExample}
-Moves: Signature Move (effect)
+Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Gear: Weapon (tags) | Armor (value)
 Conditions: None
 Status: Healthy`,
@@ -310,8 +313,8 @@ export function buildPbtACartridge(genreKey = 'fantasy') {
             character: true,
             party: true,
             inventory: true,
-            abilities: true,
-            spells: false, // Spells are handled via Moves in PbtA
+            abilities: false, // In PbtA, abilities ARE Playbook Moves (avoids D&D daily spell/ability counters)
+            spells: false,    // Magic is handled via Arcana / Weird Moves
             xp: true,
             time: true,
         },
@@ -340,11 +343,12 @@ export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName =
         `RULES: Powered by the Apocalypse (PbtA) ruleset.`,
         `GENRE: ${genre.label}.`,
         charName ? `NAME: ${charName}.` : null,
-        `ATTRIBUTES: Assign standard modifier array (+2, +1, +1, 0, -1) to exactly these five stats: ${genre.stats.join(', ')}.`,
+        `ATTRIBUTES: Assign the standard PbtA modifier array (+2, +1, +1, 0, -1) across: ${genre.stats.join(', ')}. Exactly ONE stat must be -1 (flaw/weakness).`,
         `STAT DESCRIPTIONS: ${genre.statDescriptions}.`,
         `SUGGESTED ARCHETYPES: ${genre.archetypes.join(', ')}.`,
         `SUGGESTED MOVES (pick 2): ${genre.moves.join('; ')}.`,
-        `FORMAT MANDATE: Output [CHARACTER] using Harm: 0/5, Armor, Stats with modifiers, 2 starting Moves, Gear, Conditions: None, Hold/Forward: None, and XP: 0/5. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, HP, or spell slots.`,
+        `NO D&D MECHANICS: Moves MUST use PbtA terminology (Harm, +1 forward, fictional positioning). NEVER write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns".`,
+        `FORMAT MANDATE: Output [CHARACTER] using Harm: 0/5, Armor, Stats with modifiers, 2 starting Moves, Gear, Conditions: None, Hold/Forward: None, and XP: 0/5. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, HP, spell slots, or daily ability counters.`,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }

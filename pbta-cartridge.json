@@ -3,8 +3,8 @@
   "name": "PbtA Narrative Engine (Fantasy (Dungeon World / Fellowship))",
   "description": "Powered by the Apocalypse ruleset: 2d6 moves (10+/7-9/6-), Harm clocks, and zero manual dice rolling. Tailored for Fantasy (Dungeon World / Fellowship).",
   "icon": "⚔️",
-  "createdAt": 1790553317531,
-  "updatedAt": 1790553317531,
+  "createdAt": 1790556023336,
+  "updatedAt": 1790556023336,
   "format": "multihog-game-cartridge",
   "version": 1,
   "payload": {
@@ -89,8 +89,8 @@
     },
     "syspromptSectionOrder": [],
     "stockPrompts": {
-      "character": "Main character's core stats. MECHANICS ONLY: Never include narrative background or physical appearance in [CHARACTER]. Use this exact format:\n[CHARACTER]\n{{user}} (Archetype): Harm: 0/5 | Armor: 0\nStats: Might +2, Agility +1, Wits +1, Heart +0, Arcana -1\nMoves: Move1 (trigger and mechanical effect), Move2 (trigger and mechanical effect)\nGear: Signature weapon/item (tags), everyday gear\nConditions: None\nHold/Forward: None\nXP: 0/5\nStatus: Healthy\n[/CHARACTER]",
-      "party": "Companion and party members. MECHANICS ONLY. Use this format for each member:\nName (Archetype): Harm: 0/5 | Armor: 0\nStats: Might +2, Agility +1, Wits +1, Heart +0, Arcana -1\nMoves: Signature Move (effect)\nGear: Weapon (tags) | Armor (value)\nConditions: None\nStatus: Healthy",
+      "character": "Main character's core stats. MECHANICS ONLY: Never include narrative background or physical appearance in [CHARACTER].\nNO D&D MECHANICS: Never write \"1d8 damage\", \"attack rolls\", \"disadvantage\", \"5 ft\", or \"turns\". Use PbtA concepts: Harm (+1 Harm), positioning, and modifiers (+1 forward, +1 hold).\nFormat:\n[CHARACTER]\n{{user}} (Archetype): Harm: 0/5 | Armor: 0\nStats: Might +2, Agility +1, Wits +1, Heart +0, Arcana -1\nMoves: Move 1 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning]) | Move 2 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning])\nGear: Signature weapon/item (tags), travel gear\nWealth: Coin 3 (or setting currency)\nConditions: None\nHold/Forward: None\nXP: 0/5\nStatus: Healthy\n[/CHARACTER]",
+      "party": "Companion and party members. MECHANICS ONLY. Use this format for each member:\nName (Archetype): Harm: 0/5 | Armor: 0\nStats: Might +2, Agility +1, Wits +1, Heart +0, Arcana -1\nMoves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])\nGear: Weapon (tags) | Armor (value)\nConditions: None\nStatus: Healthy",
       "combat": "Active enemies and environmental threats in combat.\nGroup threats under ENEMIES: and NON-PARTY ALLIES: headers.\nUse this format:\nTHREAT LEVEL: (Skirmish / Peril / Catastrophe)\nENEMIES:\nName: Harm [current/max] | Armor [X] | Threat: (Minion / Veteran / Boss)\nAttacks: Attack Name (Harm dealt, tags like close/reach/far/messy)\nInstinct: (What this threat desires or how it fights, e.g. \"To overwhelm with numbers\")\nStatus: Healthy"
     },
     "rngEnabled": true,
@@ -112,7 +112,7 @@
       "character": true,
       "party": true,
       "inventory": true,
-      "abilities": true,
+      "abilities": false,
       "spells": false,
       "xp": true,
       "time": true

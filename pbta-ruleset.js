@@ -130,6 +130,7 @@ NO INITIATIVE TURNS. Combat is a cinematic conversation, not round-by-round math
   1 Harm: Scratches, bruises, wind knocked out.
   2 Harm: Deep cut, broken bone, moderate injury (-1 forward to physical actions).
   3 Harm: Severe, incapacitating trauma.
+  4 Harm: Critical wound, organ damage, verge of death (-2 forward to all actions).
   5 Harm: Lethal / dying.
 </combat>`;
 }
@@ -303,10 +304,15 @@ export function buildPbtACartridge(genreKey = 'fantasy') {
         syspromptSectionOrder: [],
         stockPrompts: buildPbtAStockPrompts(genreKey),
         rngEnabled: true,
-        rngQueueD20: true, // MultiHog's queue supplies fair d6 pairs on every line
+        // "rngQueueD20" is a misnomer inherited from MultiHog — it enables the
+        // *polyhedral* RNG queue (as opposed to the d100-only queue).  Each line
+        // contains ALL standard die sizes: d20, d4, d6, d8, d10, d12.  PbtA's
+        // sysprompt instructs the LLM to consume the d6 values from consecutive
+        // lines (Line N d6 + Line N+1 d6) for 2d6 move resolution.
+        rngQueueD20: true,
         rngQueueD100: false,
         diceD100Mode: false,
-        diceFunctionTool: false, // Ensure zero player interruption
+        diceFunctionTool: false, // Disable AI function-call dice to avoid player interruptions
         blockOrder: ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'],
         modules: {
             combat: true,

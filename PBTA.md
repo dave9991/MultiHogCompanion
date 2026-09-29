@@ -74,7 +74,7 @@ Each genre uses a standard modifier array: **+2, +1, +1, 0, -1** (one primary st
 3. Choose an action:
    * **⚡ Quick Start PbtA:** Applies the ruleset, generates a full character sheet with PbtA stats and moves, locks your persona, and sends the opening story turn.
    * **🎮 Load PbtA Cartridge:** Applies the PbtA prompt ruleset to an existing chat session without recreating the character.
-   * **📦 Restore Stock D&D 5e:** Reverts MultiHog back to factory default D&D 5e rules and prompts anytime.
+   * **📦 Restore Stock D&D 5e:** Reverts the current chat back to factory default D&D 5e rules and prompts.
 
 ### Slash Commands
 * `/mhc-pbta [fantasy|scifi|anime|horror]` — Instantly load PbtA ruleset into MultiHog.

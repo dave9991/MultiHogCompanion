@@ -58,6 +58,24 @@ function showToast(type, message, title = 'MultiHog Companion') {
 }
 
 /**
+ * Trigger MultiHog to re-save settings, recompile its system prompt, and refresh UI.
+ * Attempts the runtime-bridge import first; falls back to clicking the DOM apply button.
+ */
+async function refreshMultihogRuntime() {
+    try {
+        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
+        if (typeof bridge.autoApplySysprompt === 'function') await bridge.autoApplySysprompt(true);
+        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+    } catch (_) {
+        document.getElementById('rpg_tracker_btn_apply_sysprompt')?.click();
+    }
+    if (typeof globalThis._rpgSyncSettingsUi === 'function') {
+        globalThis._rpgSyncSettingsUi();
+    }
+}
+
+/**
  * Get active chat ID from SillyTavern or Multihog tracker.
  */
 function getActiveChatId() {
@@ -422,27 +440,18 @@ export async function applyPbtACartridge(genreKey = 'fantasy') {
     // 7. Save settings
     saveSettingsDebounced();
 
-    // 8. Re-apply sysprompt via MultiHog runtime bridge if possible
-    try {
-        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
-        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
-        if (typeof bridge.autoApplySysprompt === 'function') await bridge.autoApplySysprompt(true);
-        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
-    } catch (_) {
-        const applyBtn = document.getElementById('rpg_tracker_btn_apply_sysprompt');
-        if (applyBtn) applyBtn.click();
-    }
+    // 8. Re-apply sysprompt via MultiHog runtime bridge
+    await refreshMultihogRuntime();
 
-    if (typeof globalThis._rpgSyncSettingsUi === 'function') {
-        globalThis._rpgSyncSettingsUi();
-    }
-
-    showToast('success', `PbtA ruleset (${genre.label}) applied to MultiHog! 🎲`, 'PbtA Engine Active');
+    showToast('success', `PbtA ruleset (${genre.label}) applied to this chat! 🎲`, 'PbtA Engine Active');
+    updateRulesetBadge();
     return true;
 }
 
 /**
  * Restores MultiHog to factory D&D 5e settings.
+ * Pulls actual factory defaults from MultiHog's defaults.js when available;
+ * falls back to hardcoded values if the import fails (e.g. folder renamed).
  * @returns {Promise<boolean>}
  */
 export async function restoreStockDnd() {
@@ -450,50 +459,57 @@ export async function restoreStockDnd() {
     const s = ctx.extensionSettings?.rpg_tracker;
     if (!s) return false;
 
-    // 1. Remove PbtA overrides
+    // 1. Remove PbtA overrides from the custom sysprompt library
     if (s.customSyspromptLibrary) {
         s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_'));
     }
 
-    // 2. Re-enable standard base modules
-    if (s.syspromptModules) {
-        s.syspromptModules.role = true;
-        s.syspromptModules.rng_system = true;
-        s.syspromptModules.combat = true;
-        s.syspromptModules.ruleset_note = true;
-        s.syspromptModules.end_of_output_footer = true;
-        s.syspromptModules.xp_system = true;
-        s.syspromptModules.weapon_proficiencies = true;
-        s.syspromptModules.attacks_per_round = true;
-        s.syspromptModules.saving_throws = true;
+    // 2. Pull factory defaults from MultiHog (graceful fallback)
+    let factory;
+    try {
+        const defs = await import('../SillyTavern-MultihogDnDFramework/src/state/defaults.js');
+        factory = defs.buildDefaultSettings();
+    } catch (_) {
+        factory = null;
     }
 
-    // 3. Reset stock prompts (delete allows MultiHog to fall back to factory constants)
-    delete s.stockPrompts;
+    // 3. Restore sysprompt modules from factory (or hardcoded fallback)
+    const factoryModules = factory?.syspromptModules ?? {
+        role: true, rng_system: true, combat: true, ruleset_note: true,
+        end_of_output_footer: true, xp_system: true,
+        weapon_proficiencies: true, attacks_per_round: true, saving_throws: true,
+    };
+    if (s.syspromptModules) {
+        Object.assign(s.syspromptModules, factoryModules);
+    }
 
-    // 4. Reset block order
-    s.blockOrder = ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'SPELLS', 'XP', 'TIME'];
-    if (s.modules) {
+    // 4. Restore stock prompts (delete allows MultiHog to fall back to its own factory constants)
+    if (factory?.stockPrompts) {
+        s.stockPrompts = { ...factory.stockPrompts };
+    } else {
+        delete s.stockPrompts;
+    }
+
+    // 5. Restore block order and modules
+    s.blockOrder = factory?.blockOrder
+        ?? ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'SPELLS', 'XP', 'TIME'];
+    if (factory?.modules && s.modules) {
+        Object.assign(s.modules, factory.modules);
+    } else if (s.modules) {
         s.modules.spells = true;
     }
 
+    // 6. Restore RNG defaults
+    s.rngEnabled = factory?.rngEnabled ?? true;
+    s.rngQueueD20 = factory?.rngQueueD20 ?? true;
+    s.rngQueueD100 = factory?.rngQueueD100 ?? false;
+    s.diceFunctionTool = factory?.diceFunctionTool ?? false;
+
     saveSettingsDebounced();
+    await refreshMultihogRuntime();
 
-    try {
-        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
-        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
-        if (typeof bridge.autoApplySysprompt === 'function') await bridge.autoApplySysprompt(true);
-        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
-    } catch (_) {
-        const applyBtn = document.getElementById('rpg_tracker_btn_apply_sysprompt');
-        if (applyBtn) applyBtn.click();
-    }
-
-    if (typeof globalThis._rpgSyncSettingsUi === 'function') {
-        globalThis._rpgSyncSettingsUi();
-    }
-
-    showToast('info', 'Restored MultiHog to factory D&D 5e ruleset. 📦', 'Ruleset Restored');
+    showToast('info', 'Restored this chat to factory D&D 5e ruleset. 📦', 'Ruleset Restored');
+    updateRulesetBadge();
     return true;
 }
 
@@ -682,8 +698,16 @@ async function initUI() {
             if (movesPreview.length) movesPreview.text(`Key Moves: ${g.moves.slice(0, 4).map(m => m.split(' — ')[0]).join(', ')}`);
         }
 
+        // Restore saved genre selection
+        const savedGenre = current.lastGenre || 'fantasy';
+        if (PBTA_GENRES[savedGenre]) {
+            genreSelect.val(savedGenre);
+        }
+
         genreSelect.on('change', function () {
-            updateGenrePreview($(this).val());
+            const key = $(this).val();
+            updateGenrePreview(key);
+            updateSettings({ lastGenre: key });
         });
         updateGenrePreview(genreSelect.val() || 'fantasy');
 
@@ -723,6 +747,125 @@ async function initUI() {
     }
 }
 
+// ── PbtA Detection ──────────────────────────────────────────────────────────────
+
+/**
+ * Check if PbtA overrides are currently enabled in MultiHog's live settings.
+ * Per-chat scoping is handled by MultiHog's Chat Setup Link, which hydrates
+ * the live customSyspromptLibrary with per-chat enabled states on chat switch.
+ */
+export function isPbtAActive() {
+    const s = SillyTavern.getContext().extensionSettings?.rpg_tracker;
+    if (!s?.customSyspromptLibrary) return false;
+    return s.customSyspromptLibrary.some(p => p.id.startsWith('pbta_') && p.enabled);
+}
+
+// ── 2d6 RNG Queue Interceptor ───────────────────────────────────────────────────
+
+/**
+ * Roll a single d6 using the same cryptographic rejection sampling MultiHog uses.
+ */
+function rollD6() {
+    const buf = new Uint32Array(1);
+    const limit = Math.floor(4294967296 / 6) * 6;
+    let roll;
+    do { crypto.getRandomValues(buf); roll = buf[0]; } while (roll >= limit);
+    return (roll % 6) + 1;
+}
+
+/**
+ * Build a clean PbtA 2d6 RNG block.  Each line is one pre-paired 2d6 roll:
+ *   1: 2d6 → 3 + 5 = 8
+ * This replaces MultiHog's polyhedral queue (d20/d4/d6/d8/d10/d12 per line)
+ * which wastes tokens and forces the LLM to consume 2 lines per PbtA roll.
+ */
+function buildPbtA2d6Block(lineCount = 12) {
+    const turnId = Date.now();
+    const lines = [];
+    for (let i = 0; i < lineCount; i++) {
+        const a = rollD6(), b = rollD6();
+        lines.push(`${i + 1}: 2d6 → ${a} + ${b} = ${a + b}`);
+    }
+    return `[RNG_QUEUE v7.0 — PbtA 2d6]\nturn_id=${turnId}\nscope=this_response\n${lines.join('\n')}\n[/RNG_QUEUE]\n\n`;
+}
+
+/**
+ * SillyTavern generate_interceptor — runs AFTER MultiHog's interceptor
+ * (loading_order 30 > 20). When PbtA is active for the current chat,
+ * replaces MultiHog's polyhedral RNG queue with a clean 2d6-only format.
+ *
+ * Registered on globalThis via the manifest's generate_interceptor field.
+ */
+function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
+    if (!isPbtAActive()) return;
+    if (!Array.isArray(chat)) return;
+
+    // MultiHog prepends its RNG block into the last user message's content.
+    // Find it and replace with our clean 2d6 block.
+    const rngPattern = /\[RNG_QUEUE\s+v[\d.]+\][\s\S]*?\[\/RNG_QUEUE\]\s*/g;
+
+    for (let i = chat.length - 1; i >= Math.max(0, chat.length - 3); i--) {
+        const msg = chat[i];
+        if (!msg) continue;
+
+        if (typeof msg.mes === 'string' && rngPattern.test(msg.mes)) {
+            rngPattern.lastIndex = 0;
+            msg.mes = msg.mes.replace(rngPattern, buildPbtA2d6Block());
+            console.log('[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
+            return;
+        }
+
+        if (typeof msg.content === 'string' && rngPattern.test(msg.content)) {
+            rngPattern.lastIndex = 0;
+            msg.content = msg.content.replace(rngPattern, buildPbtA2d6Block());
+            console.log('[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
+            return;
+        }
+
+        if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+                if (part?.type === 'text' && typeof part.text === 'string' && rngPattern.test(part.text)) {
+                    rngPattern.lastIndex = 0;
+                    part.text = part.text.replace(rngPattern, buildPbtA2d6Block());
+                    console.log('[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
+                    return;
+                }
+            }
+        }
+    }
+}
+
+// Register the interceptor on globalThis so SillyTavern can call it.
+globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
+
+// ── Ruleset Status Badge ────────────────────────────────────────────────────────
+
+/**
+ * Update the status badge in the settings panel to show the active ruleset.
+ */
+function updateRulesetBadge() {
+    const badge = document.getElementById('mhc_ruleset_status');
+    if (!badge) return;
+
+    if (isPbtAActive()) {
+        // Try to determine which genre is active from the sysprompt library content
+        const s = SillyTavern.getContext().extensionSettings?.rpg_tracker;
+        const roleEntry = s?.customSyspromptLibrary?.find(
+            p => p.id === 'pbta_base_override_role' && p.enabled,
+        );
+        const genreLabel = roleEntry ? 'PbtA' : 'PbtA';
+        badge.textContent = `🎲 ${genreLabel} Active`;
+        badge.style.background = 'rgba(90,160,250,0.2)';
+        badge.style.borderColor = 'rgba(90,160,250,0.5)';
+        badge.style.color = '#88ccff';
+    } else {
+        badge.textContent = '⚔️ D&D 5e Active';
+        badge.style.background = 'rgba(255,180,60,0.15)';
+        badge.style.borderColor = 'rgba(255,180,60,0.4)';
+        badge.style.color = '#ffcc88';
+    }
+}
+
 /**
  * Extension entry point.
  */
@@ -748,8 +891,12 @@ jQuery(async () => {
             name: 'mhc-pbta',
             callback: async (args) => {
                 const genre = (args?.genre || args?._unnamed || 'fantasy').toString().trim().toLowerCase();
+                if (!PBTA_GENRES[genre]) {
+                    const available = Object.keys(PBTA_GENRES).join(', ');
+                    return `Unknown genre "${genre}". Available: ${available}`;
+                }
                 const ok = await applyPbtACartridge(genre);
-                return ok ? `PbtA ruleset (${genre}) loaded into MultiHog.` : 'Failed to load PbtA ruleset.';
+                return ok ? `PbtA ruleset (${genre}) loaded into this chat.` : 'Failed to load PbtA ruleset.';
             },
             helpString: '<div>Loads the PbtA (Powered by the Apocalypse) 2d6 ruleset cartridge into MultiHog. Usage: <code>/mhc-pbta [fantasy|scifi|anime|horror]</code></div>',
         }));
@@ -758,7 +905,7 @@ jQuery(async () => {
             name: 'mhc-dnd',
             callback: async () => {
                 const ok = await restoreStockDnd();
-                return ok ? 'MultiHog restored to factory D&D 5e ruleset.' : 'Failed to restore D&D ruleset.';
+                return ok ? 'This chat restored to factory D&D 5e ruleset.' : 'Failed to restore D&D ruleset.';
             },
             helpString: '<div>Restores MultiHog back to factory default D&D 5e ruleset.</div>',
         }));
@@ -768,13 +915,20 @@ jQuery(async () => {
     if (event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, setupImagineInterceptor);
     }
-    eventSource.on(event_types.CHAT_CHANGED, () => scheduleSync('CHAT_CHANGED', 500));
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        scheduleSync('CHAT_CHANGED', 500);
+        setTimeout(updateRulesetBadge, 600);
+    });
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => scheduleSync('CHARACTER_MESSAGE_RENDERED', 400));
     eventSource.on(event_types.MESSAGE_RECEIVED, () => scheduleSync('MESSAGE_RECEIVED', 400));
-    eventSource.on(event_types.SETTINGS_UPDATED, () => scheduleSync('SETTINGS_UPDATED', 600));
+    eventSource.on(event_types.SETTINGS_UPDATED, () => {
+        scheduleSync('SETTINGS_UPDATED', 600);
+        setTimeout(updateRulesetBadge, 700);
+    });
 
     // Initial check on load
     scheduleSync('INITIAL_LOAD', 1000);
+    setTimeout(updateRulesetBadge, 1200);
 
     console.log('[MultiHog Companion] Extension loaded successfully.');
 });

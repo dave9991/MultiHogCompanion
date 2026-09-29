@@ -4,6 +4,7 @@
     "requires": [],
     "optional": [],
     "js": "index.js",
+    "generate_interceptor": "mhcGenerationInterceptor",
     "css": "style.css",
     "author": "dlittle",
     "version": "1.1.0",

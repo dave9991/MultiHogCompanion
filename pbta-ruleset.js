@@ -465,6 +465,31 @@ Name: Harm [current/max] | Armor [X] | Threat: (Minion / Veteran / Boss)
 Attacks: Attack Name (Harm dealt, tags like close/reach/far/messy)
 Instinct: (What this threat desires or how it fights, e.g. "To overwhelm with numbers")
 Status: Healthy`,
+
+        inventory: `Character possessions, equipment, weapons, and wealth.
+MANDATORY FORMAT FOR EVERY ITEM:
+- Every item MUST have a rarity or quality tag: [Common], [Uncommon], [Rare], [Exceptional], or [Signature]
+- Every item MUST have a thematic emoji prefix before the tag
+- NO D&D MECHANICS: NEVER output "AC +X", damage dice like "1d8", or "+1/+2" weapon suffixes.
+- Use PbtA tags in parentheses:
+  • Armor: (Armor 1), (Armor 2, clumsy), or (Armor 1, sealed)
+  • Weapons: (close, 2 Harm), (far, reload, 3 Harm), (hand, messy, 1 Harm), (stun), (piercing)
+  • Gear: (3 uses), (slow), (fragile), (valuable)
+- Estimated worth or setting currency: (~X Credits), (~X GP), (~X Dollars), (~X Coin), (~X Scrap)
+- Bare currency goes under Other Items.
+
+EQUIPPED ITEMS: Tag actively worn, wielded, or holstered items with [E] immediately after the rarity tag.
+
+Example:
+[INVENTORY]
+Gear:
+- 🗡️ [Signature] [E] Vibro-Blade (hand, close, 2 Harm, piercing) (~250 Credits)
+- 🦺 [Common] [E] Armored Courier Vest (Armor 1) (~150 Credits)
+Other Items:
+- 💉 [Common] Trauma Stim (restores 2 Harm, 2 uses) (~80 Credits)
+- 💻 [Uncommon] Decking Cable & Multi-tool (~50 Credits)
+- 💵 500 Credits
+[/INVENTORY]`,
     };
 }
 
@@ -638,6 +663,7 @@ export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName =
         `SUGGESTED ARCHETYPES: ${genre.archetypes.join(', ')}.`,
         `SUGGESTED MOVES (pick 2): ${genre.moves.join('; ')}.`,
         `NO D&D MECHANICS: Moves MUST use PbtA terminology (Harm, +1 forward, fictional positioning). NEVER write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns".`,
+        `NO D&D GEAR: Armor MUST use PbtA armor rating (e.g. Armor 1, Armor 2), NEVER "AC +X". Weapons MUST use tags and Harm (e.g. close, 2 Harm), NEVER D&D damage dice (1d8) or +1/+2 magic suffixes.`,
         `FORMAT MANDATE: Output [CHARACTER] using Harm: 0/5, Armor, Stats with modifiers, 2 starting Moves, Gear, Conditions: None, Hold/Forward: None, and XP: 0/5. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, HP, spell slots, or daily ability counters.`,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');

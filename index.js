@@ -536,12 +536,12 @@ export async function restoreStockDnd() {
  * @param {string} charName
  * @returns {Promise<void>}
  */
-export async function quickStartPbtA(genreKey = 'fantasy', charName = '') {
+export async function quickStartPbtA(genreKey = 'fantasy', charName = '', scenarioDesc = '') {
     const ok = await applyPbtACartridge(genreKey);
     if (!ok) return;
 
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
-    const instructions = buildPbtAQuickStartInstructions(genreKey, charName);
+    const instructions = buildPbtAQuickStartInstructions(genreKey, charName, scenarioDesc);
 
     try {
         const qs = await import('../SillyTavern-MultihogDnDFramework/quickstart.js');
@@ -605,6 +605,25 @@ export function setupImagineInterceptor() {
         imagineCmd._mhcIntercepted = true;
         console.log('[MultiHog Companion] Smart Aspect-Ratio & Crop Bridge: /imagine interceptor registered.');
     }
+}
+
+/**
+ * Choose a random character name appropriate for a genre.
+ * Dynamically imports MultiHog's name generator if available.
+ * @param {string} genre
+ * @returns {Promise<string>}
+ */
+async function getRandomCharacterName(genre = 'fantasy') {
+    try {
+        const mod = await import('../SillyTavern-MultihogDnDFramework/src/state/character-names.js');
+        if (typeof mod?.pickGenreCharacterName === 'function') {
+            return mod.pickGenreCharacterName(genre);
+        }
+    } catch (e) {
+        console.warn('[MultiHog Companion] Could not import pickGenreCharacterName, using fallback:', e);
+    }
+    const fallbackNames = ['Rowan Vance', 'Lyra Thorne', 'Kaelen Drake', 'Mara Jade', 'Silas Croft'];
+    return fallbackNames[Math.floor(Math.random() * fallbackNames.length)];
 }
 
 /**
@@ -738,12 +757,22 @@ async function initUI() {
             }
         });
 
+        $('#mhc_pbta_roll_name').on('click', async function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const genreKey = genreSelect.val();
+            const genreObj = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+            const name = await getRandomCharacterName(genreObj.multihogGenre || 'fantasy');
+            $('#mhc_pbta_char_name').val(name);
+        });
+
         $('#mhc_pbta_quickstart').on('click', async function () {
             const btn = $(this);
             const charName = ($('#mhc_pbta_char_name').val() || '').trim();
+            const scenarioDesc = ($('#mhc_pbta_scenario_desc').val() || '').trim();
             btn.prop('disabled', true);
             try {
-                await quickStartPbtA(genreSelect.val(), charName);
+                await quickStartPbtA(genreSelect.val(), charName, scenarioDesc);
             } finally {
                 btn.prop('disabled', false);
             }

@@ -144,9 +144,20 @@
                 </div>
 
                 <!-- Character Name (Optional) -->
-                <div style="margin-bottom: 12px;">
+                <div style="margin-bottom: 10px;">
                     <label style="font-size: 0.8em; opacity: 0.85; display: block; margin-bottom: 4px;">Character Name (Optional):</label>
-                    <input id="mhc_pbta_char_name" type="text" class="text_pole" placeholder="Leave empty for AI to choose..." style="width: 100%; box-sizing: border-box; font-size: 0.88em; padding: 4px 8px;">
+                    <div style="display: flex; gap: 6px;">
+                        <input id="mhc_pbta_char_name" type="text" class="text_pole" placeholder="Leave empty for AI to choose..." style="flex: 1; box-sizing: border-box; font-size: 0.88em; padding: 4px 8px;">
+                        <button id="mhc_pbta_roll_name" class="menu_button interactable" type="button" style="padding: 4px 10px; font-size: 0.95em;" title="Roll a random genre-fitting character name">
+                            <i class="fa-solid fa-dice"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Scenario / Premise Description (Optional) -->
+                <div style="margin-bottom: 12px;">
+                    <label style="font-size: 0.8em; opacity: 0.85; display: block; margin-bottom: 4px;">Scenario / Initial Premise (Optional):</label>
+                    <textarea id="mhc_pbta_scenario_desc" class="text_pole" rows="2" placeholder="e.g. Your pirate crew was marooned on a cursed sandbar after a mutiny... (optional setting/premise guidance)" style="width: 100%; box-sizing: border-box; font-size: 0.85em; padding: 4px 8px; resize: vertical;"></textarea>
                 </div>
 
                 <!-- Action Buttons -->

@@ -23,6 +23,10 @@ Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves
 * **No Enemy Rolls:** Enemies do not roll attack bonuses or saving throws; their actions unfold when you roll a 7–9 or 6-, or when you hesitate in the fiction.
 * **Harm Clock (0–5):** Instead of bloated HP pools, characters and enemies track Harm (1–5). Armor directly reduces incoming Harm (e.g., Armor 1 turns 2 Harm into 1 Harm).
 
+### 4. PbtA CYOA & Party Mechanics
+* **Move-Triggered Choices:** In CYOA mode, rollable options represent dramatic fictional Moves (`— [Move Name (+Stat)]`) rather than D&D skill checks against target DCs or ACs.
+* **Companion Bench Resolution:** Off-screen ally tasks resolve with 2d6 + Companion Stat against PbtA tiers (10+ clean return, 7–9 mixed success, 6- trouble/injury), completely removing d20 and DC checks.
+
 ---
 
 ## 🎭 Genre Stat Presets
@@ -56,7 +60,7 @@ Each genre uses a standard modifier array: **+2, +1, +1, 0, -1** (one primary st
   * `Mundane`: Human empathy, friendship, grounding emotional bonds.
 * **Key Moves:** *Directly Engage (+Danger)*, *Unleash Powers (+Freak)*, *Take a Blow (+Savior)*, *Provoke (+Superior)*, *Pierce the Mask (+Mundane)*.
 
-### 🩸 Modern / Horror (Monster of the Week)
+### 🩸 Modern / Monster Hunter (Monster of the Week)
 * **Stats:**
   * `Cool`: Staying calm facing the unexplainable, driving, stealth.
   * `Hard`: Physical grit, firearms, hand-to-hand brawling.
@@ -65,17 +69,80 @@ Each genre uses a standard modifier array: **+2, +1, +1, 0, -1** (one primary st
   * `Weird`: Psychic phenomena, occult rituals, eldritch instinct.
 * **Key Moves:** *Kick Some Ass (+Hard)*, *Investigate a Mystery (+Sharp)*, *Act Under Fire (+Cool)*, *Manipulate Someone (+Hot)*, *Use Magic (+Weird)*.
 
+### 🤠 Western / Weird West (Deadlands / Dust)
+* **Stats:**
+  * `Grit`: Tenacity, enduring desert heat and pain, staring down threats.
+  * `Quick`: Lightning-fast draw, reflexes, saddle maneuvering.
+  * `Iron`: Firearm lethality, dynamite, brutal intimidation.
+  * `Instinct`: Trail tracking, wilderness survival, spotting ambushes.
+  * `Savvy`: Gambling, bartering, silver-tongue deception, street smarts.
+* **Key Moves:** *Quick Draw (+Quick)*, *Fan the Hammer (+Iron)*, *Standoff (+Grit)*, *Read the Trail (+Instinct)*, *Silver Tongue (+Savvy)*.
+
+### 🏴‍☠️ Swashbuckling / High Seas (7th Sea / Pirate World)
+* **Stats:**
+  * `Panache`: Flamboyance, cutlass dueling, swinging across rigging.
+  * `Brawn`: Heavy sailing, deck brawling, cannon hauling, swimming.
+  * `Daring`: Bold gambles, boarding actions, steering into typhoons.
+  * `Wits`: Navigation, charting uncharted reefs, tactical trickery.
+  * `Charm`: Pirate parley, sea shanties, carousing, mutiny morale.
+* **Key Moves:** *Cross Swords (+Panache)*, *Boarding Action (+Daring)*, *Man the Broadside (+Brawn)*, *Chart the Unknown (+Wits)*, *Pirate Parley (+Charm)*.
+
+### 🤖 Giant Mecha (Beam Saber / Lancer)
+* **Stats:**
+  * `Frame`: Armor plating, kinetic impact, structural hull integrity.
+  * `Sync`: Neural interface with the mech, cockpit reflexes, high-G turns.
+  * `Systems`: Targeting sensors, electronic warfare, missile locks, hacking.
+  * `Heat`: Reactor overdrive, beam cannons, plasma dissipation.
+  * `Pilot`: Unmounted survival, sidearm combat, personal grit, leadership.
+* **Key Moves:** *Full Salvo (+Systems)*, *High-G Burn (+Sync)*, *Overclock Reactor (+Heat)*, *Crushing Blow (+Frame)*, *Bail / Eject (+Pilot)*.
+
+### 🐙 Cosmic / Eldritch Horror (Call of Cthulhu / Tremulus)
+* **Stats:**
+  * `Sanity`: Mental fortitude, scientific logic, resisting cosmic madness.
+  * `Insight`: Forensic deduction, deciphering forbidden texts, spotting anomalies.
+  * `Grit`: Enduring paralyzing dread, sheer willpower, staying conscious.
+  * `Flesh`: Hand-to-hand desperation, sprinting, physical self-preservation.
+  * `Forbidden`: Chanting ancient rites, communing with the void, alien relics.
+* **Key Moves:** *Cling to Sanity (+Sanity)*, *Decipher the Obscure (+Insight)*, *Stand Fast (+Grit)*, *Desperate Flight (+Flesh)*, *Invoke the Rites (+Forbidden)*.
+
+### 🪓 Survival / Slasher Horror (Resident Evil / Final Girl)
+* **Stats:**
+  * `Nerve`: Suppressing screams and panic, stealth, keeping composure.
+  * `Brawn`: Fighting back with improvised weapons (axes, pipes, shotguns).
+  * `Scavenge`: Searching rooms for keys, batteries, ammunition, medical gauze.
+  * `Agility`: Vaulting windows, squeezing through vents, sprinting from killers.
+  * `Heart`: Rallying terrified survivors, sacrifice, keeping hope alive.
+* **Key Moves:** *Hold Your Breath (+Nerve)*, *Fight for Your Life (+Brawn)*, *Scavenge Supplies (+Scavenge)*, *Sprint for Cover (+Agility)*, *Protect Another (+Heart)*.
+
+### ☣️ Post-Apocalyptic / Wasteland (Apocalypse World / Fallout)
+* **Stats:**
+  * `Cool`: Composure behind the wheel, driving in dust storms, nerves.
+  * `Hard`: Violence, wasteland intimidation, brute physical force.
+  * `Sharp`: Threat evaluation, spotting snipers, tracking across ruins.
+  * `Scrap`: Jury-rigging weapons, vehicles, salvage, and filtration.
+  * `Weird`: Psychic static, sensing radiation storms, strange mutations.
+* **Key Moves:** *Act Under Fire (+Cool)*, *Go Aggro (+Hard)*, *Read a Sitch (+Sharp)*, *Jury-Rig (+Scrap)*, *Open Your Brain (+Weird)*.
+
+### 🕵️ Victorian / Gothic Heist (Blades in the Dark / Dishonored)
+* **Stats:**
+  * `Prowl`: Rooftop running, gymnastics, high-speed evasion.
+  * `Finesse`: Pickpocketing, lockpicking, delicate sleight of hand.
+  * `Skulk`: Shadows, blending into fog, silent ambushes.
+  * `Sway`: Cons, aristocrat impersonation, charm, blackmail.
+  * `Attune`: Siphoning electroplasmic tech, communing with ghosts.
+* **Key Moves:** *Slip Through the Shadows (+Skulk)*, *Pick a Pocket or Lock (+Finesse)*, *Leap the Rooftops (+Prowl)*, *Work the Mark (+Sway)*, *Attune to the Veil (+Attune)*.
+
 ---
 
 ## ⚡ How to Use
 
 1. Open **Extensions Settings** $\rightarrow$ **MultiHog Companion**.
-2. Select your **Genre Preset**.
+2. Select your **Genre Preset** (choose from 11 tailored genres).
 3. Choose an action:
    * **⚡ Quick Start PbtA:** Applies the ruleset, generates a full character sheet with PbtA stats and moves, locks your persona, and sends the opening story turn.
    * **🎮 Load PbtA Cartridge:** Applies the PbtA prompt ruleset to an existing chat session without recreating the character.
    * **📦 Restore Stock D&D 5e:** Reverts the current chat back to factory default D&D 5e rules and prompts.
 
 ### Slash Commands
-* `/mhc-pbta [fantasy|scifi|anime|horror]` — Instantly load PbtA ruleset into MultiHog.
+* `/mhc-pbta [genre]` — Instantly load PbtA ruleset (e.g. `pirate`, `western`, `mecha`, `scifi`, `fantasy`, `cosmic_horror`, `survival_horror`, `post_apocalyptic`, `gothic_heist`, `anime`, `horror`).
 * `/mhc-dnd` — Restore default D&D 5e ruleset.

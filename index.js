@@ -424,6 +424,12 @@ export async function applyPbtACartridge(genreKey = 'fantasy') {
     s.stockPrompts = s.stockPrompts || {};
     Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
 
+    // 4b. Update CYOA config if defined in cartridge payload
+    if (cartridge.payload.cyoaConfig) {
+        s.cyoaConfig = s.cyoaConfig || {};
+        Object.assign(s.cyoaConfig, cartridge.payload.cyoaConfig);
+    }
+
     // 5. Update RNG settings to pure queue mode (d6 pairs, zero player interruption)
     s.rngEnabled = true;
     s.rngQueueD20 = true;
@@ -477,7 +483,10 @@ export async function restoreStockDnd() {
     const factoryModules = factory?.syspromptModules ?? {
         role: true, rng_system: true, combat: true, ruleset_note: true,
         end_of_output_footer: true, xp_system: true,
+        '[PARTY]_mechanics': true,
         weapon_proficiencies: true, attacks_per_round: true, saving_throws: true,
+        level_up_protocol: true, homebrew_and_custom_classes: true,
+        resting: true, loot: true, random_events: true,
     };
     if (s.syspromptModules) {
         Object.assign(s.syspromptModules, factoryModules);
@@ -488,6 +497,14 @@ export async function restoreStockDnd() {
         s.stockPrompts = { ...factory.stockPrompts };
     } else {
         delete s.stockPrompts;
+    }
+
+    // 4b. Restore CYOA prompt
+    if (factory?.cyoaConfig) {
+        s.cyoaConfig = JSON.parse(JSON.stringify(factory.cyoaConfig));
+    } else if (s.cyoaConfig) {
+        s.cyoaConfig.useCustomPrompt = false;
+        s.cyoaConfig.customPromptText = '';
     }
 
     // 5. Restore block order and modules

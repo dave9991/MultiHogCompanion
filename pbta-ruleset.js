@@ -29,6 +29,13 @@ export const PBTA_GENRES = {
             'Discern Realities (+Wits) — closely observe a person or situation',
             'Parley (+Heart) — press for what you want when you have leverage',
         ],
+        cyoaExamples: [
+            '1. ⚔️ Leap forward with blade drawn to strike the beast — [Hack & Slash (+Might)]',
+            '2. 🏹 Draw an arrow and aim for the eye socket from distance — [Volley (+Agility)]',
+            '3. 🔮 Channel an arcane incantation through your staff — [Cast a Spell (+Arcana)]',
+            '4. 👁️ Study the chamber walls for concealed runes or pressure plates — [Discern Realities (+Wits)]',
+            '5. 🗣️ "We came for the relic, not blood. Call off your guard and let us talk." — [Parley (+Heart)]',
+        ],
     },
     scifi: {
         id: 'scifi',
@@ -44,6 +51,13 @@ export const PBTA_GENRES = {
             'Jack In / Hack (+Mind) — breach ICE and interface with digital matrices',
             'Fast-Talk (+Synth) — bluff, negotiate, or trade on street reputation',
             'Assess Situation (+Mind) — spot tactical vantage points, hidden cameras, or exits',
+        ],
+        cyoaExamples: [
+            '1. 💥 Draw your sidearm and trade fire through the steam pipes — [Engage Hostiles (+Hard)]',
+            '2. 💻 Jack your cyberdeck directly into the security terminal — [Jack In / Hack (+Mind)]',
+            '3. 🥷 Vault over the catwalk railing into the darkness below — [Act Under Pressure (+Edge)]',
+            '4. 🎙️ "You don\'t want this smoke, omae. Check my crew\'s rep on the street." — [Fast-Talk (+Synth)]',
+            '5. 🔍 Scan the maintenance tunnel for power conduits or camera blind spots — [Assess Situation (+Mind)]',
         ],
     },
     anime: {
@@ -61,10 +75,17 @@ export const PBTA_GENRES = {
             'Provoke (+Superior) — taunt or outsmart an opponent into making a mistake',
             'Pierce the Mask (+Mundane) — see through someone’s tough exterior into their true feelings',
         ],
+        cyoaExamples: [
+            '1. 👊 Charge straight into the rival\'s aura and trade blows — [Directly Engage (+Danger)]',
+            '2. ⚡ Let your inner power surge past all limits in a blinding blast — [Unleash Powers (+Freak)]',
+            '3. 🛡️ Throw yourself in front of the collapsing debris to shield your friend — [Take a Blow (+Savior)]',
+            '4. 😏 Smirk and taunt them to draw their focus away from the civilians — [Provoke (+Superior)]',
+            '5. 💔 "I know why you\'re doing this... you don\'t have to carry this alone." — [Pierce the Mask (+Mundane)]',
+        ],
     },
     horror: {
         id: 'horror',
-        label: 'Modern / Horror (Monster of the Week)',
+        label: 'Modern / Monster Hunter (Monster of the Week)',
         icon: '🩸',
         multihogGenre: 'horror',
         stats: ['Cool', 'Hard', 'Hot', 'Sharp', 'Weird'],
@@ -76,6 +97,174 @@ export const PBTA_GENRES = {
             'Act Under Fire (+Cool) — keep your nerve when confronted by eldritch horrors',
             'Manipulate Someone (+Hot) — get a civilian or official to do what you need',
             'Use Magic (+Weird) — chant a ritual or invoke esoteric rites',
+        ],
+        cyoaExamples: [
+            '1. 🪓 Drive the fire axe into the creature\'s clawed arm — [Kick Some Ass (+Hard)]',
+            '2. 🔦 Search the bloodstained desk for occult manuscripts or clues — [Investigate a Mystery (+Sharp)]',
+            '3. 🏃 Keep your nerve and sprint past the writhing shadows toward the exit — [Act Under Fire (+Cool)]',
+            '4. 🗣️ "Look at me! Whatever is in that basement, you have to let us help!" — [Manipulate Someone (+Hot)]',
+            '5. 🕯️ Light the ceremonial candles and chant the ward of protection — [Use Magic (+Weird)]',
+        ],
+    },
+    western: {
+        id: 'western',
+        label: 'Western / Weird West (Deadlands / Dust)',
+        icon: '🤠',
+        multihogGenre: 'fantasy',
+        stats: ['Grit', 'Quick', 'Iron', 'Instinct', 'Savvy'],
+        statDescriptions: 'Grit (tenacity/enduring pain), Quick (fast-draw/reflexes/riding), Iron (firearms/dynamite/intimidation), Instinct (tracking/scouting/survival), Savvy (gambling/barter/deception)',
+        archetypes: ['The Gunslinger', 'The Outlaw', 'The Lawman', 'The Preacher', 'The Drifter', 'The Gambler', 'The Scout'],
+        moves: [
+            'Quick Draw (+Quick) — draw and fire before the other side can react',
+            'Fan the Hammer (+Iron) — unleash rapid lethal gunfire at point-blank or medium range',
+            'Standoff (+Grit) — stare down a rival or withstand pain without flinching',
+            'Read the Trail (+Instinct) — track signs across the desert or anticipate an ambush',
+            'Silver Tongue (+Savvy) — bluff, cheat at cards, or talk your way out of a hanging',
+        ],
+        cyoaExamples: [
+            '1. 🤠 Draw from the hip and fire two rounds into the saloon doorway — [Quick Draw (+Quick)]',
+            '2. 🧨 Light the dynamite stick and hurl it toward the barricade — [Fan the Hammer (+Iron)]',
+            '3. 🐎 Kick your spurs and ride hard along the canyon ridge — [Standoff (+Grit)]',
+            '4. 👁️ Kneel in the dust to examine the fresh horseshoe impressions — [Read the Trail (+Instinct)]',
+            '5. 🃏 Slide an ace from your sleeve and raise the wager — [Silver Tongue (+Savvy)]',
+        ],
+    },
+    pirate: {
+        id: 'pirate',
+        label: 'Swashbuckling / High Seas (7th Sea / Pirate World)',
+        icon: '🏴‍☠️',
+        multihogGenre: 'fantasy',
+        stats: ['Panache', 'Brawn', 'Daring', 'Wits', 'Charm'],
+        statDescriptions: 'Panache (flamboyance/cutlass dueling/rigging acrobatics), Brawn (heavy sailing/cannons/deck brawling), Daring (bold gambles/boarding actions/steering into storms), Wits (navigation/spotting shoals/tactics), Charm (shanties/pirate parley/carousing/morale)',
+        archetypes: ['The Captain', 'The Buccaneer', 'The Navigator', 'The Master Gunner', 'The Duelist', 'The Ship Doctor', 'The Sea Witch'],
+        moves: [
+            'Cross Swords (+Panache) — engage an enemy marine or rival pirate in blade dueling',
+            'Boarding Action (+Daring) — swing across the rigging on a cutlass rope onto the enemy deck',
+            'Man the Broadside (+Brawn) — direct cannon fire, haul heavy anchor chains, or brawl on deck',
+            'Chart the Unknown (+Wits) — steer through deadly shoals, doldrums, or read strange sea omens',
+            'Pirate Parley (+Charm) — press your reputation for a truce, carouse with scoundrels, or demand ransom',
+        ],
+        cyoaExamples: [
+            '1. ⚔️ Draw your cutlass and flourish into high guard against the naval officer — [Cross Swords (+Panache)]',
+            '2. 🪢 Sever the rope with your dagger and swing across the open sea onto the galleon\'s quarterdeck — [Boarding Action (+Daring)]',
+            '3. 💣 Touch the smoldering match to the twin 24-pounder cannons — [Man the Broadside (+Brawn)]',
+            '4. 🧭 Spin the helm hard to port to navigate between the jagged coral spires — [Chart the Unknown (+Wits)]',
+            '5. 🗣️ "By the Brethren Code, I invoke the Right of Parley with your admiral!" — [Pirate Parley (+Charm)]',
+        ],
+    },
+    mecha: {
+        id: 'mecha',
+        label: 'Giant Mecha (Beam Saber / Lancer)',
+        icon: '🤖',
+        multihogGenre: 'scifi',
+        stats: ['Frame', 'Sync', 'Systems', 'Heat', 'Pilot'],
+        statDescriptions: 'Frame (armor plating/kinetic impact/structural health), Sync (neural interface/high-G maneuvers/reflexes), Systems (sensors/electronic warfare/missile locks), Heat (overdrive/beam cannons/plasma discharge), Pilot (unmounted grit/sidearms/cockpit charisma)',
+        archetypes: ['The Ace Pilot', 'The Heavy Artillery', 'The Vanguard Striker', 'The EW Specialist', 'The Test Pilot', 'The Mercenary'],
+        moves: [
+            'Full Salvo (+Systems) — lock onto multiple targets with missiles and heavy ordnance',
+            'High-G Burn (+Sync) — execute an evasive aerial thruster maneuver at extreme velocity',
+            'Overclock Reactor (+Heat) — channel reactor core power into maximum beam output',
+            'Crushing Blow (+Frame) — ram, stomp, or clash in close-quarters melee with your frame',
+            'Bail / Eject (+Pilot) — escape a compromised chassis or fight on foot with sidearms',
+        ],
+        cyoaExamples: [
+            '1. 🚀 Fire a full salvo of micro-missiles into the enemy squadron — [Full Salvo (+Systems)]',
+            '2. ⚡ Boost lateral thrusters to barrel roll through the flak screen — [High-G Burn (+Sync)]',
+            '3. 💥 Overclock the beam cannon to vaporize the command bunker — [Overclock Reactor (+Heat)]',
+            '4. 🛡️ Slam your reinforced alloy shield into the charging bipedal mech — [Crushing Blow (+Frame)]',
+            '5. 🎙️ Open broad-band cockpit comms to demand the convoy\'s surrender — [Bail / Eject (+Pilot)]',
+        ],
+    },
+    cosmic_horror: {
+        id: 'cosmic_horror',
+        label: 'Cosmic / Eldritch Horror (Call of Cthulhu / Tremulus)',
+        icon: '🐙',
+        multihogGenre: 'horror',
+        stats: ['Sanity', 'Insight', 'Grit', 'Flesh', 'Forbidden'],
+        statDescriptions: 'Sanity (mental fortitude/logic/resisting madness), Insight (forensics/investigation/reading occult glyphs), Grit (enduring dread/nerve/willpower), Flesh (physical struggle/escape/brawling), Forbidden (channeling eldritch rites/void artifacts)',
+        archetypes: ['The Antiquarian', 'The Alienist', 'The Detective', 'The Occult Scholar', 'The Reluctant Heir', 'The Escaped Patient'],
+        moves: [
+            'Cling to Sanity (+Sanity) — withstand the incomprehensible sight of alien entities',
+            'Decipher the Obscure (+Insight) — read blasphemous texts, inspect crime scenes, or track occult signs',
+            'Stand Fast (+Grit) — refuse to run or freeze when dread paralyzes the room',
+            'Desperate Flight (+Flesh) — scramble through narrow passages and slam heavy iron doors',
+            'Invoke the Rites (+Forbidden) — speak syllables of the Void to cast a protective ward or banish a horror',
+        ],
+        cyoaExamples: [
+            '1. 🕯️ Close your eyes, breathe, and recite poetry to resist the whispers — [Cling to Sanity (+Sanity)]',
+            '2. 📜 Inspect the damp symbols carved into the altar\'s underside — [Decipher the Obscure (+Insight)]',
+            '3. 🔦 Hold the lantern high and stare down the shifting darkness — [Stand Fast (+Grit)]',
+            '4. 🏃 Barricade the crypt door with the heavy stone bench — [Desperate Flight (+Flesh)]',
+            '5. 🩸 Trace the ward of banishment in your own blood upon the floor — [Invoke the Rites (+Forbidden)]',
+        ],
+    },
+    survival_horror: {
+        id: 'survival_horror',
+        label: 'Survival / Slasher Horror (Resident Evil / Final Girl)',
+        icon: '🪓',
+        multihogGenre: 'horror',
+        stats: ['Nerve', 'Brawn', 'Scavenge', 'Agility', 'Heart'],
+        statDescriptions: 'Nerve (suppressing panic/stealth/silence), Brawn (desperate melee/heavy weapons/blunt force), Scavenge (searching for keys/ammo/batteries/first-aid), Agility (running/evading traps/vaulting windows), Heart (rallying other survivors/sacrifice/morale)',
+        archetypes: ['The Final Girl', 'The Jock', 'The Nerd', 'The Skeptic', 'The Caregiver', 'The Veteran Officer'],
+        moves: [
+            'Hold Your Breath (+Nerve) — stay perfectly quiet while the stalker patrols feet away',
+            'Fight for Your Life (+Brawn) — strike back with an axe, shotgun, or improvised weapon',
+            'Scavenge Supplies (+Scavenge) — search a dark room for ammunition, herbs, or access cards',
+            'Sprint for Cover (+Agility) — break into a mad dash to leap through a window or vent',
+            'Protect Another (+Heart) — dive in front of the monster to pull a screaming friend to safety',
+        ],
+        cyoaExamples: [
+            '1. 🤫 Duck into the rusted locker and hold your breath as the footsteps draw near — [Hold Your Breath (+Nerve)]',
+            '2. 🪓 Swing the fire axe with all your strength into the creature\'s knee — [Fight for Your Life (+Brawn)]',
+            '3. 🔦 Rummage through the blood-spattered nurses\' station for medical gauze — [Scavenge Supplies (+Scavenge)]',
+            '4. 🏃 Vault through the shattered glass window into the rainy courtyard — [Sprint for Cover (+Agility)]',
+            '5. 🤝 Grab the rookie\'s collar and haul them to their feet before the ceiling caves in — [Protect Another (+Heart)]',
+        ],
+    },
+    post_apocalyptic: {
+        id: 'post_apocalyptic',
+        label: 'Post-Apocalyptic / Wasteland (Apocalypse World / Fallout)',
+        icon: '☣️',
+        multihogGenre: 'scifi',
+        stats: ['Cool', 'Hard', 'Sharp', 'Scrap', 'Weird'],
+        statDescriptions: 'Cool (calm under fire/driving/nerves), Hard (violence/intimidation/brute force), Sharp (scouting/evaluating threats/tracking), Scrap (jury-rigging/barter/salvage/mechanics), Weird (mutations/psychic static/rad intuition)',
+        archetypes: ['The Road Warrior', 'The Scrapper', 'The Marauder', 'The Wasteland Shaman', 'The Medic', 'The Convoy Driver'],
+        moves: [
+            'Act Under Fire (+Cool) — stay steady behind the wheel or under sniper fire',
+            'Go Aggro (+Hard) — demand submission or unleash sudden devastating violence',
+            'Read a Sitch (+Sharp) — scan the ruins for snipers, rad-hotspots, or escape routes',
+            'Jury-Rig (+Scrap) — cobble together a functional weapon, vehicle repair, or filter from junk',
+            'Open Your Brain (+Weird) — touch the psychic maelstrom or sense oncoming radiation storms',
+        ],
+        cyoaExamples: [
+            '1. 🚗 Floor the accelerator of your armored rig to ram the raider buggy — [Act Under Fire (+Cool)]',
+            '2. 💥 Rack your sawed-off shotgun and step right into the gang leader\'s face — [Go Aggro (+Hard)]',
+            '3. 🔭 Scan the rusted highway overpass with your cracked binoculars — [Read a Sitch (+Sharp)]',
+            '4. 🔧 Splice wires and patch the radiator with duct tape and scrap copper — [Jury-Rig (+Scrap)]',
+            '5. 🌀 Close your eyes and let the psychic static reveal where the water cache lies — [Open Your Brain (+Weird)]',
+        ],
+    },
+    gothic_heist: {
+        id: 'gothic_heist',
+        label: 'Victorian / Gothic Heist (Blades in the Dark / Dishonored)',
+        icon: '🕵️',
+        multihogGenre: 'fantasy',
+        stats: ['Prowl', 'Finesse', 'Skulk', 'Sway', 'Attune'],
+        statDescriptions: 'Prowl (rooftop leaping/speed/acrobatics), Finesse (lockpicking/sleight of hand/pickpocketing), Skulk (shadows/stealth/ambush), Sway (deception/charm/blackmail/cons), Attune (ghosts/arcane leylines/electroplasmic tech)',
+        archetypes: ['The Cutpurse', 'The Whisper (Occultist)', 'The Slide (Grifter)', 'The Leech (Alchemist)', 'The Spider (Mastermind)', 'The Hound (Sniper)'],
+        moves: [
+            'Slip Through the Shadows (+Skulk) — move through gaslit alleyways and guards without being spotted',
+            'Pick a Pocket or Lock (+Finesse) — bypass a tumblered vault or lift a key from a belt',
+            'Leap the Rooftops (+Prowl) — sprint across slate roofs, chimneys, and ziplines under pursuit',
+            'Work the Mark (+Sway) — fast-talk an aristocratic guard, forge a pass, or run a confidence game',
+            'Attune to the Veil (+Attune) — commune with lingering spectres or siphon electroplasmic energy',
+        ],
+        cyoaExamples: [
+            '1. 🗝️ Slide your tension wrench into the iron vault lock — [Pick a Pocket or Lock (+Finesse)]',
+            '2. 🥷 Melt into the alcove as the Bluecoat watch patrol passes under the streetlamp — [Slip Through the Shadows (+Skulk)]',
+            '3. 🏃 Spring across the rain-slick roof gap and catch the rain gutter opposite — [Leap the Rooftops (+Prowl)]',
+            '4. 🎭 Present the forged Lord Governor\'s seal with an indignant sneer — [Work the Mark (+Sway)]',
+            '5. 👻 Channel the spirit of the murdered merchant to ask where the ledger is buried — [Attune to the Veil (+Attune)]',
         ],
     },
 };
@@ -164,6 +353,76 @@ export function buildPbtAXpContent() {
 - Award 1 XP when a major milestone, personal discovery, or quest objective is resolved: *(+1 XP — [reason])*.
 - At 5 XP, the player levels up: *(Level Up! Choose an Advance: +1 to a Stat (max +3), a new Playbook Move, or erase a Condition)*. Reset XP counter to 0/5.
 </xp_system>`;
+}
+
+/**
+ * Builds the PbtA party mechanics and companion bench resolution section.
+ */
+export function buildPbtAPartyContent() {
+    return `<[PARTY]_mechanics>
+On joining: state *(Name joins the party)* and declare their profile matching [PARTY] format:
+[PARTY]
+Name (Archetype): Harm: 0/5 | Armor: 0
+Stats: Stat1 +2, Stat2 +1, Stat3 +1, Stat4 +0, Stat5 -1
+Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
+Gear: Signature weapon/item (tags) | Armor (value)
+Conditions: None
+Status: Healthy
+[/PARTY]
+
+<leaving_vs_benching>
+Only permanent departure needs annotation: death, explicit final farewell, defection, or closure ruling out reunion → narrate, then *(Left the party: Name — reason)* (exact string; hard delete).
+- Never for temporary separation, however dramatic. Temporary/contactable = Benched (the common case).
+- Upon rejoin, don't declare stats again; only narrate unbenching.
+</leaving_vs_benching>
+
+<bench_ETA_system>
+On benching, estimate an in-world return ETA. Just before return (never once already in-scene), resolve the companion's off-screen mission:
+Pop the next pair of d6 dice from [RNG_QUEUE v7.0] and add the companion's most relevant stat:
+- 10+ (Strong Hit): Companion returns on time, mission accomplished cleanly without complications or harm.
+- 7–9 (Mixed Success): Companion returns, but with a complication (delayed return, caught heat, debt, marked condition, or +1 Harm taken).
+- 6- (Trouble): Companion returns wounded (+2 Harm or higher), failed objective, captured, or in need of extraction.
+This roll is mandatory, always pre-return.
+</bench_ETA_system>
+</[PARTY]_mechanics>`;
+}
+
+/**
+ * Builds the PbtA CYOA prompt customized for the given genre.
+ */
+export function buildPbtACyoaPrompt(genreKey = 'fantasy') {
+    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+
+    const exampleButtons = (genre.cyoaExamples && genre.cyoaExamples.length > 0)
+        ? genre.cyoaExamples.map(e => `<button>${e}</button>`).join('\n')
+        : '<button>1. ⚔️ Leap forward with blade drawn to strike the beast — [Hack & Slash (+Might)]</button>';
+    const examples = `<choices>\n${exampleButtons}\n</choices>`;
+
+    return `[END OF OUTPUT REQUIREMENT]
+- You MUST ALWAYS end your response with exactly 5 choices for the user. NEVER forget the choices.
+- Enclose all choices inside a single <choices> XML block.
+- Wrap every single choice in a <button> tag.
+- Prefix each choice text with a fitting emoji.
+- High-stakes situations and perilous obstacles should feature Moves; conversational downtime needs fewer rolls.
+- NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), Armor Class ("vs AC 15"), or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ Full Success | 7–9 Mixed Success | 6- Miss).
+- When a choice triggers a PbtA Move, format it as: — [Move Name (+Stat)]
+- When a choice consumes equipment or uses a gear tag, format it as: — [-1 Resource] or — [Item Name (tag)]
+
+Choice types available:
+- NORMAL: Plain action or spoken dialogue (e.g. "Open the blast door" or "Tell me what you know")
+- MOVE TRIGGER: Action that triggers a Move with stat modifier: — [Move Name (+Stat)]
+- ARCHETYPE / TAG: Action leveraging special playbook moves or gear tags
+
+EXAMPLES (${genre.label}):
+${examples}
+
+STRICT GENERATION ORDER:
+You must generate exactly 5 choices following narrative context:
+1. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+2. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+3. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+4. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+5. NARRATIVE-DECIDED (Choose whichever format fits the story best).`;
 }
 
 /**
@@ -282,6 +541,17 @@ export function buildPbtACartridge(genreKey = 'fantasy') {
             origin: 'unlocked_base',
             baseTag: 'xp_system',
         },
+        {
+            id: 'pbta_base_override_party',
+            tag: '[PARTY]_mechanics',
+            content: buildPbtAPartyContent(),
+            enabled: true,
+            scope: 'chat',
+            icon: 'fa-lock-open',
+            description: 'PbtA companion format and 2d6 bench resolution',
+            origin: 'unlocked_base',
+            baseTag: '[PARTY]_mechanics',
+        },
     ];
 
     const syspromptModules = {
@@ -292,10 +562,16 @@ export function buildPbtACartridge(genreKey = 'fantasy') {
         ruleset_note: false,
         end_of_output_footer: false,
         xp_system: false,
+        '[PARTY]_mechanics': false,
         // D&D systems disabled in PbtA
         weapon_proficiencies: false,
         attacks_per_round: false,
         saving_throws: false,
+        level_up_protocol: false,
+        homebrew_and_custom_classes: false,
+        resting: false,
+        loot: false,
+        random_events: false,
     };
 
     const payload = {
@@ -303,6 +579,14 @@ export function buildPbtACartridge(genreKey = 'fantasy') {
         syspromptModules,
         syspromptSectionOrder: [],
         stockPrompts: buildPbtAStockPrompts(genreKey),
+        cyoaConfig: {
+            useCustomPrompt: true,
+            customPromptText: buildPbtACyoaPrompt(genreKey),
+            useButtonTags: true,
+            useXmlTag: true,
+            useEmojis: true,
+            stripOldChoicesFromPrompt: true,
+        },
         rngEnabled: true,
         // "rngQueueD20" is a misnomer inherited from MultiHog — it enables the
         // *polyhedral* RNG queue (as opposed to the d100-only queue).  Each line

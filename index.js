@@ -138,7 +138,7 @@ function getMultihogPlayerName(chatId) {
 /**
  * Locate matching SillyTavern persona for the given character name.
  */
-async function findMatchingPersona(charName) {
+export async function findMatchingPersona(charName) {
     if (!charName) return null;
     const ctx = SillyTavern.getContext();
     let powerUser = ctx.power_user || window.power_user;
@@ -175,7 +175,7 @@ async function findMatchingPersona(charName) {
 /**
  * Bind the persona to the active chat and set it active if not already.
  */
-async function syncPersonaToChat(chatId, persona) {
+export async function syncPersonaToChat(chatId, persona) {
     const ctx = SillyTavern.getContext();
     const currentBound = ctx.chatMetadata?.persona;
 
@@ -242,7 +242,7 @@ function getMultihogPlayerPortrait(chatId, charName) {
 /**
  * Upload the image blob to the persona avatar file on SillyTavern server.
  */
-async function uploadImageToPersona(avatarId, imageSrc) {
+export async function uploadImageToPersona(avatarId, imageSrc) {
     const ctx = SillyTavern.getContext();
     const getRequestHeaders = ctx.getRequestHeaders;
 

@@ -11,7 +11,6 @@
  * 6. Drops the player into the fiction with Turn 0 opening scene
  */
 
-import { applyPbtACartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } from './index.js';
 import { serializeDossierToMarkdown } from './concierge-parser.js';
 
 /**
@@ -102,6 +101,7 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
  * @returns {Promise<{ success: boolean, message: string }>}
  */
 export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
+    const { applyPbtACartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const ctx = SillyTavern.getContext();
     const chatId = ctx.getCurrentChatId?.() || ctx.chatId || 'active';
     const systemKey = dossier.meta?.systemKey || 'fantasy';

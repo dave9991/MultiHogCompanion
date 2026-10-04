@@ -538,17 +538,33 @@ export async function restoreStockDnd() {
  * @returns {Promise<void>}
  */
 export async function quickStartPbtA(genreKey = 'fantasy', charName = '', scenarioDesc = '') {
+    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const cleanCharName = (charName || '').trim();
+
+    // ── 0. Ensure Clean Chat & Auto-Rename ──────────────────────────────────
+    try {
+        const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
+        const defaultTitle = cleanCharName
+            ? `${cleanCharName} - PbtA ${genre.label}`
+            : `PbtA ${genre.label} Adventure`;
+        await ensureCleanAdventureChat({
+            adventureTitle: defaultTitle,
+            fallbackLabel: `PbtA ${genre.label} Adventure`,
+        });
+    } catch (chatErr) {
+        console.warn('[MultiHog Companion] Auto-chat preparation failed, proceeding:', chatErr);
+    }
+
     const ok = await applyPbtACartridge(genreKey);
     if (!ok) return;
 
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
-    const instructions = buildPbtAQuickStartInstructions(genreKey, charName, scenarioDesc);
+    const instructions = buildPbtAQuickStartInstructions(genreKey, cleanCharName, scenarioDesc);
 
     try {
         const qs = await import('../SillyTavern-MultihogDnDFramework/quickstart.js');
         if (typeof qs.runQuickStart === 'function') {
             showToast('info', `Starting ${genre.label} adventure...`, 'Quick Start');
-            await qs.runQuickStart(genre.multihogGenre, null, charName, instructions);
+            await qs.runQuickStart(genre.multihogGenre, null, cleanCharName, instructions);
         } else {
             showToast('warning', 'Quick Start function not available. PbtA ruleset is active — type your first message!', 'MultiHog Companion');
         }

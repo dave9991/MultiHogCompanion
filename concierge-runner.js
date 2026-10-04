@@ -102,12 +102,18 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
  */
 export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
     const { applyPbtACartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
-    const ctx = SillyTavern.getContext();
-    const chatId = ctx.getCurrentChatId?.() || ctx.chatId || 'active';
+    const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
     const systemKey = dossier.meta?.systemKey || 'fantasy';
     const charName = (dossier.protagonist?.name || '').trim();
+    const adventureTitle = (dossier.meta?.title || '').trim();
 
     try {
+        // ── 0. Ensure Clean Chat & Auto-Rename ──────────────────────────────────
+        onProgress('🛡️ Preparing clean adventure session...', 5);
+        const chatId = await ensureCleanAdventureChat({
+            adventureTitle,
+            fallbackLabel: `PbtA ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`,
+        });
         // ── 1. Apply PbtA Ruleset Cartridge ─────────────────────────────────────
         onProgress('🎲 Installing PbtA ruleset and 2d6 engine...', 15);
         const cartridgeOk = await applyPbtACartridge(systemKey);

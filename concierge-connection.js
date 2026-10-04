@@ -209,21 +209,32 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
 async function sendViaDefault(context, messages, { signal = null } = {}) {
     const hasImage = hasImagePayload(messages);
 
+    // Explicitly attach names to isolate from SillyTavern's active background character
+    const isolatedMessages = messages.map(msg => {
+        let name = msg.name;
+        if (!name) {
+            if (msg.role === 'assistant') name = 'PbtA_Concierge';
+            else if (msg.role === 'user') name = 'Player';
+            else if (msg.role === 'system') name = 'System';
+        }
+        return { ...msg, name };
+    });
+
     // If images are present and main API is openai / chat completion:
     if (hasImage) {
         if (typeof context.sendOpenAIRequest === 'function' && context.main_api === 'openai') {
-            const data = await context.sendOpenAIRequest('quiet', messages, signal);
+            const data = await context.sendOpenAIRequest('quiet', isolatedMessages, signal);
             return data.choices?.[0]?.message?.content || '';
         }
         console.warn('[PbtA Concierge] Images attached but main API may not support multimodal payloads. Attempting chat completion.');
     }
 
-    // Default to generateRaw / generateRawData
+    // Default to generateRaw / generateRawData with pure quiet mode
     if (typeof context.generateRaw === 'function') {
-        // If messages is an array, format prompt for generateRaw
         return await context.generateRaw({
-            prompt: messages,
-            quietToLoud: true,
+            prompt: isolatedMessages,
+            quietToLoud: false,
+            quietName: 'PbtA Concierge',
             instructOverride: false,
         });
     }

@@ -383,8 +383,12 @@ async function handleUserSend() {
 
     try {
         const fullMessages = [
-            { role: 'system', content: buildConciergeSystemPrompt() },
-            ...chatHistory,
+            { role: 'system', name: 'System', content: buildConciergeSystemPrompt() },
+            ...chatHistory.map(m => ({
+                role: m.role,
+                name: m.role === 'assistant' ? 'PbtA_Concierge' : 'Player',
+                content: m.content,
+            })),
         ];
 
         const rawResponse = await sendConciergeRequest(fullMessages);
@@ -716,6 +720,17 @@ export async function openConciergeModal() {
     bindModalEvents();
     updateConnectionDropdowns();
     populateInspirationDropdowns();
+
+    // Immediately isolate from any ongoing chat by ensuring a clean session
+    try {
+        const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
+        await ensureCleanAdventureChat({
+            adventureTitle: 'PbtA Session Zero',
+            fallbackLabel: 'PbtA Adventure',
+        });
+    } catch (chatErr) {
+        console.warn('[PbtA Concierge] Auto-clean chat on modal open non-fatal error:', chatErr);
+    }
 
     // Check for existing draft or initialize greeting
     const draft = loadDraft();

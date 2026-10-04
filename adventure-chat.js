@@ -47,8 +47,9 @@ export function isDefaultChatName(name) {
     // Pure numeric epoch timestamps
     if (/^\d{10,}$/.test(clean)) return true;
 
-    // Generic placeholder names
-    if (/^(new chat|untitled|default)$/i.test(clean)) return true;
+    // Generic placeholder names or interim session names
+    if (/^(new chat|untitled|default|pbta session zero|pbta adventure)$/i.test(clean)) return true;
+    if (/^pbta\s*(session\s*zero|adventure)$/i.test(clean)) return true;
 
     return false;
 }

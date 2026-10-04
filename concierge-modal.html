@@ -1,0 +1,173 @@
+<!-- PbtA Concierge "Session Zero" Modal Dialog -->
+<div id="mhc_concierge_modal" class="mhc-concierge-overlay" style="display: none;">
+    <div class="mhc-concierge-window">
+        <!-- Header -->
+        <div class="mhc-concierge-header">
+            <div class="mhc-header-title">
+                <span class="mhc-header-icon">🎩</span>
+                <div>
+                    <h3 style="margin: 0; font-size: 1.15em; font-weight: 700;">PbtA Concierge</h3>
+                    <small style="opacity: 0.75; font-size: 0.78em;">Conversational Session Zero &amp; Campaign Architect</small>
+                </div>
+            </div>
+            
+            <div class="mhc-header-controls">
+                <!-- System Badge -->
+                <div id="mhc_header_system_badge" class="mhc-system-badge" title="Detected PbtA Narrative System">
+                    🎲 Fantasy (Dungeon World)
+                </div>
+
+                <!-- Connection Selector Dropdown -->
+                <select id="mhc_concierge_connection_source" class="text_pole" style="font-size: 0.82em; padding: 3px 6px; border-radius: 4px;" title="Select LLM Connection Source">
+                    <option value="default">Default ST Connection</option>
+                    <option value="profile">Connection Profile...</option>
+                    <option value="openai">Direct OpenAI Endpoint</option>
+                    <option value="ollama">Direct Ollama</option>
+                </select>
+
+                <select id="mhc_concierge_profile_select" class="text_pole" style="display: none; font-size: 0.82em; max-width: 140px; padding: 3px 6px; border-radius: 4px;">
+                    <option value="">-- Select Profile --</option>
+                </select>
+
+                <!-- Window Close Button -->
+                <button type="button" id="mhc_concierge_close" class="menu_button" style="padding: 4px 8px; font-size: 1.1em;" title="Close &amp; Save Draft">✕</button>
+            </div>
+        </div>
+
+        <!-- Main Body: Two Columns -->
+        <div class="mhc-concierge-body">
+            <!-- Left Column: Conversational Stream -->
+            <div class="mhc-chat-column">
+                <div id="mhc_chat_messages" class="mhc-chat-stream">
+                    <!-- Dynamic chat bubbles will appear here -->
+                </div>
+
+                <!-- Attachment Tray (Thumbnails & File Chips) -->
+                <div id="mhc_attachment_tray" class="mhc-attachment-tray" style="display: none;">
+                    <!-- Uploaded items -->
+                </div>
+
+                <!-- Input Bar -->
+                <div class="mhc-chat-input-row">
+                    <button type="button" id="mhc_attach_btn" class="menu_button mhc-attach-btn" title="Upload screenshots, game art, or setting documents (PDF, DOCX, TXT, MD)">
+                        📎
+                    </button>
+                    <input type="file" id="mhc_file_input" multiple accept="image/*,.pdf,.docx,.txt,.md,.epub" style="display: none;">
+
+                    <textarea id="mhc_chat_input" class="text_pole" rows="1" placeholder="Describe your dream campaign, or upload an image/document..."></textarea>
+                    
+                    <button type="button" id="mhc_send_btn" class="menu_button mhc-send-btn" title="Send message">
+                        ➤
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Column: Live Campaign Dossier Deck -->
+            <div class="mhc-dossier-column">
+                <div class="mhc-dossier-tabs">
+                    <button type="button" class="mhc-tab-btn active" data-tab="cards">Live Blueprint</button>
+                    <button type="button" class="mhc-tab-btn" data-tab="raw">Raw Markdown</button>
+                </div>
+
+                <!-- Tab 1: Live Cards -->
+                <div id="mhc_tab_cards" class="mhc-tab-content active">
+                    <!-- System Card -->
+                    <div class="mhc-card mhc-card-system">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">🎲 PbtA Engine</span>
+                            <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
+                        </div>
+                        <div id="mhc_deck_system_desc" class="mhc-card-desc">
+                            Fiction-first 2d6 engine with zero-touch secret rolls.
+                        </div>
+                    </div>
+
+                    <!-- Protagonist Card -->
+                    <div class="mhc-card mhc-card-char">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">👤 Protagonist</span>
+                            <span id="mhc_deck_char_playbook" class="mhc-pill">Waiting...</span>
+                        </div>
+                        <div id="mhc_deck_char_name" style="font-weight: bold; margin-bottom: 4px;">Unnamed Adventurer</div>
+                        <div id="mhc_deck_char_stats" class="mhc-stat-row">
+                            <span class="mhc-stat-pill">Might +0</span>
+                            <span class="mhc-stat-pill">Agility +0</span>
+                            <span class="mhc-stat-pill">Wits +0</span>
+                            <span class="mhc-stat-pill">Heart +0</span>
+                            <span class="mhc-stat-pill">Arcana +0</span>
+                        </div>
+                        <div id="mhc_deck_char_moves" class="mhc-moves-list" style="margin-top: 6px; font-size: 0.82em; opacity: 0.85;">
+                            • Moves will be forged in the conversation.
+                        </div>
+                    </div>
+
+                    <!-- Queued Adversaries & Monsters -->
+                    <div class="mhc-card mhc-card-monsters">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">👹 Queued Adversaries</span>
+                            <span id="mhc_deck_monster_count" class="mhc-badge-count">0</span>
+                        </div>
+                        <div id="mhc_deck_monsters_list" class="mhc-deck-list">
+                            <div class="mhc-empty-hint">No monsters queued yet.</div>
+                        </div>
+                    </div>
+
+                    <!-- Queued Locations & Maps -->
+                    <div class="mhc-card mhc-card-maps">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">🗺️ Queued Maps</span>
+                            <span id="mhc_deck_map_count" class="mhc-badge-count">0</span>
+                        </div>
+                        <div id="mhc_deck_maps_list" class="mhc-deck-list">
+                            <div class="mhc-empty-hint">No maps queued yet.</div>
+                        </div>
+                    </div>
+
+                    <!-- The Kick (Opening Crisis) -->
+                    <div class="mhc-card mhc-card-kick">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">⚡ The Kick (Starting Scene)</span>
+                        </div>
+                        <div id="mhc_deck_kick_text" class="mhc-card-desc">
+                            The starting scene and crisis will be staged here.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Raw Markdown View -->
+                <div id="mhc_tab_raw" class="mhc-tab-content">
+                    <textarea id="mhc_raw_markdown_text" class="text_pole mhc-raw-textarea" readonly></textarea>
+                    <div style="margin-top: 8px; display: flex; justify-content: flex-end; gap: 8px;">
+                        <button type="button" id="mhc_copy_markdown_btn" class="menu_button">📋 Copy Markdown</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="mhc-concierge-footer">
+            <div class="mhc-footer-left">
+                <button type="button" id="mhc_save_draft_btn" class="menu_button" title="Save conversation and dossier draft">💾 Save Draft</button>
+                <button type="button" id="mhc_export_dossier_btn" class="menu_button" title="Download Campaign Dossier markdown file">📥 Export Dossier</button>
+                <button type="button" id="mhc_reset_session_btn" class="menu_button" style="color: #ff8888;" title="Reset session zero and start fresh">↺ Reset</button>
+            </div>
+            <div class="mhc-footer-right">
+                <button type="button" id="mhc_launch_campaign_btn" class="menu_button mhc-launch-btn">
+                    🚀 Finalize &amp; Launch Campaign
+                </button>
+            </div>
+        </div>
+
+        <!-- Launch Progress Overlay -->
+        <div id="mhc_launch_progress_overlay" class="mhc-launch-overlay" style="display: none;">
+            <div class="mhc-launch-card">
+                <div class="mhc-launch-spinner"></div>
+                <h4 style="margin: 0 0 10px 0; font-size: 1.1em;">Constructing Adventure World...</h4>
+                <div id="mhc_launch_progress_label" style="font-size: 0.9em; opacity: 0.9; margin-bottom: 12px;">Installing ruleset...</div>
+                <div class="mhc-progress-track">
+                    <div id="mhc_launch_progress_bar" class="mhc-progress-fill" style="width: 10%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

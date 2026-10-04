@@ -16,6 +16,7 @@ import {
     buildPbtACartridge,
     buildPbtAQuickStartInstructions,
 } from './pbta-ruleset.js';
+import { openConciergeModal } from './concierge-ui.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -728,6 +729,12 @@ async function initUI() {
             showToast('info', 'Resolutions reset to recommended defaults (672x384 & 512x512).', 'MultiHog Companion');
         });
 
+        // ── PbtA Concierge Session Zero ──
+        $('#mhc_open_concierge_btn').on('click', function (e) {
+            e.preventDefault();
+            openConciergeModal();
+        });
+
         // ── PbtA Ruleset Controls ──
         const genreSelect = $('#mhc_pbta_genre');
         const statsPreview = $('#mhc_pbta_stats_preview');
@@ -967,6 +974,15 @@ jQuery(async () => {
                 return ok ? 'This chat restored to factory D&D 5e ruleset.' : 'Failed to restore D&D ruleset.';
             },
             helpString: '<div>Restores MultiHog back to factory default D&D 5e ruleset.</div>',
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-concierge',
+            callback: async () => {
+                await openConciergeModal();
+                return 'PbtA Concierge Session Zero opened.';
+            },
+            helpString: '<div>Opens the interactive PbtA Concierge Session Zero worldbuilder.</div>',
         }));
     }
 

@@ -659,16 +659,21 @@ async function initUI() {
 
         syncBtn.on('click', async function () {
             syncBtn.prop('disabled', true);
-            statusSpan.text('Syncing...');
+            statusSpan.html('<i class="fa-solid fa-spinner fa-spin" style="margin-right: 4px;"></i>Syncing...');
             try {
                 const didWork = await runSync('manual_button');
-                statusSpan.text(didWork ? 'Synced!' : 'Up to date');
-                setTimeout(() => statusSpan.text('Ready'), 2500);
+                statusSpan.html(`<i class="fa-solid fa-circle-check" style="color: #68d391; margin-right: 4px;"></i>${didWork ? 'Synced!' : 'Up to date'}`);
+                setTimeout(() => statusSpan.html('<i class="fa-solid fa-circle-check" style="color: #68d391; margin-right: 4px;"></i>Ready'), 2500);
             } catch (_) {
-                statusSpan.text('Sync failed');
+                statusSpan.html('<i class="fa-solid fa-triangle-exclamation" style="color: #fc8181; margin-right: 4px;"></i>Sync failed');
             } finally {
                 syncBtn.prop('disabled', false);
             }
+        });
+
+        // Prevent clicking aspect checkbox/label from toggling the resolution drawer
+        $('#mhc_aspect_ratio_bridge').closest('label').on('click', function (e) {
+            e.stopPropagation();
         });
 
         // ── Smart Aspect-Ratio & Crop Bridge Controls ──
@@ -891,24 +896,32 @@ globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
  */
 function updateRulesetBadge() {
     const badge = document.getElementById('mhc_ruleset_status');
+    const summary = document.getElementById('mhc_pbta_summary_line');
     if (!badge) return;
 
     if (isPbtAActive()) {
-        // Try to determine which genre is active from the sysprompt library content
-        const s = SillyTavern.getContext().extensionSettings?.rpg_tracker;
-        const roleEntry = s?.customSyspromptLibrary?.find(
-            p => p.id === 'pbta_base_override_role' && p.enabled,
-        );
-        const genreLabel = roleEntry ? 'PbtA' : 'PbtA';
-        badge.textContent = `🎲 ${genreLabel} Active`;
+        const current = getSettings();
+        const genreKey = current.lastGenre || 'fantasy';
+        const genreObj = PBTA_GENRES[genreKey];
+        const genreLabel = genreObj ? genreObj.label.split(' (')[0].replace(/^[^\w\s]+\s*/, '') : 'PbtA';
+
+        badge.textContent = '🎲 PbtA Active';
         badge.style.background = 'rgba(90,160,250,0.2)';
         badge.style.borderColor = 'rgba(90,160,250,0.5)';
         badge.style.color = '#88ccff';
+
+        if (summary) {
+            summary.innerHTML = `<span style="color: #88ccff; font-weight: 500;">🎲 ${genreObj?.icon || ''} ${genreLabel}</span> &mdash; 2d6 moves &amp; Harm clocks active`;
+        }
     } else {
         badge.textContent = '⚔️ D&D 5e Active';
         badge.style.background = 'rgba(255,180,60,0.15)';
         badge.style.borderColor = 'rgba(255,180,60,0.4)';
         badge.style.color = '#ffcc88';
+
+        if (summary) {
+            summary.textContent = 'MultiHog running factory D&D 5e ruleset';
+        }
     }
 }
 

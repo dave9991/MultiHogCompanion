@@ -12,7 +12,12 @@
 }
 
 #mhc_sync_now:hover {
-    filter: brightness(1.1);
+    filter: brightness(1.15);
+}
+
+.mhc-aspect-section .inline-drawer-header:hover,
+.mhc-pbta-section .inline-drawer-header:hover {
+    filter: brightness(1.15);
 }
 
 /* MultiHog Companion: Anchor 16:9 scene crops towards the top to preserve heads */

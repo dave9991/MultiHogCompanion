@@ -5,178 +5,195 @@
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
-            <p style="margin: 0 0 10px 0; font-size: 0.9em; opacity: 0.85;">
-                Enhances the Multihog D&D Framework by synchronizing personas/portraits and providing ruleset engines like PbtA.
+            <p style="margin: 0 0 10px 0; font-size: 0.88em; opacity: 0.85;">
+                Enhances the Multihog D&amp;D Framework by synchronizing personas/portraits and providing ruleset engines like PbtA.
             </p>
 
             <!-- ── Sync Toggles ── -->
-            <div class="mhc-setting-row" style="margin-bottom: 8px;">
+            <div class="mhc-setting-row" style="margin-bottom: 6px;">
                 <label class="checkbox_label" title="Automatically bind the character persona to the current chat session" style="display: flex; align-items: center; cursor: pointer;">
                     <input id="mhc_persona_sync" type="checkbox" style="margin-right: 8px;">
                     <span><b>Persona Sync:</b> Auto-bind character persona to chat</span>
                 </label>
             </div>
 
-            <div class="mhc-setting-row" style="margin-bottom: 8px;">
+            <div class="mhc-setting-row" style="margin-bottom: 6px;">
                 <label class="checkbox_label" title="Automatically update the persona avatar when Multihog generates or changes character portrait" style="display: flex; align-items: center; cursor: pointer;">
                     <input id="mhc_portrait_sync" type="checkbox" style="margin-right: 8px;">
                     <span><b>Portrait Sync:</b> Auto-sync Multihog portrait into persona</span>
                 </label>
             </div>
 
-            <div class="mhc-setting-row" style="margin-bottom: 12px;">
+            <div class="mhc-setting-row" style="margin-bottom: 8px;">
                 <label class="checkbox_label" title="Show subtle toast notifications when persona or portrait is synced" style="display: flex; align-items: center; cursor: pointer;">
                     <input id="mhc_show_toasts" type="checkbox" style="margin-right: 8px;">
                     <span>Show subtle sync notifications (toasts)</span>
                 </label>
             </div>
 
-            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 16px;">
-                <button id="mhc_sync_now" class="menu_button" style="display: flex; align-items: center; gap: 6px;">
+            <!-- Compact inline sync row -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 1px 0;">
+                <span id="mhc_status" style="font-size: 0.8em; opacity: 0.7;"><i class="fa-solid fa-circle-check" style="color: #68d391; margin-right: 4px;"></i>Ready</span>
+                <button id="mhc_sync_now" class="menu_button interactable" style="font-size: 0.75em; padding: 2px 8px; display: inline-flex; align-items: center; gap: 5px; opacity: 0.85; white-space: nowrap;" title="Manually force sync persona and portrait right now">
                     <i class="fa-solid fa-arrows-rotate"></i>
-                    <span>Sync Current Chat Now</span>
+                    <span>Sync Now</span>
                 </button>
-                <span id="mhc_status" style="font-size: 0.85em; opacity: 0.7;">Ready</span>
             </div>
 
-            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;">
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0;">
 
-            <!-- ── Smart Aspect-Ratio & Crop Bridge ── -->
-            <div class="mhc-aspect-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 1.3em;">📐</span>
-                        <b style="font-size: 1.05em;">Smart Aspect-Ratio &amp; Crop Bridge</b>
-                        <span style="font-size: 0.75em; padding: 2px 6px; border-radius: 4px; background: rgba(94,184,212,0.25); color: #88d4f0; border: 1px solid rgba(94,184,212,0.4);">ComfyUI &amp; Native</span>
-                    </div>
-                </div>
-
-                <p style="font-size: 0.85em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
-                    MultiHog triggers native image generation without explicit dimensions, causing SillyTavern to generate 1:1 squares that truncate heads in MultiHog's 16:9 scene containers. This bridge dynamically injects high-speed resolutions matching MultiHog's layout while maintaining a low VRAM footprint (~260k pixels).
-                </p>
-
-                <div class="mhc-setting-row" style="margin-bottom: 10px;">
-                    <label class="checkbox_label" title="Dynamically inject 16:9 for scenes and 1:1 for portraits during MultiHog image generation" style="display: flex; align-items: center; cursor: pointer;">
-                        <input id="mhc_aspect_ratio_bridge" type="checkbox" style="margin-right: 8px;">
-                        <span><b>Enable Aspect-Ratio Bridge:</b> Dynamic 16:9 scenes &amp; 1:1 portraits</span>
+            <!-- ── Smart Aspect-Ratio & Crop Bridge (One-liner with click to expand) ── -->
+            <div class="inline-drawer mhc-aspect-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
+                    <label class="checkbox_label" title="Dynamically inject 16:9 for scenes and 1:1 for portraits during MultiHog image generation" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                        <input id="mhc_aspect_ratio_bridge" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
+                        <span style="font-size: 0.9em;"><b>📐 Aspect-Ratio Bridge:</b> 16:9 &amp; 1:1</span>
                     </label>
-                </div>
-
-                <div id="mhc_aspect_ratio_controls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-                    <!-- Scene Resolution -->
-                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 8px;">
-                        <div style="font-size: 0.82em; font-weight: bold; color: #88d4f0; margin-bottom: 6px;">
-                            🌄 Scene Art (16:9 Widescreen)
-                        </div>
-                        <div style="display: flex; gap: 6px; align-items: center;">
-                            <input id="mhc_scene_width" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="672" title="Width in pixels">
-                            <span style="opacity: 0.6; font-size: 0.85em;">&times;</span>
-                            <input id="mhc_scene_height" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="384" title="Height in pixels">
-                            <span style="font-size: 0.75em; opacity: 0.65; margin-left: 2px;">~258k px</span>
-                        </div>
-                    </div>
-
-                    <!-- Portrait Resolution -->
-                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 8px;">
-                        <div style="font-size: 0.82em; font-weight: bold; color: #aaddff; margin-bottom: 6px;">
-                            👤 Portrait Art (1:1 Square)
-                        </div>
-                        <div style="display: flex; gap: 6px; align-items: center;">
-                            <input id="mhc_portrait_width" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="512" title="Width in pixels">
-                            <span style="opacity: 0.6; font-size: 0.85em;">&times;</span>
-                            <input id="mhc_portrait_height" type="number" class="text_pole" style="width: 70px; text-align: center; padding: 3px;" min="64" max="2048" step="16" value="512" title="Height in pixels">
-                            <span style="font-size: 0.75em; opacity: 0.65; margin-left: 2px;">~262k px</span>
-                        </div>
+                    <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand resolution settings">
+                        <span style="font-size: 0.7em; padding: 1px 5px; border-radius: 3px; background: rgba(94,184,212,0.2); color: #88d4f0; border: 1px solid rgba(94,184,212,0.35); white-space: nowrap;">ComfyUI &amp; Native</span>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
                     </div>
                 </div>
 
-                <div style="display: flex; justify-content: flex-end;">
-                    <button id="mhc_aspect_ratio_reset" class="menu_button interactable" style="font-size: 0.78em; padding: 3px 8px; opacity: 0.75; background: none; border: 1px solid rgba(255,255,255,0.15);" title="Reset resolutions to 672x384 and 512x512">
-                        <i class="fa-solid fa-rotate-left"></i> Reset Resolutions
-                    </button>
+                <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                    <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
+                        MultiHog triggers native image generation without explicit dimensions, causing SillyTavern to generate 1:1 squares that truncate heads in MultiHog's 16:9 scene containers. This bridge dynamically injects high-speed resolutions matching MultiHog's layout while maintaining a low VRAM footprint (~260k pixels).
+                    </p>
+
+                    <div id="mhc_aspect_ratio_controls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                        <!-- Scene Resolution -->
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.8em; font-weight: bold; color: #88d4f0; margin-bottom: 4px;">
+                                🌄 Scene Art (16:9 Widescreen)
+                            </div>
+                            <div style="display: flex; gap: 4px; align-items: center;">
+                                <input id="mhc_scene_width" type="number" class="text_pole" style="width: 58px; text-align: center; padding: 2px;" min="64" max="2048" step="16" value="672" title="Width in pixels">
+                                <span style="opacity: 0.6; font-size: 0.8em;">&times;</span>
+                                <input id="mhc_scene_height" type="number" class="text_pole" style="width: 58px; text-align: center; padding: 2px;" min="64" max="2048" step="16" value="384" title="Height in pixels">
+                                <span style="font-size: 0.72em; opacity: 0.65; margin-left: 2px;">~258k px</span>
+                            </div>
+                        </div>
+
+                        <!-- Portrait Resolution -->
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.8em; font-weight: bold; color: #aaddff; margin-bottom: 4px;">
+                                👤 Portrait Art (1:1 Square)
+                            </div>
+                            <div style="display: flex; gap: 4px; align-items: center;">
+                                <input id="mhc_portrait_width" type="number" class="text_pole" style="width: 58px; text-align: center; padding: 2px;" min="64" max="2048" step="16" value="512" title="Width in pixels">
+                                <span style="opacity: 0.6; font-size: 0.8em;">&times;</span>
+                                <input id="mhc_portrait_height" type="number" class="text_pole" style="width: 58px; text-align: center; padding: 2px;" min="64" max="2048" step="16" value="512" title="Height in pixels">
+                                <span style="font-size: 0.72em; opacity: 0.65; margin-left: 2px;">~262k px</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button id="mhc_aspect_ratio_reset" class="menu_button interactable" style="font-size: 0.75em; padding: 2px 8px; opacity: 0.75; background: none; border: 1px solid rgba(255,255,255,0.15);" title="Reset resolutions to 672x384 and 512x512">
+                            <i class="fa-solid fa-rotate-left"></i> Reset Resolutions
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0;">
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0;">
 
-            <!-- ── PbtA Ruleset & Quick Start ── -->
-            <div class="mhc-pbta-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px;">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                    <span style="font-size: 1.3em;">🎲</span>
-                    <b style="font-size: 1.05em;">PbtA Narrative Engine</b>
-                    <span style="font-size: 0.75em; padding: 2px 6px; border-radius: 4px; background: rgba(90,160,250,0.25); color: #88ccff; border: 1px solid rgba(90,160,250,0.4);">2d6 Moves</span>
-                </div>
-
-                <div id="mhc_ruleset_status" style="font-size: 0.82em; font-weight: bold; padding: 4px 10px; border-radius: 5px; margin-bottom: 8px; text-align: center; border: 1px solid rgba(255,180,60,0.4); background: rgba(255,180,60,0.15); color: #ffcc88;">
-                    ⚔️ D&amp;D 5e Active
-                </div>
-
-                <p style="font-size: 0.85em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
-                    Swaps D&D math for <b>Powered by the Apocalypse</b>: 2d6 rolls (10+ Full Success, 7–9 Mixed Success, 6- Miss / GM Move) and Harm clocks. <i>You never roll dice manually—SillyTavern supplies 2d6 secretly to the Ref.</i>
-                </p>
-
-                <!-- Genre Selector -->
-                <div style="margin-bottom: 10px;">
-                    <label style="font-size: 0.8em; font-weight: bold; opacity: 0.85; display: block; margin-bottom: 4px;">Choose Genre Preset:</label>
-                    <select id="mhc_pbta_genre" class="text_pole" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.9em;">
-                        <option value="fantasy">⚔️ Fantasy (Dungeon World / Fellowship)</option>
-                        <option value="scifi">🚀 Sci-Fi / Cyberpunk (The Sprawl / Scum)</option>
-                        <option value="anime">✨ Anime / Shonen (Masks / Heroic)</option>
-                        <option value="horror">🩸 Modern / Monster Hunter (Monster of the Week)</option>
-                        <option value="western">🤠 Western / Weird West (Deadlands / Dust)</option>
-                        <option value="pirate">🏴‍☠️ Swashbuckling / High Seas (7th Sea / Pirate World)</option>
-                        <option value="mecha">🤖 Giant Mecha (Beam Saber / Lancer)</option>
-                        <option value="cosmic_horror">🐙 Cosmic / Eldritch Horror (Call of Cthulhu / Tremulus)</option>
-                        <option value="survival_horror">🪓 Survival / Slasher Horror (Resident Evil / Final Girl)</option>
-                        <option value="post_apocalyptic">☣️ Post-Apocalyptic / Wasteland (Apocalypse World / Fallout)</option>
-                        <option value="gothic_heist">🕵️ Victorian / Gothic Heist (Blades in the Dark / Dishonored)</option>
-                    </select>
-                </div>
-
-                <!-- Live Genre Info Card -->
-                <div id="mhc_pbta_info" style="font-size: 0.82em; background: rgba(255,255,255,0.04); border-left: 3px solid #88ccff; padding: 8px 10px; margin-bottom: 12px; border-radius: 0 4px 4px 0;">
-                    <div id="mhc_pbta_stats_preview" style="font-weight: bold; color: #aaddff; margin-bottom: 3px;">
-                        Stats: Might, Agility, Wits, Heart, Arcana
+            <!-- ── PbtA Ruleset & Quick Start (3-Liner with click to expand) ── -->
+            <div class="inline-drawer mhc-pbta-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px;">
+                <!-- Line 1: Header + Active Status Badge -->
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 1.15em;">🎲</span>
+                        <b style="font-size: 0.98em;">PbtA Narrative Engine</b>
+                        <span style="font-size: 0.7em; padding: 1px 5px; border-radius: 3px; background: rgba(90,160,250,0.2); color: #88ccff; border: 1px solid rgba(90,160,250,0.35);">2d6 Moves</span>
                     </div>
-                    <div id="mhc_pbta_moves_preview" style="opacity: 0.75; font-size: 0.95em;">
-                        Key Moves: Hack & Slash, Volley, Defy Danger, Cast a Spell
+                    <div id="mhc_ruleset_status" style="font-size: 0.78em; font-weight: bold; padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(255,180,60,0.4); background: rgba(255,180,60,0.15); color: #ffcc88; white-space: nowrap;">
+                        ⚔️ D&amp;D 5e Active
                     </div>
                 </div>
 
-                <!-- Character Name (Optional) -->
-                <div style="margin-bottom: 10px;">
-                    <label style="font-size: 0.8em; opacity: 0.85; display: block; margin-bottom: 4px;">Character Name (Optional):</label>
-                    <div style="display: flex; gap: 6px;">
-                        <input id="mhc_pbta_char_name" type="text" class="text_pole" placeholder="Leave empty for AI to choose..." style="flex: 1; box-sizing: border-box; font-size: 0.88em; padding: 4px 8px;">
-                        <button id="mhc_pbta_roll_name" class="menu_button interactable" type="button" style="padding: 4px 10px; font-size: 0.95em;" title="Roll a random genre-fitting character name">
-                            <i class="fa-solid fa-dice"></i>
+                <!-- Line 2: What is active / subtitle summary -->
+                <div id="mhc_pbta_summary_line" style="font-size: 0.8em; opacity: 0.75; margin-bottom: 6px;">
+                    MultiHog running factory D&amp;D 5e ruleset
+                </div>
+
+                <!-- Line 3: Click to see options / configure expander -->
+                <div class="inline-drawer-toggle inline-drawer-header" style="font-size: 0.82em; color: #88ccff; display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 5px 8px; background: rgba(90,160,250,0.1); border: 1px solid rgba(90,160,250,0.25); border-radius: 5px; user-select: none;">
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        <i class="fa-solid fa-sliders"></i>
+                        <span>Configure Presets &amp; Quick Start</span>
+                    </span>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em;"></div>
+                </div>
+
+                <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                    <p style="font-size: 0.84em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
+                        Swaps D&amp;D math for <b>Powered by the Apocalypse</b>: 2d6 rolls (10+ Full Success, 7–9 Mixed Success, 6- Miss / GM Move) and Harm clocks. <i>You never roll dice manually—SillyTavern supplies 2d6 secretly to the Ref.</i>
+                    </p>
+
+                    <!-- Genre Selector -->
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-size: 0.8em; font-weight: bold; opacity: 0.85; display: block; margin-bottom: 4px;">Choose Genre Preset:</label>
+                        <select id="mhc_pbta_genre" class="text_pole" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.88em;">
+                            <option value="fantasy">⚔️ Fantasy (Dungeon World / Fellowship)</option>
+                            <option value="scifi">🚀 Sci-Fi / Cyberpunk (The Sprawl / Scum)</option>
+                            <option value="anime">✨ Anime / Shonen (Masks / Heroic)</option>
+                            <option value="horror">🩸 Modern / Monster Hunter (Monster of the Week)</option>
+                            <option value="western">🤠 Western / Weird West (Deadlands / Dust)</option>
+                            <option value="pirate">🏴‍☠️ Swashbuckling / High Seas (7th Sea / Pirate World)</option>
+                            <option value="mecha">🤖 Giant Mecha (Beam Saber / Lancer)</option>
+                            <option value="cosmic_horror">🐙 Cosmic / Eldritch Horror (Call of Cthulhu / Tremulus)</option>
+                            <option value="survival_horror">🪓 Survival / Slasher Horror (Resident Evil / Final Girl)</option>
+                            <option value="post_apocalyptic">☣️ Post-Apocalyptic / Wasteland (Apocalypse World / Fallout)</option>
+                            <option value="gothic_heist">🕵️ Victorian / Gothic Heist (Blades in the Dark / Dishonored)</option>
+                        </select>
+                    </div>
+
+                    <!-- Live Genre Info Card -->
+                    <div id="mhc_pbta_info" style="font-size: 0.82em; background: rgba(255,255,255,0.04); border-left: 3px solid #88ccff; padding: 8px 10px; margin-bottom: 10px; border-radius: 0 4px 4px 0;">
+                        <div id="mhc_pbta_stats_preview" style="font-weight: bold; color: #aaddff; margin-bottom: 3px;">
+                            Stats: Might, Agility, Wits, Heart, Arcana
+                        </div>
+                        <div id="mhc_pbta_moves_preview" style="opacity: 0.75; font-size: 0.95em;">
+                            Key Moves: Hack &amp; Slash, Volley, Defy Danger, Cast a Spell
+                        </div>
+                    </div>
+
+                    <!-- Character Name (Optional) -->
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-size: 0.8em; opacity: 0.85; display: block; margin-bottom: 4px;">Character Name (Optional):</label>
+                        <div style="display: flex; gap: 6px;">
+                            <input id="mhc_pbta_char_name" type="text" class="text_pole" placeholder="Leave empty for AI to choose..." style="flex: 1; box-sizing: border-box; font-size: 0.85em; padding: 4px 8px;">
+                            <button id="mhc_pbta_roll_name" class="menu_button interactable" type="button" style="padding: 4px 10px; font-size: 0.9em;" title="Roll a random genre-fitting character name">
+                                <i class="fa-solid fa-dice"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Scenario / Premise Description (Optional) -->
+                    <div style="margin-bottom: 12px;">
+                        <label style="font-size: 0.8em; opacity: 0.85; display: block; margin-bottom: 4px;">Scenario / Initial Premise (Optional):</label>
+                        <textarea id="mhc_pbta_scenario_desc" class="text_pole" rows="2" placeholder="e.g. Your pirate crew was marooned on a cursed sandbar after a mutiny... (optional setting/premise guidance)" style="width: 100%; box-sizing: border-box; font-size: 0.85em; padding: 4px 8px; resize: vertical;"></textarea>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; gap: 8px;">
+                            <button id="mhc_pbta_load_cartridge" class="menu_button interactable" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.85em; padding: 6px 8px;" title="Configures this chat's prompts and modules for PbtA without starting a new character">
+                                <i class="fa-solid fa-gamepad"></i>
+                                <span>Load Cartridge</span>
+                            </button>
+
+                            <button id="mhc_pbta_quickstart" class="menu_button interactable" style="flex: 1.2; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.85em; padding: 6px 8px; background: rgba(80,180,120,0.2); border-color: rgba(80,180,120,0.5); color: #bbeecc;" title="Applies PbtA and immediately generates character and starts the adventure!">
+                                <i class="fa-solid fa-bolt"></i>
+                                <span>⚡ Quick Start PbtA</span>
+                            </button>
+                        </div>
+
+                        <button id="mhc_restore_dnd" class="menu_button interactable" style="font-size: 0.78em; padding: 3px 8px; opacity: 0.7; align-self: flex-start; background: none; border: 1px solid rgba(255,255,255,0.15);" title="Reverts this chat's prompts back to factory default D&D 5e">
+                            <i class="fa-solid fa-rotate-left"></i> Restore Stock D&amp;D 5e
                         </button>
                     </div>
-                </div>
-
-                <!-- Scenario / Premise Description (Optional) -->
-                <div style="margin-bottom: 12px;">
-                    <label style="font-size: 0.8em; opacity: 0.85; display: block; margin-bottom: 4px;">Scenario / Initial Premise (Optional):</label>
-                    <textarea id="mhc_pbta_scenario_desc" class="text_pole" rows="2" placeholder="e.g. Your pirate crew was marooned on a cursed sandbar after a mutiny... (optional setting/premise guidance)" style="width: 100%; box-sizing: border-box; font-size: 0.85em; padding: 4px 8px; resize: vertical;"></textarea>
-                </div>
-
-                <!-- Action Buttons -->
-                <div style="display: flex; flex-direction: column; gap: 8px;">
-                    <div style="display: flex; gap: 8px;">
-                        <button id="mhc_pbta_load_cartridge" class="menu_button interactable" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.88em; padding: 6px 10px;" title="Configures this chat's prompts and modules for PbtA without starting a new character">
-                            <i class="fa-solid fa-gamepad"></i>
-                            <span>Load PbtA Cartridge</span>
-                        </button>
-
-                        <button id="mhc_pbta_quickstart" class="menu_button interactable" style="flex: 1.2; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.88em; padding: 6px 10px; background: rgba(80,180,120,0.2); border-color: rgba(80,180,120,0.5); color: #bbeecc;" title="Applies PbtA and immediately generates character and starts the adventure!">
-                            <i class="fa-solid fa-bolt"></i>
-                            <span>⚡ Quick Start PbtA</span>
-                        </button>
-                    </div>
-
-                    <button id="mhc_restore_dnd" class="menu_button interactable" style="font-size: 0.8em; padding: 4px 8px; opacity: 0.7; align-self: flex-start; background: none; border: 1px solid rgba(255,255,255,0.15);" title="Reverts this chat's prompts back to factory default D&D 5e">
-                        <i class="fa-solid fa-rotate-left"></i> Restore Stock D&D 5e
-                    </button>
                 </div>
             </div>
         </div>

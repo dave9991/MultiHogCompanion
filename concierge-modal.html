@@ -47,6 +47,23 @@
                     <!-- Uploaded items -->
                 </div>
 
+                <!-- Inspiration Quick Toolbar -->
+                <div class="mhc-inspiration-bar">
+                    <button type="button" id="mhc_pick_st_char_btn" class="menu_button mhc-bar-btn" title="Import an existing SillyTavern character as protagonist inspiration">
+                        👤 Pick ST Character ▾
+                    </button>
+                    <select id="mhc_st_char_select" class="text_pole" style="display: none; font-size: 0.8em; max-width: 160px; padding: 2px 6px;">
+                        <option value="">-- Choose Character --</option>
+                    </select>
+
+                    <button type="button" id="mhc_pick_st_lore_btn" class="menu_button mhc-bar-btn" title="Import an existing SillyTavern Lorebook as setting canon">
+                        📚 Pick ST Lorebook ▾
+                    </button>
+                    <select id="mhc_st_lore_select" class="text_pole" style="display: none; font-size: 0.8em; max-width: 160px; padding: 2px 6px;">
+                        <option value="">-- Choose Lorebook --</option>
+                    </select>
+                </div>
+
                 <!-- Input Bar -->
                 <div class="mhc-chat-input-row">
                     <button type="button" id="mhc_attach_btn" class="menu_button mhc-attach-btn" title="Upload screenshots, game art, or setting documents (PDF, DOCX, TXT, MD)">

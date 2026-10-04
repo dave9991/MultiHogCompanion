@@ -2,8 +2,8 @@
  * concierge-ui.js — MultiHog Companion
  *
  * Controller for the PbtA Concierge Session Zero modal interface.
- * Handles chat messaging, drag-and-drop / file attachments, live dossier updating,
- * and campaign launching.
+ * Handles chat messaging, drag-and-drop / file attachments, character card & lorebook
+ * imports, live dossier updating, and campaign launching.
  */
 
 import {
@@ -16,6 +16,15 @@ import {
     extractDocumentContent,
     formatDocumentPromptBlock,
 } from './concierge-files.js';
+import {
+    parseCharacterFile,
+    formatCharacterInspirationBlock,
+    normalizeCharacterCard,
+} from './concierge-card-reader.js';
+import {
+    fetchWorldInfoBook,
+    processLorebookForConcierge,
+} from './concierge-lore-reader.js';
 import { buildConciergeSystemPrompt } from './concierge-prompt.js';
 import {
     createEmptyDossier,
@@ -183,7 +192,6 @@ function appendChatBubble(role, text, imageSrc = null) {
     }
 
     if (text) {
-        // Basic markdown line breaks and bolding
         const formatted = text
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -213,7 +221,11 @@ function renderAttachmentTray() {
 
     tray.show();
     pendingAttachments.forEach((att, idx) => {
-        const icon = att.type === 'image' ? '🖼️' : '📄';
+        let icon = '📄';
+        if (att.type === 'image') icon = '🖼️';
+        if (att.type === 'char') icon = '👤';
+        if (att.type === 'lore') icon = '📚';
+
         const chip = $(`
             <div class="mhc-chip">
                 <span>${icon} ${att.name}</span>
@@ -258,6 +270,43 @@ function updateConnectionDropdowns() {
 }
 
 /**
+ * Populate the Character and Lorebook inspiration dropdowns.
+ */
+function populateInspirationDropdowns() {
+    const ctx = SillyTavern.getContext();
+
+    // 1. ST Characters
+    const chars = ctx.characters || [];
+    const charSelect = $('#mhc_st_char_select');
+    charSelect.empty();
+    charSelect.append('<option value="">-- Choose Character --</option>');
+    chars.forEach((c, idx) => {
+        if (c?.name) {
+            charSelect.append(`<option value="${idx}">${c.name}</option>`);
+        }
+    });
+
+    // 2. ST Lorebooks
+    const loreSelect = $('#mhc_st_lore_select');
+    loreSelect.empty();
+    loreSelect.append('<option value="">-- Choose Lorebook --</option>');
+
+    let bookNames = [];
+    if (Array.isArray(window.world_names)) {
+        bookNames = window.world_names;
+    } else {
+        $('#world_info option').each(function () {
+            const txt = $(this).text().trim();
+            if (txt && !bookNames.includes(txt)) bookNames.push(txt);
+        });
+    }
+
+    bookNames.forEach(b => {
+        loreSelect.append(`<option value="${b}">${b}</option>`);
+    });
+}
+
+/**
  * Process a user submission.
  */
 async function handleUserSend() {
@@ -289,13 +338,23 @@ async function handleUserSend() {
             }
         } else if (att.type === 'doc') {
             documentPromptAdditions += formatDocumentPromptBlock(att.name, att.text);
+        } else if (att.type === 'char') {
+            if (att.avatar && !imageSrcForDisplay) {
+                imageSrcForDisplay = att.avatar;
+            }
+            if (att.avatar && !activeDossier.protagonist.portraitSrc) {
+                activeDossier.protagonist.portraitSrc = att.avatar;
+            }
+            documentPromptAdditions += `\n${att.promptAddition}\n`;
+        } else if (att.type === 'lore') {
+            documentPromptAdditions += `\n${att.promptAddition}\n`;
         }
     }
 
     const fullUserText = (text + (documentPromptAdditions ? `\n${documentPromptAdditions}` : '')).trim();
 
     // Display user bubble
-    appendChatBubble('user', text || '(Attached inspiration)', imageSrcForDisplay);
+    appendChatBubble('user', text || '(Provided inspiration details)', imageSrcForDisplay);
 
     // Format LLM message payload
     let userMsgContent;
@@ -357,6 +416,62 @@ async function handleUserSend() {
  */
 async function handleFilesSelected(files) {
     for (const file of Array.from(files)) {
+        // 1. Try Character Card (PNG metadata or JSON)
+        try {
+            const card = await parseCharacterFile(file);
+            if (card) {
+                pendingAttachments.push({
+                    type: 'char',
+                    name: card.name,
+                    card,
+                    promptAddition: formatCharacterInspirationBlock(card),
+                    avatar: card.avatar,
+                });
+                toastr?.success(`Imported character: "${card.name}".`);
+
+                // If character card embeds a world book, import that too!
+                if (card.characterBook) {
+                    try {
+                        const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook);
+                        pendingAttachments.push({
+                            type: 'lore',
+                            name: `${card.name}'s Lorebook`,
+                            promptAddition: loreRes.block,
+                            mode: loreRes.mode,
+                        });
+                        toastr?.info(`Imported embedded worldbook for "${card.name}".`);
+                    } catch (_) {}
+                }
+                renderAttachmentTray();
+                continue;
+            }
+        } catch (_) {}
+
+        // 2. Try Lorebook JSON (has entries)
+        if (file.name.endsWith('.json')) {
+            try {
+                const text = await file.text();
+                const json = JSON.parse(text);
+                if (json.entries && (typeof json.entries === 'object' || Array.isArray(json.entries))) {
+                    const loreRes = await processLorebookForConcierge(
+                        file.name.replace(/\.json$/i, ''),
+                        json,
+                        msg => toastr?.info(msg),
+                    );
+                    pendingAttachments.push({
+                        type: 'lore',
+                        name: file.name.replace(/\.json$/i, ''),
+                        promptAddition: loreRes.block,
+                        mode: loreRes.mode,
+                    });
+                    toastr?.success(`Imported lorebook: "${file.name}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
+                    renderAttachmentTray();
+                    continue;
+                }
+            } catch (_) {}
+        }
+
+        // 3. Fallback to image or document
         if (file.type.startsWith('image/')) {
             try {
                 const dataUrl = await readImageAsDataUrl(file);
@@ -411,6 +526,83 @@ function bindModalEvents() {
         updateConciergeConnectionSettings({ conciergeConnectionProfileId: $(this).val() });
     });
 
+    // Inspiration Toolbar: ST Character Picker
+    $('#mhc_pick_st_char_btn').on('click', () => {
+        $('#mhc_st_char_select').toggle();
+    });
+
+    $('#mhc_st_char_select').on('change', async function () {
+        const idx = $(this).val();
+        if (idx === '') return;
+        $(this).hide();
+        $(this).val('');
+
+        const ctx = SillyTavern.getContext();
+        const rawChar = ctx.characters?.[idx];
+        if (!rawChar) return;
+
+        const avatarUrl = rawChar.avatar ? `/characters/${encodeURIComponent(rawChar.avatar)}` : null;
+        const card = normalizeCharacterCard(rawChar, avatarUrl);
+        if (!card) return;
+
+        pendingAttachments.push({
+            type: 'char',
+            name: card.name,
+            card,
+            promptAddition: formatCharacterInspirationBlock(card),
+            avatar: card.avatar,
+        });
+        renderAttachmentTray();
+        toastr?.success(`Imported character: "${card.name}".`);
+
+        if (card.characterBook) {
+            try {
+                const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook);
+                pendingAttachments.push({
+                    type: 'lore',
+                    name: `${card.name}'s Lorebook`,
+                    promptAddition: loreRes.block,
+                    mode: loreRes.mode,
+                });
+                renderAttachmentTray();
+                toastr?.info(`Imported embedded worldbook for "${card.name}".`);
+            } catch (_) {}
+        }
+    });
+
+    // Inspiration Toolbar: ST Lorebook Picker
+    $('#mhc_pick_st_lore_btn').on('click', () => {
+        $('#mhc_st_lore_select').toggle();
+    });
+
+    $('#mhc_st_lore_select').on('change', async function () {
+        const bookName = $(this).val();
+        if (!bookName) return;
+        $(this).hide();
+        $(this).val('');
+
+        toastr?.info(`Loading lorebook "${bookName}"...`);
+        const bookData = await fetchWorldInfoBook(bookName);
+        if (!bookData) {
+            toastr?.error(`Could not load lorebook "${bookName}".`);
+            return;
+        }
+
+        try {
+            const loreRes = await processLorebookForConcierge(bookName, bookData, msg => toastr?.info(msg));
+            pendingAttachments.push({
+                type: 'lore',
+                name: bookName,
+                promptAddition: loreRes.block,
+                mode: loreRes.mode,
+            });
+            renderAttachmentTray();
+            toastr?.success(`Imported lorebook: "${bookName}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
+        } catch (err) {
+            toastr?.error(`Lorebook import failed: ${err.message}`);
+        }
+    });
+
     // Send on button or Enter (Shift+Enter for newline)
     $('#mhc_send_btn').on('click', handleUserSend);
     $('#mhc_chat_input').on('keydown', function (e) {
@@ -431,8 +623,8 @@ function bindModalEvents() {
 
     // Drag and drop onto chat stream
     const dropArea = document.getElementById('mhc_concierge_modal');
-    dropArea.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
-    dropArea.addEventListener('drop', (e) => {
+    dropArea.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+    dropArea.addEventListener('drop', e => {
         e.preventDefault();
         e.stopPropagation();
         if (e.dataTransfer?.files?.length) {
@@ -523,6 +715,7 @@ export async function openConciergeModal() {
     await ensureModalMounted();
     bindModalEvents();
     updateConnectionDropdowns();
+    populateInspirationDropdowns();
 
     // Check for existing draft or initialize greeting
     const draft = loadDraft();

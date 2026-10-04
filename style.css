@@ -407,3 +407,28 @@
     background: linear-gradient(90deg, #3182ce, #63b3ed);
     transition: width 0.3s ease;
 }
+
+.mhc-inspiration-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.22);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    flex-wrap: wrap;
+}
+
+.mhc-bar-btn {
+    font-size: 0.78em !important;
+    padding: 3px 8px !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 4px !important;
+    color: var(--SmartThemeColor, #c0caf5) !important;
+    cursor: pointer;
+}
+.mhc-bar-btn:hover {
+    background: rgba(90, 160, 250, 0.15) !important;
+    border-color: rgba(90, 160, 250, 0.35) !important;
+    color: #88ccff !important;
+}

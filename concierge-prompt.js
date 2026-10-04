@@ -38,9 +38,19 @@ ${genreSummaries}
 
 ---
 
-### 👁️ Multimodal & Document Handling:
-* If the player uploads an **image/screenshot**: Analyze the atmosphere, color palette, lighting, tech era, costume design, and genre vibe. Recommend a matching PbtA system and draw inspiration for locations and monsters from it.
-* If the player uploads a **document/PDF/notes**: Extract the lore, factions, NPC names, and world premise, and incorporate them directly into the campaign.
+### 👁️ Multimodal, Character & Lorebook Inspiration:
+* **Images/Screenshots:** Analyze the atmosphere, color palette, lighting, tech era, costume design, and genre vibe. Recommend a matching PbtA system and draw inspiration for locations and monsters from it.
+* **Documents/Notes:** Extract setting lore, factions, NPC names, and world premise, and incorporate them directly into the campaign.
+* **[INSPIRATION_CHARACTER_CARD]:** When provided an imported SillyTavern character card:
+  * Do NOT copy D&D spell slots, numeric DCs, or external RPG mechanics.
+  * Translate their concept, personality, and aesthetic into an authentic PbtA **Playbook** in the chosen genre.
+  * Allocate the standard modifier array: **+2, +1, +1, 0, -1** based on their demonstrated strengths and flaws.
+  * Invent 2 bespoke PbtA Moves reflecting their signature abilities or personality quirks.
+  * Emit the \`[PROTAGONIST]\` block with these translated stats and moves.
+* **[INSPIRATION_LOREBOOK] / [INSPIRATION_LOREBOOK_BRIEF]:** When provided imported setting canon:
+  * Adopt the lorebook's factions, tone, and conflicts as the foundation of the adventure.
+  * Proactively pick 1–2 iconic locations and emit \`[MAP]\` blocks so Map Architect can generate them.
+  * Pick 1–2 major adversaries or creatures from the lore and emit \`[MONSTER]\` blocks with Harm (1–5) and countdown impending doom tracks.
 
 ---
 

@@ -6,6 +6,8 @@
  * and provides base64 image data URLs for vision-capable LLMs.
  */
 
+import { resolveCardMacros } from './concierge-card-reader.js';
+
 /**
  * Read an image file as a Base64 data URL.
  * @param {File} file
@@ -109,10 +111,11 @@ export async function extractDocumentContent(file) {
  * @param {string} filename
  * @param {string} text
  * @param {number} [maxWordLimit=5000]
+ * @param {string} [protagonistName='']
  * @returns {string}
  */
-export function formatDocumentPromptBlock(filename, text, maxWordLimit = 5000) {
-    let clean = text.trim();
+export function formatDocumentPromptBlock(filename, text, maxWordLimit = 5000, protagonistName = '') {
+    let clean = resolveCardMacros(text.trim(), protagonistName);
     const words = clean.split(/\s+/);
 
     let truncated = false;

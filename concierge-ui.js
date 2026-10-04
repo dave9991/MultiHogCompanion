@@ -20,6 +20,8 @@ import {
     parseCharacterFile,
     formatCharacterInspirationBlock,
     normalizeCharacterCard,
+    resolveCardMacros,
+    stripSillyTavernMacros,
 } from './concierge-card-reader.js';
 import {
     fetchWorldInfoBook,
@@ -337,7 +339,7 @@ async function handleUserSend() {
                 activeDossier.protagonist.portraitSrc = att.dataUrl;
             }
         } else if (att.type === 'doc') {
-            documentPromptAdditions += formatDocumentPromptBlock(att.name, att.text);
+            documentPromptAdditions += formatDocumentPromptBlock(att.name, att.text, 5000, activeDossier?.protagonist?.name || '');
         } else if (att.type === 'char') {
             if (att.avatar && !imageSrcForDisplay) {
                 imageSrcForDisplay = att.avatar;
@@ -351,7 +353,8 @@ async function handleUserSend() {
         }
     }
 
-    const fullUserText = (text + (documentPromptAdditions ? `\n${documentPromptAdditions}` : '')).trim();
+    const rawUserText = (text + (documentPromptAdditions ? `\n${documentPromptAdditions}` : '')).trim();
+    const fullUserText = resolveCardMacros(rawUserText, activeDossier?.protagonist?.name || '');
 
     // Display user bubble
     appendChatBubble('user', text || '(Provided inspiration details)', imageSrcForDisplay);
@@ -436,7 +439,7 @@ async function handleFilesSelected(files) {
                 // If character card embeds a world book, import that too!
                 if (card.characterBook) {
                     try {
-                        const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook);
+                        const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
                         pendingAttachments.push({
                             type: 'lore',
                             name: `${card.name}'s Lorebook`,
@@ -461,6 +464,7 @@ async function handleFilesSelected(files) {
                         file.name.replace(/\.json$/i, ''),
                         json,
                         msg => toastr?.info(msg),
+                        activeDossier?.protagonist?.name || '',
                     );
                     pendingAttachments.push({
                         type: 'lore',
@@ -561,7 +565,7 @@ function bindModalEvents() {
 
         if (card.characterBook) {
             try {
-                const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook);
+                const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
                 pendingAttachments.push({
                     type: 'lore',
                     name: `${card.name}'s Lorebook`,
@@ -593,7 +597,7 @@ function bindModalEvents() {
         }
 
         try {
-            const loreRes = await processLorebookForConcierge(bookName, bookData, msg => toastr?.info(msg));
+            const loreRes = await processLorebookForConcierge(bookName, bookData, msg => toastr?.info(msg), activeDossier?.protagonist?.name || '');
             pendingAttachments.push({
                 type: 'lore',
                 name: bookName,

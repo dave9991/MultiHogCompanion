@@ -9,6 +9,7 @@
  */
 
 import { sendConciergeRequest } from './concierge-connection.js';
+import { resolveCardMacros } from './concierge-card-reader.js';
 
 const DIRECT_FEED_WORD_LIMIT = 4000;
 const ARCHIVIST_MAX_INPUT_WORDS = 12000;
@@ -39,12 +40,14 @@ export async function fetchWorldInfoBook(bookName) {
 
 /**
  * Extracts and sanitizes active entries from raw lorebook data.
- * Drops internal metadata (uid, scan_depth, selective, etc.) and keeps only canon text.
+ * Drops internal metadata (uid, scan_depth, selective, etc.), scrubs ST macros ({{user}}, {{char}}),
+ * and keeps only canon text.
  *
  * @param {any} rawBook
+ * @param {string} [protagonistName='']
  * @returns {Array<{ title: string, keys: string[], content: string, wordCount: number }>}
  */
-export function sanitizeLorebookEntries(rawBook) {
+export function sanitizeLorebookEntries(rawBook, protagonistName = '') {
     if (!rawBook || typeof rawBook !== 'object') return [];
 
     const rawEntries = rawBook.entries || rawBook;
@@ -58,13 +61,15 @@ export function sanitizeLorebookEntries(rawBook) {
         if (!entry || typeof entry !== 'object') continue;
         if (entry.disable === true) continue; // Skip disabled entries
 
-        const content = String(entry.content || '').trim();
+        let content = String(entry.content || '').trim();
+        if (!content) continue;
+        content = resolveCardMacros(content, protagonistName);
         if (!content) continue;
 
-        let title = String(entry.comment || '').trim();
+        let title = resolveCardMacros(String(entry.comment || '').trim(), protagonistName);
         const keys = Array.isArray(entry.key)
-            ? entry.key.map(k => String(k).trim()).filter(Boolean)
-            : (typeof entry.key === 'string' ? entry.key.split(',').map(k => k.trim()).filter(Boolean) : []);
+            ? entry.key.map(k => resolveCardMacros(String(k).trim(), protagonistName)).filter(Boolean)
+            : (typeof entry.key === 'string' ? entry.key.split(',').map(k => resolveCardMacros(k.trim(), protagonistName)).filter(Boolean) : []);
 
         if (!title && keys.length) {
             title = keys.slice(0, 3).join(', ');
@@ -136,10 +141,11 @@ Output ONLY the structured Setting Brief.`;
  * @param {string} bookName
  * @param {object} rawBook
  * @param {(status: string) => void} [onStatus]
+ * @param {string} [protagonistName='']
  * @returns {Promise<{ block: string, mode: 'direct'|'synthesized', totalWords: number }>}
  */
-export async function processLorebookForConcierge(bookName, rawBook, onStatus = () => {}) {
-    const cleaned = sanitizeLorebookEntries(rawBook);
+export async function processLorebookForConcierge(bookName, rawBook, onStatus = () => {}, protagonistName = '') {
+    const cleaned = sanitizeLorebookEntries(rawBook, protagonistName);
     if (!cleaned.length) {
         throw new Error(`Lorebook "${bookName}" contains no active text entries.`);
     }
@@ -150,11 +156,11 @@ export async function processLorebookForConcierge(bookName, rawBook, onStatus = 
     if (totalWords <= DIRECT_FEED_WORD_LIMIT) {
         const textParts = cleaned.map(e => `### [${e.title}]\n${e.content}`);
         const block = `\n[INSPIRATION_LOREBOOK: ${bookName}]\n${textParts.join('\n\n')}\n[/INSPIRATION_LOREBOOK]\n`;
-        return { block, mode: 'direct', totalWords };
+        return { block: resolveCardMacros(block, protagonistName), mode: 'direct', totalWords };
     }
 
     // 2. Dense Lorebook: Sub-Agent Pass
     const brief = await runWorldArchivistPass(bookName, cleaned, onStatus);
     const block = `\n[INSPIRATION_LOREBOOK_BRIEF: ${bookName}]\n${brief}\n[/INSPIRATION_LOREBOOK_BRIEF]\n`;
-    return { block, mode: 'synthesized', totalWords };
+    return { block: resolveCardMacros(block, protagonistName), mode: 'synthesized', totalWords };
 }

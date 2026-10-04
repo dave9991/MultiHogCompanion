@@ -14,6 +14,7 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
+import { stripSillyTavernMacros } from './concierge-card-reader.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 
@@ -253,21 +254,39 @@ export async function sendConciergeRequest(messages, signal = null) {
     const settings = getConciergeConnectionSettings();
     const context = SillyTavern.getContext();
 
+    // Sanitize all outgoing messages to strip any straggling SillyTavern macros ({{user}}, {{persona}}, {{char}}, etc.)
+    // so SillyTavern's macro engine cannot substitute host persona or character details.
+    const sanitizedMessages = (messages || []).map(msg => {
+        if (typeof msg.content === 'string') {
+            return { ...msg, content: stripSillyTavernMacros(msg.content) };
+        }
+        if (Array.isArray(msg.content)) {
+            const sanitizedParts = msg.content.map(part => {
+                if (part?.type === 'text' && typeof part.text === 'string') {
+                    return { ...part, text: stripSillyTavernMacros(part.text) };
+                }
+                return part;
+            });
+            return { ...msg, content: sanitizedParts };
+        }
+        return msg;
+    });
+
     // 1. Profile Mode
     if (settings.connectionSource === 'profile' && settings.connectionProfileId) {
-        return await sendViaProfile(context, settings, messages, { signal });
+        return await sendViaProfile(context, settings, sanitizedMessages, { signal });
     }
 
     // 2. Direct OpenAI
     if (settings.connectionSource === 'openai' && settings.openaiUrl) {
-        return await sendViaDirectOpenAI(settings, messages, { signal });
+        return await sendViaDirectOpenAI(settings, sanitizedMessages, { signal });
     }
 
     // 3. Direct Ollama
     if (settings.connectionSource === 'ollama' && settings.ollamaModel) {
-        return await sendViaDirectOllama(settings, messages, { signal });
+        return await sendViaDirectOllama(settings, sanitizedMessages, { signal });
     }
 
     // 4. Default SillyTavern Connection
-    return await sendViaDefault(context, messages, { signal });
+    return await sendViaDefault(context, sanitizedMessages, { signal });
 }

@@ -67,6 +67,36 @@ export function extractPngTextChunks(buffer) {
 }
 
 /**
+ * Resolves SillyTavern macros ({{char}}, {{user}}, {{persona}}, etc.) in text.
+ * Prevents SillyTavern's macro engine (substituteParams) from substituting the
+ * user's active Persona or active background character into Session Zero prompts.
+ *
+ * @param {string} text
+ * @param {string} [charName] - Name of the imported character/protagonist, if known
+ * @returns {string}
+ */
+export function resolveCardMacros(text, charName = '') {
+    if (!text || typeof text !== 'string') return '';
+    const safeName = charName || 'the protagonist';
+    return text
+        // User & Persona macros -> "the player" or empty
+        .replace(/{{\s*(?:user|user_name)\s*}}/gi, 'the player')
+        .replace(/{{\s*(?:persona|user_description)\s*}}/gi, '')
+        // Character macros -> card/protagonist name
+        .replace(/{{\s*(?:char|char_name)\s*}}/gi, safeName)
+        // Background card fields that SillyTavern would substitute from active char
+        .replace(/{{\s*(?:charPrompt|charInstruction|charJailbreak|charDepthPrompt|creatorNotes)\s*}}/gi, '')
+        .replace(/{{\s*(?:description|personality|scenario|mesExamples|mesExamplesRaw)\s*}}/gi, '')
+        .replace(/{{\s*(?:group|charIfNotGroup|groupNotMuted|notChar|model)\s*}}/gi, '')
+        .replace(/{{\s*original\s*}}/gi, '')
+        // Any ST variable or extension macros
+        .replace(/{{\s*(?:getvar|setvar|wi)::[^}]+}}/gi, '')
+        .trim();
+}
+
+export const stripSillyTavernMacros = resolveCardMacros;
+
+/**
  * Normalizes raw character card JSON (V1, V2, or V3 spec) into a clean, uniform object.
  * @param {any} raw
  * @param {string|null} [avatarDataUrl=null]
@@ -82,11 +112,11 @@ export function normalizeCharacterCard(raw, avatarDataUrl = null) {
 
     return {
         name,
-        description: String(data.description || raw.description || '').trim(),
-        personality: String(data.personality || raw.personality || '').trim(),
-        scenario: String(data.scenario || raw.scenario || '').trim(),
-        firstMessage: String(data.first_mes || raw.first_mes || '').trim(),
-        creatorNotes: String(data.creator_notes || raw.creator_notes || '').trim(),
+        description: resolveCardMacros(String(data.description || raw.description || ''), name),
+        personality: resolveCardMacros(String(data.personality || raw.personality || ''), name),
+        scenario: resolveCardMacros(String(data.scenario || raw.scenario || ''), name),
+        firstMessage: resolveCardMacros(String(data.first_mes || raw.first_mes || ''), name),
+        creatorNotes: resolveCardMacros(String(data.creator_notes || raw.creator_notes || ''), name),
         tags: Array.isArray(data.tags) ? data.tags : (Array.isArray(raw.tags) ? raw.tags : []),
         avatar: avatarDataUrl || null,
         characterBook: data.character_book || raw.character_book || null,
@@ -162,11 +192,11 @@ export function formatCharacterInspirationBlock(card) {
         `Name: ${card.name}`,
     ];
 
-    if (card.description) parts.push(`Description & Appearance:\n${card.description}`);
-    if (card.personality) parts.push(`Personality & Traits:\n${card.personality}`);
-    if (card.scenario) parts.push(`Background & Scenario:\n${card.scenario}`);
+    if (card.description) parts.push(`Description & Appearance:\n${resolveCardMacros(card.description, card.name)}`);
+    if (card.personality) parts.push(`Personality & Traits:\n${resolveCardMacros(card.personality, card.name)}`);
+    if (card.scenario) parts.push(`Background & Scenario:\n${resolveCardMacros(card.scenario, card.name)}`);
     if (card.tags?.length) parts.push(`Tags: ${card.tags.join(', ')}`);
 
     parts.push('[/INSPIRATION_CHARACTER_CARD]\n');
-    return parts.join('\n');
+    return resolveCardMacros(parts.join('\n'), card.name);
 }

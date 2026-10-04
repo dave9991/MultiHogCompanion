@@ -132,7 +132,7 @@ function updateBlueprintDeck() {
             const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
             mList.append(`
                 <div class="mhc-deck-item">
-                    <div style="font-weight: bold; color: #ff9999;">👹 ${m.name}</div>
+                    <div style="font-weight: bold; color: var(--mhc-danger, #ef4444);">👹 ${m.name}</div>
                     <div style="font-size: 0.85em; opacity: 0.85;">Harm: ${m.harm} | Armor: ${m.armor} | ${attacks}</div>
                     <div style="font-size: 0.8em; opacity: 0.75;">Weakness: ${m.weakness}</div>
                 </div>

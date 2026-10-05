@@ -97,39 +97,49 @@ function getRpgSettings() {
 }
 
 /**
- * Extract player character name from Multihog settings/memo.
+ * Helper to extract character name from a memo string.
+ */
+function extractNameFromMemo(memo) {
+    if (!memo || typeof memo !== 'string') return null;
+    const charBlock = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
+    if (charBlock) {
+        const firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
+        const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
+        if (m) {
+            const candidate = m[1].trim();
+            if (candidate && !/^(character|unknown|user|name)$/i.test(candidate)) return candidate;
+        }
+    }
+    const nameField = memo.match(/(?:^|\n)\s*(?:Name|Character Name)\s*[:\|]\s*([^\n\|\[<]{2,60})/im);
+    if (nameField) {
+        const candidate = nameField[1].replace(/<[^>]+>/g, '').trim();
+        if (candidate && !/^(character|unknown|user)$/i.test(candidate)) return candidate;
+    }
+    return null;
+}
+
+/**
+ * Extract player character name from Multihog settings/memo strictly for this chat.
  */
 function getMultihogPlayerName(chatId) {
     const s = getRpgSettings();
     if (!s) return null;
 
-    // 1. Chat partition playerCharacter
+    // 1. Chat partition playerCharacter (chat-specific)
     if (chatId && s.chatStates?.[chatId]?.playerCharacter?.name) {
         return s.chatStates[chatId].playerCharacter.name.trim();
     }
 
-    // 2. Top-level playerCharacter (if live)
-    if (s.playerCharacter?.name) {
-        return s.playerCharacter.name.trim();
+    // 2. Chat partition currentMemo (chat-specific)
+    if (chatId && s.chatStates?.[chatId]?.currentMemo) {
+        const name = extractNameFromMemo(s.chatStates[chatId].currentMemo);
+        if (name) return name;
     }
 
-    // 3. Current RPG memo [CHARACTER] block
-    const memo = s.currentMemo;
-    if (memo && typeof memo === 'string') {
-        const charBlock = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
-        if (charBlock) {
-            const firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
-            const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
-            if (m) {
-                const candidate = m[1].trim();
-                if (candidate && !/^(character|unknown|user|name)$/i.test(candidate)) return candidate;
-            }
-        }
-        const nameField = memo.match(/(?:^|\n)\s*(?:Name|Character Name)\s*[:\|]\s*([^\n\|\[<]{2,60})/im);
-        if (nameField) {
-            const candidate = nameField[1].replace(/<[^>]+>/g, '').trim();
-            if (candidate && !/^(character|unknown|user)$/i.test(candidate)) return candidate;
-        }
+    // 3. Current RPG memo [CHARACTER] block (ONLY if projection owner is explicitly this chat)
+    if (chatId && s.chatStateProjectionOwner === chatId && s.currentMemo) {
+        const name = extractNameFromMemo(s.currentMemo);
+        if (name) return name;
     }
 
     return null;
@@ -336,74 +346,7 @@ let _isSyncing = false;
 let _syncDebounceTimer = null;
 
 /**
- * Builds a fallback PbtA Campaign Dossier from a Lorebook Player Card.
- * @param {object} pc
- * @param {object} [ctx]
- * @returns {object}
- */
-function buildDossierFromPlayerCharacter(pc, ctx) {
-    const charName = (pc?.name || 'Protagonist').trim();
-    const bio = (pc?.bio || '').trim();
-
-    let playbook = 'Wanderer';
-    const playbookMatch = bio.match(/(?:playbook|archetype|class)\s*:\s*([a-zA-Z0-9_\- ]+)/i)
-        || bio.match(/,\s*(?:a|an)\s+([a-zA-Z0-9_\- ]+?)(?:\.|\s+who|\s+from)/i);
-    if (playbookMatch) {
-        playbook = playbookMatch[1].trim();
-    } else if (pc?.class) {
-        playbook = String(pc.class).trim();
-    }
-
-    let title = `${charName}'s Adventure`;
-    let startingLocation = 'The Starting Threshold';
-    let premise = 'The adventure begins.';
-
-    if (Array.isArray(ctx?.chat) && ctx.chat.length > 0) {
-        for (const msg of ctx.chat) {
-            const text = String(msg.mes || msg.text || '');
-            const setupMatch = text.match(/\[Initial Setup:\s*([^\]]+)\]/i);
-            if (setupMatch) {
-                title = setupMatch[1].trim();
-            }
-            if (/What do you do\?/i.test(text)) {
-                premise = text.replace(/\[Initial Setup:[^\]]+\]/i, '').trim();
-                break;
-            }
-        }
-    }
-
-    return {
-        meta: {
-            title,
-            systemKey: 'fantasy',
-            systemLabel: 'PbtA Fantasy',
-            premise,
-            tone: [],
-            createdAt: Date.now(),
-        },
-        protagonist: {
-            name: charName,
-            playbook,
-            stats: { Might: 2, Agility: 1, Wits: 1, Heart: 0, Arcana: -1 },
-            startingMoves: ['Hack & Slash (+Might)', 'Defy Danger (+Agility)'],
-            harm: { max: 5, current: 0, armor: 0 },
-            gear: ['Essential adventurer kit', 'Signature weapon'],
-            bio,
-            portraitSrc: pc?.portraitSrc || null,
-        },
-        monsters: [],
-        maps: [{ site: startingLocation, kind: 'INTERIOR', threat: 'MODERATE' }],
-        factions: [],
-        theKick: {
-            startingLocation,
-            crisis: 'Trouble brewing',
-            openingPrompt: premise,
-        },
-    };
-}
-
-/**
- * Attempts to recover a PbtA Campaign Dossier artifact from SillyTavern World Info.
+ * Attempts to recover a PbtA Campaign Dossier artifact from SillyTavern World Info strictly for this chat.
  * @param {object} ctx
  * @param {string[]} candidateChatIds
  * @returns {Promise<object|null>}
@@ -420,7 +363,6 @@ async function tryRecoverDossierFromWorldInfo(ctx, candidateChatIds) {
     const bookCandidates = [
         ctx.chatMetadata?.world_info,
         ...candidateChatIds.map(id => `Campaign_${id}`),
-        'Campaign_PbtA',
     ].filter(Boolean);
 
     const getHeaders = ctx.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
@@ -560,7 +502,7 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
     let dossier = null;
     let foundChatId = effectiveChatId;
 
-    // 1. Check candidate partitions for pbtaCampaignDossier
+    // 1. Check candidate partitions for pbtaCampaignDossier (strictly for this chat)
     for (const cid of uniqueIds) {
         if (s.chatStates?.[cid]?.pbtaCampaignDossier) {
             dossier = s.chatStates[cid].pbtaCampaignDossier;
@@ -569,72 +511,13 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         }
     }
 
-    // 2. Scan ALL partitions in s.chatStates for pbtaCampaignDossier
-    if (!dossier && s.chatStates) {
-        for (const [cid, part] of Object.entries(s.chatStates)) {
-            if (part?.pbtaCampaignDossier) {
-                dossier = part.pbtaCampaignDossier;
-                foundChatId = cid;
-                break;
-            }
-        }
-    }
-
-    // 3. Check localStorage draft
-    if (!dossier) {
-        try {
-            const rawDraft = localStorage.getItem('mhc_pbta_concierge_draft');
-            if (rawDraft) {
-                const parsed = JSON.parse(rawDraft);
-                if (parsed?.protagonist?.name) {
-                    dossier = parsed;
-                }
-            }
-        } catch (_) {}
-    }
-
-    // 4. Try World Info recovery
+    // 2. Try World Info recovery bound strictly to this chat
     if (!dossier) {
         dossier = await tryRecoverDossierFromWorldInfo(ctx, uniqueIds);
     }
 
-    // 5. Try playerCharacter (Lorebook Player Card)
+    // If NO dossier exists for this specific chat, do NOT fabricate one or leak from other chats!
     if (!dossier) {
-        let pc = null;
-        for (const cid of uniqueIds) {
-            if (s.chatStates?.[cid]?.playerCharacter?.name) {
-                pc = s.chatStates[cid].playerCharacter;
-                foundChatId = cid;
-                break;
-            }
-        }
-        if (!pc && s.playerCharacter?.name) {
-            pc = s.playerCharacter;
-        }
-        if (!pc && s.chatStates) {
-            for (const part of Object.values(s.chatStates)) {
-                if (part?.playerCharacter?.name) {
-                    pc = part.playerCharacter;
-                    break;
-                }
-            }
-        }
-
-        if (pc) {
-            dossier = buildDossierFromPlayerCharacter(pc, ctx);
-        }
-    }
-
-    // 6. Try player name fallback
-    if (!dossier) {
-        const playerName = getMultihogPlayerName(effectiveChatId);
-        if (playerName) {
-            dossier = buildDossierFromPlayerCharacter({ name: playerName }, ctx);
-        }
-    }
-
-    if (!dossier) {
-        console.warn('[MultiHog Companion] Could not resolve PbtA campaign dossier or character for chat:', effectiveChatId);
         return false;
     }
 

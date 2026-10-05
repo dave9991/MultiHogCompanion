@@ -763,17 +763,6 @@ export async function openConciergeModal() {
     updateConnectionDropdowns();
     populateInspirationDropdowns();
 
-    // Immediately isolate from any ongoing chat by ensuring a clean session
-    try {
-        const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
-        await ensureCleanAdventureChat({
-            adventureTitle: 'PbtA Session Zero',
-            fallbackLabel: 'PbtA Adventure',
-        });
-    } catch (chatErr) {
-        console.warn('[PbtA Concierge] Auto-clean chat on modal open non-fatal error:', chatErr);
-    }
-
     // Check for existing draft or initialize greeting
     const draft = loadDraft();
     if (draft && draft.chatHistory?.length && !chatHistory.length) {

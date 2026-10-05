@@ -336,11 +336,81 @@ let _isSyncing = false;
 let _syncDebounceTimer = null;
 
 /**
+ * Automatically hydrates the live Multihog memo and rendered dashboard
+ * from an existing PbtA Campaign Dossier if the tracker is currently showing
+ * the empty onboarding / "create an adventure" screen.
+ *
+ * @param {string} [chatId]
+ * @returns {Promise<boolean>}
+ */
+export async function hydratePbtaMemoIfNeeded(chatId) {
+    const s = getRpgSettings();
+    if (!s) return false;
+    const effectiveChatId = chatId || getActiveChatId();
+    if (!effectiveChatId) return false;
+
+    // Check if the current partition has a PbtA dossier
+    const partition = s.chatStates?.[effectiveChatId];
+    let dossier = partition?.pbtaCampaignDossier;
+
+    // Fallback: check localStorage draft if partition didn't have it
+    if (!dossier) {
+        try {
+            const rawDraft = localStorage.getItem('mhc_pbta_concierge_draft');
+            if (rawDraft) {
+                const parsed = JSON.parse(rawDraft);
+                if (parsed?.protagonist?.name) {
+                    dossier = parsed;
+                }
+            }
+        } catch (_) {}
+    }
+
+    if (!dossier) return false;
+
+    // If currentMemo already has a [CHARACTER] block, nothing to do
+    const liveMemo = String(s.currentMemo || '').trim();
+    if (liveMemo && /\[CHARACTER\]/i.test(liveMemo)) {
+        return false;
+    }
+
+    const { formatInitialPbtaMemo } = await import('./pbta-ruleset.js');
+    const initialMemo = formatInitialPbtaMemo(dossier);
+    if (!initialMemo) return false;
+
+    s.currentMemo = initialMemo;
+    if (partition) {
+        partition.currentMemo = initialMemo;
+        partition.pbtaCampaignDossier = dossier;
+    }
+
+    if (typeof globalThis._rpgUpdateUIMemo === 'function') {
+        globalThis._rpgUpdateUIMemo(initialMemo);
+    }
+
+    try {
+        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+        if (typeof bridge.syncMemoView === 'function') bridge.syncMemoView();
+        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
+    } catch (_) {}
+
+    try {
+        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        if (typeof stateMgr.saveChatState === 'function') {
+            stateMgr.saveChatState(effectiveChatId);
+        }
+    } catch (_) {}
+
+    console.log(`[MultiHog Companion] Hydrated Multihog game state memo for PbtA campaign in chat "${effectiveChatId}".`);
+    return true;
+}
+
+/**
  * Main synchronizer function.
  */
 export async function runSync(reason = '') {
     const settings = getSettings();
-    if (!settings.enablePersonaSync && !settings.enablePortraitSync) return false;
 
     if (_isSyncing) return false;
     _isSyncing = true;
@@ -349,13 +419,19 @@ export async function runSync(reason = '') {
         const chatId = getActiveChatId();
         if (!chatId) return false;
 
+        let didWork = false;
+
+        // 1. Auto-hydrate PbtA game state memo if needed
+        const memoHydrated = await hydratePbtaMemoIfNeeded(chatId);
+        if (memoHydrated) didWork = true;
+
+        if (!settings.enablePersonaSync && !settings.enablePortraitSync) return didWork;
+
         const charName = getMultihogPlayerName(chatId);
-        if (!charName) return false;
+        if (!charName) return didWork;
 
         const persona = await findMatchingPersona(charName);
-        if (!persona) return false;
-
-        let didWork = false;
+        if (!persona) return didWork;
 
         if (settings.enablePersonaSync) {
             const personaChanged = await syncPersonaToChat(chatId, persona);
@@ -999,6 +1075,18 @@ jQuery(async () => {
                 return 'PbtA Concierge Session Zero opened.';
             },
             helpString: '<div>Opens the interactive PbtA Concierge Session Zero worldbuilder.</div>',
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-pbta-sync',
+            aliases: ['pbta-sync'],
+            callback: async () => {
+                const hydrated = await hydratePbtaMemoIfNeeded();
+                return hydrated
+                    ? 'PbtA game state memo hydrated and Multihog panel updated.'
+                    : 'PbtA panel is already up to date.';
+            },
+            helpString: '<div>Synchronizes the Multihog D&D Framework panel with the active PbtA Campaign Dossier.</div>',
         }));
     }
 

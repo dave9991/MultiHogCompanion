@@ -12,6 +12,7 @@
  */
 
 import { serializeDossierToMarkdown } from './concierge-parser.js';
+import { formatInitialPbtaMemo } from './pbta-ruleset.js';
 
 /**
  * Send an outgoing user chat message into SillyTavern.
@@ -225,16 +226,40 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         const dossierMd = serializeDossierToMarkdown(dossier);
         await injectDossierIntoWorldInfo(chatId, dossierMd);
 
-        // Store dossier in MultiHog chatState for runtime panel access
+        // Store dossier and initialize game state memo in MultiHog for runtime panel access
         const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
         const rpgSettings = effectiveCtx?.extensionSettings?.rpg_tracker;
+        const initialMemo = formatInitialPbtaMemo(dossier);
+
         if (rpgSettings) {
+            rpgSettings.currentMemo = initialMemo;
             rpgSettings.chatStates = rpgSettings.chatStates || {};
             if (chatId) {
                 rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
+                rpgSettings.chatStates[chatId].currentMemo = initialMemo;
                 rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
             }
         }
+
+        // Poke the Multihog UI so it immediately transitions out of "Create an adventure" mode
+        try {
+            if (typeof globalThis._rpgUpdateUIMemo === 'function') {
+                globalThis._rpgUpdateUIMemo(initialMemo);
+            }
+            const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+            if (typeof bridge.syncMemoView === 'function') bridge.syncMemoView();
+            if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+            if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
+        } catch (uiErr) {
+            console.warn('[PbtA Concierge] Could not poke Multihog UI directly:', uiErr);
+        }
+
+        try {
+            const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+            if (typeof stateMgr.saveChatState === 'function' && chatId) {
+                stateMgr.saveChatState(chatId);
+            }
+        } catch (_) {}
 
         // ── 6. Opening Fiction Scene (Turn 0) ───────────────────────────────────
         onProgress('🚀 Launching opening adventure turn...', 95);

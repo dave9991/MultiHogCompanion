@@ -668,3 +668,72 @@ export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName =
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }
+
+/**
+ * Generates the initial Multihog game state memo ([TIME], [LOCATION], [CHARACTER], [DUNGEON])
+ * from a completed PbtA Campaign Dossier.
+ *
+ * @param {object} dossier
+ * @returns {string} Formatted game state memo
+ */
+export function formatInitialPbtaMemo(dossier) {
+    if (!dossier || typeof dossier !== 'object') return '';
+    const p = dossier.protagonist || {};
+    const kick = dossier.theKick || {};
+    const charName = (p.name || 'Protagonist').trim();
+    const playbook = (p.playbook || 'Wanderer').trim();
+    const harmMax = p.harm?.max || 5;
+    const armor = p.harm?.armor || 0;
+
+    // Format stats: "Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1"
+    let statsStr = '';
+    if (p.stats && typeof p.stats === 'object') {
+        statsStr = Object.entries(p.stats)
+            .map(([stat, val]) => `${stat} ${Number(val) >= 0 ? '+' : ''}${val}`)
+            .join(', ');
+    } else {
+        statsStr = 'Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1';
+    }
+
+    // Format moves
+    const moves = Array.isArray(p.startingMoves) && p.startingMoves.length > 0
+        ? p.startingMoves
+        : ['Act Under Fire (+Cool)', 'Read a Tense Situation (+Sharp)'];
+    const movesStr = moves.join(' | ');
+
+    // Format gear
+    const gearStr = Array.isArray(p.gear) && p.gear.length > 0
+        ? p.gear.join(', ')
+        : 'Essential adventurer kit, signature item';
+
+    const locationStr = (kick.startingLocation || dossier.maps?.[0]?.site || 'The Starting Threshold').trim();
+
+    const blocks = [];
+
+    // 1. TIME Block
+    blocks.push(`[TIME]\nDay 1, 08:00 AM (Morning)\n[/TIME]`);
+
+    // 2. LOCATION Block
+    blocks.push(`[LOCATION]\n${locationStr}\n[/LOCATION]`);
+
+    // 3. CHARACTER Block
+    const charLines = [
+        `[CHARACTER]`,
+        `${charName} (${playbook}): Harm: 0/${harmMax} | Armor: ${armor}`,
+        `Stats: ${statsStr}`,
+        `Moves: ${movesStr}`,
+        `Gear: ${gearStr}`,
+        `Conditions: None`,
+        `Hold/Forward: None`,
+        `XP: 0/5`,
+        `[/CHARACTER]`,
+    ];
+    blocks.push(charLines.join('\n'));
+
+    // 4. If maps exist, add DUNGEON block
+    if (dossier.maps?.[0]?.site) {
+        blocks.push(`[DUNGEON]\nActive Site: ${dossier.maps[0].site}\nThreat: ${dossier.maps[0].threat || 'MODERATE'}\n[/DUNGEON]`);
+    }
+
+    return blocks.join('\n\n');
+}

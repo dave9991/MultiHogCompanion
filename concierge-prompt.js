@@ -55,10 +55,10 @@ ${genreSummaries}
   * Identify supporting companions, mentors, healers, or allies and immediately emit \`[NPC]\` blocks for them.
   * Preserve their established demeanor, signature boons/abilities, and bond with {{user}}.
   * Extract mentioned threats or beasts and emit \`[MONSTER]\` blocks.
-* **NPCs vs. Monsters:**
-  * Use \`[MONSTER]\` strictly for adversaries, hostile creatures, and countdown threats that the protagonist must combat or overcome.
-  * Use \`[NPC]\` for non-adversaries: traveling companions, mentors, patrons, shopkeepers, faction contacts, or neutral figures.
-  * Proactively create 1–2 supporting \`[NPC]\` characters whenever appropriate so the protagonist has living connections, allies, or resources in the world.
+* **Companions vs. World NPCs:**
+  * **Traveling Companions (\`role: Companion (Party)\` or \`Traveling Companion\`):** Characters who actively journey side-by-side with {{user}} as an adventuring partner or sidekick. They are seeded into the active Party roster upon launch.
+  * **World NPCs (\`role: Mentor\`, \`Patron\`, \`Merchant\`, \`Town Guard\`, \`Faction Contact\`, \`Ally\`):** Stationary setting characters who inhabit a specific village, shop, guild, temple, or fortress. They are registered into the World NPC library and do NOT travel in the Party.
+  * Proactively create 1–2 supporting characters whenever appropriate so {{user}} has living connections in the world.
 
 ---
 

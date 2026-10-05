@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS = {
     enablePortraitSync: true,
     showToasts: true,
     enableAspectRatioBridge: true,
+    aspectRatioPreset: 'sd15',
     sceneWidth: 672,
     sceneHeight: 384,
     portraitWidth: 512,
@@ -1128,11 +1129,40 @@ async function initUI() {
 
         // ── Smart Aspect-Ratio & Crop Bridge Controls ──
         const aspectCb = $('#mhc_aspect_ratio_bridge');
+        const aspectPresetSelect = $('#mhc_aspect_ratio_preset');
         const sceneW = $('#mhc_scene_width');
         const sceneH = $('#mhc_scene_height');
         const portraitW = $('#mhc_portrait_width');
         const portraitH = $('#mhc_portrait_height');
+        const scenePixelLabel = $('#mhc_scene_pixel_label');
+        const portraitPixelLabel = $('#mhc_portrait_pixel_label');
         const resetResolutionsBtn = $('#mhc_aspect_ratio_reset');
+
+        const ASPECT_PRESETS = {
+            sd15: { sceneW: 672, sceneH: 384, portraitW: 512, portraitH: 512 },
+            sdxl: { sceneW: 1344, sceneH: 768, portraitW: 1024, portraitH: 1024 },
+        };
+
+        function formatPixelCount(w, h) {
+            const px = w * h;
+            if (px >= 1000000) return `~${(px / 1000000).toFixed(2)}M px`;
+            return `~${Math.round(px / 1000)}k px`;
+        }
+
+        function updatePixelLabels() {
+            const sw = parseInt(sceneW.val(), 10) || 672;
+            const sh = parseInt(sceneH.val(), 10) || 384;
+            const pw = parseInt(portraitW.val(), 10) || 512;
+            const ph = parseInt(portraitH.val(), 10) || 512;
+            scenePixelLabel.text(formatPixelCount(sw, sh));
+            portraitPixelLabel.text(formatPixelCount(pw, ph));
+        }
+
+        function detectPreset(sw, sh, pw, ph) {
+            if (sw === 672 && sh === 384 && pw === 512 && ph === 512) return 'sd15';
+            if (sw === 1344 && sh === 768 && pw === 1024 && ph === 1024) return 'sdxl';
+            return 'custom';
+        }
 
         aspectCb.prop('checked', current.enableAspectRatioBridge);
         sceneW.val(current.sceneWidth);
@@ -1140,41 +1170,72 @@ async function initUI() {
         portraitW.val(current.portraitWidth);
         portraitH.val(current.portraitHeight);
 
+        const initialPreset = detectPreset(current.sceneWidth, current.sceneHeight, current.portraitWidth, current.portraitHeight);
+        aspectPresetSelect.val(initialPreset);
+        updatePixelLabels();
+
         aspectCb.on('change', function () {
             updateSettings({ enableAspectRatioBridge: $(this).is(':checked') });
         });
 
-        sceneW.on('change', function () {
-            const val = parseInt($(this).val(), 10);
-            if (!isNaN(val) && val > 0) updateSettings({ sceneWidth: val });
+        aspectPresetSelect.on('change', function () {
+            const chosen = $(this).val();
+            if (ASPECT_PRESETS[chosen]) {
+                const p = ASPECT_PRESETS[chosen];
+                sceneW.val(p.sceneW);
+                sceneH.val(p.sceneH);
+                portraitW.val(p.portraitW);
+                portraitH.val(p.portraitH);
+                updateSettings({
+                    aspectRatioPreset: chosen,
+                    sceneWidth: p.sceneW,
+                    sceneHeight: p.sceneH,
+                    portraitWidth: p.portraitW,
+                    portraitHeight: p.portraitH,
+                });
+                updatePixelLabels();
+                showToast('info', `Applied ${chosen === 'sdxl' ? 'SDXL / Flux (1024²)' : 'SD 1.5 (512²)'} resolution preset.`, 'MultiHog Companion');
+            } else {
+                updateSettings({ aspectRatioPreset: 'custom' });
+            }
         });
 
-        sceneH.on('change', function () {
-            const val = parseInt($(this).val(), 10);
-            if (!isNaN(val) && val > 0) updateSettings({ sceneHeight: val });
-        });
+        function handleDimensionChange() {
+            const sw = parseInt(sceneW.val(), 10) || 672;
+            const sh = parseInt(sceneH.val(), 10) || 384;
+            const pw = parseInt(portraitW.val(), 10) || 512;
+            const ph = parseInt(portraitH.val(), 10) || 512;
+            const detected = detectPreset(sw, sh, pw, ph);
+            aspectPresetSelect.val(detected);
+            updateSettings({
+                aspectRatioPreset: detected,
+                sceneWidth: sw,
+                sceneHeight: sh,
+                portraitWidth: pw,
+                portraitHeight: ph,
+            });
+            updatePixelLabels();
+        }
 
-        portraitW.on('change', function () {
-            const val = parseInt($(this).val(), 10);
-            if (!isNaN(val) && val > 0) updateSettings({ portraitWidth: val });
-        });
-
-        portraitH.on('change', function () {
-            const val = parseInt($(this).val(), 10);
-            if (!isNaN(val) && val > 0) updateSettings({ portraitHeight: val });
-        });
+        sceneW.on('change', handleDimensionChange);
+        sceneH.on('change', handleDimensionChange);
+        portraitW.on('change', handleDimensionChange);
+        portraitH.on('change', handleDimensionChange);
 
         resetResolutionsBtn.on('click', function () {
             sceneW.val(DEFAULT_SETTINGS.sceneWidth);
             sceneH.val(DEFAULT_SETTINGS.sceneHeight);
             portraitW.val(DEFAULT_SETTINGS.portraitWidth);
             portraitH.val(DEFAULT_SETTINGS.portraitHeight);
+            aspectPresetSelect.val('sd15');
             updateSettings({
+                aspectRatioPreset: 'sd15',
                 sceneWidth: DEFAULT_SETTINGS.sceneWidth,
                 sceneHeight: DEFAULT_SETTINGS.sceneHeight,
                 portraitWidth: DEFAULT_SETTINGS.portraitWidth,
                 portraitHeight: DEFAULT_SETTINGS.portraitHeight,
             });
+            updatePixelLabels();
             showToast('info', 'Resolutions reset to recommended defaults (672x384 & 512x512).', 'MultiHog Companion');
         });
 

@@ -15,6 +15,7 @@
     filter: brightness(1.15);
 }
 
+.mhc-sync-section .inline-drawer-header:hover,
 .mhc-aspect-section .inline-drawer-header:hover,
 .mhc-lorebook-section .inline-drawer-header:hover,
 .mhc-pbta-section .inline-drawer-header:hover {

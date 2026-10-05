@@ -1033,6 +1033,47 @@ export async function updateLorebookSyncUI() {
 }
 
 /**
+ * Update the status badge in the sync section header.
+ */
+function updateSyncBadge() {
+    const badge = $('#mhc_sync_badge');
+    if (!badge.length) return;
+
+    const personaOn = $('#mhc_persona_sync').is(':checked');
+    const portraitOn = $('#mhc_portrait_sync').is(':checked');
+
+    if (personaOn && portraitOn) {
+        badge.text('Persona & Portrait: ON');
+        badge.css({
+            background: 'rgba(80,180,120,0.2)',
+            color: '#88ffbb',
+            borderColor: 'rgba(80,180,120,0.35)',
+        });
+    } else if (personaOn) {
+        badge.text('Persona only');
+        badge.css({
+            background: 'rgba(90,160,250,0.2)',
+            color: '#88ccff',
+            borderColor: 'rgba(90,160,250,0.35)',
+        });
+    } else if (portraitOn) {
+        badge.text('Portrait only');
+        badge.css({
+            background: 'rgba(90,160,250,0.2)',
+            color: '#88ccff',
+            borderColor: 'rgba(90,160,250,0.35)',
+        });
+    } else {
+        badge.text('Disabled');
+        badge.css({
+            background: 'rgba(255,255,255,0.05)',
+            color: 'rgba(255,255,255,0.45)',
+            borderColor: 'rgba(255,255,255,0.1)',
+        });
+    }
+}
+
+/**
  * Initialize extension settings UI and bind events.
  */
 async function initUI() {
@@ -1050,13 +1091,16 @@ async function initUI() {
         personaCb.prop('checked', current.enablePersonaSync);
         portraitCb.prop('checked', current.enablePortraitSync);
         toastCb.prop('checked', current.showToasts);
+        updateSyncBadge();
 
         personaCb.on('change', function () {
             updateSettings({ enablePersonaSync: $(this).is(':checked') });
+            updateSyncBadge();
         });
 
         portraitCb.on('change', function () {
             updateSettings({ enablePortraitSync: $(this).is(':checked') });
+            updateSyncBadge();
         });
 
         toastCb.on('change', function () {
@@ -1364,7 +1408,7 @@ function updateRulesetBadge() {
         const genreObj = PBTA_GENRES[genreKey];
         const genreLabel = genreObj ? genreObj.label.split(' (')[0].replace(/^[^\w\s]+\s*/, '') : 'PbtA';
 
-        badge.textContent = '🎲 PbtA Active';
+        badge.textContent = `🎲 PbtA (${genreLabel})`;
         badge.style.background = 'rgba(90,160,250,0.2)';
         badge.style.borderColor = 'rgba(90,160,250,0.5)';
         badge.style.color = '#88ccff';

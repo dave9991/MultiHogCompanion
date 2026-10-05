@@ -105,6 +105,110 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
 }
 
 /**
+ * Injects dossier NPCs directly into the campaign's active lorebook ({prefix}_NPCs).
+ * Ensures companions appear immediately in Campaign Records without manual intervention.
+ */
+async function injectNpcsIntoCampaignLorebook(chatId, npcs) {
+    if (!npcs || !npcs.length) return;
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    if (!ctx) return;
+
+    try {
+        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
+        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
+            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
+            : (chatId || '');
+        const npcBookName = prefix ? `${prefix}_NPCs` : 'NPCs';
+
+        const getHeaders = ctx.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
+        let bookData = null;
+        try {
+            const res = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify({ name: npcBookName }),
+            });
+            if (res.ok) {
+                bookData = await res.json();
+            }
+        } catch (_) {}
+
+        if (!bookData || typeof bookData !== 'object' || !bookData.entries) {
+            bookData = { entries: {}, name: npcBookName, scan_depth: 4, token_budget: 400, recursive: false, extensions: {} };
+        }
+        bookData.entries = bookData.entries || {};
+
+        let modified = false;
+        for (const n of npcs) {
+            const cleanName = (n.name || '').trim();
+            if (!cleanName) continue;
+
+            const existingEntry = Object.values(bookData.entries).find(e => {
+                const label = (e.comment || '').replace(/^\[.*?\]\s*/i, '').trim().toLowerCase();
+                return label === cleanName.toLowerCase();
+            });
+            if (existingEntry) continue;
+
+            const uids = Object.keys(bookData.entries).map(Number).filter(num => !isNaN(num));
+            const nextUid = uids.length > 0 ? Math.max(...uids) + 1 : 0;
+            const firstName = cleanName.split(/\s+/)[0];
+            const keys = [cleanName];
+            if (firstName && firstName !== cleanName) keys.push(firstName);
+            if (n.role) keys.push(n.role);
+
+            const coreLines = [
+                '[CORE]',
+                `Role: ${n.role || 'Companion'}`,
+                n.appearance ? `Appearance: ${n.appearance}` : null,
+                n.demeanor ? `Demeanor: ${n.demeanor}` : null,
+                n.background ? `Background: ${n.background}` : null,
+                n.relationship ? `Relationship: ${n.relationship}` : null,
+                n.movesOrBoons ? `Moves/Boons: ${n.movesOrBoons}` : null,
+                n.notes ? `Notes: ${n.notes}` : null,
+                '[/CORE]',
+            ].filter(Boolean);
+
+            bookData.entries[nextUid] = {
+                uid: nextUid,
+                key: keys,
+                keysecondary: [],
+                comment: cleanName,
+                content: coreLines.join('\n'),
+                constant: false,
+                selective: false,
+                selectiveLogic: 0,
+                addMemo: true,
+                order: 100,
+                position: 0,
+                disable: false,
+                probability: 100,
+                useProbability: false,
+                depth: 4,
+            };
+            modified = true;
+        }
+
+        if (modified) {
+            await fetch('/api/worldinfo/edit', {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify({ name: npcBookName, data: bookData }),
+            });
+
+            if (typeof router.updateWorldInfoCache === 'function') {
+                await router.updateWorldInfoCache(npcBookName, bookData);
+            }
+            if (typeof router.rememberCampaignBook === 'function') {
+                router.rememberCampaignBook(npcBookName);
+            }
+        }
+    } catch (err) {
+        console.warn('[PbtA Concierge] Could not auto-inject NPCs into campaign lorebook:', err);
+    }
+}
+
+/**
  * Main Campaign Launch Pipeline
  *
  * @param {object} dossier The completed PbtaCampaignDossier
@@ -228,6 +332,14 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             } catch (err) {
                 console.warn('[PbtA Concierge] NPC / Monster registration encountered non-fatal error:', err);
             }
+
+            // Also inject companions directly into the active campaign lorebook ({prefix}_NPCs)
+            // so they appear immediately in Campaign Records without requiring manual import
+            try {
+                await injectNpcsIntoCampaignLorebook(chatId, npcs);
+            } catch (loreErr) {
+                console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
+            }
         }
 
         // ── 5. Inject Dossier into World Info & State ───────────────────────────
@@ -277,6 +389,17 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             : `[Initial Setup: ${dossier.meta?.title || 'PbtA Adventure'}]\n${dossier.meta?.premise || 'The adventure begins.'}\n\nWhat do you do?`;
 
         await sendOutgoingChatMessage(openingText);
+
+        // ── 7. Refresh Campaign Records & Lorebook Agent ──────────────────────
+        try {
+            const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+            if (typeof bridge.refreshAgentManifestNow === 'function') {
+                await bridge.refreshAgentManifestNow();
+            }
+            if (typeof bridge.runRouterPass === 'function') {
+                void bridge.runRouterPass(openingText, null, 1, true).catch(() => {});
+            }
+        } catch (_) {}
 
         onProgress('✨ Adventure successfully launched!', 100);
         return { success: true, message: 'Campaign launched successfully!' };

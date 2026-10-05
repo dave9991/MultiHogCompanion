@@ -303,3 +303,130 @@ ${mapsMd}
 * **Inciting Crisis:** ${kick.crisis || 'Trouble approaches'}
 * **Opening Hook:** ${kick.openingPrompt || 'You stand at the threshold...'}`;
 }
+
+/**
+ * Reconstitutes a Campaign Dossier object from serialized Markdown.
+ * Used for auto-recovery and fallback hydration from World Info or lorebooks.
+ *
+ * @param {string} markdown
+ * @returns {object|null}
+ */
+export function parseMarkdownToDossier(markdown) {
+    if (!markdown || typeof markdown !== 'string') return null;
+    const dossier = createEmptyDossier();
+
+    // 1. Title
+    const titleMatch = markdown.match(/#\s*(?:📜\s*)?CAMPAIGN DOSSIER:\s*([^\n\r]+)/i);
+    if (titleMatch) dossier.meta.title = titleMatch[1].trim();
+
+    // 2. System Engine
+    const systemMatch = markdown.match(/\*\s*\*\*System Engine:\*\*\s*([^(]+?)(?:\s*\(`?([a-z0-9_\-]+)`?\))?(?:\n|$)/i);
+    if (systemMatch) {
+        dossier.meta.systemLabel = systemMatch[1].trim();
+        if (systemMatch[2]) dossier.meta.systemKey = systemMatch[2].trim();
+    }
+
+    // 3. Premise
+    const premiseMatch = markdown.match(/\*\s*\*\*Premise:\*\*\s*([^\n\r]+)/i);
+    if (premiseMatch) dossier.meta.premise = premiseMatch[1].trim();
+
+    // 4. Protagonist
+    const protoMatch = markdown.match(/##\s*(?:👤\s*)?Protagonist:\s*([^\n\r]+)/i);
+    if (protoMatch) dossier.protagonist.name = protoMatch[1].trim();
+
+    const playbookMatch = markdown.match(/\*\s*\*\*Playbook:\*\*\s*([^\n\r]+)/i);
+    if (playbookMatch) dossier.protagonist.playbook = playbookMatch[1].trim();
+
+    const statsMatch = markdown.match(/\*\s*\*\*Stats:\*\*\s*([^\n\r]+)/i);
+    if (statsMatch) {
+        const parsedStats = parseStatsString(statsMatch[1]);
+        if (Object.keys(parsedStats).length > 0) {
+            dossier.protagonist.stats = parsedStats;
+        }
+    }
+
+    const harmMatch = markdown.match(/\*\s*\*\*Harm Capacity:\*\*\s*(\d+)(?:\s*\|\s*\*\*Armor:\*\*\s*(\d+))?/i);
+    if (harmMatch) {
+        dossier.protagonist.harm = {
+            max: parseInt(harmMatch[1], 10) || 5,
+            current: 0,
+            armor: parseInt(harmMatch[2], 10) || 0,
+        };
+    }
+
+    const bioMatch = markdown.match(/\*\s*\*\*Background Bio:\*\*\s*([^\n\r]+)/i);
+    if (bioMatch) dossier.protagonist.bio = bioMatch[1].trim();
+
+    // 5. Moves
+    const movesMatch = markdown.match(/###\s*(?:⚡\s*)?Key Moves:\s*([\s\S]*?)(?=###|##|---|$)/i);
+    if (movesMatch) {
+        const lines = movesMatch[1].split('\n')
+            .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+            .filter(l => l && !l.startsWith('_No') && !l.startsWith('No custom'));
+        if (lines.length) dossier.protagonist.startingMoves = lines;
+    }
+
+    // 6. Gear
+    const gearMatch = markdown.match(/###\s*(?:🎒\s*)?Starting Gear:\s*([\s\S]*?)(?=###|##|---|$)/i);
+    if (gearMatch) {
+        const lines = gearMatch[1].split('\n')
+            .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+            .filter(l => l && !l.startsWith('_No') && !l.startsWith('Basic'));
+        if (lines.length) dossier.protagonist.gear = lines;
+    }
+
+    // 7. Monsters
+    const monsterSection = markdown.match(/##\s*(?:👹\s*)?Threats & Monsters:\s*([\s\S]*?)(?=##|---|$)/i);
+    if (monsterSection) {
+        const monsterBlocks = monsterSection[1].split(/###\s*(?:👹\s*)?/);
+        for (const block of monsterBlocks) {
+            const lines = block.trim().split('\n');
+            const name = lines[0]?.trim();
+            if (!name || name.startsWith('_No')) continue;
+
+            const harmArmorM = block.match(/\*\s*\*\*Harm:\*\*\s*(\d+)(?:\s*\|\s*\*\*Armor:\*\*\s*(\d+))?/i);
+            const attacksM = block.match(/\*\s*\*\*Attacks:\*\*\s*([^\n\r]+)/i);
+            const weaknessM = block.match(/\*\s*\*\*Weakness:\*\*\s*([^\n\r]+)/i);
+            const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
+
+            dossier.monsters.push({
+                name,
+                harm: harmArmorM ? parseInt(harmArmorM[1], 10) : 3,
+                armor: harmArmorM ? (parseInt(harmArmorM[2], 10) || 0) : 0,
+                attacks: attacksM ? attacksM[1].split(',').map(s => s.trim()) : [],
+                weakness: weaknessM ? weaknessM[1].trim() : '',
+                notes: notesM ? notesM[1].trim() : '',
+                impendingDoom: [],
+            });
+        }
+    }
+
+    // 8. Locations & Sites
+    const mapsSection = markdown.match(/##\s*(?:🗺️\s*)?Locations & Sites:\s*([\s\S]*?)(?=##|---|$)/i);
+    if (mapsSection) {
+        const mapRe = /\*\s*\*\*([^*]+)\*\*\s*\(([^·\)]+)(?:·\s*Threat:\s*([^)]+))?\)/g;
+        let m;
+        while ((m = mapRe.exec(mapsSection[1])) !== null) {
+            dossier.maps.push({
+                site: m[1].trim(),
+                kind: m[2].trim(),
+                threat: m[3] ? m[3].trim() : 'MODERATE',
+                entrance: 'Main Entrance',
+                briefDescription: '',
+            });
+        }
+    }
+
+    // 9. The Kick
+    const kickSection = markdown.match(/##\s*(?:⚡\s*)?The Kick[^:]*:\s*([\s\S]*?)(?=##|---|$)/i);
+    if (kickSection) {
+        const startM = kickSection[1].match(/\*\s*\*\*Starting Point:\*\*\s*([^\n\r]+)/i);
+        const crisisM = kickSection[1].match(/\*\s*\*\*Inciting Crisis:\*\*\s*([^\n\r]+)/i);
+        const hookM = kickSection[1].match(/\*\s*\*\*Opening Hook:\*\*\s*([^\n\r]+)/i);
+        if (startM) dossier.theKick.startingLocation = startM[1].trim();
+        if (crisisM) dossier.theKick.crisis = crisisM[1].trim();
+        if (hookM) dossier.theKick.openingPrompt = hookM[1].trim();
+    }
+
+    return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign') ? dossier : null;
+}

@@ -336,9 +336,192 @@ let _isSyncing = false;
 let _syncDebounceTimer = null;
 
 /**
- * Automatically hydrates the live Multihog memo and rendered dashboard
- * from an existing PbtA Campaign Dossier if the tracker is currently showing
- * the empty onboarding / "create an adventure" screen.
+ * Builds a fallback PbtA Campaign Dossier from a Lorebook Player Card.
+ * @param {object} pc
+ * @param {object} [ctx]
+ * @returns {object}
+ */
+function buildDossierFromPlayerCharacter(pc, ctx) {
+    const charName = (pc?.name || 'Protagonist').trim();
+    const bio = (pc?.bio || '').trim();
+
+    let playbook = 'Wanderer';
+    const playbookMatch = bio.match(/(?:playbook|archetype|class)\s*:\s*([a-zA-Z0-9_\- ]+)/i)
+        || bio.match(/,\s*(?:a|an)\s+([a-zA-Z0-9_\- ]+?)(?:\.|\s+who|\s+from)/i);
+    if (playbookMatch) {
+        playbook = playbookMatch[1].trim();
+    } else if (pc?.class) {
+        playbook = String(pc.class).trim();
+    }
+
+    let title = `${charName}'s Adventure`;
+    let startingLocation = 'The Starting Threshold';
+    let premise = 'The adventure begins.';
+
+    if (Array.isArray(ctx?.chat) && ctx.chat.length > 0) {
+        for (const msg of ctx.chat) {
+            const text = String(msg.mes || msg.text || '');
+            const setupMatch = text.match(/\[Initial Setup:\s*([^\]]+)\]/i);
+            if (setupMatch) {
+                title = setupMatch[1].trim();
+            }
+            if (/What do you do\?/i.test(text)) {
+                premise = text.replace(/\[Initial Setup:[^\]]+\]/i, '').trim();
+                break;
+            }
+        }
+    }
+
+    return {
+        meta: {
+            title,
+            systemKey: 'fantasy',
+            systemLabel: 'PbtA Fantasy',
+            premise,
+            tone: [],
+            createdAt: Date.now(),
+        },
+        protagonist: {
+            name: charName,
+            playbook,
+            stats: { Might: 2, Agility: 1, Wits: 1, Heart: 0, Arcana: -1 },
+            startingMoves: ['Hack & Slash (+Might)', 'Defy Danger (+Agility)'],
+            harm: { max: 5, current: 0, armor: 0 },
+            gear: ['Essential adventurer kit', 'Signature weapon'],
+            bio,
+            portraitSrc: pc?.portraitSrc || null,
+        },
+        monsters: [],
+        maps: [{ site: startingLocation, kind: 'INTERIOR', threat: 'MODERATE' }],
+        factions: [],
+        theKick: {
+            startingLocation,
+            crisis: 'Trouble brewing',
+            openingPrompt: premise,
+        },
+    };
+}
+
+/**
+ * Attempts to recover a PbtA Campaign Dossier artifact from SillyTavern World Info.
+ * @param {object} ctx
+ * @param {string[]} candidateChatIds
+ * @returns {Promise<object|null>}
+ */
+async function tryRecoverDossierFromWorldInfo(ctx, candidateChatIds) {
+    if (!ctx) return null;
+    let parseMarkdownToDossier = null;
+    try {
+        const parser = await import('./concierge-parser.js');
+        parseMarkdownToDossier = parser.parseMarkdownToDossier;
+    } catch (_) {}
+    if (!parseMarkdownToDossier) return null;
+
+    const bookCandidates = [
+        ctx.chatMetadata?.world_info,
+        ...candidateChatIds.map(id => `Campaign_${id}`),
+        'Campaign_PbtA',
+    ].filter(Boolean);
+
+    const getHeaders = ctx.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
+
+    for (const bookName of [...new Set(bookCandidates)]) {
+        try {
+            const res = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify({ name: bookName }),
+            });
+            if (!res.ok) continue;
+            const data = await res.json();
+            const entries = data?.entries || {};
+            for (const entry of Object.values(entries)) {
+                if (entry?.comment?.includes('CAMPAIGN_DOSSIER') ||
+                    entry?.comment?.includes('PbtA Concierge') ||
+                    entry?.key?.includes('campaign_dossier') ||
+                    entry?.content?.includes('# 📜 CAMPAIGN DOSSIER:')) {
+                    const parsed = parseMarkdownToDossier(entry.content);
+                    if (parsed?.protagonist?.name) {
+                        console.log(`[MultiHog Companion] Recovered PbtA Campaign Dossier from World Info "${bookName}".`);
+                        return parsed;
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+    return null;
+}
+
+/**
+ * Force-renders Multihog tracker cards and updates all persistence layers.
+ * @param {object} s Multihog tracker settings
+ * @param {string} chatId
+ * @param {string} memo
+ * @returns {Promise<boolean>}
+ */
+async function forceRenderTrackerView(s, chatId, memo) {
+    if (!memo) return false;
+
+    // 1. Textarea
+    const textarea = document.getElementById('rpg-tracker-memo');
+    if (textarea) textarea.value = memo;
+
+    // 2. Multihog global helper
+    if (typeof globalThis._rpgUpdateUIMemo === 'function') {
+        globalThis._rpgUpdateUIMemo(memo);
+    }
+
+    // 3. Runtime bridge
+    try {
+        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+        if (typeof bridge.syncMemoView === 'function') bridge.syncMemoView();
+        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
+    } catch (_) {}
+
+    // 4. Force direct DOM card render if #rpg-tracker-render still shows .rt-empty
+    const renderEl = document.getElementById('rpg-tracker-render');
+    if (renderEl) {
+        try {
+            const renderer = await import('../SillyTavern-MultihogDnDFramework/renderer.js');
+            if (typeof renderer.renderMemoAsCards === 'function') {
+                const cardsHtml = renderer.renderMemoAsCards(memo, null, {});
+                if (cardsHtml && !cardsHtml.includes('rt-empty')) {
+                    renderEl.innerHTML = cardsHtml;
+                    if (typeof renderer.bindRenderedCardEvents === 'function') {
+                        renderer.bindRenderedCardEvents(renderEl, memo, false);
+                    }
+                }
+            }
+        } catch (domErr) {
+            console.warn('[MultiHog Companion] Direct card render fallback error:', domErr);
+        }
+    }
+
+    // 5. State manager
+    try {
+        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        if (typeof stateMgr.saveChatState === 'function' && chatId) {
+            stateMgr.saveChatState(chatId);
+        }
+    } catch (_) {}
+
+    // 6. SillyTavern settings persistence
+    try {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+        if (typeof ctx?.saveSettingsDebounced === 'function') {
+            ctx.saveSettingsDebounced();
+        }
+    } catch (_) {}
+
+    console.log(`[MultiHog Companion] Hydrated Multihog game state memo for PbtA campaign in chat "${chatId}".`);
+    return true;
+}
+
+/**
+ * Auto-hydrates the Multihog D&D tracker memo with initial PbtA game state
+ * from an existing PbtA Campaign Dossier or Lorebook Player Card if the tracker
+ * is currently showing the empty onboarding / "create an adventure" screen.
  *
  * @param {string} [chatId]
  * @returns {Promise<boolean>}
@@ -346,14 +529,58 @@ let _syncDebounceTimer = null;
 export async function hydratePbtaMemoIfNeeded(chatId) {
     const s = getRpgSettings();
     if (!s) return false;
-    const effectiveChatId = chatId || getActiveChatId();
-    if (!effectiveChatId) return false;
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
 
-    // Check if the current partition has a PbtA dossier
-    const partition = s.chatStates?.[effectiveChatId];
-    let dossier = partition?.pbtaCampaignDossier;
+    const candidateIds = [
+        chatId,
+        getActiveChatId(),
+        ctx?.getCurrentChatId?.(),
+        ctx?.chatId,
+        (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+    ].filter(Boolean).map(String);
+    const uniqueIds = [...new Set(candidateIds)];
+    const effectiveChatId = uniqueIds[0] || 'active';
 
-    // Fallback: check localStorage draft if partition didn't have it
+    const liveMemo = String(s.currentMemo || '').trim();
+    const hasCharBlock = liveMemo && /\[CHARACTER\]/i.test(liveMemo);
+
+    const trackerEl = document.getElementById('rpg-tracker-render');
+    const isDomEmpty = trackerEl ? (trackerEl.querySelector('.rt-empty') !== null || !trackerEl.children.length) : false;
+
+    // If liveMemo already has [CHARACTER] and the DOM is NOT empty, nothing to do
+    if (hasCharBlock && !isDomEmpty) {
+        return false;
+    }
+
+    // If liveMemo already has [CHARACTER] but DOM IS empty, re-poke and force-render!
+    if (hasCharBlock && isDomEmpty) {
+        return await forceRenderTrackerView(s, effectiveChatId, liveMemo);
+    }
+
+    let dossier = null;
+    let foundChatId = effectiveChatId;
+
+    // 1. Check candidate partitions for pbtaCampaignDossier
+    for (const cid of uniqueIds) {
+        if (s.chatStates?.[cid]?.pbtaCampaignDossier) {
+            dossier = s.chatStates[cid].pbtaCampaignDossier;
+            foundChatId = cid;
+            break;
+        }
+    }
+
+    // 2. Scan ALL partitions in s.chatStates for pbtaCampaignDossier
+    if (!dossier && s.chatStates) {
+        for (const [cid, part] of Object.entries(s.chatStates)) {
+            if (part?.pbtaCampaignDossier) {
+                dossier = part.pbtaCampaignDossier;
+                foundChatId = cid;
+                break;
+            }
+        }
+    }
+
+    // 3. Check localStorage draft
     if (!dossier) {
         try {
             const rawDraft = localStorage.getItem('mhc_pbta_concierge_draft');
@@ -366,11 +593,48 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         } catch (_) {}
     }
 
-    if (!dossier) return false;
+    // 4. Try World Info recovery
+    if (!dossier) {
+        dossier = await tryRecoverDossierFromWorldInfo(ctx, uniqueIds);
+    }
 
-    // If currentMemo already has a [CHARACTER] block, nothing to do
-    const liveMemo = String(s.currentMemo || '').trim();
-    if (liveMemo && /\[CHARACTER\]/i.test(liveMemo)) {
+    // 5. Try playerCharacter (Lorebook Player Card)
+    if (!dossier) {
+        let pc = null;
+        for (const cid of uniqueIds) {
+            if (s.chatStates?.[cid]?.playerCharacter?.name) {
+                pc = s.chatStates[cid].playerCharacter;
+                foundChatId = cid;
+                break;
+            }
+        }
+        if (!pc && s.playerCharacter?.name) {
+            pc = s.playerCharacter;
+        }
+        if (!pc && s.chatStates) {
+            for (const part of Object.values(s.chatStates)) {
+                if (part?.playerCharacter?.name) {
+                    pc = part.playerCharacter;
+                    break;
+                }
+            }
+        }
+
+        if (pc) {
+            dossier = buildDossierFromPlayerCharacter(pc, ctx);
+        }
+    }
+
+    // 6. Try player name fallback
+    if (!dossier) {
+        const playerName = getMultihogPlayerName(effectiveChatId);
+        if (playerName) {
+            dossier = buildDossierFromPlayerCharacter({ name: playerName }, ctx);
+        }
+    }
+
+    if (!dossier) {
+        console.warn('[MultiHog Companion] Could not resolve PbtA campaign dossier or character for chat:', effectiveChatId);
         return false;
     }
 
@@ -378,32 +642,18 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
     const initialMemo = formatInitialPbtaMemo(dossier);
     if (!initialMemo) return false;
 
+    // Apply to live settings and candidate partitions
     s.currentMemo = initialMemo;
-    if (partition) {
-        partition.currentMemo = initialMemo;
-        partition.pbtaCampaignDossier = dossier;
+    s.chatStateProjectionOwner = effectiveChatId;
+    s.chatStates = s.chatStates || {};
+    for (const cid of [effectiveChatId, foundChatId, ...uniqueIds]) {
+        if (!cid) continue;
+        s.chatStates[cid] = s.chatStates[cid] || {};
+        s.chatStates[cid].currentMemo = initialMemo;
+        s.chatStates[cid].pbtaCampaignDossier = dossier;
     }
 
-    if (typeof globalThis._rpgUpdateUIMemo === 'function') {
-        globalThis._rpgUpdateUIMemo(initialMemo);
-    }
-
-    try {
-        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
-        if (typeof bridge.syncMemoView === 'function') bridge.syncMemoView();
-        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
-        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
-    } catch (_) {}
-
-    try {
-        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
-        if (typeof stateMgr.saveChatState === 'function') {
-            stateMgr.saveChatState(effectiveChatId);
-        }
-    } catch (_) {}
-
-    console.log(`[MultiHog Companion] Hydrated Multihog game state memo for PbtA campaign in chat "${effectiveChatId}".`);
-    return true;
+    return await forceRenderTrackerView(s, effectiveChatId, initialMemo);
 }
 
 /**
@@ -1082,9 +1332,13 @@ jQuery(async () => {
             aliases: ['pbta-sync'],
             callback: async () => {
                 const hydrated = await hydratePbtaMemoIfNeeded();
-                return hydrated
-                    ? 'PbtA game state memo hydrated and Multihog panel updated.'
-                    : 'PbtA panel is already up to date.';
+                if (hydrated) {
+                    showToast('success', 'PbtA game state memo synchronized! Multihog tracker updated. 🎲', 'PbtA Sync');
+                    return 'PbtA game state memo hydrated and Multihog panel updated.';
+                } else {
+                    showToast('info', 'PbtA tracker is already up to date.', 'PbtA Sync');
+                    return 'PbtA panel is already up to date.';
+                }
             },
             helpString: '<div>Synchronizes the Multihog D&D Framework panel with the active PbtA Campaign Dossier.</div>',
         }));

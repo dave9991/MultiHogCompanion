@@ -17,15 +17,25 @@ import { serializeDossierToMarkdown } from './concierge-parser.js';
  * Send an outgoing user chat message into SillyTavern.
  * @param {string} text
  */
-function sendOutgoingChatMessage(text) {
+async function sendOutgoingChatMessage(text) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     const textarea = document.getElementById('send_textarea');
     const sendBtn = document.getElementById('send_but');
-    if (!textarea || !sendBtn) {
-        throw new Error('Chat input is not available.');
+
+    if (textarea && sendBtn) {
+        textarea.value = text;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 120));
+        sendBtn.click();
+        return;
     }
-    textarea.value = text;
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    sendBtn.click();
+
+    if (typeof ctx?.executeSlashCommandsWithOptions === 'function') {
+        await ctx.executeSlashCommandsWithOptions(text);
+        return;
+    }
+
+    throw new Error('Chat input is not available.');
 }
 
 /**
@@ -101,6 +111,7 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
  * @returns {Promise<{ success: boolean, message: string }>}
  */
 export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     const { applyPbtACartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
     const systemKey = dossier.meta?.systemKey || 'fantasy';
@@ -215,9 +226,14 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         await injectDossierIntoWorldInfo(chatId, dossierMd);
 
         // Store dossier in MultiHog chatState for runtime panel access
-        const rpgSettings = ctx.extensionSettings?.rpg_tracker;
-        if (rpgSettings?.chatStates?.[chatId]) {
-            rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+        const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+        const rpgSettings = effectiveCtx?.extensionSettings?.rpg_tracker;
+        if (rpgSettings) {
+            rpgSettings.chatStates = rpgSettings.chatStates || {};
+            if (chatId) {
+                rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
+                rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+            }
         }
 
         // ── 6. Opening Fiction Scene (Turn 0) ───────────────────────────────────
@@ -226,7 +242,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             ? dossier.theKick.openingPrompt
             : `[Initial Setup: ${dossier.meta?.title || 'PbtA Adventure'}]\n${dossier.meta?.premise || 'The adventure begins.'}\n\nWhat do you do?`;
 
-        sendOutgoingChatMessage(openingText);
+        await sendOutgoingChatMessage(openingText);
 
         onProgress('✨ Adventure successfully launched!', 100);
         return { success: true, message: 'Campaign launched successfully!' };

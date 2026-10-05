@@ -707,12 +707,13 @@ function bindModalEvents() {
         setTimeout(() => {
             overlay.hide();
             if (res.success) {
+                localStorage.removeItem(STORAGE_DRAFT_KEY);
                 $('#mhc_concierge_modal').fadeOut(250);
                 toastr?.success('PbtA Campaign ready! The game is now beginning.', 'Adventure Launched');
             } else {
                 toastr?.error(`Launch error: ${res.message}`, 'Launch Failed');
             }
-        }, 800);
+        }, 600);
     });
 }
 

@@ -364,16 +364,16 @@ export function buildPbtAXpContent() {
 export function buildPbtAPartyContent() {
     return `<[PARTY]_mechanics>
 On joining: state *(Name joins the party)* and declare their profile matching [PARTY] format.
-CRITICAL FORMAT: Every party member MUST start on their own line with their Name, Archetype, Harm, and Armor anchor. Separate distinct members with a blank line.
+CRITICAL FORMAT: Every party member MUST start on their own line with Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0. Separate distinct members with a blank line.
 [PARTY]
-Name (Archetype): Harm: 0/5 | Armor: 0
+Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Stats: Stat1 +2, Stat2 +1, Stat3 +1, Stat4 +0, Stat5 -1
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Gear: Signature weapon/item (tags) | Armor (value)
 Conditions: None
 Status: Healthy
 
-Second Companion (Archetype): Harm: 0/5 | Armor: 0
+Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Status: Healthy
 [/PARTY]
@@ -457,14 +457,14 @@ Status: Healthy
 [/CHARACTER]`,
 
         party: `Companion and party members. MECHANICS ONLY. Every member MUST begin with their own header line. Separate distinct members with an empty line:
-Name (Archetype): Harm: 0/5 | Armor: 0
+Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Stats: ${statsExample}
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Gear: Signature weapon/item (tags) | Armor (value)
 Conditions: None
 Status: Healthy
 
-Second Companion (Archetype): Harm: 0/5 | Armor: 0
+Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Status: Healthy`,
 
@@ -757,7 +757,7 @@ export function formatInitialPbtaMemo(dossier) {
             const cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
             if (i > 0) partyLines.push('');
             partyLines.push(
-                `${cName} (${cRole}): Harm: 0/5 | Armor: 0`,
+                `${cName} (${cRole}): 5/5 HP | Harm: 0/5 | Armor: 0`,
                 `Moves: ${cBoons}`,
                 `Bond: ${comp.relationship || 'Allied with protagonist'}`,
                 `Conditions: None`,

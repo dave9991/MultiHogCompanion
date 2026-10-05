@@ -244,8 +244,9 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                 const charCreator = await import('../SillyTavern-MultihogDnDFramework/character-creator.js');
 
                 // Activate or create persona
+                let avatarId = null;
                 if (typeof charCreator.activateSillyTavernPersona === 'function') {
-                    await charCreator.activateSillyTavernPersona(charName, { chatId });
+                    avatarId = await charCreator.activateSillyTavernPersona(charName, { chatId });
                 }
 
                 // Add to Lorebook Agent
@@ -254,16 +255,37 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                     await charCreator.addPlayerCardToLorebookAgent(charName, bio, 150, { chatId });
                 }
 
+                // Resolve persona
+                let persona = await findMatchingPersona(charName);
+                if (!persona && avatarId) {
+                    persona = { avatar: avatarId, name: charName };
+                }
+                if (!persona) {
+                    const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+                    const activeAvatar = effectiveCtx?.chatMetadata?.persona || effectiveCtx?.user_avatar;
+                    if (activeAvatar) {
+                        persona = { avatar: activeAvatar, name: charName };
+                    }
+                }
+
                 // Sync portrait if available
-                if (dossier.protagonist.portraitSrc) {
-                    const persona = await findMatchingPersona(charName);
-                    if (persona) {
-                        await uploadImageToPersona(persona.avatar, dossier.protagonist.portraitSrc);
+                if (dossier.protagonist.portraitSrc && persona) {
+                    await uploadImageToPersona(persona.avatar, dossier.protagonist.portraitSrc);
+                    const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+                    if (effectiveCtx?.chatMetadata) {
+                        effectiveCtx.chatMetadata.multihog_companion = {
+                            ...effectiveCtx.chatMetadata.multihog_companion,
+                            synced_portrait: dossier.protagonist.portraitSrc,
+                            synced_persona: persona.avatar,
+                            synced_at: Date.now(),
+                        };
+                        if (typeof effectiveCtx.saveMetadataDebounced === 'function') {
+                            effectiveCtx.saveMetadataDebounced();
+                        }
                     }
                 }
 
                 // Lock persona to chat
-                const persona = await findMatchingPersona(charName);
                 if (persona) {
                     await syncPersonaToChat(chatId, persona);
                 }
@@ -359,6 +381,28 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                 rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
                 rpgSettings.chatStates[chatId].currentMemo = initialMemo;
                 rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+            }
+
+            if (dossier.protagonist?.portraitSrc) {
+                const pSrc = dossier.protagonist.portraitSrc;
+                rpgSettings.customPortraits = rpgSettings.customPortraits || {};
+                rpgSettings.customPortraits['CHARACTER'] = pSrc;
+                rpgSettings.customPortraits['PC'] = pSrc;
+                if (charName) {
+                    rpgSettings.customPortraits[charName] = pSrc;
+                    const clean = charName.replace(/\s*\(.*?\)/g, '').trim();
+                    if (clean) rpgSettings.customPortraits[clean] = pSrc;
+                }
+                if (chatId) {
+                    rpgSettings.chatStates[chatId].customPortraits = rpgSettings.chatStates[chatId].customPortraits || {};
+                    rpgSettings.chatStates[chatId].customPortraits['CHARACTER'] = pSrc;
+                    rpgSettings.chatStates[chatId].customPortraits['PC'] = pSrc;
+                    if (charName) {
+                        rpgSettings.chatStates[chatId].customPortraits[charName] = pSrc;
+                        const clean = charName.replace(/\s*\(.*?\)/g, '').trim();
+                        if (clean) rpgSettings.chatStates[chatId].customPortraits[clean] = pSrc;
+                    }
+                }
             }
         }
 

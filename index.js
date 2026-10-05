@@ -119,27 +119,70 @@ function extractNameFromMemo(memo) {
 }
 
 /**
+ * Helper to gather candidate chat IDs across SillyTavern and MultiHog context.
+ */
+function getCandidateChatIds(chatId) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    const raw = [
+        chatId,
+        getActiveChatId(),
+        ctx?.getCurrentChatId?.(),
+        ctx?.chatId,
+        (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+    ].filter(Boolean).map(String);
+    const expanded = [];
+    for (const id of raw) {
+        expanded.push(id);
+        if (id.endsWith('.jsonl')) {
+            expanded.push(id.slice(0, -6));
+        } else {
+            expanded.push(`${id}.jsonl`);
+        }
+    }
+    return [...new Set(expanded)];
+}
+
+/**
  * Extract player character name from Multihog settings/memo strictly for this chat.
  */
 function getMultihogPlayerName(chatId) {
     const s = getRpgSettings();
     if (!s) return null;
 
-    // 1. Chat partition playerCharacter (chat-specific)
-    if (chatId && s.chatStates?.[chatId]?.playerCharacter?.name) {
-        return s.chatStates[chatId].playerCharacter.name.trim();
+    const candidateIds = getCandidateChatIds(chatId);
+
+    // 1. Chat partition playerCharacter or pbtaCampaignDossier
+    for (const cid of candidateIds) {
+        if (s.chatStates?.[cid]?.playerCharacter?.name) {
+            return s.chatStates[cid].playerCharacter.name.trim();
+        }
+        if (s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name) {
+            return s.chatStates[cid].pbtaCampaignDossier.protagonist.name.trim();
+        }
     }
 
-    // 2. Chat partition currentMemo (chat-specific)
-    if (chatId && s.chatStates?.[chatId]?.currentMemo) {
-        const name = extractNameFromMemo(s.chatStates[chatId].currentMemo);
-        if (name) return name;
+    // 2. Chat partition currentMemo
+    for (const cid of candidateIds) {
+        if (s.chatStates?.[cid]?.currentMemo) {
+            const name = extractNameFromMemo(s.chatStates[cid].currentMemo);
+            if (name) return name;
+        }
     }
 
-    // 3. Current RPG memo [CHARACTER] block (ONLY if projection owner is explicitly this chat)
-    if (chatId && s.chatStateProjectionOwner === chatId && s.currentMemo) {
+    // 3. Current RPG memo [CHARACTER] block
+    // Accept if projection owner matches candidate IDs OR is unset/empty (e.g. boot/reload, chat link disabled, or turn 0)
+    const owner = String(s.chatStateProjectionOwner || '').trim();
+    const isOwnerMatch = owner && candidateIds.some(cid => cid === owner);
+    const isOwnerUnset = !owner;
+
+    if ((isOwnerMatch || isOwnerUnset) && s.currentMemo) {
         const name = extractNameFromMemo(s.currentMemo);
         if (name) return name;
+    }
+
+    // 4. Top-level playerCharacter (if live)
+    if (s.playerCharacter?.name) {
+        return s.playerCharacter.name.trim();
     }
 
     return null;
@@ -161,21 +204,27 @@ export async function findMatchingPersona(charName) {
     if (!powerUser?.personas) return null;
 
     const clean = charName.trim().toLowerCase();
+    const baseName = charName.replace(/\s*\(.*?\)/g, '').trim().toLowerCase();
 
     // 1. Exact name match
     for (const [avatarId, name] of Object.entries(powerUser.personas)) {
-        if (name && name.trim().toLowerCase() === clean) {
+        if (!name) continue;
+        const n = name.trim().toLowerCase();
+        if (n === clean || (baseName && n === baseName)) {
             return { avatar: avatarId, name };
         }
     }
 
     // 2. Prefix / substring match for titled names (e.g. "Bob" matching "Bob the Barbarian")
     for (const [avatarId, name] of Object.entries(powerUser.personas)) {
-        if (name) {
-            const n = name.trim().toLowerCase();
-            if (clean.startsWith(n) || n.startsWith(clean)) {
-                return { avatar: avatarId, name };
-            }
+        if (!name) continue;
+        const n = name.trim().toLowerCase();
+        const baseN = n.replace(/\s*\(.*?\)/g, '').trim();
+        if (
+            clean.startsWith(n) || n.startsWith(clean) ||
+            (baseName && (clean.startsWith(baseN) || baseN.startsWith(clean) || baseName.startsWith(baseN) || baseN.startsWith(baseName)))
+        ) {
+            return { avatar: avatarId, name };
         }
     }
 
@@ -230,23 +279,63 @@ function getMultihogPlayerPortrait(chatId, charName) {
     const s = getRpgSettings();
     if (!s) return null;
 
-    const partitionPortraits = (chatId && s.chatStates?.[chatId]?.customPortraits) || null;
-    const livePortraits = s.customPortraits || null;
+    const candidateIds = getCandidateChatIds(chatId);
+
+    // 1. Check pbtaCampaignDossier or playerCharacter portraitSrc across candidate partitions
+    for (const cid of candidateIds) {
+        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc;
+        if (dossierPortrait) return dossierPortrait;
+        const pcPortrait = s.chatStates?.[cid]?.playerCharacter?.portraitSrc;
+        if (pcPortrait) return pcPortrait;
+    }
+
+    const cleanName = charName ? charName.replace(/\s*\(.*?\)/g, '').trim() : '';
+    const cleanLower = cleanName.toLowerCase();
+    const fullLower = charName ? charName.trim().toLowerCase() : '';
 
     const lookupInMap = (map) => {
         if (!map || typeof map !== 'object') return null;
-        if (charName) {
-            if (map[charName]) return map[charName];
-            const clean = charName.trim().toLowerCase();
-            const foundKey = Object.keys(map).find(k => k.trim().toLowerCase() === clean);
-            if (foundKey && map[foundKey]) return map[foundKey];
+
+        // Exact match
+        if (charName && map[charName]) return map[charName];
+        if (cleanName && map[cleanName]) return map[cleanName];
+
+        // Case-insensitive / normalized search
+        const keys = Object.keys(map);
+        if (cleanName) {
+            const foundClean = keys.find(k => {
+                const normK = k.replace(/\s*\(.*?\)/g, '').trim().toLowerCase();
+                return normK === cleanLower || normK === fullLower;
+            });
+            if (foundClean && map[foundClean]) return map[foundClean];
         }
+
+        // Substring / prefix match
+        if (cleanName) {
+            const foundPrefix = keys.find(k => {
+                const normK = k.replace(/\s*\(.*?\)/g, '').trim().toLowerCase();
+                return cleanLower.startsWith(normK) || normK.startsWith(cleanLower);
+            });
+            if (foundPrefix && map[foundPrefix]) return map[foundPrefix];
+        }
+
         if (map['CHARACTER']) return map['CHARACTER'];
         if (map['PC']) return map['PC'];
         return null;
     };
 
-    return lookupInMap(partitionPortraits) || lookupInMap(livePortraits) || null;
+    // 2. Check all partition customPortraits
+    for (const cid of candidateIds) {
+        const part = s.chatStates?.[cid]?.customPortraits;
+        const res = lookupInMap(part);
+        if (res) return res;
+    }
+
+    // 3. Check live customPortraits
+    const live = lookupInMap(s.customPortraits);
+    if (live) return live;
+
+    return null;
 }
 
 /**
@@ -261,7 +350,9 @@ export async function uploadImageToPersona(avatarId, imageSrc) {
         const res = await fetch(imageSrc);
         blob = await res.blob();
     } else {
-        const url = imageSrc.startsWith('/') ? imageSrc : `/${imageSrc}`;
+        const url = (imageSrc.startsWith('http://') || imageSrc.startsWith('https://') || imageSrc.startsWith('/'))
+            ? imageSrc
+            : `/${imageSrc}`;
         const res = await fetch(url);
         if (!res.ok) {
             throw new Error(`Failed to fetch portrait from ${url}: ${res.statusText}`);
@@ -286,18 +377,34 @@ export async function uploadImageToPersona(avatarId, imageSrc) {
     }
 
     try {
-        const { getUserAvatar, getThumbnailUrl, reloadUserAvatar, getUserAvatars } = await import('../../../personas.js');
+        const { getUserAvatar, getThumbnailUrl, getUserAvatars } = await import('../../../personas.js');
         if (typeof getUserAvatar === 'function') {
             await fetch(getUserAvatar(avatarId), { cache: 'reload' }).catch(() => {});
         }
         if (typeof getThumbnailUrl === 'function') {
             await fetch(getThumbnailUrl('persona', avatarId), { cache: 'reload' }).catch(() => {});
         }
-        if (typeof reloadUserAvatar === 'function') {
-            reloadUserAvatar(true);
-        }
         if (typeof getUserAvatars === 'function') {
             await getUserAvatars(true, avatarId).catch(() => {});
+        }
+    } catch (_) {}
+
+    // Force DOM repaint with timestamp cache buster
+    try {
+        const bustParam = `?t=${Date.now()}`;
+        const selector = `.mes[is_user="true"] .avatar img, #avatar, #user_avatar_block img, .persona_avatar_element, img[src*="${avatarId}"]`;
+        if (typeof $ !== 'undefined') {
+            $(selector).each(function () {
+                const currentSrc = $(this).attr('src') || '';
+                const baseSrc = currentSrc.split('?')[0];
+                $(this).attr('src', `${baseSrc}${bustParam}`);
+            });
+        } else if (typeof document !== 'undefined') {
+            document.querySelectorAll(selector).forEach(el => {
+                const currentSrc = el.getAttribute('src') || '';
+                const baseSrc = currentSrc.split('?')[0];
+                el.setAttribute('src', `${baseSrc}${bustParam}`);
+            });
         }
     } catch (_) {}
 
@@ -563,10 +670,28 @@ export async function runSync(reason = '') {
         const charName = getMultihogPlayerName(chatId);
         if (!charName) return didWork;
 
-        const persona = await findMatchingPersona(charName);
+        let persona = await findMatchingPersona(charName);
+        const personaMatched = !!persona;
+
+        if (!persona && settings.enablePortraitSync) {
+            const ctx = SillyTavern.getContext();
+            let powerUser = ctx.powerUser;
+            if (!powerUser) {
+                try {
+                    const pu = await import('../../../power-user.js');
+                    powerUser = pu.power_user;
+                } catch (_) {}
+            }
+            const activeAvatar = ctx.chatMetadata?.persona || ctx.user_avatar;
+            if (activeAvatar) {
+                const activeName = (powerUser?.personas && powerUser.personas[activeAvatar]) || charName;
+                persona = { avatar: activeAvatar, name: activeName };
+            }
+        }
+
         if (!persona) return didWork;
 
-        if (settings.enablePersonaSync) {
+        if (settings.enablePersonaSync && personaMatched) {
             const personaChanged = await syncPersonaToChat(chatId, persona);
             if (personaChanged) didWork = true;
         }

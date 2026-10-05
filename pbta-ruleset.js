@@ -365,6 +365,7 @@ export function buildPbtAPartyContent() {
     return `<[PARTY]_mechanics>
 On joining: state *(Name joins the party)* and declare their profile matching [PARTY] format.
 CRITICAL FORMAT: Every party member MUST start on their own line with Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0. Separate distinct members with a blank line.
+Companion damage tracking: MultiHog visualizes HP as a descending vitality bar (5/5 = full health). When a companion takes Harm, increment their Harm and decrement their HP in tandem (e.g. at 1 Harm: 4/5 HP | Harm: 1/5; at 2 Harm: 3/5 HP | Harm: 2/5; at 5 Harm: 0/5 HP | Harm: 5/5, Incapacitated).
 [PARTY]
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Stats: Stat1 +2, Stat2 +1, Stat3 +1, Stat4 +0, Stat5 -1

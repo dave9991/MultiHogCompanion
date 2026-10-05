@@ -17,6 +17,10 @@ import {
     buildPbtAQuickStartInstructions,
 } from './pbta-ruleset.js';
 import { openConciergeModal } from './concierge-ui.js';
+import {
+    getCampaignLorebookStatus,
+    syncCampaignLorebooks,
+} from './campaign-lore-sync.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -30,6 +34,9 @@ const DEFAULT_SETTINGS = {
     sceneHeight: 384,
     portraitWidth: 512,
     portraitHeight: 512,
+    enableLorebookSync: true,
+    autoSyncOnRename: true,
+    deleteOldLorebooksOnSync: true,
 };
 
 function getSettings() {
@@ -978,6 +985,54 @@ async function getRandomCharacterName(genre = 'fantasy') {
 }
 
 /**
+ * Refreshes the Campaign Lorebook Sync section in the settings drawer.
+ */
+export async function updateLorebookSyncUI() {
+    try {
+        const status = await getCampaignLorebookStatus();
+        const s = getSettings();
+
+        const badge = $('#mhc_lorebook_prefix_badge');
+        const chatDisplay = $('#mhc_lorebook_chat_display');
+        const targetPrefixDisplay = $('#mhc_lorebook_target_prefix');
+        const currentPrefixDisplay = $('#mhc_lorebook_current_prefix');
+        const detectedCountDisplay = $('#mhc_lorebook_detected_count');
+
+        if (!s.enableLorebookSync) {
+            badge.text('Disabled').css({
+                background: 'rgba(255,255,255,0.06)',
+                color: 'rgba(255,255,255,0.4)',
+                borderColor: 'rgba(255,255,255,0.1)',
+            });
+        } else if (status.inSync) {
+            badge.text(`Prefix: ${status.targetPrefix || '—'}`).css({
+                background: 'rgba(80,180,120,0.2)',
+                color: '#88ffbb',
+                borderColor: 'rgba(80,180,120,0.35)',
+            });
+        } else {
+            const shortOld = status.currentPrefix
+                ? (status.currentPrefix.length > 14 ? status.currentPrefix.slice(0, 14) + '…' : status.currentPrefix)
+                : 'none';
+            badge.text(`⚠️ Out of Sync (${shortOld})`).css({
+                background: 'rgba(255,180,60,0.2)',
+                color: '#ffcc88',
+                borderColor: 'rgba(255,180,60,0.4)',
+            });
+        }
+
+        if (chatDisplay.length) chatDisplay.text(status.chatTitle || '(none)');
+        if (targetPrefixDisplay.length) targetPrefixDisplay.text(status.targetPrefix || '—');
+        if (currentPrefixDisplay.length) currentPrefixDisplay.text(status.currentPrefix || '—');
+        if (detectedCountDisplay.length) {
+            detectedCountDisplay.text(`${status.matchingBooks.length} book(s) found`);
+        }
+    } catch (err) {
+        console.warn('[MultiHog Companion] Could not update lorebook sync UI:', err);
+    }
+}
+
+/**
  * Initialize extension settings UI and bind events.
  */
 async function initUI() {
@@ -1078,6 +1133,53 @@ async function initUI() {
             });
             showToast('info', 'Resolutions reset to recommended defaults (672x384 & 512x512).', 'MultiHog Companion');
         });
+
+        // ── Campaign Lorebooks Sync Controls ──
+        $('#mhc_lorebook_sync_enable').closest('label').on('click', function (e) {
+            e.stopPropagation();
+        });
+
+        const loreSyncCb = $('#mhc_lorebook_sync_enable');
+        const loreAutoRenameCb = $('#mhc_lorebook_auto_rename');
+        const loreDeleteOldCb = $('#mhc_lorebook_delete_old');
+        const loreSyncNowBtn = $('#mhc_lorebook_sync_now');
+
+        loreSyncCb.prop('checked', current.enableLorebookSync !== false);
+        loreAutoRenameCb.prop('checked', current.autoSyncOnRename !== false);
+        loreDeleteOldCb.prop('checked', current.deleteOldLorebooksOnSync !== false);
+
+        loreSyncCb.on('change', function () {
+            updateSettings({ enableLorebookSync: $(this).is(':checked') });
+            updateLorebookSyncUI();
+        });
+
+        loreAutoRenameCb.on('change', function () {
+            updateSettings({ autoSyncOnRename: $(this).is(':checked') });
+        });
+
+        loreDeleteOldCb.on('change', function () {
+            updateSettings({ deleteOldLorebooksOnSync: $(this).is(':checked') });
+        });
+
+        loreSyncNowBtn.on('click', async function () {
+            loreSyncNowBtn.prop('disabled', true);
+            const msgSpan = $('#mhc_lorebook_sync_msg');
+            msgSpan.html('<i class="fa-solid fa-spinner fa-spin"></i> Syncing...');
+            try {
+                const res = await syncCampaignLorebooks({ force: true });
+                if (res.ok) {
+                    msgSpan.html('<i class="fa-solid fa-circle-check" style="color: #68d391;"></i> ' + (res.changed ? 'Synced!' : 'In sync'));
+                } else {
+                    msgSpan.html('<i class="fa-solid fa-triangle-exclamation" style="color: #fc8181;"></i> Failed');
+                }
+            } finally {
+                loreSyncNowBtn.prop('disabled', false);
+                await updateLorebookSyncUI();
+                setTimeout(() => msgSpan.text(''), 3000);
+            }
+        });
+
+        await updateLorebookSyncUI();
 
         // ── PbtA Concierge Session Zero ──
         $('#mhc_open_concierge_btn').on('click', function (e) {
@@ -1350,26 +1452,51 @@ jQuery(async () => {
             },
             helpString: '<div>Synchronizes the Multihog D&D Framework panel with the active PbtA Campaign Dossier.</div>',
         }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-lore-sync',
+            aliases: ['lore-sync'],
+            callback: async () => {
+                const res = await syncCampaignLorebooks({ force: true });
+                await updateLorebookSyncUI();
+                return res.message;
+            },
+            helpString: '<div>Synchronizes MultiHog campaign lorebooks with the active adventure chat name.</div>',
+        }));
     }
 
     // 4. Register Event Listeners
     if (event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, setupImagineInterceptor);
     }
+    if (event_types.CHAT_RENAMED) {
+        eventSource.on(event_types.CHAT_RENAMED, async (detail) => {
+            const s = getSettings();
+            if (s.enableLorebookSync && s.autoSyncOnRename) {
+                setTimeout(async () => {
+                    await syncCampaignLorebooks({ isAuto: true });
+                    await updateLorebookSyncUI();
+                }, 200);
+            }
+        });
+    }
     eventSource.on(event_types.CHAT_CHANGED, () => {
         scheduleSync('CHAT_CHANGED', 500);
         setTimeout(updateRulesetBadge, 600);
+        setTimeout(updateLorebookSyncUI, 650);
     });
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => scheduleSync('CHARACTER_MESSAGE_RENDERED', 400));
     eventSource.on(event_types.MESSAGE_RECEIVED, () => scheduleSync('MESSAGE_RECEIVED', 400));
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
         scheduleSync('SETTINGS_UPDATED', 600);
         setTimeout(updateRulesetBadge, 700);
+        setTimeout(updateLorebookSyncUI, 750);
     });
 
     // Initial check on load
     scheduleSync('INITIAL_LOAD', 1000);
     setTimeout(updateRulesetBadge, 1200);
+    setTimeout(updateLorebookSyncUI, 1300);
 
     console.log('[MultiHog Companion] Extension loaded successfully.');
 });

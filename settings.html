@@ -98,6 +98,73 @@
 
             <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0;">
 
+            <!-- ── Campaign Lorebooks Sync (One-liner with click to expand) ── -->
+            <div class="inline-drawer mhc-lorebook-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
+                    <label class="checkbox_label" title="Keep campaign lorebooks synchronized with adventure chat name instead of raw timestamps" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                        <input id="mhc_lorebook_sync_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
+                        <span style="font-size: 0.9em;"><b>📚 Campaign Lorebooks:</b> Auto-Sync</span>
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand lorebook sync settings">
+                        <span id="mhc_lorebook_prefix_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); font-family: monospace; white-space: nowrap;">Prefix: —</span>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
+                    </div>
+                </div>
+
+                <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                    <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
+                        Keeps MultiHog's campaign lorebooks (<code>{prefix}_NPCs</code>, <code>_Locations</code>, etc.) automatically synchronized with your adventure chat name instead of timestamped IDs.
+                    </p>
+
+                    <!-- Auto-Sync on Rename Toggle -->
+                    <div class="mhc-setting-row" style="margin-bottom: 6px;">
+                        <label class="checkbox_label" title="Automatically migrate lorebooks and campaign prefix when a chat is renamed in SillyTavern" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_lorebook_auto_rename" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>Auto-Sync on Rename:</b> Keep lorebooks named after chat</span>
+                        </label>
+                    </div>
+
+                    <!-- Verified Deletion Toggle -->
+                    <div class="mhc-setting-row" style="margin-bottom: 10px;">
+                        <label class="checkbox_label" title="Quietly deletes old timestamp lorebooks only after verifying all cloned entries are safely intact" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_lorebook_delete_old" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>Verified Cleanup:</b> Delete old books after verified clone</span>
+                        </label>
+                    </div>
+
+                    <!-- Status Info Card -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 6px 8px; margin-bottom: 10px; font-size: 0.8em; line-height: 1.45;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                            <span style="opacity: 0.7;">Active Chat:</span>
+                            <span id="mhc_lorebook_chat_display" style="font-weight: bold; opacity: 0.9; max-width: 60%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">—</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                            <span style="opacity: 0.7;">Target Prefix:</span>
+                            <span id="mhc_lorebook_target_prefix" style="font-family: monospace; color: #88ccff;">—</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                            <span style="opacity: 0.7;">Current Prefix:</span>
+                            <span id="mhc_lorebook_current_prefix" style="font-family: monospace; color: #ffcc88;">—</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="opacity: 0.7;">Matching Lorebooks:</span>
+                            <span id="mhc_lorebook_detected_count" style="font-weight: bold; opacity: 0.85;">0 found</span>
+                        </div>
+                    </div>
+
+                    <!-- Action Row -->
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span id="mhc_lorebook_sync_msg" style="font-size: 0.75em; opacity: 0.7;"></span>
+                        <button id="mhc_lorebook_sync_now" class="menu_button interactable" style="font-size: 0.78em; padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px; background: rgba(90,160,250,0.18); border-color: rgba(90,160,250,0.35); color: #88ccff; white-space: nowrap;" title="Manually sync campaign lorebooks to match this chat right now">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                            <span>Sync Lorebooks Now</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0;">
+
             <!-- ── PbtA Ruleset & Quick Start (3-Liner with click to expand) ── -->
             <div class="inline-drawer mhc-pbta-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px;">
                 <!-- Line 1: Header + Active Status Badge -->

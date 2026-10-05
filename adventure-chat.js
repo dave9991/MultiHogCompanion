@@ -122,5 +122,17 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
         }
     }
 
-    return currentChatId || (getCurrentId ? getCurrentId() : null) || ctx?.chatId || 'active';
+    // ── 3. Align Campaign Prefix to Adventure Title ───────────────────────────
+    const effectiveChatId = currentChatId || (getCurrentId ? getCurrentId() : null) || ctx?.chatId || 'active';
+    const effectiveTitle = candidateTitle || effectiveChatId;
+    if (effectiveTitle && effectiveChatId) {
+        try {
+            const { alignCampaignPrefixForChat } = await import('./campaign-lore-sync.js');
+            await alignCampaignPrefixForChat(effectiveChatId, effectiveTitle);
+        } catch (alignErr) {
+            console.warn('[MultiHog Companion] Could not align campaign prefix in ensureCleanAdventureChat:', alignErr);
+        }
+    }
+
+    return effectiveChatId;
 }

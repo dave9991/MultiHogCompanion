@@ -259,6 +259,29 @@
     color: var(--mhc-danger);
 }
 
+.mhc-chip-loading {
+    border-color: var(--mhc-accent);
+    color: var(--mhc-accent);
+    background: rgba(59, 130, 246, 0.08);
+    font-style: italic;
+    animation: mhc-chip-pulse 1.6s infinite ease-in-out;
+}
+
+@keyframes mhc-chip-pulse {
+    0%, 100% { opacity: 0.75; transform: scale(0.99); }
+    50% { opacity: 1; transform: scale(1); }
+}
+
+.mhc-spin {
+    display: inline-block;
+    animation: mhc-spin-kf 1.2s infinite linear;
+}
+
+@keyframes mhc-spin-kf {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
 /* Input Bar */
 .mhc-chat-input-row {
     display: flex;

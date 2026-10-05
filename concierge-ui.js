@@ -45,6 +45,20 @@ let activeDossier = createEmptyDossier();
 let chatHistory = [];
 let pendingAttachments = [];
 let isGenerating = false;
+let activeImports = [];
+
+function startImportProgress(label) {
+    if (!label) return;
+    activeImports.push(label);
+    renderAttachmentTray();
+}
+
+function stopImportProgress(label) {
+    if (!label) return;
+    const idx = activeImports.indexOf(label);
+    if (idx >= 0) activeImports.splice(idx, 1);
+    renderAttachmentTray();
+}
 
 /**
  * Ensure the modal HTML template is loaded and mounted in the document.
@@ -240,12 +254,14 @@ function renderAttachmentTray() {
     const tray = $('#mhc_attachment_tray');
     tray.empty();
 
-    if (!pendingAttachments.length) {
+    if (!pendingAttachments.length && !activeImports.length) {
         tray.hide();
         return;
     }
 
     tray.show();
+
+    // 1. Settled attachment chips
     pendingAttachments.forEach((att, idx) => {
         let icon = '📄';
         if (att.type === 'image') icon = '🖼️';
@@ -256,10 +272,21 @@ function renderAttachmentTray() {
         const chip = $(`
             <div class="mhc-chip">
                 <span>${icon} ${att.name}</span>
-                <span class="mhc-chip-remove" data-index="${idx}">✕</span>
+                <span class="mhc-chip-remove" data-index="${idx}" title="Remove attachment">✕</span>
             </div>
         `);
         tray.append(chip);
+    });
+
+    // 2. Active in-progress import chips
+    activeImports.forEach(label => {
+        const loadingChip = $(`
+            <div class="mhc-chip mhc-chip-loading" title="Processing import...">
+                <span class="mhc-spin">⏳</span>
+                <span>Importing <b>${label}</b>...</span>
+            </div>
+        `);
+        tray.append(loadingChip);
     });
 
     $('.mhc-chip-remove').on('click', function () {
@@ -450,98 +477,114 @@ async function handleUserSend() {
  */
 async function handleFilesSelected(files) {
     for (const file of Array.from(files)) {
-        // 1. Try Character Card (PNG metadata or JSON)
+        startImportProgress(file.name);
         try {
-            const card = await parseCharacterFile(file);
-            if (card) {
-                pendingAttachments.push({
-                    type: 'char',
-                    name: card.name,
-                    card,
-                    promptAddition: formatCharacterInspirationBlock(card),
-                    avatar: card.avatar,
-                });
-                toastr?.success(`Imported character: "${card.name}".`);
-
-                // If character card embeds a world book, import that too!
-                if (card.characterBook) {
-                    try {
-                        const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
-                        pendingAttachments.push({
-                            type: 'lore',
-                            name: `${card.name}'s Lorebook`,
-                            promptAddition: loreRes.block,
-                            mode: loreRes.mode,
-                        });
-                        toastr?.info(`Imported embedded worldbook for "${card.name}".`);
-                    } catch (_) {}
-                }
-                renderAttachmentTray();
-                continue;
-            }
-        } catch (_) {}
-
-        // 2. Try Lorebook JSON (has entries)
-        if (file.name.endsWith('.json')) {
+            // 1. Try Character Card (PNG metadata or JSON)
+            let handledAsCard = false;
             try {
-                const text = await file.text();
-                const json = JSON.parse(text);
-                if (json.entries && (typeof json.entries === 'object' || Array.isArray(json.entries))) {
-                    const loreRes = await processLorebookForConcierge(
-                        file.name.replace(/\.json$/i, ''),
-                        json,
-                        msg => toastr?.info(msg),
-                        activeDossier?.protagonist?.name || '',
-                    );
+                const card = await parseCharacterFile(file);
+                if (card) {
+                    handledAsCard = true;
                     pendingAttachments.push({
-                        type: 'lore',
-                        name: file.name.replace(/\.json$/i, ''),
-                        promptAddition: loreRes.block,
-                        mode: loreRes.mode,
+                        type: 'char',
+                        name: card.name,
+                        card,
+                        promptAddition: formatCharacterInspirationBlock(card),
+                        avatar: card.avatar,
                     });
-                    toastr?.success(`Imported lorebook: "${file.name}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
+                    toastr?.success(`Imported character: "${card.name}".`);
+
+                    // If character card embeds a world book, import that too!
+                    if (card.characterBook) {
+                        startImportProgress(`${card.name}'s Worldbook`);
+                        try {
+                            const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
+                            pendingAttachments.push({
+                                type: 'lore',
+                                name: `${card.name}'s Lorebook`,
+                                promptAddition: loreRes.block,
+                                mode: loreRes.mode,
+                            });
+                            toastr?.info(`Imported embedded worldbook for "${card.name}".`);
+                        } catch (_) {}
+                        finally {
+                            stopImportProgress(`${card.name}'s Worldbook`);
+                        }
+                    }
                     renderAttachmentTray();
                     continue;
                 }
             } catch (_) {}
-        }
 
-        // 3. Fallback to image or document
-        if (file.type.startsWith('image/')) {
-            try {
-                const dataUrl = await readImageAsDataUrl(file);
-                pendingAttachments.push({
-                    type: 'image',
-                    file,
-                    name: file.name,
-                    dataUrl,
-                });
-            } catch (err) {
-                toastr?.error(`Could not read image "${file.name}": ${err.message}`);
+            if (handledAsCard) continue;
+
+            // 2. Try Lorebook JSON (has entries)
+            if (file.name.endsWith('.json')) {
+                let handledAsLore = false;
+                try {
+                    const text = await file.text();
+                    const json = JSON.parse(text);
+                    if (json.entries && (typeof json.entries === 'object' || Array.isArray(json.entries))) {
+                        handledAsLore = true;
+                        const loreRes = await processLorebookForConcierge(
+                            file.name.replace(/\.json$/i, ''),
+                            json,
+                            msg => toastr?.info(msg),
+                            activeDossier?.protagonist?.name || '',
+                        );
+                        pendingAttachments.push({
+                            type: 'lore',
+                            name: file.name.replace(/\.json$/i, ''),
+                            promptAddition: loreRes.block,
+                            mode: loreRes.mode,
+                        });
+                        toastr?.success(`Imported lorebook: "${file.name}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
+                        renderAttachmentTray();
+                        continue;
+                    }
+                } catch (_) {}
+                if (handledAsLore) continue;
             }
-        } else {
-            try {
-                const doc = await extractDocumentContent(file);
-                if (doc.type === 'chat') {
+
+            // 3. Fallback to image or document
+            if (file.type.startsWith('image/')) {
+                try {
+                    const dataUrl = await readImageAsDataUrl(file);
                     pendingAttachments.push({
-                        type: 'chat',
+                        type: 'image',
                         file,
-                        name: doc.chatData?.charName ? `${doc.chatData.charName} (Chat)` : doc.filename,
-                        chatData: doc.chatData,
+                        name: file.name,
+                        dataUrl,
                     });
-                    toastr?.success(`Imported prior chat log: "${doc.chatData?.charName || doc.filename}" (${doc.chatData?.messages?.length || 0} messages).`);
-                } else {
-                    pendingAttachments.push({
-                        type: 'doc',
-                        file,
-                        name: doc.filename,
-                        text: doc.text,
-                    });
-                    toastr?.info(`Extracted text from "${doc.filename}".`);
+                } catch (err) {
+                    toastr?.error(`Could not read image "${file.name}": ${err.message}`);
                 }
-            } catch (err) {
-                toastr?.error(`Could not parse document "${file.name}": ${err.message}`);
+            } else {
+                try {
+                    const doc = await extractDocumentContent(file);
+                    if (doc.type === 'chat') {
+                        pendingAttachments.push({
+                            type: 'chat',
+                            file,
+                            name: doc.chatData?.charName ? `${doc.chatData.charName} (Chat)` : doc.filename,
+                            chatData: doc.chatData,
+                        });
+                        toastr?.success(`Imported prior chat log: "${doc.chatData?.charName || doc.filename}" (${doc.chatData?.messages?.length || 0} messages).`);
+                    } else {
+                        pendingAttachments.push({
+                            type: 'doc',
+                            file,
+                            name: doc.filename,
+                            text: doc.text,
+                        });
+                        toastr?.info(`Extracted text from "${doc.filename}".`);
+                    }
+                } catch (err) {
+                    toastr?.error(`Could not parse document "${file.name}": ${err.message}`);
+                }
             }
+        } finally {
+            stopImportProgress(file.name);
         }
     }
     renderAttachmentTray();
@@ -586,32 +629,42 @@ function bindModalEvents() {
         const rawChar = ctx.characters?.[idx];
         if (!rawChar) return;
 
-        const avatarUrl = rawChar.avatar ? `/characters/${encodeURIComponent(rawChar.avatar)}` : null;
-        const card = normalizeCharacterCard(rawChar, avatarUrl);
-        if (!card) return;
+        const charLabel = rawChar.name || 'Character';
+        startImportProgress(charLabel);
+        try {
+            const avatarUrl = rawChar.avatar ? `/characters/${encodeURIComponent(rawChar.avatar)}` : null;
+            const card = normalizeCharacterCard(rawChar, avatarUrl);
+            if (!card) return;
 
-        pendingAttachments.push({
-            type: 'char',
-            name: card.name,
-            card,
-            promptAddition: formatCharacterInspirationBlock(card),
-            avatar: card.avatar,
-        });
-        renderAttachmentTray();
-        toastr?.success(`Imported character: "${card.name}".`);
+            pendingAttachments.push({
+                type: 'char',
+                name: card.name,
+                card,
+                promptAddition: formatCharacterInspirationBlock(card),
+                avatar: card.avatar,
+            });
+            renderAttachmentTray();
+            toastr?.success(`Imported character: "${card.name}".`);
 
-        if (card.characterBook) {
-            try {
-                const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
-                pendingAttachments.push({
-                    type: 'lore',
-                    name: `${card.name}'s Lorebook`,
-                    promptAddition: loreRes.block,
-                    mode: loreRes.mode,
-                });
-                renderAttachmentTray();
-                toastr?.info(`Imported embedded worldbook for "${card.name}".`);
-            } catch (_) {}
+            if (card.characterBook) {
+                startImportProgress(`${card.name}'s Worldbook`);
+                try {
+                    const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
+                    pendingAttachments.push({
+                        type: 'lore',
+                        name: `${card.name}'s Lorebook`,
+                        promptAddition: loreRes.block,
+                        mode: loreRes.mode,
+                    });
+                    renderAttachmentTray();
+                    toastr?.info(`Imported embedded worldbook for "${card.name}".`);
+                } catch (_) {}
+                finally {
+                    stopImportProgress(`${card.name}'s Worldbook`);
+                }
+            }
+        } finally {
+            stopImportProgress(charLabel);
         }
     });
 
@@ -626,14 +679,15 @@ function bindModalEvents() {
         $(this).hide();
         $(this).val('');
 
-        toastr?.info(`Loading lorebook "${bookName}"...`);
-        const bookData = await fetchWorldInfoBook(bookName);
-        if (!bookData) {
-            toastr?.error(`Could not load lorebook "${bookName}".`);
-            return;
-        }
-
+        startImportProgress(bookName);
         try {
+            toastr?.info(`Loading lorebook "${bookName}"...`);
+            const bookData = await fetchWorldInfoBook(bookName);
+            if (!bookData) {
+                toastr?.error(`Could not load lorebook "${bookName}".`);
+                return;
+            }
+
             const loreRes = await processLorebookForConcierge(bookName, bookData, msg => toastr?.info(msg), activeDossier?.protagonist?.name || '');
             pendingAttachments.push({
                 type: 'lore',
@@ -645,6 +699,8 @@ function bindModalEvents() {
             toastr?.success(`Imported lorebook: "${bookName}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
         } catch (err) {
             toastr?.error(`Lorebook import failed: ${err.message}`);
+        } finally {
+            stopImportProgress(bookName);
         }
     });
 

@@ -31,6 +31,7 @@ export function createEmptyDossier() {
             bio: '',
             portraitSrc: null,
         },
+        npcs: [],
         monsters: [],
         maps: [],
         factions: [],
@@ -160,6 +161,33 @@ export function parseConciergeStateBlock(text, dossier) {
         }
     }
 
+    // 2b. Supporting NPCs & Allies
+    updated.npcs = updated.npcs || [];
+    const npcMatches = raw.matchAll(/\[NPC\]([\s\S]*?)(?:\[\/NPC\]|$)/gi);
+    for (const match of npcMatches) {
+        const nBlock = match[1];
+        const kv = parseKeyValueLines(nBlock);
+        if (!kv.name) continue;
+
+        const npcObj = {
+            name: kv.name,
+            role: kv.role || 'Ally',
+            demeanor: kv.demeanor || '',
+            background: kv.background || '',
+            relationship: kv.relationship || '',
+            movesOrBoons: kv.moves_or_boons || kv.moves || '',
+            notes: kv.notes || '',
+            portraitSrc: null,
+        };
+
+        const existingIdx = updated.npcs.findIndex(n => n.name.toLowerCase() === npcObj.name.toLowerCase());
+        if (existingIdx >= 0) {
+            updated.npcs[existingIdx] = Object.assign({}, updated.npcs[existingIdx], npcObj);
+        } else {
+            updated.npcs.push(npcObj);
+        }
+    }
+
     // 3. Monsters
     const monsterMatches = raw.matchAll(/\[MONSTER\]([\s\S]*?)(?:\[\/MONSTER\]|$)/gi);
     for (const match of monsterMatches) {
@@ -236,6 +264,7 @@ export function parseConciergeStateBlock(text, dossier) {
 export function serializeDossierToMarkdown(dossier) {
     const meta = dossier.meta || {};
     const p = dossier.protagonist || {};
+    const npcs = dossier.npcs || [];
     const monsters = dossier.monsters || [];
     const maps = dossier.maps || [];
     const kick = dossier.theKick || {};
@@ -246,6 +275,16 @@ export function serializeDossierToMarkdown(dossier) {
 
     let movesMd = (p.startingMoves || []).map(m => `* ${m}`).join('\n') || '* No custom moves registered yet.';
     let gearMd = (p.gear || []).map(g => `* ${g}`).join('\n') || '* Basic equipment.';
+
+    let npcsMd = npcs.length
+        ? npcs.map(n => `### 👤 ${n.name}
+* **Role:** ${n.role || 'Ally'}
+* **Demeanor:** ${n.demeanor || 'None specified'}
+* **Relationship:** ${n.relationship || 'Allied with protagonist'}
+* **Background:** ${n.background || 'None specified'}
+* **Moves/Boons:** ${n.movesOrBoons || 'None'}
+* **Notes:** ${n.notes || 'None'}`).join('\n\n')
+        : '_No supporting NPCs staged yet._';
 
     let monstersMd = monsters.length
         ? monsters.map(m => {
@@ -285,6 +324,11 @@ ${movesMd}
 
 ### 🎒 Starting Gear:
 ${gearMd}
+
+---
+
+## 👥 Supporting Cast & Allies (NPCs):
+${npcsMd}
 
 ---
 
@@ -373,6 +417,35 @@ export function parseMarkdownToDossier(markdown) {
             .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
             .filter(l => l && !l.startsWith('_No') && !l.startsWith('Basic'));
         if (lines.length) dossier.protagonist.gear = lines;
+    }
+
+    // 6b. Supporting NPCs / Allies
+    const npcSection = markdown.match(/##\s*(?:👥\s*)?Supporting Cast[^\n]*:\s*([\s\S]*?)(?=##|---|$)/i);
+    if (npcSection) {
+        const npcBlocks = npcSection[1].split(/###\s*(?:👤\s*)?/);
+        for (const block of npcBlocks) {
+            const lines = block.trim().split('\n');
+            const name = lines[0]?.trim();
+            if (!name || name.startsWith('_No')) continue;
+
+            const roleM = block.match(/\*\s*\*\*Role:\*\*\s*([^\n\r]+)/i);
+            const demeanorM = block.match(/\*\s*\*\*Demeanor:\*\*\s*([^\n\r]+)/i);
+            const relM = block.match(/\*\s*\*\*Relationship:\*\*\s*([^\n\r]+)/i);
+            const bgM = block.match(/\*\s*\*\*Background:\*\*\s*([^\n\r]+)/i);
+            const boonsM = block.match(/\*\s*\*\*Moves\/Boons:\*\*\s*([^\n\r]+)/i);
+            const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
+
+            dossier.npcs.push({
+                name,
+                role: roleM ? roleM[1].trim() : 'Ally',
+                demeanor: demeanorM ? demeanorM[1].trim() : '',
+                relationship: relM ? relM[1].trim() : '',
+                background: bgM ? bgM[1].trim() : '',
+                movesOrBoons: boonsM ? boonsM[1].trim() : '',
+                notes: notesM ? notesM[1].trim() : '',
+                portraitSrc: null,
+            });
+        }
     }
 
     // 7. Monsters

@@ -200,13 +200,22 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             }
         }
 
-        // ── 4. Upsert Monsters into NPC Library ─────────────────────────────────
+        // ── 4. Upsert Supporting NPCs & Monsters into NPC Library ─────────────
+        const npcs = dossier.npcs || [];
         const monsters = dossier.monsters || [];
-        if (monsters.length) {
-            onProgress('👹 Registering adversaries in library...', 70);
+        if (npcs.length || monsters.length) {
+            onProgress('👥 Registering supporting cast & adversaries in library...', 70);
             try {
                 const npcLib = await import('../SillyTavern-MultihogDnDFramework/npc-library.js');
                 if (typeof npcLib.upsertLibraryNpc === 'function') {
+                    for (const n of npcs) {
+                        const content = `[NPC]\nName: ${n.name}\nRole: ${n.role || 'Ally'}\nDemeanor: ${n.demeanor || 'None'}\nRelationship: ${n.relationship || 'Ally'}\nBackground: ${n.background || 'None'}\nMoves/Boons: ${n.movesOrBoons || 'None'}\nNotes: ${n.notes || 'None'}\n[/NPC]`;
+                        await npcLib.upsertLibraryNpc({
+                            name: n.name,
+                            synopsis: `${n.name} — ${n.role || 'Ally'}. ${n.relationship ? `Bond: ${n.relationship}. ` : ''}${n.demeanor ? `Demeanor: ${n.demeanor}` : ''}`.trim(),
+                            content,
+                        });
+                    }
                     for (const m of monsters) {
                         const content = `[NPC]\nName: ${m.name}\nThreat Level: PbtA Adversary (Harm ${m.harm}, Armor ${m.armor})\nAttacks: ${m.attacks.join(', ')}\nWeakness: ${m.weakness}\nNotes: ${m.notes}\n[/NPC]`;
                         await npcLib.upsertLibraryNpc({
@@ -217,7 +226,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                     }
                 }
             } catch (err) {
-                console.warn('[PbtA Concierge] Monster registration encountered non-fatal error:', err);
+                console.warn('[PbtA Concierge] NPC / Monster registration encountered non-fatal error:', err);
             }
         }
 

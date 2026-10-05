@@ -97,6 +97,7 @@ function loadDraft() {
 function updateBlueprintDeck() {
     const meta = activeDossier.meta || {};
     const proto = activeDossier.protagonist || {};
+    const npcs = activeDossier.npcs || [];
     const monsters = activeDossier.monsters || [];
     const maps = activeDossier.maps || [];
     const kick = activeDossier.theKick || {};
@@ -124,6 +125,28 @@ function updateBlueprintDeck() {
         movesEl.html(proto.startingMoves.map(m => `<div>• <b>${m}</b></div>`).join(''));
     } else {
         movesEl.text('• Moves will be forged in the conversation.');
+    }
+
+    // Supporting Cast & Allies (NPCs) Card
+    $('#mhc_deck_npc_count').text(npcs.length);
+    const npcList = $('#mhc_deck_npcs_list');
+    npcList.empty();
+    if (npcs.length) {
+        npcs.forEach(n => {
+            const role = n.role || 'Ally';
+            const demeanor = n.demeanor ? ` · <i>${n.demeanor}</i>` : '';
+            const rel = n.relationship ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Bond:</b> ${n.relationship}</div>` : '';
+            const boons = n.movesOrBoons ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>Boons/Moves:</b> ${n.movesOrBoons}</div>` : '';
+            npcList.append(`
+                <div class="mhc-deck-item">
+                    <div style="font-weight: bold; color: var(--mhc-accent, #3b82f6);">👤 ${n.name} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${demeanor}</div>
+                    ${rel}
+                    ${boons}
+                </div>
+            `);
+        });
+    } else {
+        npcList.append('<div class="mhc-empty-hint">No supporting NPCs queued yet.</div>');
     }
 
     // Adversaries & Monsters Card

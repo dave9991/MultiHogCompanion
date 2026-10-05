@@ -281,6 +281,9 @@ CORE PRINCIPLES:
 - Think dangerous: the world is dynamic, reactive, and never safe when swords are drawn or guns are drawn.
 - Begin and end with the fiction: outcomes always flow from narrative actions, not abstract math.
 - Play to find out what happens: never predetermine plot; let the dice and player choices guide the story.
+- Populate the world with living people: Whenever the protagonist visits settlements, taverns, garrisons, clinics, markets, or faction hideouts, proactively introduce distinct, named NPCs with personalities, agendas, and clear desires.
+- Introduce NPCs to complicate or assist: When the player rolls a 7-9 (mixed success) or 6- (miss), you may introduce an NPC (a rival, inquisitive bystander, allied savior with a cost, or demanding authority) as part of your GM Move.
+- Give every NPC a voice, demeanor, and agenda: Never treat NPCs as cardboard quest-dispensers. Give them wants, leverage, and flaws.
 </role>`;
 }
 
@@ -729,6 +732,30 @@ export function formatInitialPbtaMemo(dossier) {
         `[/CHARACTER]`,
     ];
     blocks.push(charLines.join('\n'));
+
+    // 3b. If companion NPCs exist in the dossier, initialize [PARTY] block
+    const npcs = dossier.npcs || [];
+    const companions = npcs.filter(n => {
+        const r = (n.role || '').toLowerCase();
+        return r.includes('companion') || r.includes('party') || r.includes('sidekick') || r.includes('follower') || r.includes('partner') || r.includes('ally');
+    });
+    if (companions.length > 0) {
+        const partyLines = ['[PARTY]'];
+        for (const comp of companions) {
+            const cName = comp.name || 'Companion';
+            const cRole = comp.role || 'Ally';
+            const cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
+            partyLines.push(
+                `${cName} (${cRole}): Harm: 0/5 | Armor: 0`,
+                `Moves: ${cBoons}`,
+                `Bond: ${comp.relationship || 'Allied with protagonist'}`,
+                `Conditions: None`,
+                `Status: Healthy`
+            );
+        }
+        partyLines.push('[/PARTY]');
+        blocks.push(partyLines.join('\n'));
+    }
 
     // 4. If maps exist, add DUNGEON block
     if (dossier.maps?.[0]?.site) {

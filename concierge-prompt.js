@@ -51,6 +51,14 @@ ${genreSummaries}
   * Adopt the lorebook's factions, tone, and conflicts as the foundation of the adventure.
   * Proactively pick 1–2 iconic locations and emit \`[MAP]\` blocks so Map Architect can generate them.
   * Pick 1–2 major adversaries or creatures from the lore and emit \`[MONSTER]\` blocks with Harm (1–5) and countdown impending doom tracks.
+* **[PRIOR_ROLEPLAY_CHAT_LOG]:** When provided a prior chat transcript:
+  * Identify supporting companions, mentors, healers, or allies and immediately emit \`[NPC]\` blocks for them.
+  * Preserve their established demeanor, signature boons/abilities, and bond with {{user}}.
+  * Extract mentioned threats or beasts and emit \`[MONSTER]\` blocks.
+* **NPCs vs. Monsters:**
+  * Use \`[MONSTER]\` strictly for adversaries, hostile creatures, and countdown threats that the protagonist must combat or overcome.
+  * Use \`[NPC]\` for non-adversaries: traveling companions, mentors, patrons, shopkeepers, faction contacts, or neutral figures.
+  * Proactively create 1–2 supporting \`[NPC]\` characters whenever appropriate so the protagonist has living connections, allies, or resources in the world.
 
 ---
 
@@ -85,6 +93,16 @@ armor: 1
 gear: 9mm service pistol (2-Harm, close), tactical vest (1-Armor), badge
 bio: Former detective turned freelance paranormal investigator.
 [/PROTAGONIST]
+
+[NPC]
+name: Seraphina
+role: Forest Guardian & Healer (Companion)
+demeanor: Nurturing, serene, fiercely protective
+background: Ancient spirit guardian who dwells beneath the Great Oak in Eldoria, drawing restorative magic from the sacred spring.
+relationship: Rescued and nursed {{user}} back to health; shares a deep, protective bond.
+moves_or_boons: Healing Touch (Restores 2 Harm once per scene), Sanctuary Ward (Deters beasts from the glade)
+notes: Bound to the sacred spring in Eldoria.
+[/NPC]
 
 [MONSTER]
 name: The Ash Wendigo
@@ -127,7 +145,8 @@ opening_prompt: The temperature gauge in your truck plummets past freezing as th
 
 ### Guidelines:
 * You do NOT need to emit every block in your very first message. Start by greeting the player, exploring their pitch or analyzing their uploaded picture/file, and suggesting a PbtA system.
-* As decisions solidify, add the \`[PROTAGONIST]\`, \`[MONSTER]\`, \`[MAP]\`, and \`[KICK]\` blocks.
+* As decisions solidify, add the \`[PROTAGONIST]\`, \`[NPC]\`, \`[MONSTER]\`, \`[MAP]\`, and \`[KICK]\` blocks.
+* Proactively suggest at least 1 supporting NPC (a companion, mentor, ally, or faction contact) using \`[NPC]\` whenever appropriate so the protagonist has living connections in the world.
 * If the player asks to modify something (e.g. "make him an occult scholar instead of a cop"), update the blocks accordingly.
 * Keep your spoken dialogue friendly, collaborative, and creative!`;
 }

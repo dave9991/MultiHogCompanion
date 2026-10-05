@@ -15,6 +15,7 @@ import {
     readImageAsDataUrl,
     extractDocumentContent,
     formatDocumentPromptBlock,
+    formatChatTranscriptPromptBlock,
 } from './concierge-files.js';
 import {
     parseCharacterFile,
@@ -227,6 +228,7 @@ function renderAttachmentTray() {
         if (att.type === 'image') icon = '🖼️';
         if (att.type === 'char') icon = '👤';
         if (att.type === 'lore') icon = '📚';
+        if (att.type === 'chat') icon = '💬';
 
         const chip = $(`
             <div class="mhc-chip">
@@ -348,6 +350,8 @@ async function handleUserSend() {
                 activeDossier.protagonist.portraitSrc = att.avatar;
             }
             documentPromptAdditions += `\n${att.promptAddition}\n`;
+        } else if (att.type === 'chat') {
+            documentPromptAdditions += formatChatTranscriptPromptBlock(att.chatData, att.name, 40, activeDossier?.protagonist?.name || '');
         } else if (att.type === 'lore') {
             documentPromptAdditions += `\n${att.promptAddition}\n`;
         }
@@ -495,13 +499,23 @@ async function handleFilesSelected(files) {
         } else {
             try {
                 const doc = await extractDocumentContent(file);
-                pendingAttachments.push({
-                    type: 'doc',
-                    file,
-                    name: doc.filename,
-                    text: doc.text,
-                });
-                toastr?.info(`Extracted text from "${doc.filename}".`);
+                if (doc.type === 'chat') {
+                    pendingAttachments.push({
+                        type: 'chat',
+                        file,
+                        name: doc.chatData?.charName ? `${doc.chatData.charName} (Chat)` : doc.filename,
+                        chatData: doc.chatData,
+                    });
+                    toastr?.success(`Imported prior chat log: "${doc.chatData?.charName || doc.filename}" (${doc.chatData?.messages?.length || 0} messages).`);
+                } else {
+                    pendingAttachments.push({
+                        type: 'doc',
+                        file,
+                        name: doc.filename,
+                        text: doc.text,
+                    });
+                    toastr?.info(`Extracted text from "${doc.filename}".`);
+                }
             } catch (err) {
                 toastr?.error(`Could not parse document "${file.name}": ${err.message}`);
             }

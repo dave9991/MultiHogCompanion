@@ -37,6 +37,13 @@ export async function extractDocumentContent(file) {
     const mime = (file.type || '').toLowerCase();
     const ext = filename.split('.').pop().toLowerCase();
 
+    // 0. SillyTavern Chat Export (.jsonl)
+    if (ext === 'jsonl') {
+        const text = await file.text();
+        const chatData = parseSillyTavernChatJsonl(text, filename);
+        return { filename, text: text.trim(), type: 'chat', chatData };
+    }
+
     // 1. Text / Markdown / Plain files
     if (
         mime === 'text/plain' ||
@@ -47,6 +54,11 @@ export async function extractDocumentContent(file) {
         ext === 'json'
     ) {
         const text = await file.text();
+        // Check if plain json actually contains ST chat lines
+        if (text.includes('"chat_metadata"') && text.includes('"mes":')) {
+            const chatData = parseSillyTavernChatJsonl(text, filename);
+            return { filename, text: text.trim(), type: 'chat', chatData };
+        }
         return { filename, text: text.trim(), type: 'text' };
     }
 
@@ -126,3 +138,102 @@ export function formatDocumentPromptBlock(filename, text, maxWordLimit = 5000, p
 
     return `\n[ATTACHED_DOCUMENT: ${filename}${truncated ? ' (truncated)' : ''}]\n${clean}\n[/ATTACHED_DOCUMENT]\n`;
 }
+
+/**
+ * Parses raw JSONL content from a SillyTavern chat file.
+ * Strips out LLM chain-of-thought scratchpads (extra.reasoning), duplicate swipes,
+ * and internal timestamps to leave clean chronological dialogue.
+ *
+ * @param {string} rawText
+ * @param {string} [filename='']
+ * @returns {{ charName: string, userName: string, chatMeta: object|null, messages: Array<{ sender: string, isUser: boolean, text: string }> }}
+ */
+export function parseSillyTavernChatJsonl(rawText, filename = '') {
+    const lines = rawText.split('\n');
+    const messages = [];
+    let chatMeta = null;
+    let userName = 'User';
+    let charName = '';
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+            const obj = JSON.parse(trimmed);
+            if (obj.chat_metadata) {
+                chatMeta = obj.chat_metadata;
+                if (obj.user_name && obj.user_name !== 'unused') userName = obj.user_name;
+                if (obj.character_name && obj.character_name !== 'unused') charName = obj.character_name;
+                continue;
+            }
+
+            if (typeof obj.mes === 'string') {
+                const sender = obj.name || (obj.is_user ? userName : 'Companion');
+                if (!charName && !obj.is_user && obj.name) {
+                    charName = obj.name;
+                }
+                const msgText = obj.mes.trim();
+                if (msgText) {
+                    messages.push({
+                        sender,
+                        isUser: !!obj.is_user,
+                        text: msgText,
+                    });
+                }
+            }
+        } catch (_) {}
+    }
+
+    if (!charName && filename) {
+        // e.g. "Seraphina - 2023-5-12 @21h 32m 29s 224ms.jsonl" -> "Seraphina"
+        const m = filename.match(/^([^\-]+?)(?:\s*-\s*\d|\.jsonl|$)/i);
+        if (m) charName = m[1].trim();
+    }
+
+    return {
+        charName: charName || 'Companion',
+        userName,
+        chatMeta,
+        messages,
+    };
+}
+
+/**
+ * Formats parsed chat transcript data into a high-signal inspiration block
+ * with clear pointers for the Concierge.
+ *
+ * @param {object} chatData
+ * @param {string} [filename='']
+ * @param {number} [maxMessages=40]
+ * @param {string} [protagonistName='']
+ * @returns {string}
+ */
+export function formatChatTranscriptPromptBlock(chatData, filename = '', maxMessages = 40, protagonistName = '') {
+    if (!chatData || !Array.isArray(chatData.messages)) return '';
+    const { charName, userName, messages, chatMeta } = chatData;
+    const selectedMsgs = messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
+
+    const formattedTranscript = selectedMsgs.map(m => {
+        const cleanText = resolveCardMacros(m.text, protagonistName);
+        return `**${m.sender}**: ${cleanText}`;
+    }).join('\n\n');
+
+    const referencedBook = chatMeta?.tunnelvision_selected_book || '';
+
+    return `\n[PRIOR_ROLEPLAY_CHAT_LOG: ${charName || filename}]
+Source File: "${filename}" (${messages.length} messages${messages.length > maxMessages ? `, showing latest ${maxMessages}` : ''})
+Key Participants: ${charName} (Companion/NPC) and ${protagonistName || userName} (Player)
+${referencedBook ? `Referenced Setting/Lorebook: "${referencedBook}"\n` : ''}
+## CONCIERGE GUIDELINES FOR READING THIS CHAT LOG:
+1. STORY CONTINUITY: Treat this chat transcript as established canon backstory. The events, injuries, and conversations that occurred here really happened.
+2. CHARACTER DYNAMIC & BOND: Emulate the established relationship, intimacy/tone, and dynamic between ${protagonistName || userName} and ${charName}.
+3. LORE & CANON EXTRACTION: Extract any mentioned landmarks, sanctuaries, factions, or magical sources (e.g. sacred glades, ancient springs, Eldoria) to ground the campaign setting.
+4. THREATS & INCITING INCIDENT: Look for foreshadowed perils or adversaries (e.g. beasts roaming the woods, Shadowfangs, encroaching darkness) and stage them as threats in the Campaign Dossier.
+5. "THE KICK" (STARTING INCIDENT): Offer to start the PbtA adventure either immediately following this conversation or when an outside crisis shatters this sanctuary.
+6. PROTAGONIST PLAYBOOK: Use how the player acted, their physical state, and background to propose fitting PbtA stats, starting playbook, and gear.
+
+## CHAT LOG TRANSCRIPT:
+${formattedTranscript}
+[/PRIOR_ROLEPLAY_CHAT_LOG]\n`;
+}
+

@@ -149,11 +149,13 @@ function updateBlueprintDeck() {
         npcs.forEach(n => {
             const role = n.role || 'Ally';
             const demeanor = n.demeanor ? ` · <i>${n.demeanor}</i>` : '';
+            const app = n.appearance ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Look:</b> ${n.appearance}</div>` : '';
             const rel = n.relationship ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Bond:</b> ${n.relationship}</div>` : '';
             const boons = n.movesOrBoons ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>Boons/Moves:</b> ${n.movesOrBoons}</div>` : '';
             npcList.append(`
                 <div class="mhc-deck-item">
                     <div style="font-weight: bold; color: var(--mhc-accent, #3b82f6);">👤 ${n.name} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${demeanor}</div>
+                    ${app}
                     ${rel}
                     ${boons}
                 </div>

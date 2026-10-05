@@ -56,7 +56,7 @@ ${genreSummaries}
   * Preserve their established demeanor, signature boons/abilities, and bond with {{user}}.
   * Extract mentioned threats or beasts and emit \`[MONSTER]\` blocks.
 * **Companions vs. World NPCs:**
-  * **Traveling Companions (\`role: Companion (Party)\` or \`Traveling Companion\`):** Characters who actively journey side-by-side with {{user}} as an adventuring partner or sidekick. They are seeded into the active Party roster upon launch.
+  * **Traveling Companions (\`role: Companion (Party)\` or \`Traveling Companion\`):** Characters who actively journey side-by-side with {{user}} as an adventuring partner or sidekick. They are seeded into the active Party roster upon launch. Include their distinctive physical appearance (\`appearance: ...\`) so it renders clearly on their party card.
   * **World NPCs (\`role: Mentor\`, \`Patron\`, \`Merchant\`, \`Town Guard\`, \`Faction Contact\`, \`Ally\`):** Stationary setting characters who inhabit a specific village, shop, guild, temple, or fortress. They are registered into the World NPC library and do NOT travel in the Party.
   * Proactively create 1–2 supporting characters whenever appropriate so {{user}} has living connections in the world.
 
@@ -97,6 +97,7 @@ bio: Former detective turned freelance paranormal investigator.
 [NPC]
 name: Seraphina
 role: Forest Guardian & Healer (Companion)
+appearance: Blonde hair braided with silver leaves, emerald eyes, weathered traveler cloak
 demeanor: Nurturing, serene, fiercely protective
 background: Ancient spirit guardian who dwells beneath the Great Oak in Eldoria, drawing restorative magic from the sacred spring.
 relationship: Rescued and nursed {{user}} back to health; shares a deep, protective bond.

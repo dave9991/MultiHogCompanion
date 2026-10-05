@@ -368,6 +368,7 @@ CRITICAL FORMAT: Every party member MUST start on their own line with Name (Arch
 Companion damage tracking: MultiHog visualizes HP as a descending vitality bar (5/5 = full health). When a companion takes Harm, increment their Harm and decrement their HP in tandem (e.g. at 1 Harm: 4/5 HP | Harm: 1/5; at 2 Harm: 3/5 HP | Harm: 2/5; at 5 Harm: 0/5 HP | Harm: 5/5, Incapacitated).
 [PARTY]
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
+Appearance: Key physical features, clothing, or silhouette
 Stats: Stat1 +2, Stat2 +1, Stat3 +1, Stat4 +0, Stat5 -1
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Gear: Signature weapon/item (tags) | Armor (value)
@@ -375,6 +376,7 @@ Conditions: None
 Status: Healthy
 
 Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
+Appearance: Key physical features, clothing, or silhouette
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Status: Healthy
 [/PARTY]
@@ -459,6 +461,7 @@ Status: Healthy
 
         party: `Companion and party members. MECHANICS ONLY. Every member MUST begin with their own header line. Separate distinct members with an empty line:
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
+Appearance: Key physical features, clothing, or silhouette
 Stats: ${statsExample}
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Gear: Signature weapon/item (tags) | Armor (value)
@@ -466,6 +469,7 @@ Conditions: None
 Status: Healthy
 
 Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
+Appearance: Key physical features, clothing, or silhouette
 Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Status: Healthy`,
 
@@ -756,9 +760,11 @@ export function formatInitialPbtaMemo(dossier) {
             const cName = comp.name || 'Companion';
             const cRole = comp.role || 'Companion';
             const cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
+            const cApp = comp.appearance || comp.description || (comp.demeanor ? `${comp.demeanor} demeanor` : '');
             if (i > 0) partyLines.push('');
             partyLines.push(
                 `${cName} (${cRole}): 5/5 HP | Harm: 0/5 | Armor: 0`,
+                ...(cApp ? [`Appearance: ${cApp}`] : []),
                 `Moves: ${cBoons}`,
                 `Bond: ${comp.relationship || 'Allied with protagonist'}`,
                 `Conditions: None`,

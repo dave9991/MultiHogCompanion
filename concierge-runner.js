@@ -209,10 +209,10 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                 const npcLib = await import('../SillyTavern-MultihogDnDFramework/npc-library.js');
                 if (typeof npcLib.upsertLibraryNpc === 'function') {
                     for (const n of npcs) {
-                        const content = `[NPC]\nName: ${n.name}\nRole: ${n.role || 'Ally'}\nDemeanor: ${n.demeanor || 'None'}\nRelationship: ${n.relationship || 'Ally'}\nBackground: ${n.background || 'None'}\nMoves/Boons: ${n.movesOrBoons || 'None'}\nNotes: ${n.notes || 'None'}\n[/NPC]`;
+                        const content = `[NPC]\nName: ${n.name}\nRole: ${n.role || 'Ally'}\nAppearance: ${n.appearance || 'None'}\nDemeanor: ${n.demeanor || 'None'}\nRelationship: ${n.relationship || 'Ally'}\nBackground: ${n.background || 'None'}\nMoves/Boons: ${n.movesOrBoons || 'None'}\nNotes: ${n.notes || 'None'}\n[/NPC]`;
                         await npcLib.upsertLibraryNpc({
                             name: n.name,
-                            synopsis: `${n.name} — ${n.role || 'Ally'}. ${n.relationship ? `Bond: ${n.relationship}. ` : ''}${n.demeanor ? `Demeanor: ${n.demeanor}` : ''}`.trim(),
+                            synopsis: `${n.name} — ${n.role || 'Ally'}. ${n.appearance ? `Look: ${n.appearance}. ` : ''}${n.relationship ? `Bond: ${n.relationship}. ` : ''}${n.demeanor ? `Demeanor: ${n.demeanor}` : ''}`.trim(),
                             content,
                         });
                     }

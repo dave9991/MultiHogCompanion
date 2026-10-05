@@ -172,6 +172,7 @@ export function parseConciergeStateBlock(text, dossier) {
         const npcObj = {
             name: kv.name,
             role: kv.role || 'Ally',
+            appearance: kv.appearance || kv.description || kv.look || '',
             demeanor: kv.demeanor || '',
             background: kv.background || '',
             relationship: kv.relationship || '',
@@ -279,6 +280,7 @@ export function serializeDossierToMarkdown(dossier) {
     let npcsMd = npcs.length
         ? npcs.map(n => `### 👤 ${n.name}
 * **Role:** ${n.role || 'Ally'}
+* **Appearance:** ${n.appearance || 'None specified'}
 * **Demeanor:** ${n.demeanor || 'None specified'}
 * **Relationship:** ${n.relationship || 'Allied with protagonist'}
 * **Background:** ${n.background || 'None specified'}
@@ -429,6 +431,7 @@ export function parseMarkdownToDossier(markdown) {
             if (!name || name.startsWith('_No')) continue;
 
             const roleM = block.match(/\*\s*\*\*Role:\*\*\s*([^\n\r]+)/i);
+            const appM = block.match(/\*\s*\*\*Appearance:\*\*\s*([^\n\r]+)/i);
             const demeanorM = block.match(/\*\s*\*\*Demeanor:\*\*\s*([^\n\r]+)/i);
             const relM = block.match(/\*\s*\*\*Relationship:\*\*\s*([^\n\r]+)/i);
             const bgM = block.match(/\*\s*\*\*Background:\*\*\s*([^\n\r]+)/i);
@@ -438,6 +441,7 @@ export function parseMarkdownToDossier(markdown) {
             dossier.npcs.push({
                 name,
                 role: roleM ? roleM[1].trim() : 'Ally',
+                appearance: appM && !appM[1].includes('None specified') ? appM[1].trim() : '',
                 demeanor: demeanorM ? demeanorM[1].trim() : '',
                 relationship: relM ? relM[1].trim() : '',
                 background: bgM ? bgM[1].trim() : '',

@@ -316,14 +316,14 @@ export function buildPbtACombatContent() {
     return `<combat>
 NO INITIATIVE TURNS. Combat is a cinematic conversation, not round-by-round math.
 - NPCs do NOT roll attacks or saving throws. Their actions and counter-attacks happen naturally when the player rolls a 7–9 (compromise/counter-attack) or 6- (miss), or when the player hesitates.
-- Enemies do not have bloated HP or AC. They have a threat tier and a Harm clock (typically 1 to 5 Harm to defeat).
+- Enemies do not have bloated HP or AC. They have a threat tier and a Harm clock (typically 1 to 5 Harm to defeat). In the [COMBAT] state memo, format enemy headers with their descending vitality token alongside Harm (e.g. Name: 4/4 HP | Harm: 0/4 | Armor: 1).
 - ARMOR: Armor reduces incoming Harm by its value (e.g. Armor 1 turns 3 Harm into 2 Harm).
 - HARM TIERS:
   1 Harm: Scratches, bruises, wind knocked out.
   2 Harm: Deep cut, broken bone, moderate injury (-1 forward to physical actions).
   3 Harm: Severe, incapacitating trauma.
   4 Harm: Critical wound, organ damage, verge of death (-2 forward to all actions).
-  5 Harm: Lethal / dying.
+  5 Harm: Lethal / dying (Status: Defeated).
 </combat>`;
 }
 
@@ -570,7 +570,7 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
 NO D&D MECHANICS: Never write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns". Use PbtA concepts: Harm (+1 Harm), positioning, and modifiers (+1 forward, +1 hold).
 Format:
 [CHARACTER]
-{{user}} (Archetype): Harm: 0/${harmMax} | Armor: 0
+{{user}} (Archetype): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
 Stats: ${statsExample}
 Moves: Move 1 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning]) | Move 2 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning])
 Gear: Signature weapon/item (tags), travel gear

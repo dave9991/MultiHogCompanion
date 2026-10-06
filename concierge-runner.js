@@ -255,10 +255,23 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             stats: statsList.length >= 3 ? statsList : null,
             startingMoves: dossier.protagonist?.startingMoves,
             cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
+            config: dossier.config || {},
         };
         const cartridgeOk = await applyPbtACartridge(systemKey, cartridgeOverrides);
         if (!cartridgeOk) {
             throw new Error('Failed to install PbtA ruleset cartridge.');
+        }
+
+        // Apply native MultiHog CYOA toggle based on playstyle dial
+        const effectiveCtxEarly = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+        const rpgEarly = effectiveCtxEarly?.extensionSettings?.rpg_tracker;
+        if (rpgEarly) {
+            rpgEarly.syspromptModules = rpgEarly.syspromptModules || {};
+            if (dossier.config?.playstyle === 'freeform') {
+                rpgEarly.syspromptModules.CYOA_mode = false;
+            } else {
+                rpgEarly.syspromptModules.CYOA_mode = true;
+            }
         }
 
         // ── 2. Player Persona & Lorebook Card ────────────────────────────────────
@@ -401,6 +414,9 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                 rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
                 rpgSettings.chatStates[chatId].currentMemo = initialMemo;
                 rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+                if (dossier.config?.artStyle) {
+                    rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
+                }
             }
 
             if (dossier.protagonist?.portraitSrc) {

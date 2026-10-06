@@ -41,6 +41,14 @@ export function createEmptyDossier() {
             openingPrompt: '',
         },
         cyoaExamples: [],
+        config: {
+            playstyle: 'cyoa_5',
+            cyoaEmojis: true,
+            harmMax: 5,
+            partyMode: 'squad',
+            artStyle: '',
+            pacingXp: 5,
+        },
     };
 }
 
@@ -65,6 +73,7 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[MAP\][\s\S]*?(?:\[\/MAP\]|$)/gi, '')
         .replace(/\[KICK\][\s\S]*?(?:\[\/KICK\]|$)/gi, '')
         .replace(/\[CYOA\][\s\S]*?(?:\[\/CYOA\]|$)/gi, '')
+        .replace(/\[CONFIG\][\s\S]*?(?:\[\/CONFIG\]|$)/gi, '')
         .replace(/\[REMOVE_(?:NPC|MONSTER|MAP):[^\n\]]+\]/gi, '')
         .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS)\]/gi, '')
         .replace(/```(?:text|markdown)?\s*```/gi, '')
@@ -619,6 +628,93 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
+    // ── 8. Configuration / Campaign Dials ───────────────────────────────────────
+    updated.config = updated.config || {
+        playstyle: 'cyoa_5',
+        cyoaEmojis: true,
+        harmMax: 5,
+        partyMode: 'squad',
+        artStyle: '',
+        pacingXp: 5,
+    };
+
+    const configMatch = raw.match(/\[CONFIG\]([\s\S]*?)(?:\[\/CONFIG\]|$)/i);
+    if (configMatch) {
+        const cBlock = configMatch[1];
+        const kv = parseKeyValueLines(cBlock);
+
+        // Playstyle
+        const psRaw = (kv.playstyle || kv.cyoa_mode || kv.cyoa || '').toLowerCase();
+        if (psRaw) {
+            let nextPs = updated.config.playstyle;
+            if (/^(freeform|prose|none|off|disabled|false|0)$/.test(psRaw)) nextPs = 'freeform';
+            else if (/^(cyoa_3|3|minimal|minimalist)$/.test(psRaw)) nextPs = 'cyoa_3';
+            else if (/^(cyoa_5|5|full|standard|true|default)$/.test(psRaw)) nextPs = 'cyoa_5';
+
+            if (nextPs !== updated.config.playstyle) {
+                updated.config.playstyle = nextPs;
+                const label = nextPs === 'freeform' ? 'Pure Freeform (Prose Only)' : nextPs === 'cyoa_3' ? 'Minimalist CYOA (3 Choices)' : 'Interactive CYOA (5 Choices)';
+                changes.push(`Playstyle dial set to ${label}`);
+            }
+        }
+
+        // CYOA Emojis
+        if (kv.cyoa_emojis !== undefined || kv.emojis !== undefined) {
+            const emRaw = String(kv.cyoa_emojis !== undefined ? kv.cyoa_emojis : kv.emojis).toLowerCase();
+            const nextEm = !/^(false|off|0|no)$/.test(emRaw);
+            if (nextEm !== updated.config.cyoaEmojis) {
+                updated.config.cyoaEmojis = nextEm;
+                changes.push(`CYOA Emojis set to ${nextEm ? 'On' : 'Off'}`);
+            }
+        }
+
+        // Harm Max / Lethality
+        const harmRaw = parseInt(kv.harm_max || kv.harm || kv.lethality, 10);
+        if (!isNaN(harmRaw) && harmRaw >= 2 && harmRaw <= 8) {
+            if (harmRaw !== updated.config.harmMax) {
+                updated.config.harmMax = harmRaw;
+                if (updated.protagonist) {
+                    updated.protagonist.harm = updated.protagonist.harm || { current: 0, armor: 0 };
+                    updated.protagonist.harm.max = harmRaw;
+                }
+                const label = harmRaw <= 3 ? 'Gritty' : harmRaw === 4 ? 'Tense' : harmRaw === 5 ? 'Standard' : 'Heroic';
+                changes.push(`Harm capacity dial set to ${harmRaw} (${label})`);
+            }
+        }
+
+        // Party Mode
+        const partyRaw = (kv.party_mode || kv.party || '').toLowerCase();
+        if (partyRaw) {
+            let nextParty = updated.config.partyMode;
+            if (/^(solo|lone|loner|alone)$/.test(partyRaw)) nextParty = 'solo';
+            else if (/^(duo|pair|partner|buddy)$/.test(partyRaw)) nextParty = 'duo';
+            else if (/^(squad|team|party|full)$/.test(partyRaw)) nextParty = 'squad';
+
+            if (nextParty !== updated.config.partyMode) {
+                updated.config.partyMode = nextParty;
+                changes.push(`Party mode dial set to ${nextParty.toUpperCase()}`);
+            }
+        }
+
+        // Art Style
+        if (kv.art_style !== undefined) {
+            const nextArt = kv.art_style.trim();
+            if (nextArt !== updated.config.artStyle) {
+                updated.config.artStyle = nextArt;
+                changes.push(`Art Direction dial set to "${nextArt}"`);
+            }
+        }
+
+        // Pacing XP
+        const xpRaw = parseInt(kv.pacing_xp || kv.xp, 10);
+        if (!isNaN(xpRaw) && (xpRaw === 3 || xpRaw === 5)) {
+            if (xpRaw !== updated.config.pacingXp) {
+                updated.config.pacingXp = xpRaw;
+                changes.push(`XP Pacing dial set to ${xpRaw} XP per Advance`);
+            }
+        }
+    }
+
     return {
         success: errors.length === 0,
         updatedDossier: updated,
@@ -732,7 +828,11 @@ ${mapsMd}
 ## ⚡ The Kick (Opening Crisis):
 * **Starting Point:** ${kick.startingLocation || 'The road'}
 * **Inciting Crisis:** ${kick.crisis || 'Trouble approaches'}
-* **Opening Hook:** ${kick.openingPrompt || 'You stand at the threshold...'}${dossier.cyoaExamples && dossier.cyoaExamples.length ? `\n\n---\n\n## 🎲 Tailored CYOA Move Choices:\n${dossier.cyoaExamples.map(c => `* ${c}`).join('\n')}` : ''}`;
+* **Opening Hook:** ${kick.openingPrompt || 'You stand at the threshold...'}${dossier.cyoaExamples && dossier.cyoaExamples.length ? `\n\n---\n\n## 🎲 Tailored CYOA Move Choices:\n${dossier.cyoaExamples.map(c => `* ${c}`).join('\n')}` : ''}${dossier.config ? `\n\n---\n\n## ⚙️ Campaign Calibration Dials:
+* **Playstyle:** ${dossier.config.playstyle || 'cyoa_5'}
+* **Harm Capacity:** ${dossier.config.harmMax || 5}
+* **Party Mode:** ${dossier.config.partyMode || 'squad'}
+* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}` : ''}`;
 }
 
 /**
@@ -902,6 +1002,31 @@ export function parseMarkdownToDossier(markdown) {
             .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
             .filter(Boolean);
         if (lines.length) dossier.cyoaExamples = lines;
+    }
+
+    // 11. Configuration Dials
+    const configSection = markdown.match(/##\s*(?:⚙️\s*)?Campaign Calibration Dials[^:]*:\s*([\s\S]*?)(?=##|---|$)/i);
+    if (configSection) {
+        const psM = configSection[1].match(/\*\s*\*\*Playstyle:\*\*\s*([^\n\r]+)/i);
+        const harmM = configSection[1].match(/\*\s*\*\*Harm Capacity:\*\*\s*([^\n\r]+)/i);
+        const partyM = configSection[1].match(/\*\s*\*\*Party Mode:\*\*\s*([^\n\r]+)/i);
+        const emM = configSection[1].match(/\*\s*\*\*CYOA Emojis:\*\*\s*([^\n\r]+)/i);
+        const artM = configSection[1].match(/\*\s*\*\*Art Direction:\*\*\s*([^\n\r]+)/i);
+        const xpM = configSection[1].match(/\*\s*\*\*XP Pacing:\*\*\s*([^\n\r]+)/i);
+
+        dossier.config = dossier.config || {};
+        if (psM) dossier.config.playstyle = psM[1].trim();
+        if (harmM) {
+            const hVal = parseInt(harmM[1], 10);
+            if (!isNaN(hVal)) dossier.config.harmMax = hVal;
+        }
+        if (partyM) dossier.config.partyMode = partyM[1].trim();
+        if (emM) dossier.config.cyoaEmojis = !/disabled|false|off/i.test(emM[1]);
+        if (artM) dossier.config.artStyle = artM[1].trim();
+        if (xpM) {
+            const xpVal = parseInt(xpM[1], 10);
+            if (!isNaN(xpVal)) dossier.config.pacingXp = xpVal;
+        }
     }
 
     return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign') ? dossier : null;

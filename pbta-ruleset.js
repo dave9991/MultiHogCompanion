@@ -477,6 +477,15 @@ export function deriveCyoaExamplesFromMoves(moves = [], contextLabel = '') {
  */
 export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const config = overrides.config || overrides || {};
+    const playstyle = config.playstyle || 'cyoa_5';
+    const cyoaEmojis = (config.cyoaEmojis !== undefined) ? config.cyoaEmojis : (overrides.cyoaEmojis !== false);
+
+    if (playstyle === 'freeform') {
+        return '';
+    }
+
+    const choiceCount = playstyle === 'cyoa_3' ? 3 : 5;
 
     let buttonList = [];
     if (Array.isArray(overrides.cyoaExamples) && overrides.cyoaExamples.length > 0) {
@@ -491,15 +500,37 @@ export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
         buttonList = ['1. ⚔️ Leap forward with blade drawn to strike the beast — [Hack & Slash (+Might)]'];
     }
 
+    // Slice to desired choice count
+    buttonList = buttonList.slice(0, choiceCount);
+
+    if (!cyoaEmojis) {
+        buttonList = buttonList.map(b => b.replace(/^(\d+\.\s*)(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\uFE0F\u200D])+\s*/u, '$1'));
+    }
+
     const exampleButtons = buttonList.map(e => `<button>${e}</button>`).join('\n');
     const examples = `<choices>\n${exampleButtons}\n</choices>`;
     const displayLabel = overrides.systemLabel || overrides.name || genre.label;
 
+    const emojiLine = cyoaEmojis ? '\n- Prefix each choice text with a fitting emoji.' : '';
+
+    const orderInstructions = playstyle === 'cyoa_3'
+        ? `STRICT GENERATION ORDER:
+You must generate exactly 3 choices following narrative context:
+1. MOVE TRIGGER / ACTION: Action leveraging a Move, physical maneuver, or high-stakes check.
+2. CONVERSATIONAL / INQUIRY: Dialogue, interrogation, probing for clues, or social leverage.
+3. TACTICAL / CAUTIOUS: Observation, positioning, fallback, stealth, or defensive preparation.`
+        : `STRICT GENERATION ORDER:
+You must generate exactly 5 choices following narrative context:
+1. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+2. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+3. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+4. NARRATIVE-DECIDED (Choose whichever format fits the story best).
+5. NARRATIVE-DECIDED (Choose whichever format fits the story best).`;
+
     return `[END OF OUTPUT REQUIREMENT]
-- You MUST ALWAYS end your response with exactly 5 choices for the user. NEVER forget the choices.
+- You MUST ALWAYS end your response with exactly ${choiceCount} choices for the user. NEVER forget the choices.
 - Enclose all choices inside a single <choices> XML block.
-- Wrap every single choice in a <button> tag.
-- Prefix each choice text with a fitting emoji.
+- Wrap every single choice in a <button> tag.${emojiLine}
 - High-stakes situations and perilous obstacles should feature Moves; conversational downtime needs fewer rolls.
 - NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), Armor Class ("vs AC 15"), or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ Full Success | 7–9 Mixed Success | 6- Miss).
 - When a choice triggers a PbtA Move, format it as: — [Move Name (+Stat)]
@@ -513,13 +544,7 @@ Choice types available:
 EXAMPLES (${displayLabel}):
 ${examples}
 
-STRICT GENERATION ORDER:
-You must generate exactly 5 choices following narrative context:
-1. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-2. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-3. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-4. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-5. NARRATIVE-DECIDED (Choose whichever format fits the story best).`;
+${orderInstructions}`;
 }
 
 /**
@@ -531,6 +556,10 @@ You must generate exactly 5 choices following narrative context:
  */
 export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const config = overrides.config || overrides || {};
+    const harmMax = config.harmMax || overrides.harmMax || 5;
+    const pacingXp = config.pacingXp || overrides.pacingXp || 5;
+
     const statsList = (Array.isArray(overrides.stats) && overrides.stats.length > 0)
         ? overrides.stats
         : genre.stats;
@@ -541,14 +570,14 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
 NO D&D MECHANICS: Never write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns". Use PbtA concepts: Harm (+1 Harm), positioning, and modifiers (+1 forward, +1 hold).
 Format:
 [CHARACTER]
-{{user}} (Archetype): Harm: 0/5 | Armor: 0
+{{user}} (Archetype): Harm: 0/${harmMax} | Armor: 0
 Stats: ${statsExample}
 Moves: Move 1 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning]) | Move 2 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning])
 Gear: Signature weapon/item (tags), travel gear
 Wealth: Coin 3 (or setting currency)
 Conditions: None
 Hold/Forward: None
-XP: 0/5
+XP: 0/${pacingXp}
 Status: Healthy
 [/CHARACTER]`,
 
@@ -618,6 +647,12 @@ Other Items:
  */
 export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const config = overrides.config || overrides || {};
+    const harmMax = config.harmMax || overrides.harmMax || 5;
+    const pacingXp = config.pacingXp || overrides.pacingXp || 5;
+    const partyMode = config.partyMode || overrides.partyMode || 'squad';
+    const playstyle = config.playstyle || overrides.playstyle || 'cyoa_5';
+    const isFreeform = playstyle === 'freeform';
 
     const customSyspromptLibrary = [
         {
@@ -667,7 +702,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_footer',
             tag: 'end_of_output_footer',
-            content: buildPbtAFooterContent(),
+            content: `<end_of_output_footer>\nALWAYS end every narrative output with:\n*(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*\nFooter shows ONLY {{user}}'s Harm/XP/Hold/location — never party or NPC status.\n</end_of_output_footer>`,
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',
@@ -678,11 +713,11 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_xp',
             tag: 'xp_system',
-            content: buildPbtAXpContent(),
+            content: `<xp_system>\n- Award 1 XP whenever the player rolls a 6- (Miss) on a Move: *(+1 XP — Miss)*.\n- Award 1 XP when a major milestone, personal discovery, or quest objective is resolved: *(+1 XP — [reason])*. \n- At ${pacingXp} XP, the player levels up: *(Level Up! Choose an Advance: +1 to a Stat (max +3), a new Playbook Move, or erase a Condition)*. Reset XP counter to 0/${pacingXp}.\n</xp_system>`,
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',
-            description: 'PbtA XP on 6- Miss & 5 XP level advancement',
+            description: `PbtA XP on 6- Miss & ${pacingXp} XP level advancement`,
             origin: 'unlocked_base',
             baseTag: 'xp_system',
         },
@@ -690,7 +725,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
             id: 'pbta_base_override_party',
             tag: '[PARTY]_mechanics',
             content: buildPbtAPartyContent(),
-            enabled: true,
+            enabled: partyMode !== 'solo',
             scope: 'chat',
             icon: 'fa-lock-open',
             description: 'PbtA companion format and 2d6 bench resolution',
@@ -708,6 +743,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         end_of_output_footer: false,
         xp_system: false,
         '[PARTY]_mechanics': false,
+        CYOA_mode: !isFreeform,
         // D&D systems disabled in PbtA
         weapon_proficiencies: false,
         attacks_per_round: false,
@@ -725,11 +761,11 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         syspromptSectionOrder: [],
         stockPrompts: buildPbtAStockPrompts(genreKey, overrides),
         cyoaConfig: {
-            useCustomPrompt: true,
-            customPromptText: buildPbtACyoaPrompt(genreKey, overrides),
-            useButtonTags: true,
-            useXmlTag: true,
-            useEmojis: true,
+            useCustomPrompt: !isFreeform,
+            customPromptText: isFreeform ? '' : buildPbtACyoaPrompt(genreKey, overrides),
+            useButtonTags: !isFreeform,
+            useXmlTag: !isFreeform,
+            useEmojis: config.cyoaEmojis !== false,
             stripOldChoicesFromPrompt: true,
         },
         rngEnabled: true,
@@ -739,11 +775,13 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         rngQueueD100: false,
         diceD100Mode: false,
         diceFunctionTool: false, // Disable AI function-call dice to avoid player interruptions
-        blockOrder: ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'],
+        blockOrder: partyMode === 'solo'
+            ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME']
+            : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'],
         modules: {
             combat: true,
             character: true,
-            party: true,
+            party: partyMode !== 'solo',
             inventory: true,
             abilities: false, // In PbtA, abilities ARE Playbook Moves (avoids D&D daily spell/ability counters)
             spells: false,    // Magic is handled via Arcana / Weird Moves
@@ -806,7 +844,9 @@ export function formatInitialPbtaMemo(dossier) {
     const kick = dossier.theKick || {};
     const charName = (p.name || 'Protagonist').trim();
     const playbook = (p.playbook || 'Wanderer').trim();
-    const harmMax = p.harm?.max || 5;
+    const harmMax = dossier.config?.harmMax || p.harm?.max || 5;
+    const pacingXp = dossier.config?.pacingXp || 5;
+    const isSolo = dossier.config?.partyMode === 'solo';
     const armor = p.harm?.armor || 0;
 
     // Format stats: "Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1"
@@ -849,14 +889,14 @@ export function formatInitialPbtaMemo(dossier) {
         `Gear: ${gearStr}`,
         `Conditions: None`,
         `Hold/Forward: None`,
-        `XP: 0/5`,
+        `XP: 0/${pacingXp}`,
         `[/CHARACTER]`,
     ];
     blocks.push(charLines.join('\n'));
 
-    // 3b. If companion NPCs exist in the dossier, initialize [PARTY] block
+    // 3b. If companion NPCs exist in the dossier and party mode is not solo, initialize [PARTY] block
     const npcs = dossier.npcs || [];
-    const companions = npcs.filter(n => {
+    const companions = isSolo ? [] : npcs.filter(n => {
         const r = (n.role || '').toLowerCase();
         return r.includes('companion') || r.includes('party') || r.includes('sidekick') || r.includes('follower') || r.includes('partner');
     });

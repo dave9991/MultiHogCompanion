@@ -127,6 +127,35 @@ function updateBlueprintDeck() {
     $('#mhc_deck_system_tag').text(meta.systemKey?.toUpperCase() || 'FANTASY');
     $('#mhc_deck_system_desc').text(meta.premise || `PbtA ${sysLabel} fiction-first narrative engine.`);
 
+    // Campaign Calibration Dials Card
+    const cfg = activeDossier.config || {};
+    const playstyle = cfg.playstyle || 'cyoa_5';
+    let playstyleLabel = 'CYOA (5 Choices)';
+    if (playstyle === 'freeform') playstyleLabel = 'Pure Freeform (No Choices)';
+    else if (playstyle === 'cyoa_3') playstyleLabel = 'CYOA (3 Choices)';
+    $('#mhc_deck_dial_playstyle').text(playstyleLabel);
+
+    const harmMax = cfg.harmMax || 5;
+    let harmTag = '(Standard)';
+    if (harmMax === 3) harmTag = '(Gritty)';
+    else if (harmMax === 4) harmTag = '(Tense)';
+    else if (harmMax === 6) harmTag = '(Pulp)';
+    $('#mhc_dial_harm_btn').text(`❤️ Harm: ${harmMax} ${harmTag}`);
+
+    const partyMode = cfg.partyMode || 'squad';
+    const partyLabel = partyMode.charAt(0).toUpperCase() + partyMode.slice(1);
+    $('#mhc_dial_party_btn').text(`👥 Party: ${partyLabel}`);
+
+    const emojisOn = cfg.cyoaEmojis !== false;
+    $('#mhc_dial_emojis_btn').text(`✨ Emojis: ${emojisOn ? 'On' : 'Off'}`);
+
+    if (cfg.artStyle) {
+        $('#mhc_deck_dial_art_text').text(cfg.artStyle);
+        $('#mhc_deck_dial_art').show();
+    } else {
+        $('#mhc_deck_dial_art').hide();
+    }
+
     // Protagonist Card
     $('#mhc_deck_char_playbook').text(proto.playbook || 'In Development');
     $('#mhc_deck_char_name').text(proto.name || 'Unnamed Adventurer');
@@ -158,11 +187,18 @@ function updateBlueprintDeck() {
             const rel = n.relationship ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Bond:</b> ${n.relationship}</div>` : '';
             const boons = n.movesOrBoons ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>Boons/Moves:</b> ${n.movesOrBoons}</div>` : '';
             npcList.append(`
-                <div class="mhc-deck-item">
-                    <div style="font-weight: bold; color: var(--mhc-accent, #3b82f6);">👤 ${n.name} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${demeanor}</div>
-                    ${app}
-                    ${rel}
-                    ${boons}
+                <div class="mhc-deck-item collapsible">
+                    <div class="mhc-deck-item-header">
+                        <div class="mhc-deck-item-title" style="color: var(--mhc-accent, #3b82f6);">
+                            👤 ${n.name} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${demeanor}
+                        </div>
+                        <span class="mhc-deck-item-toggle">▼</span>
+                    </div>
+                    <div class="mhc-deck-item-detail">
+                        ${app}
+                        ${rel}
+                        ${boons}
+                    </div>
                 </div>
             `);
         });
@@ -177,11 +213,21 @@ function updateBlueprintDeck() {
     if (monsters.length) {
         monsters.forEach(m => {
             const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
+            const moves = m.moves?.length ? m.moves.join('; ') : '';
+            const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
             mList.append(`
-                <div class="mhc-deck-item">
-                    <div style="font-weight: bold; color: var(--mhc-danger, #ef4444);">👹 ${m.name}</div>
-                    <div style="font-size: 0.85em; opacity: 0.85;">Harm: ${m.harm} | Armor: ${m.armor} | ${attacks}</div>
-                    <div style="font-size: 0.8em; opacity: 0.75;">Weakness: ${m.weakness}</div>
+                <div class="mhc-deck-item collapsible">
+                    <div class="mhc-deck-item-header">
+                        <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
+                            👹 ${m.name} <span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${m.harm} | Armor: ${m.armor}</span>
+                        </div>
+                        <span class="mhc-deck-item-toggle">▼</span>
+                    </div>
+                    <div class="mhc-deck-item-detail">
+                        <div style="font-size: 0.85em; opacity: 0.85;"><b>Attacks:</b> ${attacks}</div>
+                        <div style="font-size: 0.8em; opacity: 0.75;"><b>Weakness:</b> ${m.weakness || 'None specified'}</div>
+                        ${movesLine}
+                    </div>
                 </div>
             `);
         });
@@ -195,13 +241,20 @@ function updateBlueprintDeck() {
     mapList.empty();
     if (maps.length) {
         maps.forEach(map => {
+            const desc = map.briefDescription || map.prompt || '';
+            const features = map.features?.length ? `<div style="font-size: 0.8em; opacity: 0.8; margin-top: 4px;"><b>Features:</b> ${map.features.join(', ')}</div>` : '';
             mapList.append(`
-                <div class="mhc-deck-item">
-                    <div style="display: flex; justify-content: space-between;">
-                        <b>🗺️ ${map.site}</b>
-                        <span class="mhc-pill" style="font-size: 0.72em;">${map.kind} · ${map.threat}</span>
+                <div class="mhc-deck-item collapsible">
+                    <div class="mhc-deck-item-header">
+                        <div class="mhc-deck-item-title">
+                            🗺️ ${map.site} <span class="mhc-pill" style="font-size: 0.72em;">${map.kind || 'Site'} · ${map.threat || 'Threat'}</span>
+                        </div>
+                        <span class="mhc-deck-item-toggle">▼</span>
                     </div>
-                    <div style="font-size: 0.82em; opacity: 0.8; margin-top: 2px;">${map.briefDescription || map.prompt}</div>
+                    <div class="mhc-deck-item-detail">
+                        <div style="font-size: 0.82em; opacity: 0.85;">${desc}</div>
+                        ${features}
+                    </div>
                 </div>
             `);
         });
@@ -793,6 +846,53 @@ function bindModalEvents() {
         if (e.dataTransfer?.files?.length) {
             handleFilesSelected(e.dataTransfer.files);
         }
+    });
+
+    // Campaign Calibration Dial click interactions (manual cycling)
+    $('#mhc_deck_dial_playstyle').on('click', () => {
+        activeDossier.config = activeDossier.config || {};
+        const current = activeDossier.config.playstyle || 'cyoa_5';
+        const cycle = { 'cyoa_5': 'cyoa_3', 'cyoa_3': 'freeform', 'freeform': 'cyoa_5' };
+        activeDossier.config.playstyle = cycle[current] || 'cyoa_5';
+        changelog.push(`Toggled playstyle to ${activeDossier.config.playstyle}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    $('#mhc_dial_harm_btn').on('click', () => {
+        activeDossier.config = activeDossier.config || {};
+        const current = activeDossier.config.harmMax || 5;
+        const cycle = { 5: 3, 3: 4, 4: 6, 6: 5 };
+        activeDossier.config.harmMax = cycle[current] || 5;
+        changelog.push(`Toggled Harm capacity to ${activeDossier.config.harmMax}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    $('#mhc_dial_party_btn').on('click', () => {
+        activeDossier.config = activeDossier.config || {};
+        const current = activeDossier.config.partyMode || 'squad';
+        const cycle = { 'squad': 'solo', 'solo': 'duo', 'duo': 'squad' };
+        activeDossier.config.partyMode = cycle[current] || 'squad';
+        changelog.push(`Toggled party mode to ${activeDossier.config.partyMode}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    $('#mhc_dial_emojis_btn').on('click', () => {
+        activeDossier.config = activeDossier.config || {};
+        activeDossier.config.cyoaEmojis = activeDossier.config.cyoaEmojis === false ? true : false;
+        changelog.push(`Toggled choice emojis to ${activeDossier.config.cyoaEmojis ? 'On' : 'Off'}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    // Collapsible blueprint items (NPCs, Monsters, Maps)
+    $('#mhc_concierge_modal').on('click', '.mhc-deck-item.collapsible .mhc-deck-item-header', function () {
+        const item = $(this).closest('.mhc-deck-item');
+        const detail = item.find('.mhc-deck-item-detail');
+        item.toggleClass('open');
+        detail.slideToggle(140);
     });
 
     // Tab buttons

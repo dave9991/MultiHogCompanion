@@ -491,6 +491,95 @@
     font-size: 0.85em;
 }
 
+/* ── Campaign Dials Styles ── */
+.mhc-dials-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.mhc-dial-pill {
+    font-size: 0.76em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--mhc-bg);
+    border: 1px solid var(--mhc-border);
+    color: var(--mhc-fg);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mhc-dial-pill:hover,
+.mhc-clickable-pill:hover {
+    filter: brightness(1.2);
+    border-color: var(--mhc-accent);
+    color: var(--mhc-accent);
+}
+
+.mhc-clickable-pill {
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease;
+}
+
+/* ── Interactive Accordion Expanders ── */
+.mhc-deck-item.collapsible {
+    padding: 0;
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+}
+
+.mhc-deck-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    cursor: pointer;
+    user-select: none;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.mhc-deck-item-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.mhc-deck-item-title {
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mhc-deck-item-toggle {
+    font-size: 0.75em;
+    opacity: 0.65;
+    transition: transform 0.2s ease;
+    margin-left: 6px;
+}
+
+.mhc-deck-item.open .mhc-deck-item-toggle {
+    transform: rotate(180deg);
+}
+
+.mhc-deck-item-detail {
+    display: none;
+    padding: 6px 8px 8px 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.9em;
+    line-height: 1.45;
+    background: rgba(0, 0, 0, 0.1);
+}
+
 .mhc-empty-hint {
     font-size: 0.8em;
     color: var(--mhc-fg-muted);

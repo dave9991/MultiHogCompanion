@@ -108,8 +108,8 @@ name: Silas Vance
 playbook: The Professional
 stats: Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1
 moves:
-- Investigate a Mystery (+Sharp): When reading a crime scene, ask 1 question from the GM list.
-- Act Under Fire (+Cool): Roll +Cool to stay steady when panic strikes.
+- Investigate a Mystery (+Sharp) (When reading a crime scene, ask 1 question from the GM list)
+- Act Under Fire (+Cool) (Roll +Cool to stay steady when panic strikes)
 harm: 5
 armor: 1
 gear: 9mm service pistol (2-Harm, close), tactical vest (1-Armor), badge

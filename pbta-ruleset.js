@@ -370,14 +370,15 @@ Companion damage tracking: MultiHog visualizes HP as a descending vitality bar (
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
 Stats: Stat1 +2, Stat2 +1, Stat3 +1, Stat4 +0, Stat5 -1
-Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
+((PILLS)) Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
 Gear: Signature weapon/item (tags) | Armor (value)
-Conditions: None
+((PILLS)) Conditions: None
 Status: Healthy
 
 Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
-Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
+((PILLS)) Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
+((PILLS)) Conditions: None
 Status: Healthy
 [/PARTY]
 
@@ -572,28 +573,35 @@ Format:
 [CHARACTER]
 {{user}} (Archetype): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
 Stats: ${statsExample}
-Moves: Move 1 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning]) | Move 2 (Trigger: [Fictional trigger]. Effect: [PbtA effect/harm/positioning])
+((PILLS)) Moves: Move 1 (Trigger and narrative effect), Move 2 (Trigger and narrative effect)
 Gear: Signature weapon/item (tags), travel gear
 Wealth: Coin 3 (or setting currency)
-Conditions: None
+((PILLS)) Conditions: None
 Hold/Forward: None
 XP: 0/${pacingXp}
 Status: Healthy
-[/CHARACTER]`,
+[/CHARACTER]
+
+PILL FORMATTING (renders as interactive badges with mouse-over tooltips):
+- Moves: Separate moves with commas, placing trigger and mechanical/narrative effect inside trailing parentheses: Move Name (Trigger and effect). The description appears on mouse-over. Keep commas out of the description unless inside parentheses.
+- Conditions: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward). Use plain "None" when unaffected.`,
 
         party: `Companion and party members. MECHANICS ONLY. Every member MUST begin with their own header line. Separate distinct members with an empty line:
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
 Stats: ${statsExample}
-Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
+((PILLS)) Moves: Signature Move (Trigger and narrative effect), Second Move (Trigger and narrative effect)
 Gear: Signature weapon/item (tags) | Armor (value)
-Conditions: None
+((PILLS)) Conditions: None
 Status: Healthy
 
 Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
-Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
-Status: Healthy`,
+((PILLS)) Moves: Signature Move (Trigger and narrative effect)
+((PILLS)) Conditions: None
+Status: Healthy
+
+PILL FORMATTING: Separate companion moves with commas and put the trigger/effect in parentheses: Name (detail). Details appear on hover.`,
 
         combat: `Active enemies and environmental threats in combat.
 Group threats under ENEMIES: and NON-PARTY ALLIES: headers.
@@ -602,14 +610,14 @@ Use this format:
 THREAT LEVEL: (Skirmish / Peril / Catastrophe)
 ENEMIES:
 Name: 4/4 HP | Harm: 0/4 | Armor: 1 | Threat: (Minion / Veteran / Boss)
-Attacks: Attack Name (Harm dealt, tags like close/reach/far/messy), Second Attack (Harm dealt, tags)
+((PILLS)) Attacks: Attack Name (Harm dealt, tags like close/reach/far/messy), Second Attack (Harm dealt, tags)
 Instinct: (What this threat desires or how it fights, e.g. "To overwhelm with numbers")
 Status: Healthy
 
 PILL FORMATTING (the tracker turns these into hoverable pills):
 - Separate multiple attacks, abilities, or statuses with commas, and put each one's detail in trailing parentheses: Name (detail). The detail appears on hover. Keep commas out of the detail text unless they are inside the parentheses.
 - Status entries start with (-) for harmful conditions (red) or (+) for beneficial ones (green), e.g. Status: (-) Winded (Disadvantage on the next Act Under Fire), (+) Enraged (+1 Harm dealt). Use plain "Healthy" when unaffected.
-- Optional extra lines for special threats, same Name (detail) style: Abilities: Heavy Hauler (Holds a grabbed target in place), Weakness: White birch fire (Ignores Armor).`,
+- Optional extra lines for special threats, same Name (detail) style: ((PILLS)) Abilities: Heavy Hauler (Holds a grabbed target in place), Weakness: White birch fire (Ignores Armor).`,
 
         inventory: `Character possessions, equipment, weapons, and wealth.
 MANDATORY FORMAT FOR EVERY ITEM:
@@ -826,7 +834,7 @@ export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName =
         `SUGGESTED MOVES (pick 2): ${genre.moves.join('; ')}.`,
         `NO D&D MECHANICS: Moves MUST use PbtA terminology (Harm, +1 forward, fictional positioning). NEVER write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns".`,
         `NO D&D GEAR: Armor MUST use PbtA armor rating (e.g. Armor 1, Armor 2), NEVER "AC +X". Weapons MUST use tags and Harm (e.g. close, 2 Harm), NEVER D&D damage dice (1d8) or +1/+2 magic suffixes.`,
-        `FORMAT MANDATE: Output [CHARACTER] using Harm: 0/5, Armor, Stats with modifiers, 2 starting Moves, Gear, Conditions: None, Hold/Forward: None, and XP: 0/5. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, HP, spell slots, or daily ability counters.`,
+        `FORMAT MANDATE: Output [CHARACTER] using 5/5 HP | Harm: 0/5 | Armor: 0, Stats with modifiers, ((PILLS)) Moves: Move 1 (detail), Move 2 (detail), Gear, Wealth, ((PILLS)) Conditions: None, Hold/Forward: None, XP: 0/5, Status: Healthy. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, spell slots, or daily ability counters.`,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }
@@ -859,11 +867,18 @@ export function formatInitialPbtaMemo(dossier) {
         statsStr = 'Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1';
     }
 
-    // Format moves
-    const moves = Array.isArray(p.startingMoves) && p.startingMoves.length > 0
+    // Format moves (comma-separated for pill splitting; normalizes "Name: Desc" to "Name (Desc)")
+    const rawMoves = Array.isArray(p.startingMoves) && p.startingMoves.length > 0
         ? p.startingMoves
         : ['Act Under Fire (+Cool)', 'Read a Tense Situation (+Sharp)'];
-    const movesStr = moves.join(' | ');
+    const moves = rawMoves.map(m => {
+        const colonMatch = m.match(/^([^:]+):\s*(.*)$/);
+        if (colonMatch && !/\([^)]+\)$/.test(m)) {
+            return `${colonMatch[1].trim()} (${colonMatch[2].trim()})`;
+        }
+        return m;
+    });
+    const movesStr = moves.join(', ');
 
     // Format gear
     const gearStr = Array.isArray(p.gear) && p.gear.length > 0
@@ -883,13 +898,14 @@ export function formatInitialPbtaMemo(dossier) {
     // 3. CHARACTER Block
     const charLines = [
         `[CHARACTER]`,
-        `${charName} (${playbook}): Harm: 0/${harmMax} | Armor: ${armor}`,
+        `${charName} (${playbook}): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: ${armor}`,
         `Stats: ${statsStr}`,
-        `Moves: ${movesStr}`,
+        `((PILLS)) Moves: ${movesStr}`,
         `Gear: ${gearStr}`,
-        `Conditions: None`,
+        `((PILLS)) Conditions: None`,
         `Hold/Forward: None`,
         `XP: 0/${pacingXp}`,
+        `Status: Healthy`,
         `[/CHARACTER]`,
     ];
     blocks.push(charLines.join('\n'));
@@ -906,15 +922,19 @@ export function formatInitialPbtaMemo(dossier) {
             const comp = companions[i];
             const cName = comp.name || 'Companion';
             const cRole = comp.role || 'Companion';
-            const cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
+            let cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
+            const boonColon = cBoons.match(/^([^:]+):\s*(.*)$/);
+            if (boonColon && !/\([^)]+\)$/.test(cBoons)) {
+                cBoons = `${boonColon[1].trim()} (${boonColon[2].trim()})`;
+            }
             const cApp = comp.appearance || comp.description || (comp.demeanor ? `${comp.demeanor} demeanor` : '');
             if (i > 0) partyLines.push('');
             partyLines.push(
                 `${cName} (${cRole}): 5/5 HP | Harm: 0/5 | Armor: 0`,
                 ...(cApp ? [`Appearance: ${cApp}`] : []),
-                `Moves: ${cBoons}`,
+                `((PILLS)) Moves: ${cBoons}`,
                 `Bond: ${comp.relationship || 'Allied with protagonist'}`,
-                `Conditions: None`,
+                `((PILLS)) Conditions: None`,
                 `Status: Healthy`
             );
         }

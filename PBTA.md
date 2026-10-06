@@ -27,6 +27,12 @@ Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves
 * **Move-Triggered Choices:** In CYOA mode, rollable options represent dramatic fictional Moves (`— [Move Name (+Stat)]`) rather than D&D skill checks against target DCs or ACs.
 * **Companion Bench Resolution:** Off-screen ally tasks resolve with 2d6 + Companion Stat against PbtA tiers (10+ clean return, 7–9 mixed success, 6- trouble/injury), completely removing d20 and DC checks.
 
+### 5. MultiHog State Tracker & Interactive Pills
+* **Tandem Vitality Bar:** MultiHog visualizes PbtA character health as a descending vitality bar ($HP = \text{maxHarm} - \text{curHarm}$). When your character takes Harm, the visual health bar updates in tandem.
+* **Interactive Move Pills:** Playbook Moves render as sleek badge pills (`[ Hack & Slash • ]`). Hovering over a move reveals a tooltip bubble detailing its fictional trigger and mechanical effect.
+* **Buffs & Debuffs:** Character conditions automatically tint in the tracker UI—beneficial effects with `(+)` glow emerald green, while injuries or debuffs with `(-)` render crimson red.
+* **Adversary Attacks:** In combat, monster attacks display as hoverable pills with damage tags like `(close, 2 Harm)` revealed on mouse-over.
+
 ---
 
 ## 🎭 Genre Stat Presets

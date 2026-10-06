@@ -132,8 +132,8 @@ export function buildMonsterEntryContent(monster, names) {
     // descends in tandem with Harm — the same workaround the [PARTY] block uses.
     const combatLines = [
         `${monster.name}: ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: ${parseInt(monster.armor, 10) || 0}`,
-        attacks.length ? `Attacks: ${attacks.join(', ')}` : '',
-        monster.weakness && monster.weakness !== 'Unknown' ? `Weakness: ${monster.weakness}` : '',
+        attacks.length ? `((PILLS)) Attacks: ${attacks.join(', ')}` : '',
+        monster.weakness && monster.weakness !== 'Unknown' ? `((PILLS)) Weakness: ${monster.weakness}` : '',
         doom.length ? `Countdown: ${doom.join(' → ')}` : '',
         'Status: Healthy',
     ].filter(Boolean);

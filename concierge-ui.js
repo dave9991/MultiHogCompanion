@@ -788,6 +788,11 @@ function bindModalEvents() {
 
     // Finalize & Launch Campaign
     $('#mhc_launch_campaign_btn').on('click', async () => {
+        const castEmpty = !(activeDossier?.npcs?.length) && !(activeDossier?.monsters?.length);
+        if (castEmpty && !confirm('No NPCs or monsters have been staged for this campaign. Launch anyway?\n\n(Tip: ask the Concierge to propose a cast based on your outline.)')) {
+            return;
+        }
+
         const overlay = $('#mhc_launch_progress_overlay');
         const label = $('#mhc_launch_progress_label');
         const bar = $('#mhc_launch_progress_bar');

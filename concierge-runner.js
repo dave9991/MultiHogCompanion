@@ -13,6 +13,12 @@
 
 import { serializeDossierToMarkdown } from './concierge-parser.js';
 import { formatInitialPbtaMemo } from './pbta-ruleset.js';
+import {
+    loadMainNpcSectionNames,
+    buildNpcEntryContent,
+    buildMonsterEntryContent,
+    buildNpcKeys,
+} from './concierge-npc-format.js';
 
 /**
  * Send an outgoing user chat message into SillyTavern.
@@ -108,8 +114,9 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
  * Injects dossier NPCs directly into the campaign's active lorebook ({prefix}_NPCs).
  * Ensures companions appear immediately in Campaign Records without manual intervention.
  */
-async function injectNpcsIntoCampaignLorebook(chatId, npcs) {
-    if (!npcs || !npcs.length) return;
+async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], sectionNames = null) {
+    if ((!npcs || !npcs.length) && (!monsters || !monsters.length)) return;
+    const names = sectionNames || await loadMainNpcSectionNames();
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     if (!ctx) return;
 
@@ -140,51 +147,57 @@ async function injectNpcsIntoCampaignLorebook(chatId, npcs) {
         bookData.entries = bookData.entries || {};
 
         let modified = false;
-        for (const n of npcs) {
-            const cleanName = (n.name || '').trim();
-            if (!cleanName) continue;
+        let mainSettings = {};
+        try {
+            mainSettings = (typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null) || {};
+        } catch (_) {}
+
+        const toWrite = [
+            ...(npcs || []).map(n => ({ name: n.name, ...buildNpcEntryContent(n, names) })),
+            ...(monsters || []).map(m => ({ name: m.name, ...buildMonsterEntryContent(m, names) })),
+        ];
+
+        for (const item of toWrite) {
+            const cleanName = (item.name || '').trim();
+            if (!cleanName || !item.core) continue;
 
             const existingEntry = Object.values(bookData.entries).find(e => {
                 const label = (e.comment || '').replace(/^\[.*?\]\s*/i, '').trim().toLowerCase();
                 return label === cleanName.toLowerCase();
             });
-            if (existingEntry) continue;
+            if (existingEntry) {
+                // Re-launch / edited dossier: refresh only the protected [CORE] identity block and
+                // leave any chronicle text the Router has since appended untouched.
+                const current = String(existingEntry.content || '');
+                if (/\[CORE\][\s\S]*?\[\/CORE\]/i.test(current)) {
+                    const next = current.replace(/\[CORE\][\s\S]*?\[\/CORE\]/i, () => item.core);
+                    if (next !== current) {
+                        existingEntry.content = next;
+                        modified = true;
+                    }
+                }
+                continue;
+            }
 
             const uids = Object.keys(bookData.entries).map(Number).filter(num => !isNaN(num));
             const nextUid = uids.length > 0 ? Math.max(...uids) + 1 : 0;
-            const firstName = cleanName.split(/\s+/)[0];
-            const keys = [cleanName];
-            if (firstName && firstName !== cleanName) keys.push(firstName);
-            if (n.role) keys.push(n.role);
-
-            const coreLines = [
-                '[CORE]',
-                `Role: ${n.role || 'Companion'}`,
-                n.appearance ? `Appearance: ${n.appearance}` : null,
-                n.demeanor ? `Demeanor: ${n.demeanor}` : null,
-                n.background ? `Background: ${n.background}` : null,
-                n.relationship ? `Relationship: ${n.relationship}` : null,
-                n.movesOrBoons ? `Moves/Boons: ${n.movesOrBoons}` : null,
-                n.notes ? `Notes: ${n.notes}` : null,
-                '[/CORE]',
-            ].filter(Boolean);
 
             bookData.entries[nextUid] = {
                 uid: nextUid,
-                key: keys,
+                key: buildNpcKeys(cleanName),
                 keysecondary: [],
                 comment: cleanName,
-                content: coreLines.join('\n'),
+                content: item.full,
                 constant: false,
                 selective: false,
                 selectiveLogic: 0,
                 addMemo: true,
-                order: 100,
-                position: 0,
+                order: mainSettings.routerDefaultOrder ?? 100,
+                position: mainSettings.routerDefaultPosition ?? 0,
                 disable: false,
                 probability: 100,
                 useProbability: false,
-                depth: 4,
+                depth: mainSettings.routerDefaultDepth ?? 4,
             };
             modified = true;
         }
@@ -326,39 +339,35 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             }
         }
 
-        // ── 4. Upsert Supporting NPCs & Monsters into NPC Library ─────────────
+        // ── 4. Register Supporting NPCs & Monsters (library + campaign lorebook) ──
         const npcs = dossier.npcs || [];
         const monsters = dossier.monsters || [];
         if (npcs.length || monsters.length) {
             onProgress('👥 Registering supporting cast & adversaries in library...', 70);
+            const sectionNames = await loadMainNpcSectionNames();
             try {
                 const npcLib = await import('../SillyTavern-MultihogDnDFramework/npc-library.js');
-                if (typeof npcLib.upsertLibraryNpc === 'function') {
-                    for (const n of npcs) {
-                        const content = `[NPC]\nName: ${n.name}\nRole: ${n.role || 'Ally'}\nAppearance: ${n.appearance || 'None'}\nDemeanor: ${n.demeanor || 'None'}\nRelationship: ${n.relationship || 'Ally'}\nBackground: ${n.background || 'None'}\nMoves/Boons: ${n.movesOrBoons || 'None'}\nNotes: ${n.notes || 'None'}\n[/NPC]`;
-                        await npcLib.upsertLibraryNpc({
-                            name: n.name,
-                            synopsis: `${n.name} — ${n.role || 'Ally'}. ${n.appearance ? `Look: ${n.appearance}. ` : ''}${n.relationship ? `Bond: ${n.relationship}. ` : ''}${n.demeanor ? `Demeanor: ${n.demeanor}` : ''}`.trim(),
-                            content,
-                        });
+                if (typeof npcLib.saveNpcToLibrary === 'function') {
+                    // Main's saveNpcToLibrary(settings, record) upserts by name and persists settings.
+                    const libEntries = [
+                        ...npcs.map(n => ({ name: n.name, content: buildNpcEntryContent(n, sectionNames).core, notes: n.notes || '' })),
+                        ...monsters.map(m => ({ name: m.name, content: buildMonsterEntryContent(m, sectionNames).core, notes: m.notes || '' })),
+                    ];
+                    for (const e of libEntries) {
+                        if (!e.name || !e.content) continue;
+                        await npcLib.saveNpcToLibrary(null, { name: e.name, content: e.content, keys: buildNpcKeys(e.name), notes: e.notes });
                     }
-                    for (const m of monsters) {
-                        const content = `[NPC]\nName: ${m.name}\nThreat Level: PbtA Adversary (Harm ${m.harm}, Armor ${m.armor})\nAttacks: ${m.attacks.join(', ')}\nWeakness: ${m.weakness}\nNotes: ${m.notes}\n[/NPC]`;
-                        await npcLib.upsertLibraryNpc({
-                            name: m.name,
-                            synopsis: `${m.name} — Harm ${m.harm}, Armor ${m.armor}. Weakness: ${m.weakness}`,
-                            content,
-                        });
-                    }
+                } else {
+                    console.warn('[PbtA Concierge] Main NPC library API (saveNpcToLibrary) not found — skipping library registration. Main extension may have changed.');
                 }
             } catch (err) {
-                console.warn('[PbtA Concierge] NPC / Monster registration encountered non-fatal error:', err);
+                console.warn('[PbtA Concierge] NPC / Monster library registration failed:', err);
             }
 
-            // Also inject companions directly into the active campaign lorebook ({prefix}_NPCs)
-            // so they appear immediately in Campaign Records without requiring manual import
+            // Also inject into the active campaign lorebook ({prefix}_NPCs) so they appear
+            // immediately in Campaign Records without requiring manual import.
             try {
-                await injectNpcsIntoCampaignLorebook(chatId, npcs);
+                await injectNpcsIntoCampaignLorebook(chatId, npcs, monsters, sectionNames);
             } catch (loreErr) {
                 console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
             }

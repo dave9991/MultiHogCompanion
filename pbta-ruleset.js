@@ -475,13 +475,19 @@ Status: Healthy`,
 
         combat: `Active enemies and environmental threats in combat.
 Group threats under ENEMIES: and NON-PARTY ALLIES: headers.
+CRITICAL FORMAT: Every combatant MUST start on its own line with Name: cur/max HP | Harm: cur/max | Armor: X — the HP token is required for the tracker to recognize the combatant. HP descends in tandem with Harm (e.g. a 4-Harm enemy: 4/4 HP | Harm: 0/4; after 1 Harm: 3/4 HP | Harm: 1/4; at 4 Harm: 0/4 HP | Harm: 4/4, Status: Defeated).
 Use this format:
 THREAT LEVEL: (Skirmish / Peril / Catastrophe)
 ENEMIES:
-Name: Harm [current/max] | Armor [X] | Threat: (Minion / Veteran / Boss)
-Attacks: Attack Name (Harm dealt, tags like close/reach/far/messy)
+Name: 4/4 HP | Harm: 0/4 | Armor: 1 | Threat: (Minion / Veteran / Boss)
+Attacks: Attack Name (Harm dealt, tags like close/reach/far/messy), Second Attack (Harm dealt, tags)
 Instinct: (What this threat desires or how it fights, e.g. "To overwhelm with numbers")
-Status: Healthy`,
+Status: Healthy
+
+PILL FORMATTING (the tracker turns these into hoverable pills):
+- Separate multiple attacks, abilities, or statuses with commas, and put each one's detail in trailing parentheses: Name (detail). The detail appears on hover. Keep commas out of the detail text unless they are inside the parentheses.
+- Status entries start with (-) for harmful conditions (red) or (+) for beneficial ones (green), e.g. Status: (-) Winded (Disadvantage on the next Act Under Fire), (+) Enraged (+1 Harm dealt). Use plain "Healthy" when unaffected.
+- Optional extra lines for special threats, same Name (detail) style: Abilities: Heavy Hauler (Holds a grabbed target in place), Weakness: White birch fire (Ignores Armor).`,
 
         inventory: `Character possessions, equipment, weapons, and wealth.
 MANDATORY FORMAT FOR EVERY ITEM:

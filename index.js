@@ -730,11 +730,12 @@ function scheduleSync(reason = '', delay = 350) {
 }
 
 /**
- * Applies the PbtA Game Cartridge to MultiHog settings.
+ * Applies the PbtA Game Cartridge to MultiHog settings, optionally accepting dynamic overrides.
  * @param {string} genreKey
+ * @param {object} [overrides={}]
  * @returns {Promise<boolean>}
  */
-export async function applyPbtACartridge(genreKey = 'fantasy') {
+export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     const ctx = SillyTavern.getContext();
     const s = ctx.extensionSettings?.rpg_tracker;
     if (!s) {
@@ -742,7 +743,7 @@ export async function applyPbtACartridge(genreKey = 'fantasy') {
         return false;
     }
 
-    const cartridge = buildPbtACartridge(genreKey);
+    const cartridge = buildPbtACartridge(genreKey, overrides);
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
 
     // 1. Ensure cartridge exists in MultiHog's cartridge database
@@ -792,7 +793,8 @@ export async function applyPbtACartridge(genreKey = 'fantasy') {
     // 8. Re-apply sysprompt via MultiHog runtime bridge
     await refreshMultihogRuntime();
 
-    showToast('success', `PbtA ruleset (${genre.label}) applied to this chat! 🎲`, 'PbtA Engine Active');
+    const activeLabel = overrides.systemLabel || overrides.name || genre.label;
+    showToast('success', `PbtA ruleset (${activeLabel}) applied to this chat! 🎲`, 'PbtA Engine Active');
     updateRulesetBadge();
     return true;
 }

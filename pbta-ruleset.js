@@ -399,15 +399,101 @@ This roll is mandatory, always pre-return.
 }
 
 /**
- * Builds the PbtA CYOA prompt customized for the given genre.
+ * Derives dynamic CYOA button choices directly from an array of PbtA starting moves.
+ *
+ * @param {string[]} moves Array of move strings (e.g. "Investigate a Mystery (+Sharp): ...")
+ * @param {string} [contextLabel] Context or genre label
+ * @returns {string[]} Formatted CYOA button strings
  */
-export function buildPbtACyoaPrompt(genreKey = 'fantasy') {
+export function deriveCyoaExamplesFromMoves(moves = [], contextLabel = '') {
+    if (!Array.isArray(moves) || moves.length === 0) return [];
+    const buttons = [];
+    let idx = 1;
+
+    for (const moveStr of moves) {
+        if (buttons.length >= 4) break;
+        const clean = moveStr.replace(/^[\*\-\s]+/, '').trim();
+        if (!clean) continue;
+
+        // Pattern: Move Name (+Stat): description OR Move Name (+Stat)
+        const match = clean.match(/^([^:\(]+?)\s*(\([+-]?[a-zA-Z]+\))?(?:\s*:\s*(.*))?$/);
+        if (match) {
+            const moveName = match[1].trim();
+            const statTag = match[2] ? match[2].trim() : '';
+            const desc = match[3] ? match[3].trim() : '';
+            const statWord = statTag.replace(/[\(\)+-]/g, '').toLowerCase();
+
+            let emoji = '⚡';
+            if (/sharp|wits|mind|insight|logic|investigat|percept/i.test(statWord + moveName)) emoji = '🔍';
+            else if (/cool|nerve|stealth|skulk|shadow/i.test(statWord + moveName)) emoji = '🤫';
+            else if (/hard|might|brawn|iron|flesh|danger|combat|ass|strike/i.test(statWord + moveName)) emoji = '💥';
+            else if (/hot|heart|charm|sway|parley|manipulat|talk/i.test(statWord + moveName)) emoji = '🗣️';
+            else if (/weird|arcana|forbidden|attune|magic|freak/i.test(statWord + moveName)) emoji = '🔮';
+            else if (/agility|quick|edge|prowl|speed/i.test(statWord + moveName)) emoji = '🏃';
+            else if (/tech|scrap|systems|hack/i.test(statWord + moveName)) emoji = '💻';
+
+            let actionText = '';
+            if (desc) {
+                const firstClause = desc.split(/[\.;]/)[0].trim();
+                actionText = firstClause.charAt(0).toUpperCase() + firstClause.slice(1);
+            } else {
+                actionText = `Take action to ${moveName.toLowerCase()}`;
+            }
+
+            if (!/^[A-Z]/.test(actionText)) actionText = `Execute ${moveName}`;
+
+            const tagPart = statTag ? ` — [${moveName} ${statTag}]` : ` — [${moveName}]`;
+            buttons.push(`${idx}. ${emoji} ${actionText}${tagPart}`);
+            idx++;
+        }
+    }
+
+    // Complement with standard narrative and conversational choices up to 5
+    if (buttons.length === 1) {
+        buttons.push(`${idx++}. 🗣️ Speak directly with those present to probe their intentions`);
+        buttons.push(`${idx++}. 🏃 Take cover and observe how the situation develops`);
+        buttons.push(`${idx++}. 🔍 Closely examine the immediate surroundings for hidden hazards or exits`);
+        buttons.push(`${idx++}. 🎒 Check your gear and prepare for immediate trouble`);
+    } else if (buttons.length === 2) {
+        buttons.push(`${idx++}. 🗣️ Press for answers: "Tell me what you know before this escalates."`);
+        buttons.push(`${idx++}. 🏃 Reposition carefully to secure a tactical vantage point`);
+        buttons.push(`${idx++}. 🔍 Check your perimeter and watch for an impending counter-move`);
+    } else if (buttons.length === 3) {
+        buttons.push(`${idx++}. 🗣️ "We can do this the easy way or the hard way. Your call."`);
+        buttons.push(`${idx++}. 🏃 Disengage and slip away into the cover of the environment`);
+    } else if (buttons.length === 4) {
+        buttons.push(`${idx++}. 🗣️ Hold up a hand and speak calmly to defuse the rising tension`);
+    }
+
+    return buttons;
+}
+
+/**
+ * Builds the PbtA CYOA prompt customized for the given genre and overrides.
+ *
+ * @param {string} [genreKey='fantasy']
+ * @param {object} [overrides={}]
+ * @returns {string}
+ */
+export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
 
-    const exampleButtons = (genre.cyoaExamples && genre.cyoaExamples.length > 0)
-        ? genre.cyoaExamples.map(e => `<button>${e}</button>`).join('\n')
-        : '<button>1. ⚔️ Leap forward with blade drawn to strike the beast — [Hack & Slash (+Might)]</button>';
+    let buttonList = [];
+    if (Array.isArray(overrides.cyoaExamples) && overrides.cyoaExamples.length > 0) {
+        buttonList = overrides.cyoaExamples;
+    } else if (Array.isArray(overrides.startingMoves) && overrides.startingMoves.length > 0) {
+        buttonList = deriveCyoaExamplesFromMoves(overrides.startingMoves, overrides.systemLabel || genre.label);
+    } else if (genre.cyoaExamples && genre.cyoaExamples.length > 0) {
+        buttonList = genre.cyoaExamples;
+    }
+
+    if (!buttonList || buttonList.length === 0) {
+        buttonList = ['1. ⚔️ Leap forward with blade drawn to strike the beast — [Hack & Slash (+Might)]'];
+    }
+
+    const exampleButtons = buttonList.map(e => `<button>${e}</button>`).join('\n');
     const examples = `<choices>\n${exampleButtons}\n</choices>`;
+    const displayLabel = overrides.systemLabel || overrides.name || genre.label;
 
     return `[END OF OUTPUT REQUIREMENT]
 - You MUST ALWAYS end your response with exactly 5 choices for the user. NEVER forget the choices.
@@ -424,7 +510,7 @@ Choice types available:
 - MOVE TRIGGER: Action that triggers a Move with stat modifier: — [Move Name (+Stat)]
 - ARCHETYPE / TAG: Action leveraging special playbook moves or gear tags
 
-EXAMPLES (${genre.label}):
+EXAMPLES (${displayLabel}):
 ${examples}
 
 STRICT GENERATION ORDER:
@@ -437,11 +523,18 @@ You must generate exactly 5 choices following narrative context:
 }
 
 /**
- * Generates the stock prompts tailored for a given genre.
+ * Generates the stock prompts tailored for a given genre and overrides.
+ *
+ * @param {string} [genreKey='fantasy']
+ * @param {object} [overrides={}]
+ * @returns {object}
  */
-export function buildPbtAStockPrompts(genreKey = 'fantasy') {
+export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
-    const statsExample = genre.stats.map((s, idx) => `${s} ${idx === 0 ? '+2' : idx < 3 ? '+1' : idx === 3 ? '+0' : '-1'}`).join(', ');
+    const statsList = (Array.isArray(overrides.stats) && overrides.stats.length > 0)
+        ? overrides.stats
+        : genre.stats;
+    const statsExample = statsList.map((s, idx) => `${s} ${idx === 0 ? '+2' : idx < 3 ? '+1' : idx === 3 ? '+0' : '-1'}`).join(', ');
 
     return {
         character: `Main character's core stats. MECHANICS ONLY: Never include narrative background or physical appearance in [CHARACTER].
@@ -517,9 +610,13 @@ Other Items:
 }
 
 /**
- * Builds the complete PbtA Game Cartridge object.
+ * Builds the complete PbtA Game Cartridge object, optionally accepting dynamic overrides.
+ *
+ * @param {string} [genreKey='fantasy']
+ * @param {object} [overrides={}]
+ * @returns {object} Game cartridge definition
  */
-export function buildPbtACartridge(genreKey = 'fantasy') {
+export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
 
     const customSyspromptLibrary = [
@@ -626,21 +723,18 @@ export function buildPbtACartridge(genreKey = 'fantasy') {
         customSyspromptLibrary,
         syspromptModules,
         syspromptSectionOrder: [],
-        stockPrompts: buildPbtAStockPrompts(genreKey),
+        stockPrompts: buildPbtAStockPrompts(genreKey, overrides),
         cyoaConfig: {
             useCustomPrompt: true,
-            customPromptText: buildPbtACyoaPrompt(genreKey),
+            customPromptText: buildPbtACyoaPrompt(genreKey, overrides),
             useButtonTags: true,
             useXmlTag: true,
             useEmojis: true,
             stripOldChoicesFromPrompt: true,
         },
         rngEnabled: true,
-        // "rngQueueD20" is a misnomer inherited from MultiHog — it enables the
-        // *polyhedral* RNG queue (as opposed to the d100-only queue).  Each line
-        // contains ALL standard die sizes: d20, d4, d6, d8, d10, d12.  PbtA's
-        // sysprompt instructs the LLM to consume the d6 values from consecutive
-        // lines (Line N d6 + Line N+1 d6) for 2d6 move resolution.
+        // "rngQueueD20" enables the polyhedral RNG queue from which the PbtA
+        // engine intercepts and consumes 2d6 values.
         rngQueueD20: true,
         rngQueueD100: false,
         diceD100Mode: false,
@@ -658,11 +752,18 @@ export function buildPbtACartridge(genreKey = 'fantasy') {
         },
     };
 
+    const cleanTitleSlug = overrides.campaignTitle
+        ? overrides.campaignTitle.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+        : '';
+    const cartridgeId = overrides.id || (cleanTitleSlug ? `pbta_${cleanTitleSlug}` : PBTA_CARTRIDGE_ID);
+    const cartridgeName = overrides.name || (overrides.campaignTitle ? `PbtA: ${overrides.campaignTitle}` : `PbtA Narrative Engine (${overrides.systemLabel || genre.label})`);
+    const cartridgeDesc = overrides.description || `Powered by the Apocalypse ruleset: 2d6 moves (10+/7-9/6-), Harm clocks, and zero manual dice rolling. Tailored for ${overrides.systemLabel || genre.label}.`;
+
     return {
-        id: PBTA_CARTRIDGE_ID,
-        name: `PbtA Narrative Engine (${genre.label})`,
-        description: `Powered by the Apocalypse ruleset: 2d6 moves (10+/7-9/6-), Harm clocks, and zero manual dice rolling. Tailored for ${genre.label}.`,
-        icon: genre.icon,
+        id: cartridgeId,
+        name: cartridgeName,
+        description: cartridgeDesc,
+        icon: overrides.icon || genre.icon || '🎲',
         createdAt: Date.now(),
         updatedAt: Date.now(),
         format: CARTRIDGE_FORMAT,

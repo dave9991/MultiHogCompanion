@@ -40,6 +40,7 @@ export function createEmptyDossier() {
             crisis: '',
             openingPrompt: '',
         },
+        cyoaExamples: [],
     };
 }
 
@@ -48,32 +49,61 @@ export function createEmptyDossier() {
  * @param {string} text
  * @returns {string}
  */
+/**
+ * Strips [UPDATE_DOSSIER] and [CONCIERGE_STATE] blocks (and standalone tags) out of text for display.
+ * @param {string} text
+ * @returns {string}
+ */
 export function stripConciergeStateBlocks(text) {
     if (!text) return '';
     return text
+        .replace(/\[UPDATE_DOSSIER\][\s\S]*?(?:\[\/UPDATE_DOSSIER\]|$)/gi, '')
         .replace(/\[CONCIERGE_STATE\][\s\S]*?(?:\[\/CONCIERGE_STATE\]|$)/gi, '')
+        .replace(/\[PROTAGONIST\][\s\S]*?(?:\[\/PROTAGONIST\]|$)/gi, '')
+        .replace(/\[NPC\][\s\S]*?(?:\[\/NPC\]|$)/gi, '')
+        .replace(/\[MONSTER\][\s\S]*?(?:\[\/MONSTER\]|$)/gi, '')
+        .replace(/\[MAP\][\s\S]*?(?:\[\/MAP\]|$)/gi, '')
+        .replace(/\[KICK\][\s\S]*?(?:\[\/KICK\]|$)/gi, '')
+        .replace(/\[CYOA\][\s\S]*?(?:\[\/CYOA\]|$)/gi, '')
+        .replace(/\[REMOVE_(?:NPC|MONSTER|MAP):[^\n\]]+\]/gi, '')
+        .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS)\]/gi, '')
+        .replace(/```(?:text|markdown)?\s*```/gi, '')
         .trim();
 }
 
 /**
- * Parse key-value lines (e.g. "name: Silas", "harm: 4")
+ * Resilient key-value parser handling markdown bullets, bolding, and colons.
+ * Matches lines like:
+ *   name: Silas
+ *   **Playbook:** Occult Scholar
+ *   - **Role:** Ally
  * @param {string} block
  * @returns {Record<string, string>}
  */
 function parseKeyValueLines(block) {
     const res = {};
+    if (!block) return res;
     const lines = block.split('\n');
     for (const line of lines) {
-        const m = line.match(/^\s*([a-zA-Z0-9_\-]+)\s*:\s*(.*)$/);
+        // Strip leading bullets / numbering / indentation
+        const clean = line.replace(/^[\s\-*+]+/, '').trim();
+        // Match key: value (with optional bolding **key**:)
+        const m = clean.match(/^(?:\*\*)?([a-zA-Z0-9_\-]+)(?:\*\*)?\s*:\s*(.*)$/);
         if (m) {
-            res[m[1].toLowerCase()] = m[2].trim();
+            let val = m[2].trim();
+            // Remove wrapping bold / italic if present
+            val = val.replace(/^(\*\*|__|\*|_)(.*?)\1$/, '$2').trim();
+            res[m[1].toLowerCase()] = val;
         }
     }
     return res;
 }
 
 /**
- * Parse stats line like "Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1"
+ * Resilient stats string parser.
+ * Handles both "Cool +2" and "+2 Cool", with colons, commas, or parentheses.
+ * e.g. "Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1"
+ * e.g. "+2 Cool, +1 Sharp, +1 Hard, 0 Hot, -1 Weird"
  * @param {string} line
  * @returns {Record<string, number>}
  */
@@ -82,92 +112,339 @@ function parseStatsString(line) {
     if (!line) return stats;
     const parts = line.split(/[,|;]/);
     for (const part of parts) {
-        const m = part.trim().match(/^([a-zA-Z]+)\s*([+-]?\d+)/);
+        const clean = part.replace(/[*_()]/g, '').trim();
+        // Pattern A: Cool +2 or Cool: +2
+        let m = clean.match(/^([a-zA-Z]+)\s*:?\s*([+-]?\d+)/);
         if (m) {
             stats[m[1]] = parseInt(m[2], 10);
+            continue;
+        }
+        // Pattern B: +2 Cool
+        m = clean.match(/^([+-]?\d+)\s+([a-zA-Z]+)/);
+        if (m) {
+            stats[m[2]] = parseInt(m[1], 10);
+            continue;
         }
     }
     return stats;
 }
 
 /**
- * Parse list items (lines starting with "- " or "* ")
+ * Resilient list item parser (lines starting with "- ", "* ", or numbered "1. ").
  * @param {string} block
  * @param {string} sectionKey
  * @returns {string[]}
  */
 function parseBulletList(block, sectionKey) {
-    const re = new RegExp(`${sectionKey}\\s*:\\s*\\n?((?:\\s*[-*]\\s+[^\\n]+\\n?)*)`, 'i');
+    if (!block) return [];
+    // Match sectionKey header (with optional bolding)
+    const re = new RegExp(`(?:^|\n)[\\s\\-*]*(?:\\*\\*)?${sectionKey}(?:\\*\\*)?\\s*:\\s*\\n?((?:\\s*(?:[-*+]|\\d+[.)])\\s+[^\\n]+\\n?)*)`, 'i');
     const m = block.match(re);
-    if (!m) return [];
+    if (!m || !m[1]) return [];
     return m[1]
         .split('\n')
-        .map(l => l.replace(/^\s*[-*]\s+/, '').trim())
+        .map(l => l.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim())
         .filter(Boolean);
 }
 
 /**
- * Incremental parser that updates a live Campaign Dossier with tags found in the Concierge's response.
+ * Formats a live dossier object into a clean, compact markdown representation
+ * pinned into LLM context as the single Source of Truth.
  *
- * @param {string} text Full response text from LLM
- * @param {object} dossier Current dossier to patch
- * @returns {object} Updated dossier clone
+ * @param {object} dossier
+ * @returns {string}
  */
-export function parseConciergeStateBlock(text, dossier) {
-    if (!text || typeof text !== 'string') return dossier;
+export function formatDossierForContext(dossier) {
+    if (!dossier) {
+        return `[CURRENT_CAMPAIGN_DOSSIER]\nStatus: UNINITIALIZED\n[/CURRENT_CAMPAIGN_DOSSIER]`;
+    }
+    const meta = dossier.meta || {};
+    const p = dossier.protagonist || {};
+    const npcs = dossier.npcs || [];
+    const monsters = dossier.monsters || [];
+    const maps = dossier.maps || [];
+    const kick = dossier.theKick || {};
 
+    const hasAnyContent = !!(
+        (meta.premise && meta.premise.trim()) ||
+        (p.name && p.name.trim()) ||
+        npcs.length > 0 ||
+        monsters.length > 0 ||
+        maps.length > 0 ||
+        kick.crisis ||
+        kick.startingLocation
+    );
+
+    if (!hasAnyContent) {
+        return `[CURRENT_CAMPAIGN_DOSSIER]
+Status: UNINITIALIZED (No campaign elements established yet)
+System: ${meta.systemLabel || 'Fantasy (Dungeon World)'}
+Protagonist: Unset
+NPCs: None
+Monsters: None
+Maps: None
+The Kick: Unset
+[/CURRENT_CAMPAIGN_DOSSIER]`;
+    }
+
+    const lines = [
+        '[CURRENT_CAMPAIGN_DOSSIER]',
+        'Status: IN_PROGRESS',
+        `Title: ${meta.title || 'Untitled Campaign'}`,
+        `System: ${meta.systemLabel || 'Fantasy'} (${meta.systemKey || 'fantasy'})`,
+        meta.premise ? `Premise: ${meta.premise}` : null,
+    ];
+
+    if (p.name || p.playbook) {
+        lines.push(`Protagonist: ${p.name || 'Unnamed Adventurer'} (Playbook: ${p.playbook || 'In Development'})`);
+        if (p.stats && Object.keys(p.stats).length) {
+            const statStr = Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ');
+            lines.push(`  Stats: ${statStr}`);
+        }
+        lines.push(`  Harm: ${p.harm?.max ?? 5} | Armor: ${p.harm?.armor ?? 0}`);
+        if (p.startingMoves && p.startingMoves.length) {
+            lines.push(`  Moves: ${p.startingMoves.join(' | ')}`);
+        }
+        if (p.gear && p.gear.length) {
+            lines.push(`  Gear: ${p.gear.join(', ')}`);
+        }
+        if (p.bio) {
+            lines.push(`  Bio: ${p.bio}`);
+        }
+    } else {
+        lines.push('Protagonist: Unset');
+    }
+
+    if (npcs.length) {
+        lines.push(`NPCs (${npcs.length}):`);
+        npcs.forEach(n => {
+            const role = n.role ? ` [Role: ${n.role}]` : '';
+            const bond = n.relationship ? ` (Bond: ${n.relationship})` : '';
+            const look = n.appearance ? ` (Look: ${n.appearance})` : '';
+            lines.push(`  - ${n.name}${role}${bond}${look}`);
+        });
+    } else {
+        lines.push('NPCs: None');
+    }
+
+    if (monsters.length) {
+        lines.push(`Monsters (${monsters.length}):`);
+        monsters.forEach(m => {
+            lines.push(`  - ${m.name} [Harm: ${m.harm}, Armor: ${m.armor}] (Weakness: ${m.weakness || 'Unknown'})`);
+        });
+    } else {
+        lines.push('Monsters: None');
+    }
+
+    if (maps.length) {
+        lines.push(`Maps (${maps.length}):`);
+        maps.forEach(m => {
+            lines.push(`  - ${m.site} [${m.kind}, Threat: ${m.threat}]`);
+        });
+    } else {
+        lines.push('Maps: None');
+    }
+
+    if (kick.startingLocation || kick.crisis) {
+        lines.push('The Kick:');
+        if (kick.startingLocation) lines.push(`  Starting Location: ${kick.startingLocation}`);
+        if (kick.crisis) lines.push(`  Crisis: ${kick.crisis}`);
+    } else {
+        lines.push('The Kick: Unset');
+    }
+
+    lines.push('[/CURRENT_CAMPAIGN_DOSSIER]');
+    return lines.filter(Boolean).join('\n');
+}
+
+/**
+ * Formats recent changelog records into a compact section for LLM context.
+ * @param {string[]} changelog
+ * @param {number} [maxEntries=8]
+ * @returns {string}
+ */
+export function formatChangelogForContext(changelog, maxEntries = 8) {
+    if (!Array.isArray(changelog) || !changelog.length) {
+        return `[RECENT_CHANGELOG]\n(No blueprint mutations recorded yet)\n[/RECENT_CHANGELOG]`;
+    }
+    const recent = changelog.slice(-maxEntries);
+    return `[RECENT_CHANGELOG]\n${recent.map(c => `- ${c}`).join('\n')}\n[/RECENT_CHANGELOG]`;
+}
+
+/**
+ * Applies updates from Concierge text to a dossier, returning a detailed
+ * transaction result report (changes, errors, and updated dossier).
+ *
+ * Supports both [UPDATE_DOSSIER] / [CONCIERGE_STATE] wrapper blocks and
+ * standalone blocks ([PROTAGONIST], [NPC], etc.).
+ *
+ * @param {string} text LLM response text
+ * @param {object} dossier Current dossier to patch
+ * @returns {{
+ *   success: boolean,
+ *   updatedDossier: object,
+ *   changes: string[],
+ *   errors: string[],
+ *   hasMutations: boolean
+ * }}
+ */
+export function applyDossierUpdates(text, dossier) {
+    const fallbackResult = {
+        success: true,
+        updatedDossier: dossier,
+        changes: [],
+        errors: [],
+        hasMutations: false,
+    };
+
+    if (!text || typeof text !== 'string') return fallbackResult;
+
+    // 1. Locate directive content: [UPDATE_DOSSIER] or [CONCIERGE_STATE]
+    let raw = null;
+    const updateMatch = text.match(/\[UPDATE_DOSSIER\]([\s\S]*?)(?:\[\/UPDATE_DOSSIER\]|$)/i);
     const stateMatch = text.match(/\[CONCIERGE_STATE\]([\s\S]*?)(?:\[\/CONCIERGE_STATE\]|$)/i);
-    if (!stateMatch) return dossier;
 
-    const raw = stateMatch[1];
+    if (updateMatch) {
+        raw = updateMatch[1];
+    } else if (stateMatch) {
+        raw = stateMatch[1];
+    } else {
+        // Fallback: check if text contains standalone blocks directly
+        const hasDirectBlocks = /\[(?:PROTAGONIST|NPC|MONSTER|MAP|KICK|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS)\]/i.test(text);
+        if (hasDirectBlocks) {
+            raw = text;
+        }
+    }
+
+    if (!raw) return fallbackResult;
+
     const updated = JSON.parse(JSON.stringify(dossier));
+    const changes = [];
+    const errors = [];
 
-    // 1. Meta / System
+    // ── 1. Meta / System ────────────────────────────────────────────────────────
     const sysMatch = raw.match(/system\s*:\s*([a-zA-Z0-9_\-]+)/i);
     if (sysMatch) {
         const key = sysMatch[1].trim().toLowerCase();
         if (PBTA_GENRES[key]) {
-            updated.meta.systemKey = key;
-            updated.meta.systemLabel = PBTA_GENRES[key].label;
+            if (updated.meta.systemKey !== key) {
+                updated.meta.systemKey = key;
+                updated.meta.systemLabel = PBTA_GENRES[key].label;
+                changes.push(`PbtA Engine set to ${updated.meta.systemLabel} (${key})`);
+            }
+        } else {
+            errors.push(`Unknown system engine "${key}". Available: ${Object.keys(PBTA_GENRES).join(', ')}`);
         }
     }
 
-    const premiseMatch = raw.match(/premise\s*:\s*([^\n]+)/i);
+    const premiseMatch = raw.match(/premise\s*:\s*([^\n\r]+)/i);
     if (premiseMatch) {
-        updated.meta.premise = premiseMatch[1].trim();
-        if (!updated.meta.title || updated.meta.title === 'Untitled PbtA Campaign') {
-            updated.meta.title = updated.meta.premise.slice(0, 40) + '...';
+        const newPremise = premiseMatch[1].trim().replace(/^(\*\*|__)(.*?)\1$/, '$2');
+        if (newPremise && updated.meta.premise !== newPremise) {
+            updated.meta.premise = newPremise;
+            if (!updated.meta.title || updated.meta.title === 'Untitled PbtA Campaign') {
+                updated.meta.title = newPremise.slice(0, 40) + '...';
+            }
+            changes.push(`Premise updated: "${newPremise}"`);
         }
     }
 
-    // 2. Protagonist
+    // ── 2. Protagonist ──────────────────────────────────────────────────────────
     const protoMatch = raw.match(/\[PROTAGONIST\]([\s\S]*?)(?:\[\/PROTAGONIST\]|$)/i);
     if (protoMatch) {
         const pBlock = protoMatch[1];
         const kv = parseKeyValueLines(pBlock);
 
-        if (kv.name) updated.protagonist.name = kv.name;
-        if (kv.playbook) updated.protagonist.playbook = kv.playbook;
-        if (kv.bio) updated.protagonist.bio = kv.bio;
-        if (kv.stats) updated.protagonist.stats = parseStatsString(kv.stats);
-        if (kv.harm) updated.protagonist.harm.max = parseInt(kv.harm, 10) || 5;
-        if (kv.armor) updated.protagonist.harm.armor = parseInt(kv.armor, 10) || 0;
+        if (kv.name && updated.protagonist.name !== kv.name) {
+            changes.push(`Protagonist name: "${kv.name}" (was "${updated.protagonist.name || 'Unnamed'}")`);
+            updated.protagonist.name = kv.name;
+        }
+        if (kv.playbook && updated.protagonist.playbook !== kv.playbook) {
+            changes.push(`Protagonist playbook: "${kv.playbook}" (was "${updated.protagonist.playbook || 'None'}")`);
+            updated.protagonist.playbook = kv.playbook;
+        }
+        if (kv.bio && updated.protagonist.bio !== kv.bio) {
+            updated.protagonist.bio = kv.bio;
+            changes.push(`Protagonist bio updated`);
+        }
+        if (kv.stats) {
+            const parsedStats = parseStatsString(kv.stats);
+            if (Object.keys(parsedStats).length > 0) {
+                updated.protagonist.stats = parsedStats;
+                const statStr = Object.entries(parsedStats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ');
+                changes.push(`Protagonist stats updated: ${statStr}`);
+            } else {
+                errors.push(`Could not parse protagonist stats: "${kv.stats}"`);
+            }
+        }
+        if (kv.harm) {
+            const h = parseInt(kv.harm, 10);
+            if (!isNaN(h)) {
+                updated.protagonist.harm.max = h;
+                changes.push(`Protagonist Harm max set to ${h}`);
+            }
+        }
+        if (kv.armor) {
+            const a = parseInt(kv.armor, 10);
+            if (!isNaN(a)) {
+                updated.protagonist.harm.armor = a;
+                changes.push(`Protagonist Armor set to ${a}`);
+            }
+        }
 
         const moves = parseBulletList(pBlock, 'moves');
-        if (moves.length) updated.protagonist.startingMoves = moves;
+        if (moves.length) {
+            updated.protagonist.startingMoves = moves;
+            changes.push(`Protagonist moves updated (${moves.length} moves registered)`);
+        }
 
         if (kv.gear) {
-            updated.protagonist.gear = kv.gear.split(/[,;]/).map(g => g.trim()).filter(Boolean);
+            const gearList = kv.gear.split(/[,;]/).map(g => g.trim()).filter(Boolean);
+            if (gearList.length) {
+                updated.protagonist.gear = gearList;
+                changes.push(`Protagonist gear updated: ${gearList.join(', ')}`);
+            }
         }
     }
 
-    // 2b. Supporting NPCs & Allies
+    // ── 3. Supporting NPCs / Allies ─────────────────────────────────────────────
     updated.npcs = updated.npcs || [];
+
+    // Check for explicit clear / removal
+    if (/\[CLEAR_NPCS\]/i.test(raw) || /clear_npcs\s*:\s*true/i.test(raw)) {
+        if (updated.npcs.length > 0) {
+            changes.push(`Cleared all ${updated.npcs.length} NPCs`);
+            updated.npcs = [];
+        }
+    }
+
+    const removeNpcMatches = raw.matchAll(/(?:\[REMOVE_NPC:\s*([^\]]+)\]|remove_npc\s*:\s*([^\n\r]+))/gi);
+    for (const rm of removeNpcMatches) {
+        const targetName = (rm[1] || rm[2] || '').trim();
+        if (targetName) {
+            const beforeLen = updated.npcs.length;
+            updated.npcs = updated.npcs.filter(n => n.name.toLowerCase() !== targetName.toLowerCase());
+            if (updated.npcs.length < beforeLen) {
+                changes.push(`Removed NPC "${targetName}"`);
+            }
+        }
+    }
+
     const npcMatches = raw.matchAll(/\[NPC\]([\s\S]*?)(?:\[\/NPC\]|$)/gi);
     for (const match of npcMatches) {
         const nBlock = match[1];
         const kv = parseKeyValueLines(nBlock);
         if (!kv.name) continue;
+
+        // Check if this NPC block requests removal
+        if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
+            const beforeLen = updated.npcs.length;
+            updated.npcs = updated.npcs.filter(n => n.name.toLowerCase() !== kv.name.toLowerCase());
+            if (updated.npcs.length < beforeLen) {
+                changes.push(`Removed NPC "${kv.name}"`);
+            }
+            continue;
+        }
 
         const npcObj = {
             name: kv.name,
@@ -186,17 +463,49 @@ export function parseConciergeStateBlock(text, dossier) {
         const existingIdx = updated.npcs.findIndex(n => n.name.toLowerCase() === npcObj.name.toLowerCase());
         if (existingIdx >= 0) {
             updated.npcs[existingIdx] = Object.assign({}, updated.npcs[existingIdx], npcObj);
+            changes.push(`Updated NPC "${npcObj.name}" (${npcObj.role})`);
         } else {
             updated.npcs.push(npcObj);
+            changes.push(`Added NPC "${npcObj.name}" (${npcObj.role})`);
         }
     }
 
-    // 3. Monsters
+    // ── 4. Monsters / Adversaries ───────────────────────────────────────────────
+    updated.monsters = updated.monsters || [];
+
+    if (/\[CLEAR_MONSTERS\]/i.test(raw) || /clear_monsters\s*:\s*true/i.test(raw)) {
+        if (updated.monsters.length > 0) {
+            changes.push(`Cleared all ${updated.monsters.length} monsters`);
+            updated.monsters = [];
+        }
+    }
+
+    const removeMonMatches = raw.matchAll(/(?:\[REMOVE_MONSTER:\s*([^\]]+)\]|remove_monster\s*:\s*([^\n\r]+))/gi);
+    for (const rm of removeMonMatches) {
+        const targetName = (rm[1] || rm[2] || '').trim();
+        if (targetName) {
+            const beforeLen = updated.monsters.length;
+            updated.monsters = updated.monsters.filter(m => m.name.toLowerCase() !== targetName.toLowerCase());
+            if (updated.monsters.length < beforeLen) {
+                changes.push(`Removed Adversary "${targetName}"`);
+            }
+        }
+    }
+
     const monsterMatches = raw.matchAll(/\[MONSTER\]([\s\S]*?)(?:\[\/MONSTER\]|$)/gi);
     for (const match of monsterMatches) {
         const mBlock = match[1];
         const kv = parseKeyValueLines(mBlock);
         if (!kv.name) continue;
+
+        if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
+            const beforeLen = updated.monsters.length;
+            updated.monsters = updated.monsters.filter(m => m.name.toLowerCase() !== kv.name.toLowerCase());
+            if (updated.monsters.length < beforeLen) {
+                changes.push(`Removed Adversary "${kv.name}"`);
+            }
+            continue;
+        }
 
         const monsterObj = {
             name: kv.name,
@@ -211,17 +520,49 @@ export function parseConciergeStateBlock(text, dossier) {
         const existingIdx = updated.monsters.findIndex(m => m.name.toLowerCase() === monsterObj.name.toLowerCase());
         if (existingIdx >= 0) {
             updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], monsterObj);
+            changes.push(`Updated Adversary "${monsterObj.name}" (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`);
         } else {
             updated.monsters.push(monsterObj);
+            changes.push(`Added Adversary "${monsterObj.name}" (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`);
         }
     }
 
-    // 4. Maps
+    // ── 5. Locations / Maps ─────────────────────────────────────────────────────
+    updated.maps = updated.maps || [];
+
+    if (/\[CLEAR_MAPS\]/i.test(raw) || /clear_maps\s*:\s*true/i.test(raw)) {
+        if (updated.maps.length > 0) {
+            changes.push(`Cleared all ${updated.maps.length} maps`);
+            updated.maps = [];
+        }
+    }
+
+    const removeMapMatches = raw.matchAll(/(?:\[REMOVE_MAP:\s*([^\]]+)\]|remove_map\s*:\s*([^\n\r]+))/gi);
+    for (const rm of removeMapMatches) {
+        const targetSite = (rm[1] || rm[2] || '').trim();
+        if (targetSite) {
+            const beforeLen = updated.maps.length;
+            updated.maps = updated.maps.filter(m => m.site.toLowerCase() !== targetSite.toLowerCase());
+            if (updated.maps.length < beforeLen) {
+                changes.push(`Removed Location "${targetSite}"`);
+            }
+        }
+    }
+
     const mapMatches = raw.matchAll(/\[MAP\]([\s\S]*?)(?:\[\/MAP\]|$)/gi);
     for (const match of mapMatches) {
         const mBlock = match[1];
         const kv = parseKeyValueLines(mBlock);
         if (!kv.site) continue;
+
+        if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
+            const beforeLen = updated.maps.length;
+            updated.maps = updated.maps.filter(m => m.site.toLowerCase() !== kv.site.toLowerCase());
+            if (updated.maps.length < beforeLen) {
+                changes.push(`Removed Location "${kv.site}"`);
+            }
+            continue;
+        }
 
         const kindUpper = (kv.kind || 'INTERIOR').toUpperCase();
         const threatUpper = (kv.threat || 'MODERATE').toUpperCase();
@@ -239,22 +580,64 @@ export function parseConciergeStateBlock(text, dossier) {
         const existingIdx = updated.maps.findIndex(m => m.site.toLowerCase() === mapObj.site.toLowerCase());
         if (existingIdx >= 0) {
             updated.maps[existingIdx] = Object.assign({}, updated.maps[existingIdx], mapObj);
+            changes.push(`Updated Location "${mapObj.site}" (${mapObj.kind})`);
         } else {
             updated.maps.push(mapObj);
+            changes.push(`Queued Location "${mapObj.site}" (${mapObj.kind}, Threat: ${mapObj.threat})`);
         }
     }
 
-    // 5. The Kick (Opening Incident)
+    // ── 6. The Kick (Opening Incident) ──────────────────────────────────────────
     const kickMatch = raw.match(/\[KICK\]([\s\S]*?)(?:\[\/KICK\]|$)/i);
     if (kickMatch) {
         const kBlock = kickMatch[1];
         const kv = parseKeyValueLines(kBlock);
-        if (kv.starting_location) updated.theKick.startingLocation = kv.starting_location;
-        if (kv.crisis) updated.theKick.crisis = kv.crisis;
-        if (kv.opening_prompt) updated.theKick.openingPrompt = kv.opening_prompt;
+        if (kv.starting_location && updated.theKick.startingLocation !== kv.starting_location) {
+            updated.theKick.startingLocation = kv.starting_location;
+            changes.push(`The Kick starting location: "${kv.starting_location}"`);
+        }
+        if (kv.crisis && updated.theKick.crisis !== kv.crisis) {
+            updated.theKick.crisis = kv.crisis;
+            changes.push(`The Kick crisis updated`);
+        }
+        if (kv.opening_prompt && updated.theKick.openingPrompt !== kv.opening_prompt) {
+            updated.theKick.openingPrompt = kv.opening_prompt;
+            changes.push(`The Kick opening prompt registered`);
+        }
     }
 
-    return updated;
+    // ── 7. CYOA Examples (Optional Explicit Choices) ───────────────────────────
+    const cyoaMatch = raw.match(/\[CYOA\]([\s\S]*?)(?:\[\/CYOA\]|$)/i);
+    if (cyoaMatch) {
+        const cBlock = cyoaMatch[1];
+        const lines = cBlock.split('\n')
+            .map(l => l.replace(/^[\*\-\s]+/, '').trim())
+            .filter(Boolean);
+        if (lines.length > 0) {
+            updated.cyoaExamples = lines;
+            changes.push(`Tailored CYOA choices registered (${lines.length} choices)`);
+        }
+    }
+
+    return {
+        success: errors.length === 0,
+        updatedDossier: updated,
+        changes,
+        errors,
+        hasMutations: changes.length > 0,
+    };
+}
+
+/**
+ * Backward-compatible incremental parser that updates a live Campaign Dossier.
+ * Delegates to applyDossierUpdates under the hood.
+ *
+ * @param {string} text Full response text from LLM
+ * @param {object} dossier Current dossier to patch
+ * @returns {object} Updated dossier clone
+ */
+export function parseConciergeStateBlock(text, dossier) {
+    return applyDossierUpdates(text, dossier).updatedDossier;
 }
 
 /**
@@ -349,7 +732,7 @@ ${mapsMd}
 ## ⚡ The Kick (Opening Crisis):
 * **Starting Point:** ${kick.startingLocation || 'The road'}
 * **Inciting Crisis:** ${kick.crisis || 'Trouble approaches'}
-* **Opening Hook:** ${kick.openingPrompt || 'You stand at the threshold...'}`;
+* **Opening Hook:** ${kick.openingPrompt || 'You stand at the threshold...'}${dossier.cyoaExamples && dossier.cyoaExamples.length ? `\n\n---\n\n## 🎲 Tailored CYOA Move Choices:\n${dossier.cyoaExamples.map(c => `* ${c}`).join('\n')}` : ''}`;
 }
 
 /**
@@ -510,6 +893,15 @@ export function parseMarkdownToDossier(markdown) {
         if (startM) dossier.theKick.startingLocation = startM[1].trim();
         if (crisisM) dossier.theKick.crisis = crisisM[1].trim();
         if (hookM) dossier.theKick.openingPrompt = hookM[1].trim();
+    }
+
+    // 10. CYOA Choices
+    const cyoaSection = markdown.match(/##\s*(?:🎲\s*)?Tailored CYOA Move Choices[^:]*:\s*([\s\S]*?)(?=##|---|$)/i);
+    if (cyoaSection) {
+        const lines = cyoaSection[1].split('\n')
+            .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+            .filter(Boolean);
+        if (lines.length) dossier.cyoaExamples = lines;
     }
 
     return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign') ? dossier : null;

@@ -33,6 +33,9 @@ import {
     createEmptyDossier,
     stripConciergeStateBlocks,
     parseConciergeStateBlock,
+    applyDossierUpdates,
+    formatDossierForContext,
+    formatChangelogForContext,
     serializeDossierToMarkdown,
 } from './concierge-parser.js';
 import { launchPbtaCampaign } from './concierge-runner.js';
@@ -43,6 +46,7 @@ const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
 let modalInitialized = false;
 let activeDossier = createEmptyDossier();
 let chatHistory = [];
+let changelog = [];
 let pendingAttachments = [];
 let isGenerating = false;
 let activeImports = [];
@@ -86,6 +90,7 @@ function saveDraft() {
         const payload = {
             dossier: activeDossier,
             chatHistory,
+            changelog,
             timestamp: Date.now(),
         };
         localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify(payload));
@@ -441,8 +446,16 @@ async function handleUserSend() {
     $('#mhc_send_btn').prop('disabled', true);
 
     try {
+        const buildSystemContext = (dossier, logs) => {
+            return `${buildConciergeSystemPrompt()}
+
+${formatDossierForContext(dossier)}
+
+${formatChangelogForContext(logs)}`;
+        };
+
         const fullMessages = [
-            { role: 'system', name: 'System', content: buildConciergeSystemPrompt() },
+            { role: 'system', name: 'System', content: buildSystemContext(activeDossier, changelog) },
             ...chatHistory.map(m => ({
                 role: m.role,
                 name: m.role === 'assistant' ? 'PbtA_Concierge' : 'Player',
@@ -450,19 +463,66 @@ async function handleUserSend() {
             })),
         ];
 
+        // Step 1: Send request to Concierge
         const rawResponse = await sendConciergeRequest(fullMessages);
+
+        // Check for state mutations / directives
+        const report = applyDossierUpdates(rawResponse, activeDossier);
+
+        let finalChatBubbleText = '';
+
+        if (report.hasMutations || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE)\]/i.test(rawResponse)) {
+            // Apply mutations to live blueprint
+            if (report.hasMutations) {
+                activeDossier = report.updatedDossier;
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                report.changes.forEach(c => changelog.push(`[${timeStr}] ${c}`));
+                updateBlueprintDeck();
+                saveDraft();
+            }
+
+            // Step 2: Handshake loop with the Parser report
+            const typingEl = document.getElementById('mhc_typing_indicator');
+            if (typingEl) {
+                typingEl.innerHTML = '<i>🎩 The Concierge is syncing the blueprint...</i>';
+            }
+
+            const confirmationNotice = report.success
+                ? `[PARSER_CONFIRMATION: Success. Applied changes: ${report.changes.join('; ') || 'Blueprint in sync'}. Current blueprint is updated. Speak to the player now to confirm these updates and discuss the next creative step. Do NOT repeat the raw [UPDATE_DOSSIER] code block.]`
+                : `[PARSER_FEEDBACK: Errors detected: ${report.errors.join('; ')}. Current changes applied: ${report.changes.join('; ') || 'None'}. Please explain or correct any missing items to the player.]`;
+
+            const step2Messages = [
+                { role: 'system', name: 'System', content: buildSystemContext(activeDossier, changelog) },
+                ...chatHistory.map(m => ({
+                    role: m.role,
+                    name: m.role === 'assistant' ? 'PbtA_Concierge' : 'Player',
+                    content: m.content,
+                })),
+                { role: 'assistant', name: 'PbtA_Concierge', content: rawResponse },
+                { role: 'system', name: 'System', content: confirmationNotice },
+            ];
+
+            try {
+                const step2Response = await sendConciergeRequest(step2Messages);
+                const cleanStep2 = stripConciergeStateBlocks(step2Response);
+                finalChatBubbleText = cleanStep2 || step2Response;
+            } catch (step2Err) {
+                console.warn('[PbtA Concierge] Step 2 handshake error, falling back to clean text:', step2Err);
+                finalChatBubbleText = stripConciergeStateBlocks(rawResponse) || rawResponse;
+            }
+        } else {
+            // No blueprint mutation requested: standard conversational response
+            finalChatBubbleText = stripConciergeStateBlocks(rawResponse) || rawResponse;
+        }
+
         typingBubble.remove();
 
-        // Parse state updates
-        activeDossier = parseConciergeStateBlock(rawResponse, activeDossier);
-        updateBlueprintDeck();
+        // Render clean bubble to the user
+        appendChatBubble('assistant', finalChatBubbleText);
 
-        // Clean text for bubble
-        const cleanBubbleText = stripConciergeStateBlocks(rawResponse);
-        appendChatBubble('assistant', cleanBubbleText || rawResponse);
-
-        // Record response in history
-        chatHistory.push({ role: 'assistant', content: rawResponse });
+        // Record clean conversation text in history (prevent context pollution from raw code blocks)
+        chatHistory.push({ role: 'assistant', content: finalChatBubbleText });
         saveDraft();
     } catch (err) {
         typingBubble.remove();
@@ -779,6 +839,7 @@ function bindModalEvents() {
         localStorage.removeItem(STORAGE_DRAFT_KEY);
         activeDossier = createEmptyDossier();
         chatHistory = [];
+        changelog = [];
         pendingAttachments = [];
         $('#mhc_chat_messages').empty();
         renderAttachmentTray();
@@ -831,6 +892,7 @@ export async function openConciergeModal() {
     if (draft && draft.chatHistory?.length && !chatHistory.length) {
         activeDossier = draft.dossier || activeDossier;
         chatHistory = draft.chatHistory || [];
+        changelog = draft.changelog || [];
         $('#mhc_chat_messages').empty();
         chatHistory.forEach(msg => {
             if (typeof msg.content === 'string') {

@@ -243,9 +243,20 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             adventureTitle,
             fallbackLabel: `PbtA ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`,
         });
-        // ── 1. Apply PbtA Ruleset Cartridge ─────────────────────────────────────
+        // ── 1. Apply PbtA Ruleset Cartridge with Dynamic Overrides ─────────────
         onProgress('🎲 Installing PbtA ruleset and 2d6 engine...', 15);
-        const cartridgeOk = await applyPbtACartridge(systemKey);
+        const statsList = Object.keys(dossier.protagonist?.stats || {});
+        const cartridgeOverrides = {
+            id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+            campaignTitle: adventureTitle,
+            name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
+            systemLabel: dossier.meta?.systemLabel,
+            description: dossier.meta?.premise,
+            stats: statsList.length >= 3 ? statsList : null,
+            startingMoves: dossier.protagonist?.startingMoves,
+            cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
+        };
+        const cartridgeOk = await applyPbtACartridge(systemKey, cartridgeOverrides);
         if (!cartridgeOk) {
             throw new Error('Failed to install PbtA ruleset cartridge.');
         }

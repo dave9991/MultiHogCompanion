@@ -746,6 +746,39 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         },
     ];
 
+    if (overrides.tone || config.tone) {
+        const toneStr = String(overrides.tone || config.tone).trim();
+        if (toneStr) {
+            customSyspromptLibrary.push({
+                id: 'pbta_campaign_tone',
+                tag: 'tone',
+                content: `<tone>\nAtmosphere & Tone: ${toneStr}\nNarrate with this atmospheric style, sensory texture, mood, and genre conventions consistently.\n</tone>`,
+                enabled: true,
+                scope: 'chat',
+                icon: 'fa-masks-theater',
+                description: `Campaign tone: ${toneStr}`,
+                origin: 'unlocked_base',
+                baseTag: 'tone',
+            });
+        }
+    }
+
+    const factionsList = overrides.factions || config.factions;
+    if (Array.isArray(factionsList) && factionsList.length > 0) {
+        const fText = factionsList.map(f => `- ${f.name} (${f.standing || 'Neutral'}): ${f.agenda || 'Unstated'}${f.notes ? ` — ${f.notes}` : ''}`).join('\n');
+        customSyspromptLibrary.push({
+            id: 'pbta_campaign_factions',
+            tag: 'factions',
+            content: `<factions>\nCampaign Factions & Powers:\n${fText}\nPortray faction agents, rivalries, and shifting leverage dynamically in response to protagonist moves.\n</factions>`,
+            enabled: true,
+            scope: 'chat',
+            icon: 'fa-flag',
+            description: 'Campaign factions and political agendas',
+            origin: 'unlocked_base',
+            baseTag: 'factions',
+        });
+    }
+
     const syspromptModules = {
         // Unlocked overrides active
         role: false,
@@ -972,6 +1005,18 @@ export function formatInitialPbtaMemo(dossier) {
     // 4. If maps exist, add DUNGEON block
     if (dossier.maps?.[0]?.site) {
         blocks.push(`[DUNGEON]\nActive Site: ${dossier.maps[0].site}\nThreat: ${dossier.maps[0].threat || 'MODERATE'}\n[/DUNGEON]`);
+    }
+
+    // 5. If factions exist, add FACTIONS block
+    if (Array.isArray(dossier.factions) && dossier.factions.length > 0) {
+        const fLines = ['[FACTIONS]'];
+        for (const f of dossier.factions) {
+            const standing = f.standing || 'Neutral';
+            const agenda = f.agenda ? ` | Agenda: ${f.agenda}` : '';
+            fLines.push(`- ${f.name} (${standing})${agenda}`);
+        }
+        fLines.push('[/FACTIONS]');
+        blocks.push(fLines.join('\n'));
     }
 
     return blocks.join('\n\n');

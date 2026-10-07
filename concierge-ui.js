@@ -125,7 +125,15 @@ function updateBlueprintDeck() {
     const sysLabel = meta.systemLabel || PBTA_GENRES.fantasy.label;
     $('#mhc_header_system_badge').text(`🎲 ${sysLabel}`);
     $('#mhc_deck_system_tag').text(meta.systemKey?.toUpperCase() || 'FANTASY');
+    const campTitle = (meta.title || '').trim() || 'Untitled PbtA Campaign';
+    $('#mhc_deck_campaign_title').text(campTitle);
     $('#mhc_deck_system_desc').text(meta.premise || `PbtA ${sysLabel} fiction-first narrative engine.`);
+    if (meta.tone) {
+        $('#mhc_deck_system_tone_text').text(meta.tone);
+        $('#mhc_deck_system_tone').show();
+    } else {
+        $('#mhc_deck_system_tone').hide();
+    }
 
     // Campaign Calibration Dials Card
     const cfg = activeDossier.config || {};
@@ -215,6 +223,9 @@ function updateBlueprintDeck() {
             const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
             const moves = m.moves?.length ? m.moves.join('; ') : '';
             const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
+            const doomLine = m.impendingDoom?.length
+                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>⏳ Impending Doom:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${m.impendingDoom.map(d => `<li>${d}</li>`).join('')}</ul></div>`
+                : '';
             mList.append(`
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
@@ -227,6 +238,7 @@ function updateBlueprintDeck() {
                         <div style="font-size: 0.85em; opacity: 0.85;"><b>Attacks:</b> ${attacks}</div>
                         <div style="font-size: 0.8em; opacity: 0.75;"><b>Weakness:</b> ${m.weakness || 'None specified'}</div>
                         ${movesLine}
+                        ${doomLine}
                     </div>
                 </div>
             `);
@@ -242,6 +254,7 @@ function updateBlueprintDeck() {
     if (maps.length) {
         maps.forEach(map => {
             const desc = map.briefDescription || map.prompt || '';
+            const entrance = map.entrance ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Entrance:</b> ${map.entrance}</div>` : '';
             const features = map.features?.length ? `<div style="font-size: 0.8em; opacity: 0.8; margin-top: 4px;"><b>Features:</b> ${map.features.join(', ')}</div>` : '';
             mapList.append(`
                 <div class="mhc-deck-item collapsible">
@@ -252,6 +265,7 @@ function updateBlueprintDeck() {
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
                     <div class="mhc-deck-item-detail">
+                        ${entrance}
                         <div style="font-size: 0.82em; opacity: 0.85;">${desc}</div>
                         ${features}
                     </div>
@@ -260,6 +274,39 @@ function updateBlueprintDeck() {
         });
     } else {
         mapList.append('<div class="mhc-empty-hint">No maps queued yet.</div>');
+    }
+
+    // Factions & Powers Card
+    const factions = activeDossier.factions || [];
+    $('#mhc_deck_faction_count').text(factions.length);
+    const fList = $('#mhc_deck_factions_list');
+    if (fList.length) {
+        fList.empty();
+        if (factions.length) {
+            factions.forEach(f => {
+                const standing = f.standing || 'Neutral';
+                let badgeColor = 'rgba(156, 163, 175, 0.4)';
+                if (/friendly|allied|ally/i.test(standing)) badgeColor = 'rgba(34, 197, 94, 0.4)';
+                else if (/hostile|enemy/i.test(standing)) badgeColor = 'rgba(239, 68, 68, 0.4)';
+                const notes = f.notes ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Notes:</b> ${f.notes}</div>` : '';
+                fList.append(`
+                    <div class="mhc-deck-item collapsible">
+                        <div class="mhc-deck-item-header">
+                            <div class="mhc-deck-item-title" style="color: var(--mhc-warning, #f59e0b);">
+                                🚩 ${f.name} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${badgeColor};">${standing}</span>
+                            </div>
+                            <span class="mhc-deck-item-toggle">▼</span>
+                        </div>
+                        <div class="mhc-deck-item-detail">
+                            <div style="font-size: 0.85em; opacity: 0.85;"><b>Agenda:</b> ${f.agenda || 'Unstated'}</div>
+                            ${notes}
+                        </div>
+                    </div>
+                `);
+            });
+        } else {
+            fList.append('<div class="mhc-empty-hint">No factions queued yet.</div>');
+        }
     }
 
     // Kick Card
@@ -471,20 +518,27 @@ async function handleUserSend() {
     const fullUserText = resolveCardMacros(rawUserText, activeDossier?.protagonist?.name || '');
 
     // Display user bubble
-    appendChatBubble('user', text || '(Provided inspiration details)', imageSrcForDisplay);
+    const displayUserText = text || '(Provided inspiration details)';
+    appendChatBubble('user', displayUserText, imageSrcForDisplay);
 
     // Format LLM message payload
-    let userMsgContent;
+    let userMsgLlmContent;
     if (imagePayload) {
-        userMsgContent = [
+        userMsgLlmContent = [
             { type: 'text', text: fullUserText || 'Please analyze this inspiration image for our PbtA campaign.' },
             imagePayload,
         ];
     } else {
-        userMsgContent = fullUserText;
+        userMsgLlmContent = fullUserText;
     }
 
-    chatHistory.push({ role: 'user', content: userMsgContent });
+    chatHistory.push({
+        role: 'user',
+        content: displayUserText,
+        displayContent: displayUserText,
+        llmContent: userMsgLlmContent,
+        imageSrc: imageSrcForDisplay,
+    });
 
     // Show typing bubble
     const stream = document.getElementById('mhc_chat_messages');
@@ -860,6 +914,22 @@ function bindModalEvents() {
         }
     });
 
+    // Campaign Title manual edit interaction
+    $('#mhc_deck_edit_title_btn, #mhc_deck_campaign_title').on('click', () => {
+        const currentTitle = activeDossier.meta?.title === 'Untitled PbtA Campaign' ? '' : (activeDossier.meta?.title || '');
+        const newTitle = window.prompt('Enter campaign title (2-3 words recommended):', currentTitle);
+        if (newTitle !== null) {
+            const clean = newTitle.trim().replace(/[\\/:*?"<>|]/g, '');
+            if (clean) {
+                activeDossier.meta = activeDossier.meta || {};
+                activeDossier.meta.title = clean;
+                changelog.push(`Renamed campaign title to "${clean}"`);
+                updateBlueprintDeck();
+                saveDraft();
+            }
+        }
+    });
+
     // Campaign Calibration Dial click interactions (manual cycling)
     $('#mhc_deck_dial_playstyle').on('click', () => {
         activeDossier.config = activeDossier.config || {};
@@ -875,7 +945,16 @@ function bindModalEvents() {
         activeDossier.config = activeDossier.config || {};
         const current = activeDossier.config.harmMax || 5;
         const cycle = { 5: 3, 3: 4, 4: 6, 6: 5 };
-        activeDossier.config.harmMax = cycle[current] || 5;
+        const nextHarm = cycle[current] || 5;
+        activeDossier.config.harmMax = nextHarm;
+        if (activeDossier.protagonist) {
+            activeDossier.protagonist.harm = activeDossier.protagonist.harm || {};
+            if (typeof activeDossier.protagonist.harm === 'object') {
+                activeDossier.protagonist.harm.max = nextHarm;
+            } else {
+                activeDossier.protagonist.harm = { current: 0, max: nextHarm };
+            }
+        }
         changelog.push(`Toggled Harm capacity to ${activeDossier.config.harmMax}`);
         updateBlueprintDeck();
         saveDraft();
@@ -1007,10 +1086,11 @@ export async function openConciergeModal() {
         changelog = draft.changelog || [];
         $('#mhc_chat_messages').empty();
         chatHistory.forEach(msg => {
-            if (typeof msg.content === 'string') {
+            const displayStr = msg.displayContent || (typeof msg.content === 'string' ? msg.content : '');
+            if (displayStr) {
                 const isAssistant = msg.role === 'assistant';
-                const text = isAssistant ? stripConciergeStateBlocks(msg.content) : msg.content;
-                appendChatBubble(msg.role, text);
+                const text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
+                appendChatBubble(msg.role, text, msg.imageSrc || null);
             } else if (Array.isArray(msg.content)) {
                 let text = '';
                 let imgSrc = null;
@@ -1018,7 +1098,7 @@ export async function openConciergeModal() {
                     if (p.type === 'text') text += p.text;
                     if (p.type === 'image_url') imgSrc = p.image_url?.url;
                 });
-                appendChatBubble(msg.role, text, imgSrc);
+                appendChatBubble(msg.role, text, imgSrc || msg.imageSrc || null);
             }
         });
     } else if (!chatHistory.length) {

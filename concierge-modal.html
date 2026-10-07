@@ -94,8 +94,17 @@
                             <span class="mhc-card-title">🎲 PbtA Engine</span>
                             <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
                         </div>
+                        <div class="mhc-deck-title-row" style="margin: 6px 0 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                            <div style="font-size: 1.05em; font-weight: 700; color: var(--mhc-accent, #38bdf8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                📖 <span id="mhc_deck_campaign_title" title="Campaign Title">Untitled PbtA Campaign</span>
+                            </div>
+                            <button type="button" id="mhc_deck_edit_title_btn" class="menu_button" style="padding: 1px 6px; font-size: 0.75em; opacity: 0.8;" title="Rename Campaign Title">✏️</button>
+                        </div>
                         <div id="mhc_deck_system_desc" class="mhc-card-desc">
                             Fiction-first 2d6 engine with zero-touch secret rolls.
+                        </div>
+                        <div id="mhc_deck_system_tone" class="mhc-card-desc" style="display: none; margin-top: 4px; font-style: italic; opacity: 0.85;">
+                            <b>Tone:</b> <span id="mhc_deck_system_tone_text"></span>
                         </div>
                     </div>
 
@@ -164,6 +173,17 @@
                         </div>
                         <div id="mhc_deck_maps_list" class="mhc-deck-list">
                             <div class="mhc-empty-hint">No maps queued yet.</div>
+                        </div>
+                    </div>
+
+                    <!-- Factions & Powers Card -->
+                    <div class="mhc-card mhc-card-factions">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">🚩 Factions & Powers</span>
+                            <span id="mhc_deck_faction_count" class="mhc-badge-count">0</span>
+                        </div>
+                        <div id="mhc_deck_factions_list" class="mhc-deck-list">
+                            <div class="mhc-empty-hint">No factions queued yet.</div>
                         </div>
                     </div>
 

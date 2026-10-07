@@ -114,8 +114,8 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
  * Injects dossier NPCs directly into the campaign's active lorebook ({prefix}_NPCs).
  * Ensures companions appear immediately in Campaign Records without manual intervention.
  */
-async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], sectionNames = null) {
-    if ((!npcs || !npcs.length) && (!monsters || !monsters.length)) return;
+async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], factions = [], sectionNames = null) {
+    if ((!npcs || !npcs.length) && (!monsters || !monsters.length) && (!factions || !factions.length)) return;
     const names = sectionNames || await loadMainNpcSectionNames();
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     if (!ctx) return;
@@ -152,9 +152,28 @@ async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], secti
             mainSettings = (typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null) || {};
         } catch (_) {}
 
+        const factionEntries = (factions || []).map(f => {
+            const clean = (f.name || '').trim();
+            const core = [
+                `[CORE]`,
+                `Name: ${clean}`,
+                `Type: Faction / Organization`,
+                `Standing: ${f.standing || 'Neutral'}`,
+                `Agenda: ${f.agenda || 'Unstated'}`,
+                ...(f.notes ? [`Notes: ${f.notes}`] : []),
+                `[/CORE]`,
+            ].join('\n');
+            return {
+                name: clean,
+                core,
+                full: core,
+            };
+        });
+
         const toWrite = [
             ...(npcs || []).map(n => ({ name: n.name, ...buildNpcEntryContent(n, names) })),
             ...(monsters || []).map(m => ({ name: m.name, ...buildMonsterEntryContent(m, names) })),
+            ...factionEntries,
         ];
 
         for (const item of toWrite) {
@@ -252,6 +271,8 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
             systemLabel: dossier.meta?.systemLabel,
             description: dossier.meta?.premise,
+            tone: dossier.meta?.tone,
+            factions: dossier.factions,
             stats: statsList.length >= 3 ? statsList : null,
             startingMoves: dossier.protagonist?.startingMoves,
             cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
@@ -363,10 +384,11 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             }
         }
 
-        // ── 4. Register Supporting NPCs & Monsters (library + campaign lorebook) ──
+        // ── 4. Register Supporting NPCs, Monsters & Factions (library + lorebook) ──
         const npcs = dossier.npcs || [];
         const monsters = dossier.monsters || [];
-        if (npcs.length || monsters.length) {
+        const factions = dossier.factions || [];
+        if (npcs.length || monsters.length || factions.length) {
             onProgress('👥 Registering supporting cast & adversaries in library...', 70);
             const sectionNames = await loadMainNpcSectionNames();
             try {
@@ -391,7 +413,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             // Also inject into the active campaign lorebook ({prefix}_NPCs) so they appear
             // immediately in Campaign Records without requiring manual import.
             try {
-                await injectNpcsIntoCampaignLorebook(chatId, npcs, monsters, sectionNames);
+                await injectNpcsIntoCampaignLorebook(chatId, npcs, monsters, factions, sectionNames);
             } catch (loreErr) {
                 console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
             }
@@ -466,7 +488,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         onProgress('🚀 Launching opening adventure turn...', 95);
         const openingText = dossier.theKick?.openingPrompt
             ? dossier.theKick.openingPrompt
-            : `[Initial Setup: ${dossier.meta?.title || 'PbtA Adventure'}]\n${dossier.meta?.premise || 'The adventure begins.'}\n\nWhat do you do?`;
+            : `[Initial Setup: ${dossier.meta?.title || 'PbtA Adventure'}]\n${dossier.meta?.premise || 'The adventure begins.'}\n\nBegin the adventure and frame the opening scene.`;
 
         await sendOutgoingChatMessage(openingText);
 

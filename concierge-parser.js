@@ -18,7 +18,7 @@ export function createEmptyDossier() {
             systemKey: 'fantasy',
             systemLabel: PBTA_GENRES.fantasy.label,
             premise: '',
-            tone: [],
+            tone: '',
             createdAt: Date.now(),
         },
         protagonist: {
@@ -52,11 +52,69 @@ export function createEmptyDossier() {
     };
 }
 
+export const SYSTEM_ALIASES = {
+    modern: 'horror',
+    'monster of the week': 'horror',
+    motw: 'horror',
+    pirates: 'pirate',
+    piracy: 'pirate',
+    swashbuckler: 'pirate',
+    cosmic: 'cosmic_horror',
+    lovecraft: 'cosmic_horror',
+    cthulhu: 'cosmic_horror',
+    survival: 'survival_horror',
+    'survival horror': 'survival_horror',
+    'post-apocalyptic': 'post_apocalyptic',
+    'post apocalyptic': 'post_apocalyptic',
+    apocalypse: 'post_apocalyptic',
+    apocalyptic: 'post_apocalyptic',
+    heist: 'gothic_heist',
+    'gothic heist': 'gothic_heist',
+    blades: 'gothic_heist',
+    cyberpunk: 'scifi',
+    sprawl: 'scifi',
+    shonen: 'anime',
+    superheroes: 'anime',
+    masks: 'anime',
+    dungeonworld: 'fantasy',
+    'dungeon world': 'fantasy',
+    fellowship: 'fantasy',
+};
+
 /**
- * Strips [CONCIERGE_STATE] blocks out of text for display in the conversational bubble.
- * @param {string} text
+ * Normalizes raw system engine keys into canonical PBTA_GENRES keys.
+ * @param {string} rawKey
+ * @returns {string|null}
+ */
+export function normalizeSystemKey(rawKey) {
+    if (!rawKey) return null;
+    const clean = rawKey.trim().toLowerCase().replace(/[\s\-_]+/g, '_');
+    if (PBTA_GENRES[clean]) return clean;
+    if (SYSTEM_ALIASES[clean]) return SYSTEM_ALIASES[clean];
+    const plain = rawKey.trim().toLowerCase();
+    if (SYSTEM_ALIASES[plain]) return SYSTEM_ALIASES[plain];
+    return null;
+}
+
+/**
+ * Strips quotes, backticks, and markdown wrapping from entity names.
+ * @param {string} rawName
  * @returns {string}
  */
+export function cleanTargetName(rawName) {
+    if (!rawName) return '';
+    let clean = rawName.trim();
+    let prev;
+    do {
+        prev = clean;
+        clean = clean
+            .replace(/^(\*\*|__)(.*?)\1$/, '$2')
+            .replace(/^["'“”‘’`]+(.*?)["'“”‘’`]+$/, '$1')
+            .trim();
+    } while (clean !== prev);
+    return clean;
+}
+
 /**
  * Strips [UPDATE_DOSSIER] and [CONCIERGE_STATE] blocks (and standalone tags) out of text for display.
  * @param {string} text
@@ -71,11 +129,12 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[NPC\][\s\S]*?(?:\[\/NPC\]|$)/gi, '')
         .replace(/\[MONSTER\][\s\S]*?(?:\[\/MONSTER\]|$)/gi, '')
         .replace(/\[MAP\][\s\S]*?(?:\[\/MAP\]|$)/gi, '')
+        .replace(/\[FACTION\][\s\S]*?(?:\[\/FACTION\]|$)/gi, '')
         .replace(/\[KICK\][\s\S]*?(?:\[\/KICK\]|$)/gi, '')
         .replace(/\[CYOA\][\s\S]*?(?:\[\/CYOA\]|$)/gi, '')
         .replace(/\[CONFIG\][\s\S]*?(?:\[\/CONFIG\]|$)/gi, '')
-        .replace(/\[REMOVE_(?:NPC|MONSTER|MAP):[^\n\]]+\]/gi, '')
-        .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS)\]/gi, '')
+        .replace(/\[REMOVE_(?:NPC|MONSTER|MAP|FACTION):[^\n\]]+\]/gi, '')
+        .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS)\]/gi, '')
         .replace(/```(?:text|markdown)?\s*```/gi, '')
         .trim();
 }
@@ -208,7 +267,7 @@ The Kick: Unset
     // model can copy names/keys exactly and emit precise partial edits.
     const cfg = dossier.config || {};
     lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}`);
-    if (meta.tone && meta.tone.length) lines.push(`Tone: ${[].concat(meta.tone).join(', ')}`);
+    if (meta.tone) lines.push(`Tone: ${meta.tone}`);
 
     if (p.name || p.playbook) {
         lines.push('[PROTAGONIST]');
@@ -285,6 +344,20 @@ The Kick: Unset
         lines.push('Maps: None');
     }
 
+    if (dossier.factions && dossier.factions.length) {
+        lines.push(`Factions (${dossier.factions.length}):`);
+        dossier.factions.forEach(f => {
+            lines.push('[FACTION]');
+            lines.push(`name: ${f.name}`);
+            if (f.agenda) lines.push(`agenda: ${f.agenda}`);
+            if (f.standing) lines.push(`standing: ${f.standing}`);
+            if (f.notes) lines.push(`notes: ${f.notes}`);
+            lines.push('[/FACTION]');
+        });
+    } else {
+        lines.push('Factions: None');
+    }
+
     if (kick.startingLocation || kick.crisis || kick.openingPrompt) {
         lines.push('[KICK]');
         if (kick.startingLocation) lines.push(`starting_location: ${kick.startingLocation}`);
@@ -358,7 +431,7 @@ export function applyDossierUpdates(text, dossier) {
         raw = stateMatch[1];
     } else {
         // Fallback: check if text contains standalone blocks directly
-        const hasDirectBlocks = /\[(?:PROTAGONIST|NPC|MONSTER|MAP|KICK|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS)\]/i.test(text);
+        const hasDirectBlocks = /\[(?:PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS)\]/i.test(text);
         if (hasDirectBlocks) {
             raw = text;
         }
@@ -371,17 +444,30 @@ export function applyDossierUpdates(text, dossier) {
     const errors = [];
 
     // ── 1. Meta / System ────────────────────────────────────────────────────────
-    const sysMatch = raw.match(/system\s*:\s*([a-zA-Z0-9_\-]+)/i);
+    const sysMatch = raw.match(/system\s*:\s*([^\n\r]+)/i);
     if (sysMatch) {
-        const key = sysMatch[1].trim().toLowerCase();
-        if (PBTA_GENRES[key]) {
+        const rawKey = sysMatch[1].trim();
+        const key = normalizeSystemKey(rawKey);
+        if (key && PBTA_GENRES[key]) {
             if (updated.meta.systemKey !== key) {
                 updated.meta.systemKey = key;
                 updated.meta.systemLabel = PBTA_GENRES[key].label;
                 changes.push(`PbtA Engine set to ${updated.meta.systemLabel} (${key})`);
             }
         } else {
-            errors.push(`Unknown system engine "${key}". Available: ${Object.keys(PBTA_GENRES).join(', ')}`);
+            errors.push(`Unknown system engine "${rawKey}". Available: ${Object.keys(PBTA_GENRES).join(', ')}`);
+        }
+    }
+
+    const titleMatch = raw.match(/title\s*:\s*([^\n\r]+)/i);
+    if (titleMatch) {
+        const newTitle = titleMatch[1].trim()
+            .replace(/^(\*\*|__)(.*?)\1$/, '$2')
+            .replace(/^["'“”‘’](.*)["'“”‘’]$/, '$1')
+            .trim();
+        if (newTitle && updated.meta.title !== newTitle) {
+            changes.push(`Campaign title set to "${newTitle}"`);
+            updated.meta.title = newTitle;
         }
     }
 
@@ -394,6 +480,15 @@ export function applyDossierUpdates(text, dossier) {
                 updated.meta.title = newPremise.slice(0, 40) + '...';
             }
             changes.push(`Premise updated: "${newPremise}"`);
+        }
+    }
+
+    const toneMatch = raw.match(/tone\s*:\s*([^\n\r]+)/i);
+    if (toneMatch) {
+        const rawTone = cleanTargetName(toneMatch[1]);
+        if (rawTone && updated.meta.tone !== rawTone) {
+            updated.meta.tone = rawTone;
+            changes.push(`Campaign tone set to: "${rawTone}"`);
         }
     }
 
@@ -468,7 +563,7 @@ export function applyDossierUpdates(text, dossier) {
 
     const removeNpcMatches = raw.matchAll(/(?:\[REMOVE_NPC:\s*([^\]]+)\]|remove_npc\s*:\s*([^\n\r]+))/gi);
     for (const rm of removeNpcMatches) {
-        const targetName = (rm[1] || rm[2] || '').trim();
+        const targetName = cleanTargetName(rm[1] || rm[2] || '');
         if (targetName) {
             const beforeLen = updated.npcs.length;
             updated.npcs = updated.npcs.filter(n => n.name.toLowerCase() !== targetName.toLowerCase());
@@ -542,7 +637,7 @@ export function applyDossierUpdates(text, dossier) {
 
     const removeMonMatches = raw.matchAll(/(?:\[REMOVE_MONSTER:\s*([^\]]+)\]|remove_monster\s*:\s*([^\n\r]+))/gi);
     for (const rm of removeMonMatches) {
-        const targetName = (rm[1] || rm[2] || '').trim();
+        const targetName = cleanTargetName(rm[1] || rm[2] || '');
         if (targetName) {
             const beforeLen = updated.monsters.length;
             updated.monsters = updated.monsters.filter(m => m.name.toLowerCase() !== targetName.toLowerCase());
@@ -607,7 +702,7 @@ export function applyDossierUpdates(text, dossier) {
 
     const removeMapMatches = raw.matchAll(/(?:\[REMOVE_MAP:\s*([^\]]+)\]|remove_map\s*:\s*([^\n\r]+))/gi);
     for (const rm of removeMapMatches) {
-        const targetSite = (rm[1] || rm[2] || '').trim();
+        const targetSite = cleanTargetName(rm[1] || rm[2] || '');
         if (targetSite) {
             const beforeLen = updated.maps.length;
             updated.maps = updated.maps.filter(m => m.site.toLowerCase() !== targetSite.toLowerCase());
@@ -658,6 +753,64 @@ export function applyDossierUpdates(text, dossier) {
         } else {
             updated.maps.push(mapObj);
             changes.push(`Queued Location "${mapObj.site}" (${mapObj.kind}, Threat: ${mapObj.threat})`);
+        }
+    }
+
+    // ── 5b. Factions & Powers ──────────────────────────────────────────────────
+    updated.factions = updated.factions || [];
+
+    if (/\[CLEAR_FACTIONS\]/i.test(raw) || /clear_factions\s*:\s*true/i.test(raw)) {
+        if (updated.factions.length > 0) {
+            changes.push(`Cleared all ${updated.factions.length} factions`);
+            updated.factions = [];
+        }
+    }
+
+    const removeFactionMatches = raw.matchAll(/(?:\[REMOVE_FACTION:\s*([^\]]+)\]|remove_faction\s*:\s*([^\n\r]+))/gi);
+    for (const rm of removeFactionMatches) {
+        const targetName = cleanTargetName(rm[1] || rm[2] || '');
+        if (targetName) {
+            const beforeLen = updated.factions.length;
+            updated.factions = updated.factions.filter(f => f.name.toLowerCase() !== targetName.toLowerCase());
+            if (updated.factions.length < beforeLen) {
+                changes.push(`Removed Faction "${targetName}"`);
+            }
+        }
+    }
+
+    const factionMatches = raw.matchAll(/\[FACTION\]([\s\S]*?)(?:\[\/FACTION\]|$)/gi);
+    for (const match of factionMatches) {
+        const fBlock = match[1];
+        const kv = parseKeyValueLines(fBlock);
+        if (!kv.name) continue;
+
+        if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
+            const beforeLen = updated.factions.length;
+            updated.factions = updated.factions.filter(f => f.name.toLowerCase() !== kv.name.toLowerCase());
+            if (updated.factions.length < beforeLen) {
+                changes.push(`Removed Faction "${kv.name}"`);
+            }
+            continue;
+        }
+
+        const factionObj = {
+            name: kv.name,
+            agenda: kv.agenda || kv.goal || '',
+            standing: kv.standing || kv.reputation || kv.influence || 'Neutral',
+            notes: kv.notes || kv.description || '',
+        };
+
+        const existingIdx = updated.factions.findIndex(f => f.name.toLowerCase() === factionObj.name.toLowerCase());
+        if (existingIdx >= 0) {
+            const patch = {};
+            if (kv.agenda || kv.goal) patch.agenda = factionObj.agenda;
+            if (kv.standing || kv.reputation || kv.influence) patch.standing = factionObj.standing;
+            if (kv.notes || kv.description) patch.notes = factionObj.notes;
+            updated.factions[existingIdx] = Object.assign({}, updated.factions[existingIdx], patch);
+            changes.push(`Updated Faction "${factionObj.name}"`);
+        } else {
+            updated.factions.push(factionObj);
+            changes.push(`Added Faction "${factionObj.name}"`);
         }
     }
 
@@ -848,16 +1001,27 @@ export function serializeDossierToMarkdown(dossier) {
         }).join('\n\n')
         : '_No adversaries staged yet._';
 
+    let factionsMd = (dossier.factions || []).length
+        ? dossier.factions.map(f => `### 🚩 ${f.name}
+* **Agenda:** ${f.agenda || 'None specified'}
+* **Standing:** ${f.standing || 'Neutral'}
+* **Notes:** ${f.notes || 'None'}`).join('\n\n')
+        : '_No factions staged yet._';
+
     let mapsMd = maps.length
         ? maps.map(m => `* **${m.site}** (${m.kind} · Threat: ${m.threat})
   * Entrance: ${m.entrance}
   * Premise: ${m.briefDescription}`).join('\n')
         : '_No locations staged yet._';
 
+    const toneLine = meta.tone
+        ? `\n* **Tone:** ${meta.tone}`
+        : '';
+
     return `# 📜 CAMPAIGN DOSSIER: ${meta.title || 'Untitled PbtA Campaign'}
 
 * **System Engine:** ${meta.systemLabel || 'PbtA Fantasy'} (\`${meta.systemKey || 'fantasy'}\`)
-* **Premise:** ${meta.premise || 'Not specified'}
+* **Premise:** ${meta.premise || 'Not specified'}${toneLine}
 
 ---
 
@@ -882,6 +1046,11 @@ ${npcsMd}
 
 ## 👹 Threats & Monsters:
 ${monstersMd}
+
+---
+
+## 🚩 Factions & Powers:
+${factionsMd}
 
 ---
 
@@ -922,9 +1091,14 @@ export function parseMarkdownToDossier(markdown) {
         if (systemMatch[2]) dossier.meta.systemKey = systemMatch[2].trim();
     }
 
-    // 3. Premise
+    // 3. Premise & Tone
     const premiseMatch = markdown.match(/\*\s*\*\*Premise:\*\*\s*([^\n\r]+)/i);
     if (premiseMatch) dossier.meta.premise = premiseMatch[1].trim();
+
+    const toneMatch = markdown.match(/\*\s*\*\*Tone:\*\*\s*([^\n\r]+)/i);
+    if (toneMatch) {
+        dossier.meta.tone = toneMatch[1].trim();
+    }
 
     // 4. Protagonist
     const protoMatch = markdown.match(/##\s*(?:👤\s*)?Protagonist:\s*([^\n\r]+)/i);
@@ -972,7 +1146,7 @@ export function parseMarkdownToDossier(markdown) {
     }
 
     // 6b. Supporting NPCs / Allies
-    const npcSection = markdown.match(/##\s*(?:👥\s*)?Supporting Cast[^\n]*:\s*([\s\S]*?)(?=##|---|$)/i);
+    const npcSection = markdown.match(/##\s*(?:👥\s*)?Supporting Cast[^\n]*:\s*([\s\S]*?)(?=\n##[^#]|\n---|Ref:|$)/i);
     if (npcSection) {
         const npcBlocks = npcSection[1].split(/###\s*(?:👤\s*)?/);
         for (const block of npcBlocks) {
@@ -1008,7 +1182,7 @@ export function parseMarkdownToDossier(markdown) {
     }
 
     // 7. Monsters
-    const monsterSection = markdown.match(/##\s*(?:👹\s*)?Threats & Monsters:\s*([\s\S]*?)(?=##|---|$)/i);
+    const monsterSection = markdown.match(/##\s*(?:👹\s*)?Threats & Monsters:\s*([\s\S]*?)(?=\n##[^#]|\n---|Ref:|$)/i);
     if (monsterSection) {
         const monsterBlocks = monsterSection[1].split(/###\s*(?:👹\s*)?/);
         for (const block of monsterBlocks) {
@@ -1021,6 +1195,15 @@ export function parseMarkdownToDossier(markdown) {
             const weaknessM = block.match(/\*\s*\*\*Weakness:\*\*\s*([^\n\r]+)/i);
             const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
 
+            const doomM = block.match(/\*\s*\*\*Countdown Clock:\*\*\s*([\s\S]*?)(?=\*\s*\*\*Notes:|$)/i);
+            const impendingDoom = [];
+            if (doomM) {
+                const dLines = doomM[1].split('\n')
+                    .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+                    .filter(Boolean);
+                impendingDoom.push(...dLines);
+            }
+
             dossier.monsters.push({
                 name,
                 harm: harmArmorM ? parseInt(harmArmorM[1], 10) : 3,
@@ -1028,13 +1211,35 @@ export function parseMarkdownToDossier(markdown) {
                 attacks: attacksM ? attacksM[1].split(',').map(s => s.trim()) : [],
                 weakness: weaknessM ? weaknessM[1].trim() : '',
                 notes: notesM ? notesM[1].trim() : '',
-                impendingDoom: [],
+                impendingDoom,
+            });
+        }
+    }
+
+    // 7b. Factions & Powers
+    const factionSection = markdown.match(/##\s*(?:🚩\s*)?Factions & Powers:\s*([\s\S]*?)(?=\n##[^#]|\n---|Ref:|$)/i);
+    if (factionSection) {
+        const fBlocks = factionSection[1].split(/###\s*(?:🚩\s*)?/);
+        for (const block of fBlocks) {
+            const lines = block.trim().split('\n');
+            const name = lines[0]?.trim();
+            if (!name || name.startsWith('_No')) continue;
+
+            const agendaM = block.match(/\*\s*\*\*Agenda:\*\*\s*([^\n\r]+)/i);
+            const standingM = block.match(/\*\s*\*\*Standing:\*\*\s*([^\n\r]+)/i);
+            const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
+
+            dossier.factions.push({
+                name,
+                agenda: agendaM ? agendaM[1].trim() : '',
+                standing: standingM ? standingM[1].trim() : 'Neutral',
+                notes: notesM ? notesM[1].trim() : '',
             });
         }
     }
 
     // 8. Locations & Sites
-    const mapsSection = markdown.match(/##\s*(?:🗺️\s*)?Locations & Sites:\s*([\s\S]*?)(?=##|---|$)/i);
+    const mapsSection = markdown.match(/##\s*(?:🗺️\s*)?Locations & Sites:\s*([\s\S]*?)(?=\n##[^#]|\n---|Ref:|$)/i);
     if (mapsSection) {
         const mapRe = /\*\s*\*\*([^*]+)\*\*\s*\(([^·\)]+)(?:·\s*Threat:\s*([^)]+))?\)/g;
         let m;

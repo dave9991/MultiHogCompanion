@@ -40,6 +40,8 @@ import {
 } from './concierge-parser.js';
 import { launchPbtaCampaign } from './concierge-runner.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
+import { buildNameRagSeedsForConcierge } from './namerag-hooks.js';
+import { extension_settings } from '../../../extensions.js';
 
 const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
 
@@ -50,6 +52,7 @@ let changelog = [];
 let pendingAttachments = [];
 let isGenerating = false;
 let activeImports = [];
+let activeNameRagSeeds = '';
 
 function startImportProgress(label) {
     if (!label) return;
@@ -567,12 +570,22 @@ async function handleUserSend() {
     $('#mhc_send_btn').prop('disabled', true);
 
     try {
+        if (!activeNameRagSeeds && extension_settings?.multihog_companion?.nameRagEnhanceConcierge !== false && extension_settings?.multihog_companion?.enableNameRag !== false) {
+            try {
+                activeNameRagSeeds = await buildNameRagSeedsForConcierge({
+                    genre: activeDossier?.meta?.system || 'fantasy',
+                    premise: activeDossier?.meta?.premise || '',
+                    limit: 8,
+                });
+            } catch (_) {}
+        }
+
         const buildSystemContext = (dossier, logs) => {
             return `${buildConciergeSystemPrompt()}
 
 ${formatDossierForContext(dossier)}
 
-${formatChangelogForContext(logs)}`;
+${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
         };
 
         const fullMessages = [
@@ -1057,6 +1070,7 @@ function bindModalEvents() {
         chatHistory = [];
         changelog = [];
         pendingAttachments = [];
+        activeNameRagSeeds = '';
         $('#mhc_chat_messages').empty();
         renderAttachmentTray();
         updateBlueprintDeck();

@@ -25,6 +25,15 @@ import {
     syncLivePbtaMemoVitality,
     normalizePbtaMemo,
 } from './pbta-vitality-sync.js';
+import {
+    discoverNameRagServer,
+    testNameRagConnection,
+} from './namerag-client.js';
+import {
+    setupMultiHogRollHooks,
+    syncNameRagAdhocSysprompt,
+    rollNameRagCandidate,
+} from './namerag-hooks.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -42,6 +51,10 @@ const DEFAULT_SETTINGS = {
     enableLorebookSync: true,
     autoSyncOnRename: true,
     deleteOldLorebooksOnSync: true,
+    enableNameRag: true,
+    nameRagEnhanceMultiHog: true,
+    nameRagEnhanceConcierge: true,
+    nameRagAdhocSysprompt: true,
 };
 
 function getSettings() {
@@ -992,6 +1005,13 @@ export function setupImagineInterceptor() {
  * @returns {Promise<string>}
  */
 async function getRandomCharacterName(genre = 'fantasy') {
+    const s = getSettings();
+    if (s.enableNameRag !== false && s.nameRagEnhanceMultiHog !== false) {
+        try {
+            const candidate = await rollNameRagCandidate(genre);
+            if (candidate?.name) return candidate.name;
+        } catch (_) {}
+    }
     try {
         const mod = await import('../SillyTavern-MultihogDnDFramework/src/state/character-names.js');
         if (typeof mod?.pickGenreCharacterName === 'function') {
@@ -1376,6 +1396,102 @@ async function initUI() {
                 btn.prop('disabled', false);
             }
         });
+
+        // ── 5. Name Diversity Engine (NameRAG) Controls ──
+        async function initNameRagUI() {
+            try {
+                const discovery = await discoverNameRagServer();
+                const section = $('#mhc_namerag_section');
+                if (!discovery.available) {
+                    section.hide();
+                    return;
+                }
+
+                section.show();
+                const badge = $('#mhc_namerag_status_badge');
+                const serverNameLabel = $('#mhc_namerag_server_name');
+                serverNameLabel.text(`MCP: ${discovery.serverName}`);
+
+                if (discovery.isRunning) {
+                    badge.text(`🟢 Connected (${discovery.serverName})`).css({
+                        background: 'rgba(80,180,120,0.2)',
+                        color: '#88ffbb',
+                        borderColor: 'rgba(80,180,120,0.35)',
+                    });
+                } else {
+                    badge.text(`🟡 Ready (${discovery.serverName})`).css({
+                        background: 'rgba(255,180,60,0.2)',
+                        color: '#ffcc88',
+                        borderColor: 'rgba(255,180,60,0.4)',
+                    });
+                }
+
+                const enableCb = $('#mhc_namerag_enable');
+                const multiHogCb = $('#mhc_namerag_enhance_multihog');
+                const conciergeCb = $('#mhc_namerag_enhance_concierge');
+                const adhocCb = $('#mhc_namerag_adhoc_sysprompt');
+
+                enableCb.prop('checked', current.enableNameRag !== false);
+                multiHogCb.prop('checked', current.nameRagEnhanceMultiHog !== false);
+                conciergeCb.prop('checked', current.nameRagEnhanceConcierge !== false);
+                adhocCb.prop('checked', current.nameRagAdhocSysprompt !== false);
+
+                enableCb.on('change', async function () {
+                    const val = $(this).is(':checked');
+                    updateSettings({ enableNameRag: val });
+                    await syncNameRagAdhocSysprompt(val && adhocCb.is(':checked'), refreshMultihogRuntime);
+                });
+
+                multiHogCb.on('change', function () {
+                    updateSettings({ nameRagEnhanceMultiHog: $(this).is(':checked') });
+                });
+
+                conciergeCb.on('change', function () {
+                    updateSettings({ nameRagEnhanceConcierge: $(this).is(':checked') });
+                });
+
+                adhocCb.on('change', async function () {
+                    const val = $(this).is(':checked');
+                    updateSettings({ nameRagAdhocSysprompt: val });
+                    await syncNameRagAdhocSysprompt(enableCb.is(':checked') && val, refreshMultihogRuntime);
+                });
+
+                if (current.enableNameRag !== false && current.nameRagAdhocSysprompt !== false) {
+                    await syncNameRagAdhocSysprompt(true);
+                }
+
+                const escapeSimple = (str) => String(str || '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+
+                $('#mhc_namerag_test_btn').on('click', async function () {
+                    const btn = $(this);
+                    const origHtml = btn.html();
+                    const query = $('#mhc_namerag_test_query').val().trim() || 'robed wizard';
+                    const resultEl = $('#mhc_namerag_test_result');
+
+                    btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i>');
+                    resultEl.show().html('<span style="opacity: 0.6;">Querying NameRAG...</span>');
+
+                    try {
+                        const res = await testNameRagConnection(query);
+                        if (res.ok && res.sample) {
+                            const s = res.sample;
+                            resultEl.html(`<b>✨ ${escapeSimple(s.name)}</b> <span style="opacity: 0.7;">(${escapeSimple(s.gender || 'Dual')}${s.origin ? ' | ' + escapeSimple(s.origin) : ''})</span><br><span style="opacity: 0.85; font-style: italic;">${escapeSimple(s.vibe || s.meaning || 'No description')}</span>`);
+                        } else {
+                            resultEl.html(`<span style="color: #fc8181;"><i class="fa-solid fa-circle-exclamation"></i> ${escapeSimple(res.error || 'Failed to get name')}</span>`);
+                        }
+                    } catch (err) {
+                        resultEl.html(`<span style="color: #fc8181;"><i class="fa-solid fa-circle-exclamation"></i> ${escapeSimple(err.message)}</span>`);
+                    } finally {
+                        btn.prop('disabled', false).html(origHtml);
+                    }
+                });
+            } catch (err) {
+                console.warn('[MultiHog Companion] Error initializing NameRAG UI:', err);
+                $('#mhc_namerag_section').hide();
+            }
+        }
+
+        await initNameRagUI();
     } catch (err) {
         console.error('[MultiHog Companion] Failed to load UI template:', err);
     }
@@ -1593,6 +1709,10 @@ jQuery(async () => {
     if (event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, setupImagineInterceptor);
     }
+    setupMultiHogRollHooks(() => {
+        const s = getSettings();
+        return s.enableNameRag !== false && s.nameRagEnhanceMultiHog !== false;
+    });
     if (event_types.CHAT_RENAMED) {
         eventSource.on(event_types.CHAT_RENAMED, async (detail) => {
             const s = getSettings();

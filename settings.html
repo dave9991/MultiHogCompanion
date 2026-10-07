@@ -297,6 +297,65 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ── 5. Name Diversity Engine (NameRAG) ── -->
+            <div id="mhc_namerag_section" class="inline-drawer mhc-namerag-section" style="display: none; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
+                    <label class="checkbox_label" title="Enable NameRAG diversity engine to fix repetitive LLM name generation" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                        <input id="mhc_namerag_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
+                        <span style="font-size: 0.9em;"><b>📇 Name Diversity Engine:</b> NameRAG</span>
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand NameRAG settings">
+                        <span id="mhc_namerag_status_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); white-space: nowrap;">Connected</span>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
+                    </div>
+                </div>
+
+                <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                    <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
+                        Connects to the local NameRAG MCP server via SillyTavern's MCP bridge to generate deeply varied, setting-authentic character and NPC names instead of repetitive LLM clichés.
+                    </p>
+
+                    <!-- Vanilla MultiHog Scope -->
+                    <div class="mhc-setting-row" style="margin-bottom: 6px;">
+                        <label class="checkbox_label" title="Enhance MultiHog's Character Creator, Quick Start roll buttons, and auto-seed unrolled Instant Action names" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_namerag_enhance_multihog" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>MultiHog Integration:</b> Enhance Roll buttons &amp; Instant Action</span>
+                        </label>
+                    </div>
+
+                    <!-- Concierge Session Zero Scope -->
+                    <div class="mhc-setting-row" style="margin-bottom: 6px;">
+                        <label class="checkbox_label" title="Inject NameRAG name pools into Session Zero Concierge context for protagonists, NPCs, and factions" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_namerag_enhance_concierge" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>Session Zero Concierge:</b> Seed diverse protagonist &amp; NPC pools</span>
+                        </label>
+                    </div>
+
+                    <!-- Ad-Hoc GM Guidance Scope -->
+                    <div class="mhc-setting-row" style="margin-bottom: 10px;">
+                        <label class="checkbox_label" title="Inject system prompt instructions guiding the GM/Narrator to call search_names for in-game NPCs" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_namerag_adhoc_sysprompt" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>Ad-Hoc GM Guidance:</b> Instruct Narrator to use search_names mid-game</span>
+                        </label>
+                    </div>
+
+                    <!-- Interactive Test / Roll Box -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 8px; margin-bottom: 6px;">
+                        <div style="font-size: 0.8em; font-weight: bold; color: #88ccff; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+                            <span><i class="fa-solid fa-dice-d20"></i> Test Name Generation</span>
+                            <span id="mhc_namerag_server_name" style="font-size: 0.75em; opacity: 0.7; font-family: monospace;"></span>
+                        </div>
+                        <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                            <input id="mhc_namerag_test_query" type="text" class="text_pole" placeholder="Character vibe (e.g. robed wizard, shadowy rogue)..." value="robed wizard" style="flex: 1; font-size: 0.82em; padding: 3px 6px;">
+                            <button id="mhc_namerag_test_btn" class="menu_button interactable" type="button" style="font-size: 0.8em; padding: 3px 8px; white-space: nowrap;">
+                                <i class="fa-solid fa-sparkles"></i> Roll Name
+                            </button>
+                        </div>
+                        <div id="mhc_namerag_test_result" style="font-size: 0.78em; min-height: 20px; line-height: 1.35; padding: 4px 6px; border-radius: 4px; background: rgba(0,0,0,0.25); display: none;"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>

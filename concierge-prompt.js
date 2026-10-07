@@ -66,6 +66,9 @@ ${genreSummaries}
   * Identify supporting companions, mentors, healers, or allies already established there; they are the player's own material, so emit \`[NPC]\` blocks for them right away.
   * Preserve their established demeanor, signature boons/abilities, and bond with the protagonist.
   * Extract mentioned threats or beasts and emit \`[MONSTER]\` blocks.
+* **[NAME_DIVERSITY_SEEDS]:** When curated authentic names from the world's name repository are provided in context:
+  * Draw inspiration, protagonist names, adversary names, and NPC names directly from this pool.
+  * Avoid stereotypical or repetitive LLM name tropes (e.g. Elidor, Silas, Lyra, Vance, Aurelia, Malachi).
 * **Companions vs. World NPCs:**
   * **World NPCs (\`role: Mentor\`, \`Patron\`, \`Merchant\`, \`Town Guard\`, \`Faction Contact\`, \`Ally\`):** The default. Stationary setting characters who inhabit a specific village, shop, guild, temple, or fortress. They are registered into the NPC library and campaign lorebook and do NOT travel in the Party.
   * **Traveling Companions (\`role: Companion (Party)\` or \`Traveling Companion\`):** Opt-in only. Use when the player's material features a party or they ask for one — characters who journey side-by-side with the protagonist. They are also seeded into the active Party roster upon launch. Include their distinctive physical appearance (\`appearance: ...\`) so it renders clearly on their party card.

@@ -32,9 +32,9 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. ⚔️ Leap forward with blade drawn to strike the beast — [Hack & Slash (+Might)]',
             '2. 🏹 Draw an arrow and aim for the eye socket from distance — [Volley (+Agility)]',
-            '3. 🔮 Channel an arcane incantation through your staff — [Cast a Spell (+Arcana)]',
-            '4. 👁️ Study the chamber walls for concealed runes or pressure plates — [Discern Realities (+Wits)]',
-            '5. 🗣️ "We came for the relic, not blood. Call off your guard and let us talk." — [Parley (+Heart)]',
+            '3. 🛡️ Raise your shield to brace the doorway and shout for the party to rally',
+            '4. 👁️ Scan the chamber walls for concealed runes or pressure plates',
+            '5. 🗣️ "We came for the relic, not blood. Call off your guard and let us talk."',
         ],
     },
     scifi: {
@@ -55,9 +55,9 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. 💥 Draw your sidearm and trade fire through the steam pipes — [Engage Hostiles (+Hard)]',
             '2. 💻 Jack your cyberdeck directly into the security terminal — [Jack In / Hack (+Mind)]',
-            '3. 🥷 Vault over the catwalk railing into the darkness below — [Act Under Pressure (+Edge)]',
-            '4. 🎙️ "You don\'t want this smoke, omae. Check my crew\'s rep on the street." — [Fast-Talk (+Synth)]',
-            '5. 🔍 Scan the maintenance tunnel for power conduits or camera blind spots — [Assess Situation (+Mind)]',
+            '3. 🥷 Slide into the shadows behind the cooling towers and wait for the drones to pass',
+            '4. 🎙️ "You don\'t want this smoke, omae. Check my crew\'s rep on the street."',
+            '5. 🏃 Dash down the fire escape toward the getaway bike in the alley',
         ],
     },
     anime: {
@@ -76,11 +76,11 @@ export const PBTA_GENRES = {
             'Pierce the Mask (+Mundane) — see through someone’s tough exterior into their true feelings',
         ],
         cyoaExamples: [
-            '1. 👊 Charge straight into the rival\'s aura and trade blows — [Directly Engage (+Danger)]',
+            '1. 👊 Charge straight into the rival\'s aura and clash blows — [Directly Engage (+Danger)]',
             '2. ⚡ Let your inner power surge past all limits in a blinding blast — [Unleash Powers (+Freak)]',
-            '3. 🛡️ Throw yourself in front of the collapsing debris to shield your friend — [Take a Blow (+Savior)]',
-            '4. 😏 Smirk and taunt them to draw their focus away from the civilians — [Provoke (+Superior)]',
-            '5. 💔 "I know why you\'re doing this... you don\'t have to carry this alone." — [Pierce the Mask (+Mundane)]',
+            '3. 🛡️ Throw yourself in front of the collapsing debris to shield your friend',
+            '4. 😏 Smirk confidently to draw their gaze away from the civilians',
+            '5. 💔 "I know why you\'re doing this... you don\'t have to carry this alone."',
         ],
     },
     horror: {
@@ -101,9 +101,9 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. 🪓 Drive the fire axe into the creature\'s clawed arm — [Kick Some Ass (+Hard)]',
             '2. 🔦 Search the bloodstained desk for occult manuscripts or clues — [Investigate a Mystery (+Sharp)]',
-            '3. 🏃 Keep your nerve and sprint past the writhing shadows toward the exit — [Act Under Fire (+Cool)]',
-            '4. 🗣️ "Look at me! Whatever is in that basement, you have to let us help!" — [Manipulate Someone (+Hot)]',
-            '5. 🕯️ Light the ceremonial candles and chant the ward of protection — [Use Magic (+Weird)]',
+            '3. 🏃 Slam the heavy oak door shut and throw the deadbolt into place',
+            '4. 🗣️ "Look at me! Whatever is in that basement, you have to let us help!"',
+            '5. 🕯️ Light the ceremonial candles and chant the ward of protection',
         ],
     },
     western: {
@@ -124,9 +124,9 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. 🤠 Draw from the hip and fire two rounds into the saloon doorway — [Quick Draw (+Quick)]',
             '2. 🧨 Light the dynamite stick and hurl it toward the barricade — [Fan the Hammer (+Iron)]',
-            '3. 🐎 Kick your spurs and ride hard along the canyon ridge — [Standoff (+Grit)]',
-            '4. 👁️ Kneel in the dust to examine the fresh horseshoe impressions — [Read the Trail (+Instinct)]',
-            '5. 🃏 Slide an ace from your sleeve and raise the wager — [Silver Tongue (+Savvy)]',
+            '3. 🐎 Kick your spurs and ride hard down the gully to flank their line',
+            '4. 👁️ Kneel in the dust to check which way the stagecoach tracks turned',
+            '5. 🃏 Slide your winning hand face-down onto the table and stare down the gambler',
         ],
     },
     pirate: {
@@ -145,11 +145,11 @@ export const PBTA_GENRES = {
             'Pirate Parley (+Charm) — press your reputation for a truce, carouse with scoundrels, or demand ransom',
         ],
         cyoaExamples: [
-            '1. ⚔️ Draw your cutlass and flourish into high guard against the naval officer — [Cross Swords (+Panache)]',
-            '2. 🪢 Sever the rope with your dagger and swing across the open sea onto the galleon\'s quarterdeck — [Boarding Action (+Daring)]',
-            '3. 💣 Touch the smoldering match to the twin 24-pounder cannons — [Man the Broadside (+Brawn)]',
-            '4. 🧭 Spin the helm hard to port to navigate between the jagged coral spires — [Chart the Unknown (+Wits)]',
-            '5. 🗣️ "By the Brethren Code, I invoke the Right of Parley with your admiral!" — [Pirate Parley (+Charm)]',
+            '1. ⚔️ Draw your cutlass and clash blades with the naval officer — [Cross Swords (+Panache)]',
+            '2. 🪢 Sever the rope with your dagger and swing across the open sea — [Boarding Action (+Daring)]',
+            '3. 💣 Shout for the gun crew to hold fire until we come alongside',
+            '4. 🧭 Spin the helm hard to port to navigate between the coral spires',
+            '5. 🗣️ "By the Brethren Code, I invoke the Right of Parley with your admiral!"',
         ],
     },
     mecha: {
@@ -170,9 +170,9 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. 🚀 Fire a full salvo of micro-missiles into the enemy squadron — [Full Salvo (+Systems)]',
             '2. ⚡ Boost lateral thrusters to barrel roll through the flak screen — [High-G Burn (+Sync)]',
-            '3. 💥 Overclock the beam cannon to vaporize the command bunker — [Overclock Reactor (+Heat)]',
-            '4. 🛡️ Slam your reinforced alloy shield into the charging bipedal mech — [Crushing Blow (+Frame)]',
-            '5. 🎙️ Open broad-band cockpit comms to demand the convoy\'s surrender — [Bail / Eject (+Pilot)]',
+            '3. 🛡️ Slam your reinforced alloy shield into the charging frame to hold the line',
+            '4. 🔍 Scan telemetry frequencies for the enemy commander\'s beacon signal',
+            '5. 🎙️ Open broad-band cockpit comms to order the escort convoy to scatter',
         ],
     },
     cosmic_horror: {
@@ -193,9 +193,9 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. 🕯️ Close your eyes, breathe, and recite poetry to resist the whispers — [Cling to Sanity (+Sanity)]',
             '2. 📜 Inspect the damp symbols carved into the altar\'s underside — [Decipher the Obscure (+Insight)]',
-            '3. 🔦 Hold the lantern high and stare down the shifting darkness — [Stand Fast (+Grit)]',
-            '4. 🏃 Barricade the crypt door with the heavy stone bench — [Desperate Flight (+Flesh)]',
-            '5. 🩸 Trace the ward of banishment in your own blood upon the floor — [Invoke the Rites (+Forbidden)]',
+            '3. 🔦 Hold the lantern high and stare down the shifting darkness',
+            '4. 🏃 Barricade the crypt door with the heavy stone bench',
+            '5. 🩸 Trace the ward of banishment in your own blood upon the floor',
         ],
     },
     survival_horror: {
@@ -214,11 +214,11 @@ export const PBTA_GENRES = {
             'Protect Another (+Heart) — dive in front of the monster to pull a screaming friend to safety',
         ],
         cyoaExamples: [
-            '1. 🤫 Duck into the rusted locker and hold your breath as the footsteps draw near — [Hold Your Breath (+Nerve)]',
+            '1. 🤫 Duck into the rusted locker and hold your breath as footsteps draw near — [Hold Your Breath (+Nerve)]',
             '2. 🪓 Swing the fire axe with all your strength into the creature\'s knee — [Fight for Your Life (+Brawn)]',
-            '3. 🔦 Rummage through the blood-spattered nurses\' station for medical gauze — [Scavenge Supplies (+Scavenge)]',
-            '4. 🏃 Vault through the shattered glass window into the rainy courtyard — [Sprint for Cover (+Agility)]',
-            '5. 🤝 Grab the rookie\'s collar and haul them to their feet before the ceiling caves in — [Protect Another (+Heart)]',
+            '3. 🔦 Rummage through the blood-spattered nurses\' station for medical gauze',
+            '4. 🏃 Vault through the shattered glass window into the rainy courtyard',
+            '5. 🤝 Grab the rookie\'s collar and haul them to their feet',
         ],
     },
     post_apocalyptic: {
@@ -239,9 +239,9 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. 🚗 Floor the accelerator of your armored rig to ram the raider buggy — [Act Under Fire (+Cool)]',
             '2. 💥 Rack your sawed-off shotgun and step right into the gang leader\'s face — [Go Aggro (+Hard)]',
-            '3. 🔭 Scan the rusted highway overpass with your cracked binoculars — [Read a Sitch (+Sharp)]',
-            '4. 🔧 Splice wires and patch the radiator with duct tape and scrap copper — [Jury-Rig (+Scrap)]',
-            '5. 🌀 Close your eyes and let the psychic static reveal where the water cache lies — [Open Your Brain (+Weird)]',
+            '3. 🔭 Scan the rusted highway overpass with your cracked binoculars',
+            '4. 🔧 Splice wires and patch the radiator with duct tape and scrap copper',
+            '5. 🗣️ "We trade clean water for safe passage. Take it or chew lead."',
         ],
     },
     gothic_heist: {
@@ -262,9 +262,32 @@ export const PBTA_GENRES = {
         cyoaExamples: [
             '1. 🗝️ Slide your tension wrench into the iron vault lock — [Pick a Pocket or Lock (+Finesse)]',
             '2. 🥷 Melt into the alcove as the Bluecoat watch patrol passes under the streetlamp — [Slip Through the Shadows (+Skulk)]',
-            '3. 🏃 Spring across the rain-slick roof gap and catch the rain gutter opposite — [Leap the Rooftops (+Prowl)]',
-            '4. 🎭 Present the forged Lord Governor\'s seal with an indignant sneer — [Work the Mark (+Sway)]',
-            '5. 👻 Channel the spirit of the murdered merchant to ask where the ledger is buried — [Attune to the Veil (+Attune)]',
+            '3. 🏃 Spring across the rain-slick roof gap and catch the rain gutter opposite',
+            '4. 🎭 Present the forged Lord Governor\'s seal with an indignant sneer',
+            '5. 👻 Channel the spirit of the murdered merchant to ask where the ledger is buried',
+        ],
+    },
+    slice_of_life: {
+        id: 'slice_of_life',
+        label: 'Slice of Life / Cozy Drama (Wanderhome / Yazeba)',
+        icon: '🍵',
+        multihogGenre: 'fantasy',
+        stats: ['Heart', 'Grace', 'Daring', 'Insight', 'Craft'],
+        statDescriptions: 'Heart (empathy/listening/comfort), Grace (social composure/patience/etiquette), Daring (vulnerability/confessions/bold leaps), Insight (noticing quiet details/reading moods), Craft (cooking/gardening/artisan care/fixing things)',
+        archetypes: ['The Caregiver', 'The Dreamer', 'The Newcomer', 'The Overachiever', 'The Quiet Artisan', 'The Free Spirit', 'The Confidant', 'The Town Hermit'],
+        moves: [
+            'Comfort & Reassure (+Heart) — offer gentle solace or heartfelt listening to someone in distress',
+            'Take the Leap (+Daring) — risk emotional vulnerability, confess feelings, or take a bold social chance',
+            'Keep Your Composure (+Grace) — maintain dignity and calm through intense embarrassment, gossip, or social pressure',
+            'Notice the Unspoken (+Insight) — read between the lines to sense what someone truly feels or needs',
+            'Tend & Craft (+Craft) — pour patience and care into restoring an heirloom, cooking a heartfelt meal, or mending a broken tool',
+        ],
+        cyoaExamples: [
+            '1. ☕ Smile warmly and pour another cup of chamomile tea',
+            '2. 💬 "How has your garden been holding up this week, Mrs. Higgins?"',
+            '3. 🚶 Step out onto the sunlit porch to get some quiet air',
+            '4. 📦 Help carry the heavy wooden crates inside from the cart',
+            '5. 😳 Take a deep breath and confess what you really came here to say — [Take the Leap (+Daring)]',
         ],
     },
 };
@@ -319,11 +342,11 @@ NO INITIATIVE TURNS. Combat is a cinematic conversation, not round-by-round math
 - Enemies do not have bloated HP or AC. They have a threat tier and a Harm clock (typically 1 to 5 Harm to defeat). In the [COMBAT] state memo, format enemy headers with their descending vitality token alongside Harm (e.g. Name: 4/4 HP | Harm: 0/4 | Armor: 1).
 - ARMOR: Armor reduces incoming Harm by its value (e.g. Armor 1 turns 3 Harm into 2 Harm).
 - HARM TIERS:
-  1 Harm: Scratches, bruises, wind knocked out.
-  2 Harm: Deep cut, broken bone, moderate injury (-1 forward to physical actions).
-  3 Harm: Severe, incapacitating trauma.
-  4 Harm: Critical wound, organ damage, verge of death (-2 forward to all actions).
-  5 Harm: Lethal / dying (Status: Defeated).
+  1 Harm: Scratches, bruises, wind knocked out (in slice-of-life: minor embarrassment or fluster).
+  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).
+  3 Harm: Severe, incapacitating trauma (in slice-of-life: acute emotional distress or social tension).
+  4 Harm: Critical wound, organ damage, verge of death (in slice-of-life: near burnout, -2 forward).
+  5 Harm: Lethal / dying (Status: Defeated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).
 </combat>`;
 }
 
@@ -412,7 +435,7 @@ export function deriveCyoaExamplesFromMoves(moves = [], contextLabel = '') {
     let idx = 1;
 
     for (const moveStr of moves) {
-        if (buttons.length >= 4) break;
+        if (buttons.length >= 1) break;
         const clean = moveStr.replace(/^[\*\-\s]+/, '').trim();
         if (!clean) continue;
 
@@ -532,7 +555,6 @@ You must generate exactly 5 choices following narrative context:
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for the user. NEVER forget the choices.
 - Enclose all choices inside a single <choices> XML block.
 - Wrap every single choice in a <button> tag.${emojiLine}
-- High-stakes situations and perilous obstacles should feature Moves; conversational downtime needs fewer rolls.
 - NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), Armor Class ("vs AC 15"), or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ Full Success | 7–9 Mixed Success | 6- Miss).
 - When a choice triggers a PbtA Move, format it as: — [Move Name (+Stat)]
 - When a choice consumes equipment or uses a gear tag, format it as: — [-1 Resource] or — [Item Name (tag)]
@@ -541,6 +563,16 @@ Choice types available:
 - NORMAL: Plain action or spoken dialogue (e.g. "Open the blast door" or "Tell me what you know")
 - MOVE TRIGGER: Action that triggers a Move with stat modifier: — [Move Name (+Stat)]
 - ARCHETYPE / TAG: Action leveraging special playbook moves or gear tags
+
+TENSION-ADAPTIVE MOVE PACING:
+- EVALUATE SCENE TENSION BEFORE GENERATING CHOICES:
+  • LOW TENSION / DOWNTIME (Taverns, campfires, safehouses, transit, shopping, routine conversation):
+    Generate 100% plain dialogue, inquiry, and narrative actions (ZERO moves). Ordinary conversation and routine tasks NEVER use dice.
+  • SIMMERING FRICTION / SOCIAL STANDOFF (Diplomacy, interrogation, tense standoff with leverage):
+    At most 1 choice triggers a Move (e.g. Parley, Fast-Talk, or sudden draw). The other choices must be spoken dialogue, observation, or tactical positioning.
+  • HIGH TENSION / PERIL (Active combat, chases, lethal traps, frantic escape):
+    1 to 2 choices may trigger tactical Moves (e.g. melee, ranged, spells/tech), while the remaining choices provide tactical maneuvers, taking cover, positioning, or spoken commands (no move tags).
+- NEVER OVERLOAD: Never offer more than 2 choices with moves even in deadly combat. Most choices should always be narrative or conversational options.
 
 EXAMPLES (${displayLabel}):
 ${examples}

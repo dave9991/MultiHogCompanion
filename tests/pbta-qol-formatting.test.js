@@ -10,9 +10,9 @@ import { buildMonsterEntryContent } from '../concierge-npc-format.js';
 
 console.log('--- Running PbtA QoL Formatting Test Suite ---');
 
-// 1. Verify all 11 genre presets generate valid cartridges with ((PILLS)) prompts
+// 1. Verify all 12 genre presets generate valid cartridges with ((PILLS)) prompts
 const genres = Object.keys(PBTA_GENRES);
-assert.strictEqual(genres.length, 11, `Expected 11 genres, found ${genres.length}`);
+assert.strictEqual(genres.length, 12, `Expected 12 genres, found ${genres.length}`);
 
 for (const genreKey of genres) {
     const cartridge = buildPbtACartridge(genreKey);

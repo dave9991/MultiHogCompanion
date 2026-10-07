@@ -79,6 +79,12 @@ export const SYSTEM_ALIASES = {
     dungeonworld: 'fantasy',
     'dungeon world': 'fantasy',
     fellowship: 'fantasy',
+    'slice of life': 'slice_of_life',
+    slice: 'slice_of_life',
+    cozy: 'slice_of_life',
+    wanderhome: 'slice_of_life',
+    yazeba: 'slice_of_life',
+    'small town': 'slice_of_life',
 };
 
 /**

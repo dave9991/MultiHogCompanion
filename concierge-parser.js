@@ -204,22 +204,29 @@ The Kick: Unset
         meta.premise ? `Premise: ${meta.premise}` : null,
     ];
 
+    // Full-detail view, written in the same key: value shape as [UPDATE_DOSSIER] blocks so the
+    // model can copy names/keys exactly and emit precise partial edits.
+    const cfg = dossier.config || {};
+    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}`);
+    if (meta.tone && meta.tone.length) lines.push(`Tone: ${[].concat(meta.tone).join(', ')}`);
+
     if (p.name || p.playbook) {
-        lines.push(`Protagonist: ${p.name || 'Unnamed Adventurer'} (Playbook: ${p.playbook || 'In Development'})`);
+        lines.push('[PROTAGONIST]');
+        lines.push(`name: ${p.name || 'Unnamed Adventurer'}`);
+        lines.push(`playbook: ${p.playbook || 'In Development'}`);
         if (p.stats && Object.keys(p.stats).length) {
-            const statStr = Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ');
-            lines.push(`  Stats: ${statStr}`);
+            lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}`);
         }
-        lines.push(`  Harm: ${p.harm?.max ?? 5} | Armor: ${p.harm?.armor ?? 0}`);
+        lines.push(`harm: ${p.harm?.max ?? 5}`);
+        lines.push(`armor: ${p.harm?.armor ?? 0}`);
         if (p.startingMoves && p.startingMoves.length) {
-            lines.push(`  Moves: ${p.startingMoves.join(' | ')}`);
+            lines.push('moves:');
+            p.startingMoves.forEach(mv => lines.push(`- ${mv}`));
         }
-        if (p.gear && p.gear.length) {
-            lines.push(`  Gear: ${p.gear.join(', ')}`);
-        }
-        if (p.bio) {
-            lines.push(`  Bio: ${p.bio}`);
-        }
+        if (p.gear && p.gear.length) lines.push(`gear: ${p.gear.join(', ')}`);
+        if (p.bio) lines.push(`bio: ${p.bio}`);
+        lines.push(`portrait: ${p.portraitSrc ? 'set' : 'none'}`);
+        lines.push('[/PROTAGONIST]');
     } else {
         lines.push('Protagonist: Unset');
     }
@@ -227,10 +234,15 @@ The Kick: Unset
     if (npcs.length) {
         lines.push(`NPCs (${npcs.length}):`);
         npcs.forEach(n => {
-            const role = n.role ? ` [Role: ${n.role}]` : '';
-            const bond = n.relationship ? ` (Bond: ${n.relationship})` : '';
-            const look = n.appearance ? ` (Look: ${n.appearance})` : '';
-            lines.push(`  - ${n.name}${role}${bond}${look}`);
+            lines.push('[NPC]');
+            lines.push(`name: ${n.name}`);
+            const fields = [
+                ['role', n.role], ['species', n.species], ['appearance', n.appearance],
+                ['equipment', n.equipment], ['demeanor', n.demeanor], ['background', n.background],
+                ['relationship', n.relationship], ['moves_or_boons', n.movesOrBoons], ['notes', n.notes],
+            ];
+            fields.forEach(([k, v]) => { if (v) lines.push(`${k}: ${v}`); });
+            lines.push('[/NPC]');
         });
     } else {
         lines.push('NPCs: None');
@@ -239,7 +251,18 @@ The Kick: Unset
     if (monsters.length) {
         lines.push(`Monsters (${monsters.length}):`);
         monsters.forEach(m => {
-            lines.push(`  - ${m.name} [Harm: ${m.harm}, Armor: ${m.armor}] (Weakness: ${m.weakness || 'Unknown'})`);
+            lines.push('[MONSTER]');
+            lines.push(`name: ${m.name}`);
+            lines.push(`harm: ${m.harm}`);
+            lines.push(`armor: ${m.armor}`);
+            if (m.attacks && m.attacks.length) lines.push(`attacks: ${[].concat(m.attacks).join(', ')}`);
+            lines.push(`weakness: ${m.weakness || 'Unknown'}`);
+            if (m.impendingDoom && m.impendingDoom.length) {
+                lines.push('countdown:');
+                m.impendingDoom.forEach(d => lines.push(`- ${d}`));
+            }
+            if (m.notes) lines.push(`notes: ${m.notes}`);
+            lines.push('[/MONSTER]');
         });
     } else {
         lines.push('Monsters: None');
@@ -248,18 +271,34 @@ The Kick: Unset
     if (maps.length) {
         lines.push(`Maps (${maps.length}):`);
         maps.forEach(m => {
-            lines.push(`  - ${m.site} [${m.kind}, Threat: ${m.threat}]`);
+            lines.push('[MAP]');
+            lines.push(`site: ${m.site}`);
+            lines.push(`kind: ${m.kind}`);
+            lines.push(`threat: ${m.threat}`);
+            if (m.entrance) lines.push(`entrance: ${m.entrance}`);
+            if (m.prompt) lines.push(`prompt: ${m.prompt}`);
+            if (m.briefDescription) lines.push(`brief_description: ${m.briefDescription}`);
+            lines.push(`status: ${m.status || 'queued'}`);
+            lines.push('[/MAP]');
         });
     } else {
         lines.push('Maps: None');
     }
 
-    if (kick.startingLocation || kick.crisis) {
-        lines.push('The Kick:');
-        if (kick.startingLocation) lines.push(`  Starting Location: ${kick.startingLocation}`);
-        if (kick.crisis) lines.push(`  Crisis: ${kick.crisis}`);
+    if (kick.startingLocation || kick.crisis || kick.openingPrompt) {
+        lines.push('[KICK]');
+        if (kick.startingLocation) lines.push(`starting_location: ${kick.startingLocation}`);
+        if (kick.crisis) lines.push(`crisis: ${kick.crisis}`);
+        if (kick.openingPrompt) lines.push(`opening_prompt: ${kick.openingPrompt}`);
+        lines.push('[/KICK]');
     } else {
         lines.push('The Kick: Unset');
+    }
+
+    if (dossier.cyoaExamples && dossier.cyoaExamples.length) {
+        lines.push('[CYOA]');
+        dossier.cyoaExamples.forEach(c => lines.push(`- ${c}`));
+        lines.push('[/CYOA]');
     }
 
     lines.push('[/CURRENT_CAMPAIGN_DOSSIER]');
@@ -471,7 +510,19 @@ export function applyDossierUpdates(text, dossier) {
 
         const existingIdx = updated.npcs.findIndex(n => n.name.toLowerCase() === npcObj.name.toLowerCase());
         if (existingIdx >= 0) {
-            updated.npcs[existingIdx] = Object.assign({}, updated.npcs[existingIdx], npcObj);
+            // Partial follow-up edit: only overwrite fields the Concierge actually supplied
+            const patch = {};
+            const given = (...ks) => ks.some(k => kv[k] !== undefined && kv[k] !== '');
+            if (given('role')) patch.role = npcObj.role;
+            if (given('species', 'race')) patch.species = npcObj.species;
+            if (given('appearance', 'description', 'look')) patch.appearance = npcObj.appearance;
+            if (given('equipment', 'gear')) patch.equipment = npcObj.equipment;
+            if (given('demeanor')) patch.demeanor = npcObj.demeanor;
+            if (given('background')) patch.background = npcObj.background;
+            if (given('relationship')) patch.relationship = npcObj.relationship;
+            if (given('moves_or_boons', 'moves')) patch.movesOrBoons = npcObj.movesOrBoons;
+            if (given('notes')) patch.notes = npcObj.notes;
+            updated.npcs[existingIdx] = Object.assign({}, updated.npcs[existingIdx], patch);
             changes.push(`Updated NPC "${npcObj.name}" (${npcObj.role})`);
         } else {
             updated.npcs.push(npcObj);
@@ -528,7 +579,15 @@ export function applyDossierUpdates(text, dossier) {
 
         const existingIdx = updated.monsters.findIndex(m => m.name.toLowerCase() === monsterObj.name.toLowerCase());
         if (existingIdx >= 0) {
-            updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], monsterObj);
+            const patch = {};
+            if (kv.harm) patch.harm = monsterObj.harm;
+            if (kv.armor) patch.armor = monsterObj.armor;
+            if (kv.attacks) patch.attacks = monsterObj.attacks;
+            if (kv.weakness) patch.weakness = monsterObj.weakness;
+            if (monsterObj.impendingDoom.length) patch.impendingDoom = monsterObj.impendingDoom;
+            if (kv.notes) patch.notes = monsterObj.notes;
+            updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], patch);
+            Object.assign(monsterObj, updated.monsters[existingIdx]);
             changes.push(`Updated Adversary "${monsterObj.name}" (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`);
         } else {
             updated.monsters.push(monsterObj);
@@ -588,7 +647,13 @@ export function applyDossierUpdates(text, dossier) {
 
         const existingIdx = updated.maps.findIndex(m => m.site.toLowerCase() === mapObj.site.toLowerCase());
         if (existingIdx >= 0) {
-            updated.maps[existingIdx] = Object.assign({}, updated.maps[existingIdx], mapObj);
+            const patch = {};
+            if (kv.kind) patch.kind = mapObj.kind;
+            if (kv.threat) patch.threat = mapObj.threat;
+            if (kv.entrance) patch.entrance = mapObj.entrance;
+            if (kv.prompt) { patch.prompt = mapObj.prompt; }
+            if (kv.brief_description || kv.prompt) patch.briefDescription = mapObj.briefDescription;
+            updated.maps[existingIdx] = Object.assign({}, updated.maps[existingIdx], patch);
             changes.push(`Updated Location "${mapObj.site}" (${mapObj.kind})`);
         } else {
             updated.maps.push(mapObj);

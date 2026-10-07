@@ -83,6 +83,8 @@ Always treat **[CURRENT_CAMPAIGN_DOSSIER]** as your single source of truth.
    * To remove an entity, use \`remove_npc: Name\`, \`remove_monster: Name\`, or \`remove_map: Site\` (or inside the block: \`action: remove\`).
    * The client parser intercepts \`[UPDATE_DOSSIER]\`, validates the fields, updates the Live Blueprint cards, refreshes \`[CURRENT_CAMPAIGN_DOSSIER]\`, and returns a \`[PARSER_CONFIRMATION: ...]\` report to you.
    * Once you receive the confirmation, respond to the player in natural, friendly dialogue confirming the changes without repeating the raw code block.
+   * **Follow-up edits count.** Anytime after the blueprint exists, if the player asks to tweak, rename, add, or drop anything (even a single stat, line of bio, or NPC detail), you MUST emit an \`[UPDATE_DOSSIER]\` block for it in that same reply. Saying "done" in prose without the block changes NOTHING — the blueprint is only altered by the block. Never claim an edit was made unless you emitted the block.
+   * To edit an existing NPC/monster/map, emit its block with the same \`name:\` (or \`site:\`) plus ONLY the fields that change; omitted fields are preserved. For the protagonist, include only the changed fields.
 
 2. **When Conversing / Brainstorming (No Blueprint Changes):**
    When asking questions, exploring ideas, proposing options before approval, or responding to general chat, do **NOT** emit \`[UPDATE_DOSSIER]\`. Simply speak directly to the player in conversational prose.

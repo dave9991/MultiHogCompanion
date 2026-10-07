@@ -512,7 +512,7 @@ ${formatChangelogForContext(logs)}`;
             ...chatHistory.map(m => ({
                 role: m.role,
                 name: m.role === 'assistant' ? 'PbtA_Concierge' : 'Player',
-                content: m.content,
+                content: m.llmContent ?? m.content,
             })),
         ];
 
@@ -523,6 +523,7 @@ ${formatChangelogForContext(logs)}`;
         const report = applyDossierUpdates(rawResponse, activeDossier);
 
         let finalChatBubbleText = '';
+        let appliedDirective = '';
 
         if (report.hasMutations || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE)\]/i.test(rawResponse)) {
             // Apply mutations to live blueprint
@@ -533,6 +534,11 @@ ${formatChangelogForContext(logs)}`;
                 report.changes.forEach(c => changelog.push(`[${timeStr}] ${c}`));
                 updateBlueprintDeck();
                 saveDraft();
+            }
+
+            if (report.hasMutations) {
+                const blk = rawResponse.match(/\[(?:UPDATE_DOSSIER|CONCIERGE_STATE)\][\s\S]*?(?:\[\/(?:UPDATE_DOSSIER|CONCIERGE_STATE)\]|$)/i);
+                appliedDirective = blk ? blk[0] : '';
             }
 
             // Step 2: Handshake loop with the Parser report
@@ -550,7 +556,7 @@ ${formatChangelogForContext(logs)}`;
                 ...chatHistory.map(m => ({
                     role: m.role,
                     name: m.role === 'assistant' ? 'PbtA_Concierge' : 'Player',
-                    content: m.content,
+                    content: m.llmContent ?? m.content,
                 })),
                 { role: 'assistant', name: 'PbtA_Concierge', content: rawResponse },
                 { role: 'system', name: 'System', content: confirmationNotice },
@@ -575,7 +581,13 @@ ${formatChangelogForContext(logs)}`;
         appendChatBubble('assistant', finalChatBubbleText);
 
         // Record clean conversation text in history (prevent context pollution from raw code blocks)
-        chatHistory.push({ role: 'assistant', content: finalChatBubbleText });
+        // llmContent keeps the applied directive block so the model keeps seeing (and imitating)
+        // the edit protocol on later turns; the UI bubble/draft display uses the clean `content`.
+        chatHistory.push({
+            role: 'assistant',
+            content: finalChatBubbleText,
+            ...(appliedDirective ? { llmContent: `${appliedDirective}\n\n${finalChatBubbleText}` } : {}),
+        });
         saveDraft();
     } catch (err) {
         typingBubble.remove();

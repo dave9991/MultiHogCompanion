@@ -22,11 +22,14 @@ for (const genreKey of genres) {
     // Character prompt
     assert.ok(prompts.character.includes('5/5 HP | Harm: 0/5'), `Character missing 5/5 HP in ${genreKey}`);
     assert.ok(prompts.character.includes('((PILLS)) Moves:'), `Character missing ((PILLS)) Moves in ${genreKey}`);
+    assert.ok(prompts.character.includes('((PILLS)) Gear:'), `Character missing ((PILLS)) Gear in ${genreKey}`);
     assert.ok(prompts.character.includes('((PILLS)) Conditions:'), `Character missing ((PILLS)) Conditions in ${genreKey}`);
 
     // Party prompt
     assert.ok(prompts.party.includes('5/5 HP | Harm: 0/5'), `Party missing 5/5 HP in ${genreKey}`);
     assert.ok(prompts.party.includes('((PILLS)) Moves:'), `Party missing ((PILLS)) Moves in ${genreKey}`);
+    assert.ok(prompts.party.includes('((PILLS)) Gear:'), `Party missing ((PILLS)) Gear in ${genreKey}`);
+    assert.ok(prompts.party.includes('((PILLS)) Bonds:'), `Party missing ((PILLS)) Bonds in ${genreKey}`);
     assert.ok(prompts.party.includes('((PILLS)) Conditions:'), `Party missing ((PILLS)) Conditions in ${genreKey}`);
 
     // Combat prompt
@@ -38,6 +41,7 @@ console.log('✓ All 11 genre presets generate valid ((PILLS)) and tandem HP pro
 const qs = buildPbtAQuickStartInstructions('fantasy', 'Geralt', 'Monster hunt');
 assert.ok(qs.includes('5/5 HP | Harm: 0/5'), 'Quick Start mandate missing 5/5 HP');
 assert.ok(qs.includes('((PILLS)) Moves:'), 'Quick Start mandate missing ((PILLS)) Moves');
+assert.ok(qs.includes('((PILLS)) Gear:'), 'Quick Start mandate missing ((PILLS)) Gear');
 assert.ok(qs.includes('((PILLS)) Conditions:'), 'Quick Start mandate missing ((PILLS)) Conditions');
 console.log('✓ Quick Start instructions mandate tandem HP and ((PILLS))');
 
@@ -60,9 +64,10 @@ const soloDossier = {
 const soloMemo = formatInitialPbtaMemo(soloDossier);
 assert.ok(soloMemo.includes('Deckard (Blade Runner): 4/4 HP | Harm: 0/4 | Armor: 1'), 'Solo memo missing 4/4 HP anchor');
 assert.ok(soloMemo.includes('((PILLS)) Moves: Assess Situation (+Mind) (Scan for exits and blind spots), Act Under Pressure (+Cool) (Stay icy under fire)'), 'Solo memo missing normalized ((PILLS)) moves');
+assert.ok(soloMemo.includes('((PILLS)) Gear: Blaster pistol, Longcoat'), 'Solo memo missing ((PILLS)) Gear');
 assert.ok(soloMemo.includes('((PILLS)) Conditions: None'), 'Solo memo missing ((PILLS)) Conditions');
 assert.ok(!soloMemo.includes('[PARTY]'), 'Solo memo should not have [PARTY] block');
-console.log('✓ formatInitialPbtaMemo correctly formats solo protagonist with 4/4 HP and normalized pill moves');
+console.log('✓ formatInitialPbtaMemo correctly formats solo protagonist with 4/4 HP, normalized pill moves, and pill gear');
 
 // 4. formatInitialPbtaMemo with party companions
 const squadDossier = {
@@ -75,6 +80,7 @@ const squadDossier = {
             movesOrBoons: 'Nexus Empathy: Read synth emotional resonance',
             appearance: 'Dark tailored suit, obsidian eyes',
             relationship: 'Bound by secret origin',
+            equipment: 'Derringer pistol (2 Harm)',
         },
     ],
 };
@@ -82,8 +88,10 @@ const squadMemo = formatInitialPbtaMemo(squadDossier);
 assert.ok(squadMemo.includes('[PARTY]'), 'Squad memo must include [PARTY]');
 assert.ok(squadMemo.includes('Rachael (Companion): 5/5 HP | Harm: 0/5 | Armor: 0'), 'Companion missing 5/5 HP');
 assert.ok(squadMemo.includes('((PILLS)) Moves: Nexus Empathy (Read synth emotional resonance)'), 'Companion boon missing normalized ((PILLS))');
+assert.ok(squadMemo.includes('((PILLS)) Gear: Derringer pistol (2 Harm)'), 'Companion gear missing ((PILLS))');
+assert.ok(squadMemo.includes('((PILLS)) Bonds: Bound by secret origin'), 'Companion bond missing ((PILLS))');
 assert.ok(squadMemo.includes('((PILLS)) Conditions: None'), 'Companion missing ((PILLS)) Conditions');
-console.log('✓ formatInitialPbtaMemo correctly formats squad companions with 5/5 HP and ((PILLS))');
+console.log('✓ formatInitialPbtaMemo correctly formats squad companions with 5/5 HP, ((PILLS)) moves, gear, and bonds');
 
 // 5. buildMonsterEntryContent
 const mockMonster = {

@@ -574,7 +574,7 @@ Format:
 {{user}} (Archetype): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
 Stats: ${statsExample}
 ((PILLS)) Moves: Move 1 (Trigger and narrative effect), Move 2 (Trigger and narrative effect)
-Gear: Signature weapon/item (tags), travel gear
+((PILLS)) Gear: Signature weapon (Tags, 2 Harm), Protective gear ((+) Armor 1)
 Wealth: Coin 3 (or setting currency)
 ((PILLS)) Conditions: None
 Hold/Forward: None
@@ -584,6 +584,7 @@ Status: Healthy
 
 PILL FORMATTING (renders as interactive badges with mouse-over tooltips):
 - Moves: Separate moves with commas, placing trigger and mechanical/narrative effect inside trailing parentheses: Move Name (Trigger and effect). The description appears on mouse-over. Keep commas out of the description unless inside parentheses.
+- Gear: Separate equipped items with commas, placing weapon tags, armor values, or uses inside trailing parentheses: Item Name (Tags, harm/armor). Use (+) for armor or protective bonuses, e.g. Static Shroud ((+) +1 Armor).
 - Conditions: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward). Use plain "None" when unaffected.`,
 
         party: `Companion and party members. MECHANICS ONLY. Every member MUST begin with their own header line. Separate distinct members with an empty line:
@@ -591,17 +592,20 @@ Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
 Stats: ${statsExample}
 ((PILLS)) Moves: Signature Move (Trigger and narrative effect), Second Move (Trigger and narrative effect)
-Gear: Signature weapon/item (tags) | Armor (value)
+((PILLS)) Gear: Signature weapon (Tags, 2 Harm), Protective gear ((+) Armor 1)
+((PILLS)) Bonds: Protagonist Name (Bond or debt detail), Faction Name (Relationship context)
 ((PILLS)) Conditions: None
 Status: Healthy
 
 Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
 ((PILLS)) Moves: Signature Move (Trigger and narrative effect)
+((PILLS)) Gear: Utility item (Tags)
+((PILLS)) Bonds: Protagonist Name (Bond detail)
 ((PILLS)) Conditions: None
 Status: Healthy
 
-PILL FORMATTING: Separate companion moves with commas and put the trigger/effect in parentheses: Name (detail). Details appear on hover.`,
+PILL FORMATTING: Separate companion moves, gear, and bonds with commas and put the trigger/effect/tag in parentheses: Name (detail). Details appear on hover.`,
 
         combat: `Active enemies and environmental threats in combat.
 Group threats under ENEMIES: and NON-PARTY ALLIES: headers.
@@ -834,7 +838,7 @@ export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName =
         `SUGGESTED MOVES (pick 2): ${genre.moves.join('; ')}.`,
         `NO D&D MECHANICS: Moves MUST use PbtA terminology (Harm, +1 forward, fictional positioning). NEVER write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns".`,
         `NO D&D GEAR: Armor MUST use PbtA armor rating (e.g. Armor 1, Armor 2), NEVER "AC +X". Weapons MUST use tags and Harm (e.g. close, 2 Harm), NEVER D&D damage dice (1d8) or +1/+2 magic suffixes.`,
-        `FORMAT MANDATE: Output [CHARACTER] using 5/5 HP | Harm: 0/5 | Armor: 0, Stats with modifiers, ((PILLS)) Moves: Move 1 (detail), Move 2 (detail), Gear, Wealth, ((PILLS)) Conditions: None, Hold/Forward: None, XP: 0/5, Status: Healthy. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, spell slots, or daily ability counters.`,
+        `FORMAT MANDATE: Output [CHARACTER] using 5/5 HP | Harm: 0/5 | Armor: 0, Stats with modifiers, ((PILLS)) Moves: Move 1 (detail), Move 2 (detail), ((PILLS)) Gear: Signature weapon (tags), Armor ((+) +1 Armor), Wealth, ((PILLS)) Conditions: None, Hold/Forward: None, XP: 0/5, Status: Healthy. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, spell slots, or daily ability counters.`,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }
@@ -867,23 +871,30 @@ export function formatInitialPbtaMemo(dossier) {
         statsStr = 'Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1';
     }
 
-    // Format moves (comma-separated for pill splitting; normalizes "Name: Desc" to "Name (Desc)")
+    // Helper to normalize "Name: Desc" into "Name (Desc)" for pill tooltips
+    const normalizePill = item => {
+        if (typeof item !== 'string') return String(item || '');
+        const trimmed = item.trim();
+        const colonMatch = trimmed.match(/^([^:]+):\s*(.*)$/);
+        if (colonMatch && !/\([^)]+\)$/.test(trimmed)) {
+            return `${colonMatch[1].trim()} (${colonMatch[2].trim()})`;
+        }
+        return trimmed;
+    };
+
+    // Format moves (comma-separated for pill splitting)
     const rawMoves = Array.isArray(p.startingMoves) && p.startingMoves.length > 0
         ? p.startingMoves
         : ['Act Under Fire (+Cool)', 'Read a Tense Situation (+Sharp)'];
-    const moves = rawMoves.map(m => {
-        const colonMatch = m.match(/^([^:]+):\s*(.*)$/);
-        if (colonMatch && !/\([^)]+\)$/.test(m)) {
-            return `${colonMatch[1].trim()} (${colonMatch[2].trim()})`;
-        }
-        return m;
-    });
-    const movesStr = moves.join(', ');
+    const movesStr = rawMoves.map(normalizePill).join(', ');
 
-    // Format gear
-    const gearStr = Array.isArray(p.gear) && p.gear.length > 0
-        ? p.gear.join(', ')
-        : 'Essential adventurer kit, signature item';
+    // Format gear (comma-separated for pill splitting)
+    const rawGear = Array.isArray(p.gear) && p.gear.length > 0
+        ? p.gear
+        : (typeof p.gear === 'string' && p.gear.trim())
+            ? p.gear.split(',').map(s => s.trim()).filter(Boolean)
+            : ['Essential adventurer kit (utility tools)', 'Signature weapon (2 Harm, close)'];
+    const gearStr = rawGear.map(normalizePill).join(', ');
 
     const locationStr = (kick.startingLocation || dossier.maps?.[0]?.site || 'The Starting Threshold').trim();
 
@@ -901,7 +912,7 @@ export function formatInitialPbtaMemo(dossier) {
         `${charName} (${playbook}): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: ${armor}`,
         `Stats: ${statsStr}`,
         `((PILLS)) Moves: ${movesStr}`,
-        `Gear: ${gearStr}`,
+        `((PILLS)) Gear: ${gearStr}`,
         `((PILLS)) Conditions: None`,
         `Hold/Forward: None`,
         `XP: 0/${pacingXp}`,
@@ -923,17 +934,33 @@ export function formatInitialPbtaMemo(dossier) {
             const cName = comp.name || 'Companion';
             const cRole = comp.role || 'Companion';
             let cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
-            const boonColon = cBoons.match(/^([^:]+):\s*(.*)$/);
-            if (boonColon && !/\([^)]+\)$/.test(cBoons)) {
-                cBoons = `${boonColon[1].trim()} (${boonColon[2].trim()})`;
-            }
+            const rawBoons = Array.isArray(cBoons) ? cBoons : [cBoons];
+            const cBoonsStr = rawBoons.map(normalizePill).join(', ');
+
+            let cGear = comp.equipment || comp.gear || 'Signature equipment (utility)';
+            const rawCompGear = Array.isArray(cGear)
+                ? cGear
+                : typeof cGear === 'string'
+                    ? cGear.split(',').map(s => s.trim()).filter(Boolean)
+                    : [String(cGear)];
+            const cGearStr = rawCompGear.map(normalizePill).join(', ');
+
+            let cBonds = comp.relationship || `${charName} (Allied with protagonist)`;
+            const rawCompBonds = Array.isArray(cBonds)
+                ? cBonds
+                : typeof cBonds === 'string'
+                    ? cBonds.split(',').map(s => s.trim()).filter(Boolean)
+                    : [String(cBonds)];
+            const cBondsStr = rawCompBonds.map(normalizePill).join(', ');
+
             const cApp = comp.appearance || comp.description || (comp.demeanor ? `${comp.demeanor} demeanor` : '');
             if (i > 0) partyLines.push('');
             partyLines.push(
                 `${cName} (${cRole}): 5/5 HP | Harm: 0/5 | Armor: 0`,
                 ...(cApp ? [`Appearance: ${cApp}`] : []),
-                `((PILLS)) Moves: ${cBoons}`,
-                `Bond: ${comp.relationship || 'Allied with protagonist'}`,
+                `((PILLS)) Moves: ${cBoonsStr}`,
+                `((PILLS)) Gear: ${cGearStr}`,
+                `((PILLS)) Bonds: ${cBondsStr}`,
                 `((PILLS)) Conditions: None`,
                 `Status: Healthy`
             );

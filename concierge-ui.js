@@ -588,13 +588,24 @@ ${formatDossierForContext(dossier)}
 ${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
         };
 
+        const formatHistoryMessage = (m) => {
+            if (m.role === 'assistant') {
+                return {
+                    role: 'assistant',
+                    name: 'PbtA_Concierge',
+                    content: stripConciergeStateBlocks(m.content) || m.content,
+                };
+            }
+            return {
+                role: m.role,
+                name: 'Player',
+                content: m.llmContent ?? m.content,
+            };
+        };
+
         const fullMessages = [
             { role: 'system', name: 'System', content: buildSystemContext(activeDossier, changelog) },
-            ...chatHistory.map(m => ({
-                role: m.role,
-                name: m.role === 'assistant' ? 'PbtA_Concierge' : 'Player',
-                content: m.llmContent ?? m.content,
-            })),
+            ...chatHistory.map(formatHistoryMessage),
         ];
 
         // Step 1: Send request to Concierge
@@ -604,7 +615,6 @@ ${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSee
         const report = applyDossierUpdates(rawResponse, activeDossier);
 
         let finalChatBubbleText = '';
-        let appliedDirective = '';
 
         if (report.hasMutations || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE)\]/i.test(rawResponse)) {
             // Apply mutations to live blueprint
@@ -617,11 +627,6 @@ ${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSee
                 saveDraft();
             }
 
-            if (report.hasMutations) {
-                const blk = rawResponse.match(/\[(?:UPDATE_DOSSIER|CONCIERGE_STATE)\][\s\S]*?(?:\[\/(?:UPDATE_DOSSIER|CONCIERGE_STATE)\]|$)/i);
-                appliedDirective = blk ? blk[0] : '';
-            }
-
             // Step 2: Handshake loop with the Parser report
             const typingEl = document.getElementById('mhc_typing_indicator');
             if (typingEl) {
@@ -629,16 +634,12 @@ ${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSee
             }
 
             const confirmationNotice = report.success
-                ? `[PARSER_CONFIRMATION: Success. Applied changes: ${report.changes.join('; ') || 'Blueprint in sync'}. Current blueprint is updated. Speak to the player now to confirm these updates and discuss the next creative step. Do NOT repeat the raw [UPDATE_DOSSIER] code block.]`
+                ? `[PARSER_CONFIRMATION: Success. Applied changes: ${report.changes.join('; ') || 'Blueprint in sync'}. The live Blueprint Deck has updated on the player's screen. Speak to the player now to highlight only the core dramatic hook or important choice (keep response concise, 2-4 sentences max), invite them to review the cards in the Blueprint Deck, and ask what they would like to adjust. Do NOT list out full stats, moves, or card details, and do NOT repeat the raw [UPDATE_DOSSIER] code block.]`
                 : `[PARSER_FEEDBACK: Errors detected: ${report.errors.join('; ')}. Current changes applied: ${report.changes.join('; ') || 'None'}. Please explain or correct any missing items to the player.]`;
 
             const step2Messages = [
                 { role: 'system', name: 'System', content: buildSystemContext(activeDossier, changelog) },
-                ...chatHistory.map(m => ({
-                    role: m.role,
-                    name: m.role === 'assistant' ? 'PbtA_Concierge' : 'Player',
-                    content: m.llmContent ?? m.content,
-                })),
+                ...chatHistory.map(formatHistoryMessage),
                 { role: 'assistant', name: 'PbtA_Concierge', content: rawResponse },
                 { role: 'system', name: 'System', content: confirmationNotice },
             ];
@@ -661,13 +662,10 @@ ${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSee
         // Render clean bubble to the user
         appendChatBubble('assistant', finalChatBubbleText);
 
-        // Record clean conversation text in history (prevent context pollution from raw code blocks)
-        // llmContent keeps the applied directive block so the model keeps seeing (and imitating)
-        // the edit protocol on later turns; the UI bubble/draft display uses the clean `content`.
+        // Record clean conversation text in history (prevent context pollution and token bloat from raw code blocks)
         chatHistory.push({
             role: 'assistant',
             content: finalChatBubbleText,
-            ...(appliedDirective ? { llmContent: `${appliedDirective}\n\n${finalChatBubbleText}` } : {}),
         });
         saveDraft();
     } catch (err) {

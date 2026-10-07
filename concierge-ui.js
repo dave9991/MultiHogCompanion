@@ -157,6 +157,12 @@ function updateBlueprintDeck() {
     const emojisOn = cfg.cyoaEmojis !== false;
     $('#mhc_dial_emojis_btn').text(`✨ Emojis: ${emojisOn ? 'On' : 'Off'}`);
 
+    const simDepth = cfg.simulationDepth || 'active_fronts';
+    let simLabel = 'Active Fronts';
+    if (simDepth === 'living_world') simLabel = 'Living World';
+    else if (simDepth === 'static') simLabel = 'Static Solo';
+    $('#mhc_dial_sim_depth_btn').text(`🌍 Sim: ${simLabel}`);
+
     if (cfg.artStyle) {
         $('#mhc_deck_dial_art_text').text(cfg.artStyle);
         $('#mhc_deck_dial_art').show();
@@ -223,6 +229,9 @@ function updateBlueprintDeck() {
             const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
             const moves = m.moves?.length ? m.moves.join('; ') : '';
             const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
+            const doomBadge = m.impendingDoom?.length
+                ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;" title="Active Countdown Front / Impending Doom">⏳ Clock: ${m.impendingDoom.length}</span>`
+                : '';
             const doomLine = m.impendingDoom?.length
                 ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>⏳ Impending Doom:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${m.impendingDoom.map(d => `<li>${d}</li>`).join('')}</ul></div>`
                 : '';
@@ -230,7 +239,7 @@ function updateBlueprintDeck() {
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
                         <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
-                            👹 ${m.name} <span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${m.harm} | Armor: ${m.armor}</span>
+                            👹 ${m.name} <span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${m.harm} | Armor: ${m.armor}</span> ${doomBadge}
                         </div>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
@@ -252,15 +261,20 @@ function updateBlueprintDeck() {
     const mapList = $('#mhc_deck_maps_list');
     mapList.empty();
     if (maps.length) {
+        const startSiteName = (kick?.startingLocation || maps[0]?.site || '').toLowerCase().trim();
         maps.forEach(map => {
             const desc = map.briefDescription || map.prompt || '';
             const entrance = map.entrance ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Entrance:</b> ${map.entrance}</div>` : '';
             const features = map.features?.length ? `<div style="font-size: 0.8em; opacity: 0.8; margin-top: 4px;"><b>Features:</b> ${map.features.join(', ')}</div>` : '';
+            const isPrimary = (map.site || '').toLowerCase().trim() === startSiteName;
+            const stageBadge = isPrimary
+                ? '<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Starting location: Generated immediately at launch">⭐ Starting Site</span>'
+                : '<span class="mhc-pill" style="font-size: 0.72em; opacity: 0.75;" title="Queued in Locations lorebook for lazy on-entry generation">📦 Staged for Entry</span>';
             mapList.append(`
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
                         <div class="mhc-deck-item-title">
-                            🗺️ ${map.site} <span class="mhc-pill" style="font-size: 0.72em;">${map.kind || 'Site'} · ${map.threat || 'Threat'}</span>
+                            🗺️ ${map.site} <span class="mhc-pill" style="font-size: 0.72em;">${map.kind || 'Site'} · ${map.threat || 'Threat'}</span> ${stageBadge}
                         </div>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
@@ -974,6 +988,17 @@ function bindModalEvents() {
         activeDossier.config = activeDossier.config || {};
         activeDossier.config.cyoaEmojis = activeDossier.config.cyoaEmojis === false ? true : false;
         changelog.push(`Toggled choice emojis to ${activeDossier.config.cyoaEmojis ? 'On' : 'Off'}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    $('#mhc_dial_sim_depth_btn').on('click', () => {
+        activeDossier.config = activeDossier.config || {};
+        const current = activeDossier.config.simulationDepth || 'active_fronts';
+        const cycle = { 'active_fronts': 'living_world', 'living_world': 'static', 'static': 'active_fronts' };
+        activeDossier.config.simulationDepth = cycle[current] || 'active_fronts';
+        const label = activeDossier.config.simulationDepth === 'static' ? 'Static Solo' : activeDossier.config.simulationDepth === 'living_world' ? 'Living World' : 'Active Fronts';
+        changelog.push(`Toggled simulation depth to ${label}`);
         updateBlueprintDeck();
         saveDraft();
     });

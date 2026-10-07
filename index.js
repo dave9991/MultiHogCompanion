@@ -21,6 +21,10 @@ import {
     getCampaignLorebookStatus,
     syncCampaignLorebooks,
 } from './campaign-lore-sync.js';
+import {
+    syncLivePbtaMemoVitality,
+    normalizePbtaMemo,
+} from './pbta-vitality-sync.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -672,6 +676,19 @@ export async function runSync(reason = '') {
         // 1. Auto-hydrate PbtA game state memo if needed
         const memoHydrated = await hydratePbtaMemoIfNeeded(chatId);
         if (memoHydrated) didWork = true;
+
+        // 2. Synchronize PbtA Harm with descending tandem HP in live memo
+        const rpgSettings = getRpgSettings();
+        if (rpgSettings) {
+            const vitalityUpdated = syncLivePbtaMemoVitality(rpgSettings, chatId);
+            if (vitalityUpdated) {
+                didWork = true;
+                try {
+                    const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+                    if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+                } catch (_) {}
+            }
+        }
 
         if (!settings.enablePersonaSync && !settings.enablePortraitSync) return didWork;
 

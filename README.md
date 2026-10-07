@@ -36,6 +36,13 @@ MultiHog Companion bridges the gap between Multihog's internal campaign state an
 * **One-Click Reversible:** Easily restore factory default D&D 5e settings anytime.
 * 👉 **Full Documentation:** See **[PBTA.md](PBTA.md)** for detailed mechanics, stat arrays, and move lists.
 
+### 6. 🎩 Conversational Session Zero & Living World Simulation
+* **PbtA Concierge Modal:** Conversational campaign architect capable of importing SillyTavern characters, existing lorebooks, and documents to build full bespoke adventures.
+* **Token-Optimized Modular Lorebooks:** Distributes entities cleanly across `{prefix}_NPCs`, `{prefix}_Factions`, `{prefix}_Locations`, and `{prefix}_Quests`, leaving the full raw dossier dormant in World Info (`constant: false`) to slash context overhead.
+* **Day 0 World Skeleton Seeding:** Injects macro premises into `{prefix}_Skeleton` so MultiHog's World Progression engine simulates faction intrigue and countdown fronts off-screen.
+* **Automated PbtA Fronts:** Advances Impending Doom every 24 in-world hours, feeding Grim Portents to the GM Narrator as fuel for failed moves (6- / 7–9).
+* **Simulation Depth Calibration:** Seamlessly toggle between **Static Solo** (lightweight lorebooks only), **Active Fronts** (24h macro countdowns), or **Living World** (macro Fronts + 8h persistent Map Evolution).
+
 ---
 
 ## 📦 Requirements

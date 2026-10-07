@@ -48,6 +48,7 @@ export function createEmptyDossier() {
             partyMode: 'squad',
             artStyle: '',
             pacingXp: 5,
+            simulationDepth: 'active_fronts',
         },
     };
 }
@@ -272,7 +273,7 @@ The Kick: Unset
     // Full-detail view, written in the same key: value shape as [UPDATE_DOSSIER] blocks so the
     // model can copy names/keys exactly and emit precise partial edits.
     const cfg = dossier.config || {};
-    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}`);
+    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
 
     if (p.name || p.playbook) {
@@ -437,7 +438,7 @@ export function applyDossierUpdates(text, dossier) {
         raw = stateMatch[1];
     } else {
         // Fallback: check if text contains standalone blocks directly
-        const hasDirectBlocks = /\[(?:PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS)\]/i.test(text);
+        const hasDirectBlocks = /\[(?:CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS)\]/i.test(text);
         if (hasDirectBlocks) {
             raw = text;
         }
@@ -860,6 +861,7 @@ export function applyDossierUpdates(text, dossier) {
         partyMode: 'squad',
         artStyle: '',
         pacingXp: 5,
+        simulationDepth: 'active_fronts',
     };
 
     const configMatch = raw.match(/\[CONFIG\]([\s\S]*?)(?:\[\/CONFIG\]|$)/i);
@@ -935,6 +937,21 @@ export function applyDossierUpdates(text, dossier) {
             if (xpRaw !== updated.config.pacingXp) {
                 updated.config.pacingXp = xpRaw;
                 changes.push(`XP Pacing dial set to ${xpRaw} XP per Advance`);
+            }
+        }
+
+        // World Simulation Depth
+        const simRaw = (kv.simulation_depth || kv.sim_depth || kv.simulation || '').toLowerCase();
+        if (simRaw) {
+            let nextSim = updated.config.simulationDepth || 'active_fronts';
+            if (/^(static|none|off|solo|disabled|narrative_solo)$/.test(simRaw)) nextSim = 'static';
+            else if (/^(living|living_world|full|deep|all)$/.test(simRaw)) nextSim = 'living_world';
+            else if (/^(active|active_fronts|fronts|standard|default)$/.test(simRaw)) nextSim = 'active_fronts';
+
+            if (nextSim !== updated.config.simulationDepth) {
+                updated.config.simulationDepth = nextSim;
+                const label = nextSim === 'static' ? 'Static (Narrative Only)' : nextSim === 'living_world' ? 'Living World (Fronts + Maps)' : 'Active Fronts (Recommended)';
+                changes.push(`Simulation Depth dial set to ${label}`);
             }
         }
     }
@@ -1072,7 +1089,7 @@ ${mapsMd}
 * **Playstyle:** ${dossier.config.playstyle || 'cyoa_5'}
 * **Harm Capacity:** ${dossier.config.harmMax || 5}
 * **Party Mode:** ${dossier.config.partyMode || 'squad'}
-* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}` : ''}`;
+* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}` : ''}`;
 }
 
 /**
@@ -1287,6 +1304,7 @@ export function parseMarkdownToDossier(markdown) {
         const harmM = configSection[1].match(/\*\s*\*\*Harm Capacity:\*\*\s*([^\n\r]+)/i);
         const partyM = configSection[1].match(/\*\s*\*\*Party Mode:\*\*\s*([^\n\r]+)/i);
         const emM = configSection[1].match(/\*\s*\*\*CYOA Emojis:\*\*\s*([^\n\r]+)/i);
+        const simM = configSection[1].match(/\*\s*\*\*Simulation Depth:\*\*\s*([^\n\r]+)/i);
         const artM = configSection[1].match(/\*\s*\*\*Art Direction:\*\*\s*([^\n\r]+)/i);
         const xpM = configSection[1].match(/\*\s*\*\*XP Pacing:\*\*\s*([^\n\r]+)/i);
 
@@ -1298,6 +1316,7 @@ export function parseMarkdownToDossier(markdown) {
         }
         if (partyM) dossier.config.partyMode = partyM[1].trim();
         if (emM) dossier.config.cyoaEmojis = !/disabled|false|off/i.test(emM[1]);
+        if (simM) dossier.config.simulationDepth = simM[1].trim();
         if (artM) dossier.config.artStyle = artM[1].trim();
         if (xpM) {
             const xpVal = parseInt(xpM[1], 10);

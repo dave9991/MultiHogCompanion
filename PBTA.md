@@ -141,11 +141,46 @@ Each genre uses a standard modifier array: **+2, +1, +1, 0, -1** (one primary st
 
 ---
 
+## 🌍 World Simulation Architecture & PbtA Fronts
+
+MultiHog Companion integrates deeply with MultiHog's background simulation engines (World Skeleton, World Progression, and Map Evolution) while keeping per-turn prompt overhead near zero.
+
+### 1. Token-Optimized Modular Lorebooks
+Instead of pinning thousands of tokens to every single turn, Session Zero splits your setting into 4 lean campaign lorebooks:
+* **`{prefix}_NPCs`**: Supporting characters and adversaries formatted with clean `[CORE]` summaries.
+* **`{prefix}_Factions`**: Global powers, allegiances, and agendas.
+* **`{prefix}_Locations`**: District-scale settlements and adventure sites with trigger keywords.
+* **`{prefix}_Quests`**: The opening crisis and active quest hooks.
+
+The full raw Campaign Dossier is recorded in World Info as a dormant background artifact (`constant: false`), activated only when specific deep lore is referenced.
+
+### 2. Day 0 World Skeleton Seeding
+At campaign launch, the Concierge seeds macro premises into `{prefix}_Skeleton`:
+* **Factions (`FAC`)**: Global powers operating off-screen.
+* **Locations (`LOC`)**: High-level geographic districts and wilderness hubs.
+* **Conflicts (`EVENT`)**: Active regional tensions and Impending Dooms.
+
+This gives MultiHog's World Progression engine deterministic fuel to evolve the world without hallucination.
+
+### 3. PbtA Fronts & Impending Doom via World Progression
+In tabletop PbtA, Fronts and Grim Portents represent looming catastrophes that advance when protagonists falter.
+* **Automated Grim Portents:** Every 24 in-world hours, MultiHog advances off-screen Fronts based on adversary countdown tracks.
+* **Narrator Fuel on 6- and 7–9 Rolls:** When the protagonist rolls a Miss (6-) or Weak Hit (7–9), the Ref is instructed to consult the latest World Progression reports and Map Evolution threads (`[Recent site activity]`) to deliver dramatic, fiction-first GM Moves instead of repetitive combat harm.
+
+### 4. World Simulation Depth Calibration
+During Session Zero (or via the Campaign Calibration Dials), players choose between three simulation depths:
+* **Active Fronts (Recommended):** World Progression advances every 24 in-world hours, tracking Grim Portents and faction moves without heavy background token churn.
+* **Living World (Deepest):** Combines 24-hour macro Fronts with automated 8-hour Map Evolution across all mapped sites, tracking site ecology, open causal threads, and scavengers.
+* **Static Solo (Narrative Only):** Disables background simulation agents for pure lightweight, lorebook-driven solo play.
+
+---
+
 ## ⚡ How to Use
 
 1. Open **Extensions Settings** $\rightarrow$ **MultiHog Companion**.
 2. Select your **Genre Preset** (choose from 11 tailored genres).
 3. Choose an action:
+   * **🎩 PbtA Concierge (Session Zero):** Conversational campaign builder with live blueprint deck and simulation dials.
    * **⚡ Quick Start PbtA:** Applies the ruleset, generates a full character sheet with PbtA stats and moves, locks your persona, and sends the opening story turn.
    * **🎮 Load PbtA Cartridge:** Applies the PbtA prompt ruleset to an existing chat session without recreating the character.
    * **📦 Restore Stock D&D 5e:** Reverts the current chat back to factory default D&D 5e rules and prompts.

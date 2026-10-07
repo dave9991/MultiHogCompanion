@@ -19,6 +19,11 @@ import {
     buildMonsterEntryContent,
     buildNpcKeys,
 } from './concierge-npc-format.js';
+import {
+    buildDossierWorldInfoEntry,
+    prepareCampaignLorebookDistributions,
+    buildWorldSkeletonEntries,
+} from './concierge-lore-distributor.js';
 
 /**
  * Send an outgoing user chat message into SillyTavern.
@@ -69,7 +74,7 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
         // Find or create dossier entry
         let targetUid = null;
         for (const [uid, entry] of Object.entries(bookData.entries)) {
-            if (entry.comment?.includes('CAMPAIGN_DOSSIER') || entry.key?.includes('campaign_dossier')) {
+            if (entry.comment?.includes('CAMPAIGN_DOSSIER') || entry.key?.includes('campaign_dossier') || entry.key?.includes('campaign dossier')) {
                 targetUid = uid;
                 break;
             }
@@ -79,18 +84,8 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
             targetUid = String(Date.now());
         }
 
-        bookData.entries[targetUid] = {
-            uid: parseInt(targetUid, 10) || Date.now(),
-            key: ['campaign', 'dossier', 'setting', 'premise', 'monster', 'threat', 'moves'],
-            keysecondary: [],
-            comment: 'PbtA Concierge: Campaign Dossier Artifact',
-            content: dossierMarkdown,
-            constant: true,
-            selective: false,
-            order: 100,
-            position: 1, // before char defs / high priority
-            disable: false,
-        };
+        // Use buildDossierWorldInfoEntry with constant: false to prevent context bloat
+        bookData.entries[targetUid] = buildDossierWorldInfoEntry(dossierMarkdown, targetUid);
 
         await fetch('/api/worldinfo/edit', {
             method: 'POST',
@@ -111,30 +106,29 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
 }
 
 /**
- * Injects dossier NPCs directly into the campaign's active lorebook ({prefix}_NPCs).
- * Ensures companions appear immediately in Campaign Records without manual intervention.
+ * Robust upsert helper for MultiHog modular lorebooks.
+ * Updates [CORE] on existing entries and appends new ones with proper metadata.
+ *
+ * @param {string} bookName
+ * @param {Array<{ name: string, keys: string[], core: string, full?: string }>} items
  */
-async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], factions = [], sectionNames = null) {
-    if ((!npcs || !npcs.length) && (!monsters || !monsters.length) && (!factions || !factions.length)) return;
-    const names = sectionNames || await loadMainNpcSectionNames();
+async function upsertWorldInfoBook(bookName, items = []) {
+    if (!bookName || !items || !items.length) return;
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     if (!ctx) return;
 
     try {
         const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
         const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
-        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
-            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
-            : (chatId || '');
-        const npcBookName = prefix ? `${prefix}_NPCs` : 'NPCs';
-
+        const mainSettings = (typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null) || {};
         const getHeaders = ctx.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
+
         let bookData = null;
         try {
             const res = await fetch('/api/worldinfo/get', {
                 method: 'POST',
                 headers: getHeaders(),
-                body: JSON.stringify({ name: npcBookName }),
+                body: JSON.stringify({ name: bookName }),
             });
             if (res.ok) {
                 bookData = await res.json();
@@ -142,48 +136,21 @@ async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], facti
         } catch (_) {}
 
         if (!bookData || typeof bookData !== 'object' || !bookData.entries) {
-            bookData = { entries: {}, name: npcBookName, scan_depth: 4, token_budget: 400, recursive: false, extensions: {} };
+            bookData = { entries: {}, name: bookName, scan_depth: 4, token_budget: 400, recursive: false, extensions: {} };
         }
         bookData.entries = bookData.entries || {};
 
         let modified = false;
-        let mainSettings = {};
-        try {
-            mainSettings = (typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null) || {};
-        } catch (_) {}
 
-        const factionEntries = (factions || []).map(f => {
-            const clean = (f.name || '').trim();
-            const core = [
-                `[CORE]`,
-                `Name: ${clean}`,
-                `Type: Faction / Organization`,
-                `Standing: ${f.standing || 'Neutral'}`,
-                `Agenda: ${f.agenda || 'Unstated'}`,
-                ...(f.notes ? [`Notes: ${f.notes}`] : []),
-                `[/CORE]`,
-            ].join('\n');
-            return {
-                name: clean,
-                core,
-                full: core,
-            };
-        });
-
-        const toWrite = [
-            ...(npcs || []).map(n => ({ name: n.name, ...buildNpcEntryContent(n, names) })),
-            ...(monsters || []).map(m => ({ name: m.name, ...buildMonsterEntryContent(m, names) })),
-            ...factionEntries,
-        ];
-
-        for (const item of toWrite) {
-            const cleanName = (item.name || '').trim();
+        for (const item of items) {
+            const cleanName = (item.name || item.comment || '').trim();
             if (!cleanName || !item.core) continue;
 
             const existingEntry = Object.values(bookData.entries).find(e => {
                 const label = (e.comment || '').replace(/^\[.*?\]\s*/i, '').trim().toLowerCase();
                 return label === cleanName.toLowerCase();
             });
+
             if (existingEntry) {
                 // Re-launch / edited dossier: refresh only the protected [CORE] identity block and
                 // leave any chronicle text the Router has since appended untouched.
@@ -203,10 +170,10 @@ async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], facti
 
             bookData.entries[nextUid] = {
                 uid: nextUid,
-                key: buildNpcKeys(cleanName),
+                key: item.keys || [cleanName],
                 keysecondary: [],
                 comment: cleanName,
-                content: item.full,
+                content: item.full || item.core,
                 constant: false,
                 selective: false,
                 selectiveLogic: 0,
@@ -225,18 +192,149 @@ async function injectNpcsIntoCampaignLorebook(chatId, npcs, monsters = [], facti
             await fetch('/api/worldinfo/edit', {
                 method: 'POST',
                 headers: getHeaders(),
-                body: JSON.stringify({ name: npcBookName, data: bookData }),
+                body: JSON.stringify({ name: bookName, data: bookData }),
             });
 
             if (typeof router.updateWorldInfoCache === 'function') {
-                await router.updateWorldInfoCache(npcBookName, bookData);
+                await router.updateWorldInfoCache(bookName, bookData);
             }
             if (typeof router.rememberCampaignBook === 'function') {
-                router.rememberCampaignBook(npcBookName);
+                router.rememberCampaignBook(bookName);
             }
         }
     } catch (err) {
-        console.warn('[PbtA Concierge] Could not auto-inject NPCs into campaign lorebook:', err);
+        console.warn(`[PbtA Concierge] Could not auto-inject entries into "${bookName}":`, err);
+    }
+}
+
+/**
+ * Distributes dossier entities across the 4 native campaign lorebooks:
+ * - {prefix}_NPCs      (NPCs & Monsters)
+ * - {prefix}_Factions  (Factions)
+ * - {prefix}_Locations (Maps / Sites)
+ * - {prefix}_Quests    (Starting Crisis)
+ */
+async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames = null) {
+    if (!dossier || typeof dossier !== 'object') return;
+    try {
+        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
+            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
+            : (chatId || '');
+
+        const npcBookName = prefix ? `${prefix}_NPCs` : 'NPCs';
+        const factionBookName = prefix ? `${prefix}_Factions` : 'Factions';
+        const locBookName = prefix ? `${prefix}_Locations` : 'Locations';
+        const questBookName = prefix ? `${prefix}_Quests` : 'Quests';
+
+        const dist = prepareCampaignLorebookDistributions(dossier, sectionNames);
+
+        await Promise.all([
+            upsertWorldInfoBook(npcBookName, dist.npcs),
+            upsertWorldInfoBook(factionBookName, dist.factions),
+            upsertWorldInfoBook(locBookName, dist.locations),
+            upsertWorldInfoBook(questBookName, dist.quests),
+        ]);
+    } catch (err) {
+        console.warn('[PbtA Concierge] Campaign lorebook distribution encountered error:', err);
+    }
+}
+
+/**
+ * Injects Day 0 macro premises into MultiHog's World Skeleton ({prefix}_Skeleton).
+ * Provides foundational fuel for MultiHog's World Progression engine to simulate
+ * the campaign off-screen right from launch.
+ *
+ * @param {string} chatId
+ * @param {object} dossier
+ */
+async function injectWorldSkeleton(chatId, dossier) {
+    if (!dossier || typeof dossier !== 'object') return;
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    if (!ctx) return;
+
+    try {
+        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
+        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
+            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
+            : (chatId || '');
+        const skeletonBookName = prefix ? `${prefix}_Skeleton` : 'World_Skeleton';
+
+        const skeletonEntries = buildWorldSkeletonEntries(dossier);
+        if (!skeletonEntries.length) return;
+
+        const getHeaders = ctx.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
+        let bookData = null;
+        try {
+            const res = await fetch('/api/worldinfo/get', {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify({ name: skeletonBookName }),
+            });
+            if (res.ok) {
+                bookData = await res.json();
+            }
+        } catch (_) {}
+
+        if (!bookData || typeof bookData !== 'object' || !bookData.entries) {
+            bookData = {
+                entries: {},
+                name: skeletonBookName,
+                scan_depth: 4,
+                token_budget: 400,
+                recursive: false,
+                extensions: {},
+            };
+        }
+        bookData.entries = bookData.entries || {};
+
+        let uid = 0;
+        const keys = Object.keys(bookData.entries).map(Number);
+        if (keys.length > 0) {
+            uid = Math.max(...keys) + 1;
+        }
+
+        let modified = false;
+        for (const entry of skeletonEntries) {
+            const cleanLabel = (entry.comment || '').toLowerCase().trim();
+            const existingEntry = Object.values(bookData.entries).find(e => {
+                const l = (e.comment || '').toLowerCase().trim();
+                return l === cleanLabel;
+            });
+
+            if (existingEntry) {
+                if (existingEntry.content !== entry.content) {
+                    existingEntry.content = entry.content;
+                    modified = true;
+                }
+                continue;
+            }
+
+            bookData.entries[uid] = {
+                ...entry,
+                uid,
+            };
+            uid++;
+            modified = true;
+        }
+
+        if (modified) {
+            await fetch('/api/worldinfo/edit', {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify({ name: skeletonBookName, data: bookData }),
+            });
+
+            if (typeof router.updateWorldInfoCache === 'function') {
+                await router.updateWorldInfoCache(skeletonBookName, bookData);
+            }
+            if (typeof router.rememberCampaignBook === 'function') {
+                router.rememberCampaignBook(skeletonBookName);
+            }
+        }
+    } catch (err) {
+        console.warn('[PbtA Concierge] World Skeleton injection encountered non-fatal error:', err);
     }
 }
 
@@ -352,31 +450,37 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             }
         }
 
-        // ── 3. Sequential Map Architect Generation ──────────────────────────────
+        // ── 3. Primary Map Architect Generation (Staggered Launch) ─────────────
         const maps = dossier.maps || [];
         if (maps.length) {
             try {
                 const mapArch = await import('../SillyTavern-MultihogDnDFramework/map-architect.js');
                 if (typeof mapArch.runMapArchitect === 'function') {
-                    let mapIndex = 0;
-                    for (const map of maps) {
-                        mapIndex++;
-                        const pct = 30 + Math.floor((mapIndex / maps.length) * 30);
-                        onProgress(`🗺️ Generating map ${mapIndex}/${maps.length}: ${map.site}...`, pct);
+                    // Staggered / Lazy Generation: Generate the primary starting location map at launch.
+                    // Secondary sites are already registered in {prefix}_Locations with [CORE],
+                    // ready for Map Architect to generate on entry or via Campaign Records!
+                    const startSiteName = (dossier.theKick?.startingLocation || maps[0]?.site || '').toLowerCase().trim();
+                    const primaryMap = maps.find(m => (m.site || '').toLowerCase().trim() === startSiteName) || maps[0];
 
+                    if (primaryMap?.site) {
+                        onProgress(`🗺️ Generating starting map: ${primaryMap.site}...`, 45);
                         try {
                             await mapArch.runMapArchitect({
-                                site: map.site,
-                                entrance: map.entrance || 'Main Threshold',
-                                kind: map.kind || 'INTERIOR',
+                                site: primaryMap.site,
+                                entrance: primaryMap.entrance || 'Main Threshold',
+                                kind: primaryMap.kind || 'SETTLEMENT',
                                 scale: 'SMALL',
-                                threat: map.threat || 'MODERATE',
-                                prompt: map.prompt || map.briefDescription,
-                                brief_description: map.briefDescription || map.prompt,
+                                threat: primaryMap.threat || 'MODERATE',
+                                prompt: primaryMap.prompt || primaryMap.briefDescription,
+                                brief_description: primaryMap.briefDescription || primaryMap.prompt,
                             });
                         } catch (mapErr) {
-                            console.warn(`[PbtA Concierge] Map Architect skipped "${map.site}":`, mapErr);
+                            console.warn(`[PbtA Concierge] Map Architect skipped starting map "${primaryMap.site}":`, mapErr);
                         }
+                    }
+
+                    if (maps.length > 1) {
+                        console.log(`[PbtA Concierge] Staged ${maps.length - 1} secondary site(s) into Locations lorebook for lazy on-entry generation.`);
                     }
                 }
             } catch (err) {
@@ -410,12 +514,19 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                 console.warn('[PbtA Concierge] NPC / Monster library registration failed:', err);
             }
 
-            // Also inject into the active campaign lorebook ({prefix}_NPCs) so they appear
-            // immediately in Campaign Records without requiring manual import.
+            // Also inject across the 4 native campaign lorebooks ({prefix}_NPCs, _Factions, _Locations, _Quests)
             try {
-                await injectNpcsIntoCampaignLorebook(chatId, npcs, monsters, factions, sectionNames);
+                await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
             } catch (loreErr) {
                 console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
+            }
+
+            // ── 4b. Seed Day 0 World Skeleton ({prefix}_Skeleton) for World Progression ──
+            onProgress('🌍 Seeding Day 0 World Skeleton for macro progression...', 78);
+            try {
+                await injectWorldSkeleton(chatId, dossier);
+            } catch (skelErr) {
+                console.warn('[PbtA Concierge] World Skeleton injection skipped:', skelErr);
             }
         }
 
@@ -432,10 +543,30 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         if (rpgSettings) {
             rpgSettings.currentMemo = initialMemo;
             rpgSettings.chatStates = rpgSettings.chatStates || {};
+
+            const simDepth = dossier.config?.simulationDepth || 'active_fronts';
+            if (simDepth === 'static') {
+                rpgSettings.worldProgressionEnabled = false;
+                rpgSettings.mapEvolutionEnabled = false;
+            } else if (simDepth === 'living_world') {
+                rpgSettings.worldProgressionEnabled = true;
+                rpgSettings.worldProgressionIntervalHours = 24;
+                rpgSettings.mapEvolutionEnabled = true;
+                rpgSettings.mapEvolutionIntervalHours = 8;
+            } else {
+                // 'active_fronts' (default recommended)
+                rpgSettings.worldProgressionEnabled = true;
+                rpgSettings.worldProgressionIntervalHours = 24;
+                rpgSettings.mapEvolutionEnabled = false;
+            }
+
             if (chatId) {
                 rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
                 rpgSettings.chatStates[chatId].currentMemo = initialMemo;
                 rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+                rpgSettings.chatStates[chatId].simulationDepth = simDepth;
+                rpgSettings.chatStates[chatId].worldProgressionEnabled = rpgSettings.worldProgressionEnabled;
+                rpgSettings.chatStates[chatId].mapEvolutionEnabled = rpgSettings.mapEvolutionEnabled;
                 if (dossier.config?.artStyle) {
                     rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
                 }

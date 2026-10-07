@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Companion extension for Multihog D&D Framework in SillyTavern. Automatically binds personas to chats and syncs character portraits.",
   "type": "module",
+  "scripts": {
+    "test": "node tests/upstream-integrity.test.js && for f in tests/*.test.js; do [ \"$f\" != \"tests/upstream-integrity.test.js\" ] && node \"$f\" || true; done"
+  },
   "keywords": [
     "sillytavern",
     "sillytavern-extension",

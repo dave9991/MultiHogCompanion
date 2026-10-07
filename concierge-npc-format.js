@@ -72,15 +72,18 @@ function bullets(items) {
     return items.map(i => `- ${i}`).join('\n');
 }
 
+export { FALLBACK_SECTION_NAMES };
+
 /**
  * Assemble `[CORE]` from {sectionId: text}, skipping empty values and any
  * section the main extension no longer defines.
  */
-function assembleCore(fields, names) {
+function assembleCore(fields, names = FALLBACK_SECTION_NAMES) {
+    const effectiveNames = names || FALLBACK_SECTION_NAMES;
     const lines = [];
     for (const [id, text] of Object.entries(fields)) {
         const raw = String(text || '');
-        const label = names[id];
+        const label = effectiveNames[id];
         if (!raw.trim() || !label) continue;
         // Bullet lists start with "\n" and sit on their own lines under the header.
         lines.push(raw.startsWith('\n') ? `${label}:${raw.trimEnd()}` : `${label}: ${raw.trim()}`);
@@ -93,10 +96,10 @@ function assembleCore(fields, names) {
  * Campaign-specific facts (relationship, notes) live OUTSIDE [CORE] — main
  * keeps those out of the protected identity block.
  * @param {object} npc Dossier NPC
- * @param {Record<string,string>} names From {@link loadMainNpcSectionNames}
+ * @param {Record<string,string>} [names] From {@link loadMainNpcSectionNames}
  * @returns {{ core: string, full: string }}
  */
-export function buildNpcEntryContent(npc, names) {
+export function buildNpcEntryContent(npc, names = FALLBACK_SECTION_NAMES) {
     const moves = splitTopLevelCommas(npc.movesOrBoons).map(m => `Move/Boon — ${m}`);
     const background = [npc.role ? `${npc.role}.` : '', npc.background || '']
         .filter(Boolean).join(' ').trim();
@@ -122,7 +125,7 @@ export function buildNpcEntryContent(npc, names) {
  * Build the lorebook / library content for a PbtA monster (adversary).
  * Harm/Armor/attacks/countdown go into Combat Profile; weakness → Flaws.
  */
-export function buildMonsterEntryContent(monster, names) {
+export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES) {
     const attacks = Array.isArray(monster.attacks) ? monster.attacks : [];
     const doom = Array.isArray(monster.impendingDoom) ? monster.impendingDoom : [];
     const harmMax = Math.max(1, parseInt(monster.harm, 10) || 4);

@@ -142,6 +142,8 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[CONFIG\][\s\S]*?(?:\[\/CONFIG\]|$)/gi, '')
         .replace(/\[REMOVE_(?:NPC|MONSTER|MAP|FACTION):[^\n\]]+\]/gi, '')
         .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS)\]/gi, '')
+        .replace(/\[NOOP\][\s\S]*?(?:\[\/NOOP\]|$)/gi, '')
+        .replace(/\[BUILDER_REPORT:[^\n\]]+\]/gi, '')
         .replace(/```(?:text|markdown)?\s*```/gi, '')
         .trim();
 }
@@ -423,9 +425,36 @@ export function applyDossierUpdates(text, dossier) {
         changes: [],
         errors: [],
         hasMutations: false,
+        isNoop: false,
+        builderSummary: 'No blueprint mutations detected',
     };
 
     if (!text || typeof text !== 'string') return fallbackResult;
+
+    // 0. Check for explicit NOOP
+    const noopMatch = text.match(/\[NOOP\]([\s\S]*?)(?:\[\/NOOP\]|$)/i);
+    const isExplicitNoop = Boolean(noopMatch) || /^\s*\[NOOP\]\s*$/i.test(text.trim());
+    if (isExplicitNoop) {
+        let noopSummary = '';
+        if (noopMatch && noopMatch[1]) {
+            const sm = noopMatch[1].match(/summary\s*:\s*([^\n\r]+)/i);
+            if (sm) {
+                noopSummary = sm[1].trim()
+                    .replace(/^(\*\*|__)(.*?)\1$/, '$2')
+                    .replace(/^["'“”‘’](.*)["'“”‘’]$/, '$1')
+                    .trim();
+            }
+        }
+        return {
+            success: true,
+            updatedDossier: dossier,
+            changes: [],
+            errors: [],
+            hasMutations: false,
+            isNoop: true,
+            builderSummary: noopSummary || 'No blueprint changes requested',
+        };
+    }
 
     // 1. Locate directive content: [UPDATE_DOSSIER] or [CONCIERGE_STATE]
     let raw = null;
@@ -449,6 +478,16 @@ export function applyDossierUpdates(text, dossier) {
     const updated = JSON.parse(JSON.stringify(dossier));
     const changes = [];
     const errors = [];
+
+    // Extract builder summary if emitted
+    let builderSummary = null;
+    const summaryMatch = raw.match(/summary\s*:\s*([^\n\r]+)/i);
+    if (summaryMatch) {
+        builderSummary = summaryMatch[1].trim()
+            .replace(/^(\*\*|__)(.*?)\1$/, '$2')
+            .replace(/^["'“”‘’](.*)["'“”‘’]$/, '$1')
+            .trim();
+    }
 
     // ── 1. Meta / System ────────────────────────────────────────────────────────
     const sysMatch = raw.match(/system\s*:\s*([^\n\r]+)/i);
@@ -962,6 +1001,8 @@ export function applyDossierUpdates(text, dossier) {
         changes,
         errors,
         hasMutations: changes.length > 0,
+        isNoop: false,
+        builderSummary: builderSummary || (changes.length ? changes.join('; ') : 'Blueprint in sync'),
     };
 }
 

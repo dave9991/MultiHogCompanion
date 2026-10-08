@@ -28,7 +28,11 @@ import {
     fetchWorldInfoBook,
     processLorebookForConcierge,
 } from './concierge-lore-reader.js';
-import { buildConciergeSystemPrompt } from './concierge-prompt.js';
+import {
+    buildConciergeSystemPrompt,
+    buildConciergeBuilderContext,
+    buildConciergeTalkerContext,
+} from './concierge-prompt.js';
 import {
     createEmptyDossier,
     stripConciergeStateBlocks,
@@ -343,7 +347,7 @@ function updateBlueprintDeck() {
 /**
  * Append a chat bubble to the message stream.
  */
-function appendChatBubble(role, text, imageSrc = null) {
+function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
     const stream = document.getElementById('mhc_chat_messages');
     if (!stream) return;
 
@@ -364,6 +368,16 @@ function appendChatBubble(role, text, imageSrc = null) {
             .replace(/\*(.*?)\*/g, '<i>$1</i>')
             .replace(/\n/g, '<br>');
         html += `<div>${formatted}</div>`;
+    }
+
+    if (hasDiagnostic) {
+        html += `
+            <div style="margin-top: 8px;">
+                <button type="button" class="mhc-copy-debug-trace-btn" style="font-size: 0.78em; padding: 4px 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 4px; color: #ef4444; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                    📋 Copy Antigravity Debug Trace
+                </button>
+            </div>
+        `;
     }
 
     bubble.innerHTML = html;
@@ -580,20 +594,14 @@ async function handleUserSend() {
             } catch (_) {}
         }
 
-        const buildSystemContext = (dossier, logs) => {
-            return `${buildConciergeSystemPrompt()}
-
-${formatDossierForContext(dossier)}
-
-${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
-        };
-
         const formatHistoryMessage = (m) => {
             if (m.role === 'assistant') {
+                const cleanContent = stripConciergeStateBlocks(m.content) || m.content;
+                const reportPrefix = m.builderReport ? `[BUILDER_REPORT: ${m.builderReport}]\n\n` : '';
                 return {
                     role: 'assistant',
                     name: 'PbtA_Concierge',
-                    content: stripConciergeStateBlocks(m.content) || m.content,
+                    content: `${reportPrefix}${cleanContent}`,
                 };
             }
             return {
@@ -603,69 +611,134 @@ ${formatChangelogForContext(logs)}${activeNameRagSeeds ? `\n\n${activeNameRagSee
             };
         };
 
-        const fullMessages = [
-            { role: 'system', name: 'System', content: buildSystemContext(activeDossier, changelog) },
+        const typingEl = document.getElementById('mhc_typing_indicator');
+
+        // ── Stage 1: The Builder (State Machine / Extractor) ───────────────
+        if (typingEl) {
+            typingEl.innerHTML = '<i>🎩 The Concierge is inspecting the blueprint...</i>';
+        }
+
+        const builderMessages = [
+            {
+                role: 'system',
+                name: 'System',
+                content: buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds),
+            },
             ...chatHistory.map(formatHistoryMessage),
         ];
 
-        // Step 1: Send request to Concierge
-        const rawResponse = await sendConciergeRequest(fullMessages);
+        let builderAttempts = 0;
+        const maxBuilderAttempts = 2;
+        let builderRawResponse = '';
+        let builderReport = null;
+        let builderFailed = false;
+        let currentBuilderMessages = [...builderMessages];
+        const diagnosticAttempts = [];
 
-        // Check for state mutations / directives
-        const report = applyDossierUpdates(rawResponse, activeDossier);
+        while (builderAttempts < maxBuilderAttempts) {
+            builderAttempts++;
+            builderRawResponse = await sendConciergeRequest(currentBuilderMessages);
+            builderReport = applyDossierUpdates(builderRawResponse, activeDossier);
+
+            diagnosticAttempts.push({
+                attempt: builderAttempts,
+                rawResponse: builderRawResponse,
+                errors: builderReport.errors,
+                hasMutations: builderReport.hasMutations,
+                isNoop: builderReport.isNoop,
+                builderSummary: builderReport.builderSummary,
+            });
+
+            if (builderReport.success || builderReport.isNoop) {
+                break;
+            }
+
+            // If syntax errors occurred and attempts remain, retry with error feedback
+            if (builderAttempts < maxBuilderAttempts && builderReport.errors.length > 0) {
+                if (typingEl) {
+                    typingEl.innerHTML = '<i>🎩 The Concierge is recalibrating the blueprint...</i>';
+                }
+                currentBuilderMessages = [
+                    ...builderMessages,
+                    { role: 'assistant', name: 'PbtA_Builder', content: builderRawResponse },
+                    {
+                        role: 'system',
+                        name: 'System',
+                        content: `[PARSER_ERROR: Blueprint update contained errors: ${builderReport.errors.join('; ')}. Please correct these syntax errors and re-emit the [UPDATE_DOSSIER] block.]`,
+                    },
+                ];
+            }
+        }
+
+        if (!builderReport || (!builderReport.success && !builderReport.isNoop)) {
+            builderFailed = true;
+        }
+
+        let builderSummaryText = '';
+        let diagnosticPackage = null;
+
+        if (!builderFailed && builderReport.hasMutations) {
+            activeDossier = builderReport.updatedDossier;
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            builderReport.changes.forEach(c => changelog.push(`[${timeStr}] ${c}`));
+            updateBlueprintDeck();
+            saveDraft();
+            builderSummaryText = builderReport.builderSummary || builderReport.changes.join('; ') || 'Blueprint updated';
+        } else if (builderReport?.isNoop) {
+            builderSummaryText = `NOOP (${builderReport.builderSummary || 'No blueprint changes requested'})`;
+        } else if (builderFailed) {
+            builderSummaryText = `ERROR: Failed after ${maxBuilderAttempts} attempts. Blueprint unchanged.`;
+            diagnosticPackage = {
+                timestamp: new Date().toISOString(),
+                systemEngine: activeDossier?.meta?.systemKey || 'fantasy',
+                userMessage: displayUserText,
+                currentDossierSnapshot: JSON.parse(JSON.stringify(activeDossier)),
+                attempts: diagnosticAttempts,
+            };
+            window._lastConciergeBuilderDiagnostic = diagnosticPackage;
+        }
+
+        // ── Stage 2: The Talker (Conversational Session Zero GM) ───────────
+        if (typingEl) {
+            typingEl.innerHTML = '<i>🎩 The Concierge is contemplating the fiction...</i>';
+        }
+
+        const talkerMessages = [
+            {
+                role: 'system',
+                name: 'System',
+                content: buildConciergeTalkerContext(activeDossier, changelog, activeNameRagSeeds),
+            },
+            ...chatHistory.map(formatHistoryMessage),
+            {
+                role: 'system',
+                name: 'System',
+                content: builderFailed
+                    ? `[BUILDER_ERROR: Attempted update failed validation; blueprint unchanged. Please let the player know gently that there was a formatting hiccup and ask what they would like to adjust.]`
+                    : `[BUILDER_REPORT: ${builderSummaryText}]`,
+            },
+        ];
 
         let finalChatBubbleText = '';
-
-        if (report.hasMutations || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE)\]/i.test(rawResponse)) {
-            // Apply mutations to live blueprint
-            if (report.hasMutations) {
-                activeDossier = report.updatedDossier;
-                const now = new Date();
-                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-                report.changes.forEach(c => changelog.push(`[${timeStr}] ${c}`));
-                updateBlueprintDeck();
-                saveDraft();
-            }
-
-            // Step 2: Handshake loop with the Parser report
-            const typingEl = document.getElementById('mhc_typing_indicator');
-            if (typingEl) {
-                typingEl.innerHTML = '<i>🎩 The Concierge is syncing the blueprint...</i>';
-            }
-
-            const confirmationNotice = report.success
-                ? `[PARSER_CONFIRMATION: Success. Applied changes: ${report.changes.join('; ') || 'Blueprint in sync'}. The live Blueprint Deck has updated on the player's screen. Speak to the player now to highlight only the core dramatic hook or important choice (keep response concise, 2-4 sentences max), invite them to review the cards in the Blueprint Deck, and ask what they would like to adjust. Do NOT list out full stats, moves, or card details, and do NOT repeat the raw [UPDATE_DOSSIER] code block.]`
-                : `[PARSER_FEEDBACK: Errors detected: ${report.errors.join('; ')}. Current changes applied: ${report.changes.join('; ') || 'None'}. Please explain or correct any missing items to the player.]`;
-
-            const step2Messages = [
-                { role: 'system', name: 'System', content: buildSystemContext(activeDossier, changelog) },
-                ...chatHistory.map(formatHistoryMessage),
-                { role: 'assistant', name: 'PbtA_Concierge', content: rawResponse },
-                { role: 'system', name: 'System', content: confirmationNotice },
-            ];
-
-            try {
-                const step2Response = await sendConciergeRequest(step2Messages);
-                const cleanStep2 = stripConciergeStateBlocks(step2Response);
-                finalChatBubbleText = cleanStep2 || step2Response;
-            } catch (step2Err) {
-                console.warn('[PbtA Concierge] Step 2 handshake error, falling back to clean text:', step2Err);
-                finalChatBubbleText = stripConciergeStateBlocks(rawResponse) || rawResponse;
-            }
-        } else {
-            // No blueprint mutation requested: standard conversational response
-            finalChatBubbleText = stripConciergeStateBlocks(rawResponse) || rawResponse;
+        try {
+            const talkerResponse = await sendConciergeRequest(talkerMessages);
+            finalChatBubbleText = stripConciergeStateBlocks(talkerResponse) || talkerResponse;
+        } catch (talkerErr) {
+            console.warn('[PbtA Concierge] Talker error, falling back to basic response:', talkerErr);
+            finalChatBubbleText = builderSummaryText ? `I have noted: ${builderSummaryText}` : 'Could not generate conversational response.';
         }
 
         typingBubble.remove();
 
-        // Render clean bubble to the user
-        appendChatBubble('assistant', finalChatBubbleText);
+        // Render clean bubble to the user (with debug trace button if failure occurred)
+        appendChatBubble('assistant', finalChatBubbleText, null, Boolean(diagnosticPackage));
 
-        // Record clean conversation text in history (prevent context pollution and token bloat from raw code blocks)
+        // Record clean conversation text and builder report in history
         chatHistory.push({
             role: 'assistant',
             content: finalChatBubbleText,
+            builderReport: builderSummaryText,
         });
         saveDraft();
     } catch (err) {
@@ -1103,6 +1176,36 @@ function bindModalEvents() {
                 toastr?.error(`Launch error: ${res.message}`, 'Launch Failed');
             }
         }, 600);
+    });
+
+    // Copy Antigravity Debug Trace
+    $('#mhc_concierge_modal').on('click', '.mhc-copy-debug-trace-btn', function () {
+        const trace = window._lastConciergeBuilderDiagnostic;
+        if (!trace) {
+            toastr?.warning('No diagnostic trace found.');
+            return;
+        }
+        const md = [
+            '### 🎩 MultiHog Concierge Builder Diagnostic Trace',
+            `- **Timestamp:** ${trace.timestamp}`,
+            `- **System Engine:** ${trace.systemEngine}`,
+            `- **User Message:** ${trace.userMessage || '(none)'}`,
+            '#### Attempts:',
+            ...(trace.attempts || []).map(a => `* **Attempt ${a.attempt}:**\n  - Raw: \`\`\`${a.rawResponse}\`\`\`\n  - Errors: ${a.errors?.length ? a.errors.join('; ') : 'None'}\n  - Summary: ${a.builderSummary || 'None'}`),
+            '#### Current Blueprint Snapshot:',
+            '```json',
+            JSON.stringify(trace.currentDossierSnapshot, null, 2),
+            '```',
+        ].join('\n');
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            navigator.clipboard.writeText(md).then(() => {
+                toastr?.success('Copied Antigravity debug trace to clipboard!');
+            }).catch(() => {
+                prompt('Copy Antigravity debug trace:', md);
+            });
+        } else {
+            prompt('Copy Antigravity debug trace:', md);
+        }
     });
 }
 

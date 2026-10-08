@@ -133,11 +133,22 @@ function extractNameFromMemo(memo) {
     if (!memo || typeof memo !== 'string') return null;
     const charBlock = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
     if (charBlock) {
-        const firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
+        let firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
+        // Decode common HTML entities
+        firstLine = firstLine
+            .replace(/&quot;/g, '"')
+            .replace(/&#34;/g, '"')
+            .replace(/&apos;/g, "'")
+            .replace(/&#39;/g, "'")
+            .replace(/^[-*•–—]\s*/, '')
+            .trim();
         const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
         if (m) {
             const candidate = m[1].trim();
             if (candidate && !/^(character|unknown|user|name)$/i.test(candidate)) return candidate;
+        }
+        if (firstLine && !/^(character|unknown|user|name)$/i.test(firstLine) && firstLine.length <= 50) {
+            return firstLine;
         }
     }
     const nameField = memo.match(/(?:^|\n)\s*(?:Name|Character Name)\s*[:\|]\s*([^\n\|\[<]{2,60})/im);
@@ -219,6 +230,48 @@ function getMultihogPlayerName(chatId) {
 }
 
 /**
+ * Generates normalized lookup keys/variants for a character or persona name.
+ * Handles quoted nicknames (e.g., John "The axe" Smith), smart quotes, HTML entities,
+ * parenthetical descriptors, and quote stripping (as done upstream by MultiHog DnD).
+ * @param {string} rawName
+ * @returns {string[]}
+ */
+export function getNameMatchingVariants(rawName) {
+    if (!rawName || typeof rawName !== 'string') return [];
+    // Decode HTML entities
+    let str = rawName
+        .replace(/&quot;/g, '"')
+        .replace(/&#34;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&#39;/g, "'")
+        .trim();
+    // Normalize unicode/curly quotes to standard straight quotes
+    str = str.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+
+    const lower = str.toLowerCase();
+    // 1. Without parentheses (e.g. "Bob (the Barbarian)" -> "Bob")
+    const noParens = lower.replace(/\s*\(.*?\)/g, '').replace(/\s+/g, ' ').trim();
+    // 2. Without quote characters (e.g. 'john "the axe" smith' -> 'john the axe smith')
+    // MultiHog's buildNameOnlyPersonaIdentity strips quotes with replace(/['"\\]/g, '')
+    const noQuotes = lower.replace(/['"\\]/g, '').replace(/\s+/g, ' ').trim();
+    const noParensNoQuotes = noParens.replace(/['"\\]/g, '').replace(/\s+/g, ' ').trim();
+    // 3. Without the quoted nickname altogether (e.g. 'john "the axe" smith' -> 'john smith')
+    const noNickname = lower
+        .replace(/\s*\(.*?\)/g, '')
+        .replace(/\s*["'][^"']*["']/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return [...new Set([
+        lower,
+        noQuotes,
+        noParens,
+        noParensNoQuotes,
+        noNickname,
+    ])].filter(Boolean);
+}
+
+/**
  * Locate matching SillyTavern persona for the given character name.
  */
 export async function findMatchingPersona(charName) {
@@ -233,28 +286,36 @@ export async function findMatchingPersona(charName) {
     }
     if (!powerUser?.personas) return null;
 
-    const clean = charName.trim().toLowerCase();
-    const baseName = charName.replace(/\s*\(.*?\)/g, '').trim().toLowerCase();
+    const charVariants = getNameMatchingVariants(charName);
+    if (!charVariants.length) return null;
 
-    // 1. Exact name match
-    for (const [avatarId, name] of Object.entries(powerUser.personas)) {
-        if (!name) continue;
-        const n = name.trim().toLowerCase();
-        if (n === clean || (baseName && n === baseName)) {
-            return { avatar: avatarId, name };
+    // 1. Exact match across normalized variants
+    // Catches:
+    // - Exact raw match ("John \"The axe\" Smith" == "John \"The axe\" Smith")
+    // - Upstream quote-stripped persona ("John \"The axe\" Smith" matching "John The axe Smith")
+    // - Base-name persona without nickname ("John \"The axe\" Smith" matching "John Smith")
+    // - Smart quotes vs straight quotes
+    for (const [avatarId, personaName] of Object.entries(powerUser.personas)) {
+        if (!personaName) continue;
+        const personaVariants = getNameMatchingVariants(personaName);
+        const hasVariantMatch = charVariants.some(cv => personaVariants.includes(cv));
+        if (hasVariantMatch) {
+            return { avatar: avatarId, name: personaName };
         }
     }
 
     // 2. Prefix / substring match for titled names (e.g. "Bob" matching "Bob the Barbarian")
-    for (const [avatarId, name] of Object.entries(powerUser.personas)) {
-        if (!name) continue;
-        const n = name.trim().toLowerCase();
-        const baseN = n.replace(/\s*\(.*?\)/g, '').trim();
-        if (
-            clean.startsWith(n) || n.startsWith(clean) ||
-            (baseName && (clean.startsWith(baseN) || baseN.startsWith(clean) || baseName.startsWith(baseN) || baseN.startsWith(baseName)))
-        ) {
-            return { avatar: avatarId, name };
+    for (const [avatarId, personaName] of Object.entries(powerUser.personas)) {
+        if (!personaName) continue;
+        const personaVariants = getNameMatchingVariants(personaName);
+        for (const cv of charVariants) {
+            if (cv.length < 2) continue;
+            for (const pv of personaVariants) {
+                if (pv.length < 2) continue;
+                if (cv.startsWith(pv) || pv.startsWith(cv)) {
+                    return { avatar: avatarId, name: personaName };
+                }
+            }
         }
     }
 
@@ -319,34 +380,35 @@ function getMultihogPlayerPortrait(chatId, charName) {
         if (pcPortrait) return pcPortrait;
     }
 
-    const cleanName = charName ? charName.replace(/\s*\(.*?\)/g, '').trim() : '';
-    const cleanLower = cleanName.toLowerCase();
-    const fullLower = charName ? charName.trim().toLowerCase() : '';
+    const charVariants = getNameMatchingVariants(charName);
 
     const lookupInMap = (map) => {
         if (!map || typeof map !== 'object') return null;
 
         // Exact match
         if (charName && map[charName]) return map[charName];
-        if (cleanName && map[cleanName]) return map[cleanName];
 
-        // Case-insensitive / normalized search
+        // Case-insensitive / normalized search across name variants
         const keys = Object.keys(map);
-        if (cleanName) {
-            const foundClean = keys.find(k => {
-                const normK = k.replace(/\s*\(.*?\)/g, '').trim().toLowerCase();
-                return normK === cleanLower || normK === fullLower;
-            });
-            if (foundClean && map[foundClean]) return map[foundClean];
+        for (const k of keys) {
+            const keyVariants = getNameMatchingVariants(k);
+            if (charVariants.some(cv => keyVariants.includes(cv))) {
+                return map[k];
+            }
         }
 
         // Substring / prefix match
-        if (cleanName) {
-            const foundPrefix = keys.find(k => {
-                const normK = k.replace(/\s*\(.*?\)/g, '').trim().toLowerCase();
-                return cleanLower.startsWith(normK) || normK.startsWith(cleanLower);
-            });
-            if (foundPrefix && map[foundPrefix]) return map[foundPrefix];
+        for (const k of keys) {
+            const keyVariants = getNameMatchingVariants(k);
+            for (const cv of charVariants) {
+                if (cv.length < 2) continue;
+                for (const kv of keyVariants) {
+                    if (kv.length < 2) continue;
+                    if (cv.startsWith(kv) || kv.startsWith(cv)) {
+                        return map[k];
+                    }
+                }
+            }
         }
 
         if (map['CHARACTER']) return map['CHARACTER'];

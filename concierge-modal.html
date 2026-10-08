@@ -84,6 +84,7 @@
                 <div class="mhc-dossier-tabs">
                     <button type="button" class="mhc-tab-btn active" data-tab="cards">Live Blueprint</button>
                     <button type="button" class="mhc-tab-btn" data-tab="raw">Raw Markdown</button>
+                    <button type="button" class="mhc-tab-btn" data-tab="debug" id="mhc_tab_debug_btn">🛠️ Debug</button>
                 </div>
 
                 <!-- Tab 1: Live Cards -->
@@ -204,6 +205,70 @@
                     <textarea id="mhc_raw_markdown_text" class="text_pole mhc-raw-textarea" readonly></textarea>
                     <div style="margin-top: 8px; display: flex; justify-content: flex-end; gap: 8px;">
                         <button type="button" id="mhc_copy_markdown_btn" class="menu_button">📋 Copy Markdown</button>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Debug Inspector -->
+                <div id="mhc_tab_debug" class="mhc-tab-content">
+                    <div class="mhc-debug-inspector-container" style="display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto; padding: 2px;">
+                        <!-- Status Bar -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px;">
+                            <div style="font-size: 0.85em; display: flex; align-items: center; gap: 6px;">
+                                <span>Status:</span>
+                                <span id="mhc_debug_status_badge" class="mhc-pill" style="font-size: 0.8em; border-color: rgba(156,163,175,0.4);">Awaiting Turn</span>
+                            </div>
+                            <span id="mhc_debug_timestamp" style="font-size: 0.75em; opacity: 0.7; font-family: monospace;">--:--:--</span>
+                        </div>
+
+                        <!-- Extracted Summary & Report -->
+                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
+                            <div style="font-size: 0.8em; font-weight: 700; color: #88ccff; margin-bottom: 4px;">📋 Parser Result &amp; Summary</div>
+                            <div id="mhc_debug_summary_text" style="font-size: 0.82em; font-style: italic; opacity: 0.85; margin-bottom: 6px;">No build transactions recorded yet.</div>
+                            <div id="mhc_debug_changes_list" style="font-size: 0.78em; opacity: 0.8;"></div>
+                            <div id="mhc_debug_errors_list" style="font-size: 0.78em; color: #ef4444; margin-top: 4px;"></div>
+                        </div>
+
+                        <!-- Raw Builder LLM Output -->
+                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <span style="font-size: 0.8em; font-weight: 700; color: #ffcc66;">🤖 Last Raw Output from Builder LLM</span>
+                                <span id="mhc_debug_attempt_count" style="font-size: 0.75em; opacity: 0.7;">Attempt 0/2</span>
+                            </div>
+                            <pre id="mhc_debug_raw_output" class="text_pole" style="font-family: monospace; font-size: 0.75em; white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; margin: 0; border-radius: 4px;">(No raw Builder response captured yet)</pre>
+                        </div>
+
+                        <!-- Prompt Sent to Builder (Collapsible) -->
+                        <div class="mhc-deck-item collapsible">
+                            <div class="mhc-deck-item-header" style="padding: 6px 8px;">
+                                <div class="mhc-deck-item-title" style="font-size: 0.8em; font-weight: 700; color: #a3e635;">
+                                    📤 Prompt Sent to Builder (Input)
+                                </div>
+                                <span class="mhc-deck-item-toggle">▼</span>
+                            </div>
+                            <div class="mhc-deck-item-detail" style="padding: 6px 8px;">
+                                <pre id="mhc_debug_prompt_input" style="font-family: monospace; font-size: 0.73em; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; margin: 0; border-radius: 4px;">(No prompt recorded yet)</pre>
+                            </div>
+                        </div>
+
+                        <!-- In-Memory Blueprint State (Collapsible) -->
+                        <div class="mhc-deck-item collapsible">
+                            <div class="mhc-deck-item-header" style="padding: 6px 8px;">
+                                <div class="mhc-deck-item-title" style="font-size: 0.8em; font-weight: 700; color: #c084fc;">
+                                    💾 Current In-Memory activeDossier (JSON)
+                                </div>
+                                <span class="mhc-deck-item-toggle">▼</span>
+                            </div>
+                            <div class="mhc-deck-item-detail" style="padding: 6px 8px;">
+                                <pre id="mhc_debug_dossier_json" style="font-family: monospace; font-size: 0.73em; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; margin: 0; border-radius: 4px;">{}</pre>
+                            </div>
+                        </div>
+
+                        <!-- Actions Row -->
+                        <div style="margin-top: auto; padding-top: 8px; display: flex; justify-content: flex-end; gap: 8px;">
+                            <button type="button" class="menu_button mhc-copy-debug-trace-btn" style="font-size: 0.8em; padding: 4px 10px;">
+                                📋 Copy Full Diagnostic for Antigravity
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

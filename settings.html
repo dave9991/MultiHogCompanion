@@ -356,6 +356,54 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ── 6. Developer & Debug Mode ── -->
+            <div id="mhc_debug_section" class="inline-drawer mhc-debug-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
+                    <label class="checkbox_label" title="Enable Concierge Debug Inspector to examine the Builder agent and last build command" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                        <input id="mhc_concierge_debug_mode" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
+                        <span style="font-size: 0.9em;"><b>🛠️ Developer &amp; Debug Mode:</b> Builder Inspector</span>
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand debug diagnostics">
+                        <span id="mhc_settings_debug_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(150,150,150,0.2); color: #ccc; border: 1px solid rgba(255,255,255,0.15); white-space: nowrap;">Idle</span>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
+                    </div>
+                </div>
+
+                <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                    <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
+                        Inspects the underlying execution pipeline for the PbtA Concierge Builder agent, showing the exact command/prompt sent, verbatim model output, and parser transaction results.
+                    </p>
+
+                    <!-- Status Row -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                        <span style="font-size: 0.8em; opacity: 0.8;"><b>Last Build Status:</b> <span id="mhc_settings_debug_status">None</span></span>
+                        <span id="mhc_settings_debug_time" style="font-size: 0.75em; opacity: 0.65; font-family: monospace;">--:--:--</span>
+                    </div>
+
+                    <!-- Raw Builder LLM Output -->
+                    <div style="margin-bottom: 8px;">
+                        <div style="font-size: 0.8em; font-weight: bold; color: #ffcc66; margin-bottom: 4px;">Last Raw Output from Builder LLM:</div>
+                        <pre id="mhc_settings_debug_raw" class="text_pole" style="font-family: monospace; font-size: 0.75em; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; margin: 0; border-radius: 4px;">(No build transactions recorded yet)</pre>
+                    </div>
+
+                    <!-- Parser Summary -->
+                    <div style="margin-bottom: 8px;">
+                        <div style="font-size: 0.8em; font-weight: bold; color: #88ccff; margin-bottom: 4px;">Parser Summary &amp; Mutations:</div>
+                        <div id="mhc_settings_debug_summary" style="font-size: 0.78em; opacity: 0.85; background: rgba(0,0,0,0.2); padding: 5px 8px; border-radius: 4px;">None</div>
+                    </div>
+
+                    <!-- Action Row -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <button id="mhc_refresh_debug_btn" class="menu_button interactable" type="button" style="font-size: 0.75em; padding: 2px 8px;">
+                            <i class="fa-solid fa-arrows-rotate"></i> Refresh View
+                        </button>
+                        <button class="menu_button interactable mhc-copy-debug-trace-btn" type="button" style="font-size: 0.75em; padding: 2px 8px; color: #ff8888;">
+                            <i class="fa-solid fa-clipboard"></i> Copy Diagnostic for Antigravity
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>

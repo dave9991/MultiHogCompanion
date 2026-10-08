@@ -1367,3 +1367,80 @@ export function parseMarkdownToDossier(markdown) {
 
     return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign') ? dossier : null;
 }
+
+/**
+ * Classifies a builder transaction report into a standardized status code.
+ * @param {object} [report]
+ * @returns {'MUTATED'|'NOOP'|'SYNTAX_ERROR'|'UNRECOGNIZED_OUTPUT'}
+ */
+export function classifyBuilderReport(report) {
+    if (!report) return 'UNRECOGNIZED_OUTPUT';
+    if (report.hasMutations) return 'MUTATED';
+    if (report.isNoop) return 'NOOP';
+    if (report.errors && report.errors.length > 0) return 'SYNTAX_ERROR';
+    return 'UNRECOGNIZED_OUTPUT';
+}
+
+/**
+ * Builds the explicit directive notice for the Talker based on the builder's final status.
+ * @param {'MUTATED'|'NOOP'|'SYNTAX_ERROR'|'UNRECOGNIZED_OUTPUT'} status
+ * @param {string} [summaryText]
+ * @param {string[]} [errors]
+ * @returns {string}
+ */
+export function buildTalkerInstructionNotice(status, summaryText = '', errors = []) {
+    if (status === 'MUTATED' || status === 'NOOP') {
+        return `[BUILDER_REPORT: ${summaryText}]`;
+    }
+    if (status === 'SYNTAX_ERROR') {
+        const errStr = errors && errors.length ? ` (${errors.join('; ')})` : '';
+        return `[BUILDER_ERROR: Attempted update failed validation${errStr}; blueprint unchanged. Please let the player know gently that there was a formatting hiccup and ask what they would like to adjust.]`;
+    }
+    return `[BUILDER_NOTICE: The Builder output did not include an [UPDATE_DOSSIER] block. No changes were made to the blueprint. Do NOT claim an edit was made. Discuss ideas conversationally with the player.]`;
+}
+
+/**
+ * Format a builder transaction as a rich Markdown diagnostic trace for Antigravity or bug reporting.
+ * @param {object} [tx]
+ * @returns {string}
+ */
+export function formatDiagnosticTrace(tx) {
+    if (!tx) return 'No diagnostic trace recorded.';
+    const attempts = tx.attempts || [];
+    const md = [
+        '### 🎩 MultiHog Concierge Builder Diagnostic Trace',
+        `- **Timestamp:** ${tx.timestamp || new Date().toISOString()}`,
+        `- **Final Status:** ${tx.finalStatus || 'UNKNOWN'}`,
+        `- **System Engine:** ${tx.systemEngine || 'fantasy'}`,
+        `- **User Prompt:** ${tx.userPrompt || tx.userMessage || '(none)'}`,
+        `- **Extracted Summary:** ${tx.builderSummary || '(none)'}`,
+        '',
+        '#### Execution Attempts:',
+        ...attempts.map((a, i) => {
+            const errs = a.report?.errors?.length ? a.report.errors.join('; ') : (a.errors?.length ? a.errors.join('; ') : 'None');
+            const changes = a.report?.changes?.length ? a.report.changes.join('; ') : 'None';
+            const raw = a.rawResponse || '(empty)';
+            return [
+                `* **Attempt ${a.attempt || a.attemptNumber || i + 1}:**`,
+                `  - **Status:** Mutations: ${Boolean(a.report?.hasMutations || a.hasMutations)}, Noop: ${Boolean(a.report?.isNoop || a.isNoop)}`,
+                `  - **Errors:** ${errs}`,
+                `  - **Mutations:** ${changes}`,
+                `  - **Raw Output:**`,
+                '```text',
+                raw,
+                '```',
+            ].join('\n');
+        }),
+        '',
+        '#### Last Builder Request (Input Messages):',
+        '```json',
+        JSON.stringify(tx.builderRequest?.messages || [], null, 2),
+        '```',
+        '',
+        '#### Current Blueprint Snapshot (activeDossier):',
+        '```json',
+        JSON.stringify(tx.activeDossierSnapshot || tx.currentDossierSnapshot || {}, null, 2),
+        '```',
+    ].join('\n');
+    return md;
+}

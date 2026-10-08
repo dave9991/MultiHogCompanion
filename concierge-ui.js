@@ -41,6 +41,9 @@ import {
     formatDossierForContext,
     formatChangelogForContext,
     serializeDossierToMarkdown,
+    classifyBuilderReport,
+    buildTalkerInstructionNotice,
+    formatDiagnosticTrace as formatDiagnosticTraceParser,
 } from './concierge-parser.js';
 import { launchPbtaCampaign } from './concierge-runner.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
@@ -647,9 +650,10 @@ async function handleUserSend() {
                 hasMutations: builderReport.hasMutations,
                 isNoop: builderReport.isNoop,
                 builderSummary: builderReport.builderSummary,
+                report: builderReport,
             });
 
-            if (builderReport.success || builderReport.isNoop) {
+            if (builderReport.hasMutations || builderReport.isNoop) {
                 break;
             }
 
@@ -667,17 +671,27 @@ async function handleUserSend() {
                         content: `[PARSER_ERROR: Blueprint update contained errors: ${builderReport.errors.join('; ')}. Please correct these syntax errors and re-emit the [UPDATE_DOSSIER] block.]`,
                     },
                 ];
+            } else if (builderAttempts < maxBuilderAttempts && !builderReport.hasMutations && !builderReport.isNoop) {
+                if (typingEl) {
+                    typingEl.innerHTML = '<i>🎩 The Concierge is recalibrating the blueprint...</i>';
+                }
+                currentBuilderMessages = [
+                    ...builderMessages,
+                    { role: 'assistant', name: 'PbtA_Builder', content: builderRawResponse },
+                    {
+                        role: 'system',
+                        name: 'System',
+                        content: `[PARSER_ERROR: No [UPDATE_DOSSIER] or [NOOP] block found in output. You must emit either an [UPDATE_DOSSIER] block containing blueprint directives or a [NOOP] block.]`,
+                    },
+                ];
             }
         }
 
-        if (!builderReport || (!builderReport.success && !builderReport.isNoop)) {
-            builderFailed = true;
-        }
+        const finalStatus = classifyBuilderReport(builderReport);
+        builderFailed = (finalStatus === 'SYNTAX_ERROR' || finalStatus === 'UNRECOGNIZED_OUTPUT');
 
         let builderSummaryText = '';
-        let diagnosticPackage = null;
-
-        if (!builderFailed && builderReport.hasMutations) {
+        if (finalStatus === 'MUTATED') {
             activeDossier = builderReport.updatedDossier;
             const now = new Date();
             const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -685,24 +699,36 @@ async function handleUserSend() {
             updateBlueprintDeck();
             saveDraft();
             builderSummaryText = builderReport.builderSummary || builderReport.changes.join('; ') || 'Blueprint updated';
-        } else if (builderReport?.isNoop) {
+        } else if (finalStatus === 'NOOP') {
             builderSummaryText = `NOOP (${builderReport.builderSummary || 'No blueprint changes requested'})`;
-        } else if (builderFailed) {
-            builderSummaryText = `ERROR: Failed after ${maxBuilderAttempts} attempts. Blueprint unchanged.`;
-            diagnosticPackage = {
-                timestamp: new Date().toISOString(),
-                systemEngine: activeDossier?.meta?.systemKey || 'fantasy',
-                userMessage: displayUserText,
-                currentDossierSnapshot: JSON.parse(JSON.stringify(activeDossier)),
-                attempts: diagnosticAttempts,
-            };
-            window._lastConciergeBuilderDiagnostic = diagnosticPackage;
+        } else if (finalStatus === 'SYNTAX_ERROR') {
+            builderSummaryText = `SYNTAX_ERROR: ${builderReport.errors.join('; ')}`;
+        } else {
+            builderSummaryText = `UNRECOGNIZED_OUTPUT: No [UPDATE_DOSSIER] or [NOOP] block detected.`;
         }
+
+        const transactionRecord = {
+            timestamp: new Date().toISOString(),
+            systemEngine: activeDossier?.meta?.systemKey || 'fantasy',
+            userPrompt: displayUserText,
+            builderRequest: {
+                messages: currentBuilderMessages,
+            },
+            attempts: diagnosticAttempts,
+            finalStatus,
+            builderSummary: builderSummaryText,
+            activeDossierSnapshot: JSON.parse(JSON.stringify(activeDossier)),
+        };
+        window._mhcLastBuilderTransaction = transactionRecord;
+        window._lastConciergeBuilderDiagnostic = transactionRecord;
+        renderDebugInspectorView(transactionRecord);
 
         // ── Stage 2: The Talker (Conversational Session Zero GM) ───────────
         if (typingEl) {
             typingEl.innerHTML = '<i>🎩 The Concierge is contemplating the fiction...</i>';
         }
+
+        const talkerInstruction = buildTalkerInstructionNotice(finalStatus, builderSummaryText, builderReport?.errors);
 
         const talkerMessages = [
             {
@@ -714,9 +740,7 @@ async function handleUserSend() {
             {
                 role: 'system',
                 name: 'System',
-                content: builderFailed
-                    ? `[BUILDER_ERROR: Attempted update failed validation; blueprint unchanged. Please let the player know gently that there was a formatting hiccup and ask what they would like to adjust.]`
-                    : `[BUILDER_REPORT: ${builderSummaryText}]`,
+                content: talkerInstruction,
             },
         ];
 
@@ -732,7 +756,7 @@ async function handleUserSend() {
         typingBubble.remove();
 
         // Render clean bubble to the user (with debug trace button if failure occurred)
-        appendChatBubble('assistant', finalChatBubbleText, null, Boolean(diagnosticPackage));
+        appendChatBubble('assistant', finalChatBubbleText, null, Boolean(builderFailed));
 
         // Record clean conversation text and builder report in history
         chatHistory.push({
@@ -1102,6 +1126,9 @@ function bindModalEvents() {
         $(this).addClass('active');
         const tab = $(this).attr('data-tab');
         $(`#mhc_tab_${tab}`).addClass('active');
+        if (tab === 'debug') {
+            renderDebugInspectorView();
+        }
     });
 
     // Copy Markdown
@@ -1142,6 +1169,9 @@ function bindModalEvents() {
         changelog = [];
         pendingAttachments = [];
         activeNameRagSeeds = '';
+        window._mhcLastBuilderTransaction = null;
+        window._lastConciergeBuilderDiagnostic = null;
+        renderDebugInspectorView(null);
         $('#mhc_chat_messages').empty();
         renderAttachmentTray();
         updateBlueprintDeck();
@@ -1180,23 +1210,12 @@ function bindModalEvents() {
 
     // Copy Antigravity Debug Trace
     $('#mhc_concierge_modal').on('click', '.mhc-copy-debug-trace-btn', function () {
-        const trace = window._lastConciergeBuilderDiagnostic;
+        const trace = window._mhcLastBuilderTransaction || window._lastConciergeBuilderDiagnostic;
         if (!trace) {
             toastr?.warning('No diagnostic trace found.');
             return;
         }
-        const md = [
-            '### 🎩 MultiHog Concierge Builder Diagnostic Trace',
-            `- **Timestamp:** ${trace.timestamp}`,
-            `- **System Engine:** ${trace.systemEngine}`,
-            `- **User Message:** ${trace.userMessage || '(none)'}`,
-            '#### Attempts:',
-            ...(trace.attempts || []).map(a => `* **Attempt ${a.attempt}:**\n  - Raw: \`\`\`${a.rawResponse}\`\`\`\n  - Errors: ${a.errors?.length ? a.errors.join('; ') : 'None'}\n  - Summary: ${a.builderSummary || 'None'}`),
-            '#### Current Blueprint Snapshot:',
-            '```json',
-            JSON.stringify(trace.currentDossierSnapshot, null, 2),
-            '```',
-        ].join('\n');
+        const md = formatDiagnosticTrace(trace);
         if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
             navigator.clipboard.writeText(md).then(() => {
                 toastr?.success('Copied Antigravity debug trace to clipboard!');
@@ -1207,6 +1226,124 @@ function bindModalEvents() {
             prompt('Copy Antigravity debug trace:', md);
         }
     });
+}
+
+function escapeHtml(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+/**
+ * Format a builder transaction as a rich Markdown diagnostic trace for Antigravity or bug reporting.
+ * @param {object} [tx]
+ * @returns {string}
+ */
+export function formatDiagnosticTrace(tx = (window._mhcLastBuilderTransaction || window._lastConciergeBuilderDiagnostic)) {
+    return formatDiagnosticTraceParser(tx);
+}
+
+/**
+ * Renders the latest Builder transaction state into both the in-modal debug inspector and settings drawer.
+ * @param {object} [tx]
+ */
+export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction || window._lastConciergeBuilderDiagnostic)) {
+    // 1. In-Modal Tab Elements
+    const modalBadge = $('#mhc_debug_status_badge');
+    const modalTime = $('#mhc_debug_timestamp');
+    const modalSummary = $('#mhc_debug_summary_text');
+    const modalChanges = $('#mhc_debug_changes_list');
+    const modalErrors = $('#mhc_debug_errors_list');
+    const modalRaw = $('#mhc_debug_raw_output');
+    const modalAttempts = $('#mhc_debug_attempt_count');
+    const modalPrompt = $('#mhc_debug_prompt_input');
+    const modalDossier = $('#mhc_debug_dossier_json');
+
+    // 2. Settings Drawer Elements
+    const settingsBadge = $('#mhc_settings_debug_badge');
+    const settingsStatus = $('#mhc_settings_debug_status');
+    const settingsTime = $('#mhc_settings_debug_time');
+    const settingsRaw = $('#mhc_settings_debug_raw');
+    const settingsSummary = $('#mhc_settings_debug_summary');
+
+    if (!tx) {
+        modalBadge.text('Awaiting Turn').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc', borderColor: 'rgba(156,163,175,0.4)' });
+        modalTime.text('--:--:--');
+        modalSummary.text('No build transactions recorded yet.');
+        modalChanges.empty();
+        modalErrors.empty();
+        modalRaw.text('(No raw Builder response captured yet)');
+        modalAttempts.text('Attempt 0/2');
+        modalPrompt.text('(No prompt recorded yet)');
+        modalDossier.text(JSON.stringify(activeDossier || {}, null, 2));
+
+        settingsBadge.text('Idle').css({ background: 'rgba(150,150,150,0.2)', color: '#ccc', borderColor: 'rgba(255,255,255,0.15)' });
+        settingsStatus.text('None');
+        settingsTime.text('--:--:--');
+        settingsRaw.text('(No build transactions recorded yet)');
+        settingsSummary.text('None');
+        return;
+    }
+
+    const attempts = tx.attempts || [];
+    const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null;
+    const rawText = lastAttempt?.rawResponse || '(empty)';
+    const status = tx.finalStatus || 'UNKNOWN';
+    const timeFormatted = tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString() : '--:--:--';
+
+    let badgeColor = '#ccc';
+    let badgeBg = 'rgba(150,150,150,0.2)';
+    let badgeBorder = 'rgba(255,255,255,0.15)';
+
+    if (status === 'MUTATED') {
+        badgeColor = '#4ade80';
+        badgeBg = 'rgba(34, 197, 94, 0.2)';
+        badgeBorder = 'rgba(34, 197, 94, 0.4)';
+    } else if (status === 'NOOP') {
+        badgeColor = '#60a5fa';
+        badgeBg = 'rgba(59, 130, 246, 0.2)';
+        badgeBorder = 'rgba(59, 130, 246, 0.4)';
+    } else if (status === 'SYNTAX_ERROR') {
+        badgeColor = '#f87171';
+        badgeBg = 'rgba(239, 68, 68, 0.2)';
+        badgeBorder = 'rgba(239, 68, 68, 0.4)';
+    } else if (status === 'UNRECOGNIZED_OUTPUT') {
+        badgeColor = '#fbbf24';
+        badgeBg = 'rgba(245, 158, 11, 0.2)';
+        badgeBorder = 'rgba(245, 158, 11, 0.4)';
+    }
+
+    modalBadge.text(status).css({ color: badgeColor, background: badgeBg, borderColor: badgeBorder });
+    modalTime.text(timeFormatted);
+    modalSummary.text(tx.builderSummary || 'No summary available');
+
+    modalChanges.empty();
+    const changes = lastAttempt?.report?.changes || [];
+    if (changes.length) {
+        modalChanges.html(`<b>Mutations:</b> ${changes.map(c => `• ${escapeHtml(c)}`).join(' ')}`);
+    }
+
+    modalErrors.empty();
+    const errors = lastAttempt?.report?.errors || lastAttempt?.errors || [];
+    if (errors.length) {
+        modalErrors.html(`<b>Errors:</b> ${errors.map(e => `⚠️ ${escapeHtml(e)}`).join('; ')}`);
+    }
+
+    modalRaw.text(rawText);
+    modalAttempts.text(`Attempt ${attempts.length}/2`);
+    modalPrompt.text(JSON.stringify(tx.builderRequest?.messages || [], null, 2));
+    modalDossier.text(JSON.stringify(tx.activeDossierSnapshot || tx.currentDossierSnapshot || activeDossier || {}, null, 2));
+
+    // Settings drawer updates
+    settingsBadge.text(status).css({ color: badgeColor, background: badgeBg, borderColor: badgeBorder });
+    settingsStatus.text(status);
+    settingsTime.text(timeFormatted);
+    settingsRaw.text(rawText);
+    settingsSummary.text(tx.builderSummary || 'None');
 }
 
 /**
@@ -1250,5 +1387,6 @@ export async function openConciergeModal() {
     }
 
     updateBlueprintDeck();
+    renderDebugInspectorView();
     $('#mhc_concierge_modal').fadeIn(200);
 }

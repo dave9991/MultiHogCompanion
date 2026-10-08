@@ -16,7 +16,11 @@ import {
     buildPbtACartridge,
     buildPbtAQuickStartInstructions,
 } from './pbta-ruleset.js';
-import { openConciergeModal } from './concierge-ui.js';
+import {
+    openConciergeModal,
+    renderDebugInspectorView,
+    formatDiagnosticTrace,
+} from './concierge-ui.js';
 import {
     getCampaignLorebookStatus,
     syncCampaignLorebooks,
@@ -55,6 +59,7 @@ const DEFAULT_SETTINGS = {
     nameRagEnhanceMultiHog: true,
     nameRagEnhanceConcierge: true,
     nameRagAdhocSysprompt: true,
+    conciergeDebugMode: false,
 };
 
 function getSettings() {
@@ -1492,6 +1497,38 @@ async function initUI() {
         }
 
         await initNameRagUI();
+
+        // ── 6. Developer & Debug Mode Controls ──
+        const debugCb = $('#mhc_concierge_debug_mode');
+        debugCb.prop('checked', current.conciergeDebugMode || false);
+        debugCb.on('change', function () {
+            updateSettings({ conciergeDebugMode: $(this).is(':checked') });
+        });
+
+        $('#mhc_refresh_debug_btn').on('click', function () {
+            renderDebugInspectorView();
+            showToast('info', 'Concierge debug inspector view refreshed.', 'MultiHog Companion');
+        });
+
+        $(document).off('click.mhcDebugTrace', '.mhc-copy-debug-trace-btn').on('click.mhcDebugTrace', '.mhc-copy-debug-trace-btn', function () {
+            const trace = window._mhcLastBuilderTransaction || window._lastConciergeBuilderDiagnostic;
+            if (!trace) {
+                if (typeof toastr !== 'undefined') toastr.warning('No diagnostic trace recorded yet.');
+                return;
+            }
+            const md = formatDiagnosticTrace(trace);
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                navigator.clipboard.writeText(md).then(() => {
+                    if (typeof toastr !== 'undefined') toastr.success('Copied Antigravity debug trace to clipboard!');
+                }).catch(() => {
+                    prompt('Copy Antigravity debug trace:', md);
+                });
+            } else {
+                prompt('Copy Antigravity debug trace:', md);
+            }
+        });
+
+        renderDebugInspectorView();
     } catch (err) {
         console.error('[MultiHog Companion] Failed to load UI template:', err);
     }

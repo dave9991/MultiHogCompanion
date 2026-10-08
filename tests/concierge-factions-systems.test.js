@@ -147,9 +147,9 @@ console.log('✓ Sysprompt Control Room correctly registers tone & factions snip
 console.log('Testing Initial Memo [FACTIONS] Block...');
 const memo = formatInitialPbtaMemo(fullDossier);
 assert.ok(memo.includes('[FACTIONS]'), 'memo contains [FACTIONS] block');
-assert.ok(memo.includes('- The Iron Watchers (Hostile) | Agenda: Suppress all public knowledge of occult manifestations'));
-assert.ok(memo.includes('- The Whispering Circle (Neutral) | Agenda: Awaken the slumbering entity beneath the pines'));
-console.log('✓ formatInitialPbtaMemo successfully renders [FACTIONS] block');
+assert.ok(memo.includes('((PILLS)) The Iron Watchers: (-) Hostile (Standing), Agenda (Suppress all public knowledge of occult manifestations)'), 'The Iron Watchers missing ((PILLS)) formatting');
+assert.ok(memo.includes('((PILLS)) The Whispering Circle: Neutral (Standing), Agenda (Awaken the slumbering entity beneath the pines)'), 'The Whispering Circle missing ((PILLS)) formatting');
+console.log('✓ formatInitialPbtaMemo successfully renders ((PILLS)) [FACTIONS] block');
 
 // ── Test 7: Prompt Hygiene & Directives ─────────────────────────────────────
 console.log('Testing Prompt Hygiene & Directives...');

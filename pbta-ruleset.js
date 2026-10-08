@@ -1045,9 +1045,26 @@ export function formatInitialPbtaMemo(dossier) {
     if (Array.isArray(dossier.factions) && dossier.factions.length > 0) {
         const fLines = ['[FACTIONS]'];
         for (const f of dossier.factions) {
-            const standing = f.standing || 'Neutral';
-            const agenda = f.agenda ? ` | Agenda: ${f.agenda}` : '';
-            fLines.push(`- ${f.name} (${standing})${agenda}`);
+            const rawStanding = (f.standing || 'Neutral').trim();
+            let standingFormatted = rawStanding;
+            const lower = rawStanding.toLowerCase();
+            if (!rawStanding.startsWith('(+)') && !rawStanding.startsWith('(-)') && !rawStanding.startsWith('(+) ') && !rawStanding.startsWith('(-) ')) {
+                if (lower.includes('ally') || lower.includes('allied') || lower.includes('friend') || lower.includes('sympathetic') || lower.includes('honored')) {
+                    standingFormatted = `(+) ${rawStanding}`;
+                } else if (lower.includes('hostile') || lower.includes('rival') || lower.includes('enemy') || lower.includes('hated') || lower.includes('unfriendly')) {
+                    standingFormatted = `(-) ${rawStanding}`;
+                }
+            }
+
+            const pills = [`${standingFormatted} (Standing)`];
+            if (f.agenda) {
+                pills.push(`Agenda (${f.agenda.replace(/[()]/g, '').trim()})`);
+            }
+            if (f.notes) {
+                pills.push(`Notes (${f.notes.replace(/[()]/g, '').trim()})`);
+            }
+
+            fLines.push(`((PILLS)) ${f.name}: ${pills.join(', ')}`);
         }
         fLines.push('[/FACTIONS]');
         blocks.push(fLines.join('\n'));

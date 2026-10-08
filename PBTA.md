@@ -32,6 +32,7 @@ Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves
 * **Interactive Move & Gear Pills:** Playbook Moves and equipped Gear render as sleek badge pills (`[ Hack & Slash • ]`, `[ Vibro-Blade • ]`). Hovering over a pill reveals a tooltip bubble detailing its fictional trigger, damage tags, or armor bonuses.
 * **Companion Bonds:** Companion ties and allegiances render as interactive `((PILLS)) Bonds:` pills, cleanly displaying debts or oaths on hover.
 * **Buffs & Debuffs:** Character conditions automatically tint in the tracker UI—beneficial effects with `(+)` glow emerald green, while injuries or debuffs with `(-)` render crimson red.
+* **Interactive Faction Pills:** Factions in `[FACTIONS]` render as `((PILLS)) Faction Name: Standing (Standing), Agenda (Fictional goals...)`, tinting `(+) Allied` (green) and `(-) Hostile` (red) with hoverable agenda tooltips.
 * **Adversary Attacks:** In combat, monster attacks display as hoverable pills with damage tags like `(close, 2 Harm)` revealed on mouse-over.
 
 ---

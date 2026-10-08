@@ -130,3 +130,73 @@ export function syncLivePbtaMemoVitality(s, chatId = null) {
 
     return didUpdate;
 }
+
+/**
+ * Extracts parsed PbtA character positioning, stats, moves, and conditions from
+ * a state memo string. Useful for verifying that the Adventure Companion receives
+ * comprehensive PbtA character context.
+ *
+ * @param {string} memoText
+ * @returns {object|null}
+ */
+export function extractPbtaCharacterState(memoText) {
+    if (!memoText || typeof memoText !== 'string') return null;
+
+    const charBlockMatch = memoText.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
+    const textToSearch = charBlockMatch ? charBlockMatch[1] : memoText;
+
+    // 1. Name, Playbook, HP, Harm, Armor
+    const headerRegex = /^\s*[-*+•–—]?\s*(.+?)(?:\s*\(([^)]+)\))?:\s*(\d+)\/(\d+)\s*HP\s*\|\s*Harm:\s*(\d+)\/(\d+)(?:\s*\|\s*Armor:\s*(\d+))?/m;
+    const headerMatch = textToSearch.match(headerRegex);
+
+    let name = null;
+    let playbook = null;
+    let curHarm = null;
+    let maxHarm = null;
+    let curHp = null;
+    let maxHp = null;
+    let armor = 0;
+
+    if (headerMatch) {
+        name = headerMatch[1].trim();
+        playbook = headerMatch[2] ? headerMatch[2].trim() : null;
+        curHp = parseInt(headerMatch[3], 10);
+        maxHp = parseInt(headerMatch[4], 10);
+        curHarm = parseInt(headerMatch[5], 10);
+        maxHarm = parseInt(headerMatch[6], 10);
+        if (headerMatch[7]) armor = parseInt(headerMatch[7], 10) || 0;
+    }
+
+    // 2. Stats
+    const statsMatch = textToSearch.match(/Stats:\s*(.+)$/m);
+    const statsStr = statsMatch ? statsMatch[1].trim() : '';
+
+    // 3. Moves
+    const movesMatch = textToSearch.match(/(?:\(\(PILLS\)\)\s*)?Moves:\s*(.+)$/m);
+    const movesStr = movesMatch ? movesMatch[1].trim() : '';
+
+    // 4. Conditions
+    const condMatch = textToSearch.match(/(?:\(\(PILLS\)\)\s*)?Conditions:\s*(.+)$/m);
+    const conditionsStr = condMatch ? condMatch[1].trim() : '';
+
+    // 5. XP
+    const xpMatch = textToSearch.match(/XP:\s*(\d+)(?:\/(\d+))?/i);
+    const xp = xpMatch ? parseInt(xpMatch[1], 10) : 0;
+    const xpMax = xpMatch && xpMatch[2] ? parseInt(xpMatch[2], 10) : 5;
+
+    return {
+        name,
+        playbook,
+        curHarm,
+        maxHarm,
+        curHp,
+        maxHp,
+        armor,
+        stats: statsStr,
+        moves: movesStr,
+        conditions: conditionsStr,
+        xp,
+        xpMax,
+        isPbta: !!(curHarm !== null || /Harm/i.test(textToSearch)),
+    };
+}

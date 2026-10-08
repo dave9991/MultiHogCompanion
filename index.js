@@ -38,6 +38,9 @@ import {
     syncNameRagAdhocSysprompt,
     rollNameRagCandidate,
 } from './namerag-hooks.js';
+import {
+    setupCompanionDocInterceptor,
+} from './pbta-companion-bridge.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -1732,6 +1735,9 @@ jQuery(async () => {
 
     // 2. Setup Smart Aspect-Ratio & Crop Bridge (/imagine interceptor)
     setupImagineInterceptor();
+
+    // 2b. Setup Adventure Companion PbtA Documentation Bridge (Strategy 1)
+    setupCompanionDocInterceptor();
 
     // 3. Register Slash Commands
     if (SlashCommandParser && SlashCommand) {

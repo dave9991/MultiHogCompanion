@@ -142,16 +142,24 @@ async function upsertWorldInfoBook(bookName, items = []) {
 
         let modified = false;
 
+        const assignedMap = {};
+
         for (const item of items) {
             const cleanName = (item.name || item.comment || '').trim();
             if (!cleanName || !item.core) continue;
+            const lowerName = cleanName.toLowerCase();
 
             const existingEntry = Object.values(bookData.entries).find(e => {
                 const label = (e.comment || '').replace(/^\[.*?\]\s*/i, '').trim().toLowerCase();
-                return label === cleanName.toLowerCase();
+                return label === lowerName;
             });
 
             if (existingEntry) {
+                assignedMap[lowerName] = {
+                    bookName,
+                    uid: existingEntry.uid,
+                    fullId: `${bookName}::${existingEntry.uid}`,
+                };
                 // Re-launch / edited dossier: refresh only the protected [CORE] identity block and
                 // leave any chronicle text the Router has since appended untouched.
                 const current = String(existingEntry.content || '');
@@ -167,6 +175,12 @@ async function upsertWorldInfoBook(bookName, items = []) {
 
             const uids = Object.keys(bookData.entries).map(Number).filter(num => !isNaN(num));
             const nextUid = uids.length > 0 ? Math.max(...uids) + 1 : 0;
+
+            assignedMap[lowerName] = {
+                bookName,
+                uid: nextUid,
+                fullId: `${bookName}::${nextUid}`,
+            };
 
             bookData.entries[nextUid] = {
                 uid: nextUid,
@@ -202,8 +216,10 @@ async function upsertWorldInfoBook(bookName, items = []) {
                 router.rememberCampaignBook(bookName);
             }
         }
+        return assignedMap;
     } catch (err) {
         console.warn(`[PbtA Concierge] Could not auto-inject entries into "${bookName}":`, err);
+        return {};
     }
 }
 
@@ -213,9 +229,10 @@ async function upsertWorldInfoBook(bookName, items = []) {
  * - {prefix}_Factions  (Factions)
  * - {prefix}_Locations (Maps / Sites)
  * - {prefix}_Quests    (Starting Crisis)
+ * @returns {Promise<Record<string, { bookName: string, uid: number|string, fullId: string }>>}
  */
 async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames = null) {
-    if (!dossier || typeof dossier !== 'object') return;
+    if (!dossier || typeof dossier !== 'object') return {};
     try {
         const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
         const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
@@ -229,14 +246,16 @@ async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, secti
 
         const dist = prepareCampaignLorebookDistributions(dossier, sectionNames);
 
-        await Promise.all([
+        const [npcMap] = await Promise.all([
             upsertWorldInfoBook(npcBookName, dist.npcs),
             upsertWorldInfoBook(factionBookName, dist.factions),
             upsertWorldInfoBook(locBookName, dist.locations),
             upsertWorldInfoBook(questBookName, dist.quests),
         ]);
+        return npcMap || {};
     } catch (err) {
         console.warn('[PbtA Concierge] Campaign lorebook distribution encountered error:', err);
+        return {};
     }
 }
 
@@ -492,6 +511,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         const npcs = dossier.npcs || [];
         const monsters = dossier.monsters || [];
         const factions = dossier.factions || [];
+        let npcMapping = {};
         if (npcs.length || monsters.length || factions.length) {
             onProgress('👥 Registering supporting cast & adversaries in library...', 70);
             const sectionNames = await loadMainNpcSectionNames();
@@ -516,7 +536,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
 
             // Also inject across the 4 native campaign lorebooks ({prefix}_NPCs, _Factions, _Locations, _Quests)
             try {
-                await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
+                npcMapping = await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
             } catch (loreErr) {
                 console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
             }
@@ -531,46 +551,104 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         }
 
         // ── 5. Inject Dossier into World Info & State ───────────────────────────
-        onProgress('📜 Inscribing Campaign Dossier into World Memory...', 85);
-        const dossierMd = serializeDossierToMarkdown(dossier);
-        await injectDossierIntoWorldInfo(chatId, dossierMd);
+            onProgress('📜 Inscribing Campaign Dossier into World Memory...', 85);
+            const dossierMd = serializeDossierToMarkdown(dossier);
+            await injectDossierIntoWorldInfo(chatId, dossierMd);
 
-        // Store dossier and initialize game state memo in MultiHog for runtime panel access
-        const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
-        const rpgSettings = effectiveCtx?.extensionSettings?.rpg_tracker;
-        const initialMemo = formatInitialPbtaMemo(dossier);
+            // Store dossier and initialize game state memo in MultiHog for runtime panel access
+            const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+            const rpgSettings = effectiveCtx?.extensionSettings?.rpg_tracker;
+            const initialMemo = formatInitialPbtaMemo(dossier);
 
-        if (rpgSettings) {
-            rpgSettings.currentMemo = initialMemo;
-            rpgSettings.chatStates = rpgSettings.chatStates || {};
+            if (rpgSettings) {
+                rpgSettings.currentMemo = initialMemo;
+                rpgSettings.chatStates = rpgSettings.chatStates || {};
 
-            const simDepth = dossier.config?.simulationDepth || 'active_fronts';
-            if (simDepth === 'static') {
-                rpgSettings.worldProgressionEnabled = false;
-                rpgSettings.mapEvolutionEnabled = false;
-            } else if (simDepth === 'living_world') {
-                rpgSettings.worldProgressionEnabled = true;
-                rpgSettings.worldProgressionIntervalHours = 24;
-                rpgSettings.mapEvolutionEnabled = true;
-                rpgSettings.mapEvolutionIntervalHours = 8;
-            } else {
-                // 'active_fronts' (default recommended)
-                rpgSettings.worldProgressionEnabled = true;
-                rpgSettings.worldProgressionIntervalHours = 24;
-                rpgSettings.mapEvolutionEnabled = false;
-            }
+                // ── 5b. Synchronize Relationships & Turn 1 Context ─────────────────
+                const relsEnabled = dossier.config?.relationships !== false;
+                rpgSettings.npcRelationshipBars = relsEnabled;
 
-            if (chatId) {
-                rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
-                rpgSettings.chatStates[chatId].currentMemo = initialMemo;
-                rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
-                rpgSettings.chatStates[chatId].simulationDepth = simDepth;
-                rpgSettings.chatStates[chatId].worldProgressionEnabled = rpgSettings.worldProgressionEnabled;
-                rpgSettings.chatStates[chatId].mapEvolutionEnabled = rpgSettings.mapEvolutionEnabled;
-                if (dossier.config?.artStyle) {
-                    rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
+                if (relsEnabled && npcMapping && Object.keys(npcMapping).length > 0) {
+                    rpgSettings.npcRelationshipValues = rpgSettings.npcRelationshipValues || {};
+                    rpgSettings.npcRelationshipLog = rpgSettings.npcRelationshipLog || {};
+                    rpgSettings.activeRouterKeys = rpgSettings.activeRouterKeys || [];
+
+                    for (const n of (dossier.npcs || [])) {
+                        const cleanName = (n.name || '').toLowerCase().trim();
+                        const mapped = npcMapping[cleanName];
+                        if (!mapped?.fullId) continue;
+
+                        const fullId = mapped.fullId;
+                        const friendship = n.friendship ?? 0;
+                        const affection = n.affection ?? 0;
+
+                        rpgSettings.npcRelationshipValues[fullId] = {
+                            friendship,
+                            affection,
+                        };
+
+                        if (!Array.isArray(rpgSettings.npcRelationshipLog[fullId])) {
+                            rpgSettings.npcRelationshipLog[fullId] = [];
+                        }
+                        rpgSettings.npcRelationshipLog[fullId].unshift({
+                            timestamp: Date.now(),
+                            field: 'friendship',
+                            delta: friendship,
+                            newValue: friendship,
+                            source: 'concierge_session_zero',
+                        });
+                        if (affection !== 0) {
+                            rpgSettings.npcRelationshipLog[fullId].unshift({
+                                timestamp: Date.now(),
+                                field: 'affection',
+                                delta: affection,
+                                newValue: affection,
+                                source: 'concierge_session_zero',
+                            });
+                        }
+
+                        // Activate starting companions / mentors on Turn 1 so they appear in [NPC_RELATIONS]
+                        const isAllied = /companion|party|mentor|patron|ally/i.test(n.role || '');
+                        if (isAllied && !rpgSettings.activeRouterKeys.includes(fullId)) {
+                            rpgSettings.activeRouterKeys.push(fullId);
+                        }
+                    }
                 }
-            }
+
+                const simDepth = dossier.config?.simulationDepth || 'active_fronts';
+                if (simDepth === 'static') {
+                    rpgSettings.worldProgressionEnabled = false;
+                    rpgSettings.mapEvolutionEnabled = false;
+                } else if (simDepth === 'living_world') {
+                    rpgSettings.worldProgressionEnabled = true;
+                    rpgSettings.worldProgressionIntervalHours = 24;
+                    rpgSettings.mapEvolutionEnabled = true;
+                    rpgSettings.mapEvolutionIntervalHours = 8;
+                } else {
+                    // 'active_fronts' (default recommended)
+                    rpgSettings.worldProgressionEnabled = true;
+                    rpgSettings.worldProgressionIntervalHours = 24;
+                    rpgSettings.mapEvolutionEnabled = false;
+                }
+
+                if (chatId) {
+                    rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
+                    rpgSettings.chatStates[chatId].currentMemo = initialMemo;
+                    rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+                    rpgSettings.chatStates[chatId].simulationDepth = simDepth;
+                    rpgSettings.chatStates[chatId].worldProgressionEnabled = rpgSettings.worldProgressionEnabled;
+                    rpgSettings.chatStates[chatId].mapEvolutionEnabled = rpgSettings.mapEvolutionEnabled;
+                    rpgSettings.chatStates[chatId].npcRelationshipBars = relsEnabled;
+                    if (rpgSettings.npcRelationshipValues) {
+                        rpgSettings.chatStates[chatId].npcRelationshipValues = JSON.parse(JSON.stringify(rpgSettings.npcRelationshipValues));
+                    }
+                    if (rpgSettings.activeRouterKeys) {
+                        rpgSettings.chatStates[chatId].activeRouterKeys = [...rpgSettings.activeRouterKeys];
+                    }
+                    if (dossier.config?.artStyle) {
+                        rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
+                    }
+                }
 
             if (dossier.protagonist?.portraitSrc) {
                 const pSrc = dossier.protagonist.portraitSrc;

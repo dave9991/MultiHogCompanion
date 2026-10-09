@@ -49,6 +49,7 @@ export function createEmptyDossier() {
             artStyle: '',
             pacingXp: 5,
             simulationDepth: 'active_fronts',
+            relationships: true,
         },
     };
 }
@@ -123,6 +124,46 @@ export function cleanTargetName(rawName) {
 }
 
 /**
+ * Clamps a relationship score to MultiHog's standard -150..+150 scale.
+ * @param {any} val
+ * @returns {number}
+ */
+export function clampRelationshipScore(val) {
+    const num = parseInt(val, 10);
+    if (isNaN(num)) return 0;
+    return Math.max(-150, Math.min(150, num));
+}
+
+/**
+ * Infers initial Friendship and Affection scores from role and narrative bond text.
+ * Used when explicit numbers are omitted in the blueprint.
+ * @param {string} [role]
+ * @param {string} [relText]
+ * @returns {{ friendship: number, affection: number }}
+ */
+export function inferStartingNpcRelationships(roleOrNpc = '', relText = '') {
+    let combined = '';
+    if (typeof roleOrNpc === 'object' && roleOrNpc !== null) {
+        combined = `${roleOrNpc.role || ''} ${roleOrNpc.relationship || ''} ${roleOrNpc.demeanor || ''}`.toLowerCase();
+    } else {
+        combined = `${roleOrNpc || ''} ${relText || ''}`.toLowerCase();
+    }
+    if (/(lover|spouse|partner|husband|wife|fianc[ée]|boyfriend|girlfriend|sweetheart|romance)/i.test(combined)) {
+        return { friendship: 35, affection: 60 };
+    }
+    if (/(rival|competitor|enemy|adversary|hostile|nemesis|hates|grudge)/i.test(combined)) {
+        return { friendship: -30, affection: 0 };
+    }
+    if (/(mentor|patron|confidant|sworn brother|sworn sister|best friend|loyal)/i.test(combined)) {
+        return { friendship: 45, affection: 0 };
+    }
+    if (/(ally|friend|companion|contact)/i.test(combined)) {
+        return { friendship: 25, affection: 0 };
+    }
+    return { friendship: 0, affection: 0 };
+}
+
+/**
  * Strips [UPDATE_DOSSIER] and [CONCIERGE_STATE] blocks (and standalone tags) out of text for display.
  * @param {string} text
  * @returns {string}
@@ -132,11 +173,11 @@ export function stripConciergeStateBlocks(text) {
     return text
         .replace(/\[UPDATE_DOSSIER\][\s\S]*?(?:\[\/UPDATE_DOSSIER\]|$)/gi, '')
         .replace(/\[CONCIERGE_STATE\][\s\S]*?(?:\[\/CONCIERGE_STATE\]|$)/gi, '')
-        .replace(/\[PROTAGONIST\][\s\S]*?(?:\[\/PROTAGONIST\]|$)/gi, '')
-        .replace(/\[NPC\][\s\S]*?(?:\[\/NPC\]|$)/gi, '')
-        .replace(/\[MONSTER\][\s\S]*?(?:\[\/MONSTER\]|$)/gi, '')
-        .replace(/\[MAP\][\s\S]*?(?:\[\/MAP\]|$)/gi, '')
-        .replace(/\[FACTION\][\s\S]*?(?:\[\/FACTION\]|$)/gi, '')
+        .replace(/\[PROTAGONIST(?::[^\n\]]+)?\][\s\S]*?(?:\[\/PROTAGONIST\]|$)/gi, '')
+        .replace(/\[NPC(?::[^\n\]]+)?\][\s\S]*?(?:\[\/NPC\]|$)/gi, '')
+        .replace(/\[MONSTER(?::[^\n\]]+)?\][\s\S]*?(?:\[\/MONSTER\]|$)/gi, '')
+        .replace(/\[MAP(?::[^\n\]]+)?\][\s\S]*?(?:\[\/MAP\]|$)/gi, '')
+        .replace(/\[FACTION(?::[^\n\]]+)?\][\s\S]*?(?:\[\/FACTION\]|$)/gi, '')
         .replace(/\[KICK\][\s\S]*?(?:\[\/KICK\]|$)/gi, '')
         .replace(/\[CYOA\][\s\S]*?(?:\[\/CYOA\]|$)/gi, '')
         .replace(/\[CONFIG\][\s\S]*?(?:\[\/CONFIG\]|$)/gi, '')
@@ -275,7 +316,7 @@ The Kick: Unset
     // Full-detail view, written in the same key: value shape as [UPDATE_DOSSIER] blocks so the
     // model can copy names/keys exactly and emit precise partial edits.
     const cfg = dossier.config || {};
-    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}`);
+    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
 
     if (p.name || p.playbook) {
@@ -307,9 +348,12 @@ The Kick: Unset
             const fields = [
                 ['role', n.role], ['species', n.species], ['appearance', n.appearance],
                 ['equipment', n.equipment], ['demeanor', n.demeanor], ['background', n.background],
-                ['relationship', n.relationship], ['moves_or_boons', n.movesOrBoons], ['notes', n.notes],
+                ['relationship', n.relationship],
+                ['friendship', n.friendship !== undefined ? n.friendship : null],
+                ['affection', n.affection !== undefined ? n.affection : null],
+                ['moves_or_boons', n.movesOrBoons], ['notes', n.notes],
             ];
-            fields.forEach(([k, v]) => { if (v) lines.push(`${k}: ${v}`); });
+            fields.forEach(([k, v]) => { if (v !== null && v !== undefined && v !== '') lines.push(`${k}: ${v}`); });
             lines.push('[/NPC]');
         });
     } else {
@@ -619,10 +663,12 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const npcMatches = raw.matchAll(/\[NPC\]([\s\S]*?)(?:\[\/NPC\]|$)/gi);
+    const npcMatches = raw.matchAll(/(?:\[NPC(?::\s*([^\]\r\n]+))?\])([\s\S]*?)(?:\[\/NPC\]|$)/gi);
     for (const match of npcMatches) {
-        const nBlock = match[1];
+        const inlineName = match[1]?.trim();
+        const nBlock = match[2];
         const kv = parseKeyValueLines(nBlock);
+        if (!kv.name && inlineName) kv.name = inlineName;
         if (!kv.name) continue;
 
         // Check if this NPC block requests removal
@@ -635,6 +681,17 @@ export function applyDossierUpdates(text, dossier) {
             continue;
         }
 
+        let fVal = kv.friendship !== undefined ? clampRelationshipScore(kv.friendship) : null;
+        let aVal = kv.affection !== undefined ? clampRelationshipScore(kv.affection) : null;
+        if (fVal === null && aVal === null) {
+            const inferred = inferStartingNpcRelationships(kv.role, kv.relationship);
+            fVal = inferred.friendship;
+            aVal = inferred.affection;
+        } else {
+            fVal = fVal ?? 0;
+            aVal = aVal ?? 0;
+        }
+
         const npcObj = {
             name: kv.name,
             role: kv.role || 'Ally',
@@ -644,6 +701,8 @@ export function applyDossierUpdates(text, dossier) {
             demeanor: kv.demeanor || '',
             background: kv.background || '',
             relationship: kv.relationship || '',
+            friendship: fVal,
+            affection: aVal,
             movesOrBoons: kv.moves_or_boons || kv.moves || '',
             notes: kv.notes || '',
             portraitSrc: null,
@@ -661,6 +720,8 @@ export function applyDossierUpdates(text, dossier) {
             if (given('demeanor')) patch.demeanor = npcObj.demeanor;
             if (given('background')) patch.background = npcObj.background;
             if (given('relationship')) patch.relationship = npcObj.relationship;
+            if (given('friendship')) patch.friendship = clampRelationshipScore(kv.friendship);
+            if (given('affection')) patch.affection = clampRelationshipScore(kv.affection);
             if (given('moves_or_boons', 'moves')) patch.movesOrBoons = npcObj.movesOrBoons;
             if (given('notes')) patch.notes = npcObj.notes;
             updated.npcs[existingIdx] = Object.assign({}, updated.npcs[existingIdx], patch);
@@ -993,6 +1054,16 @@ export function applyDossierUpdates(text, dossier) {
                 changes.push(`Simulation Depth dial set to ${label}`);
             }
         }
+
+        // Relationships Dial
+        if (kv.relationships !== undefined || kv.relations !== undefined || kv.npc_relationships !== undefined) {
+            const relRaw = String(kv.relationships ?? kv.relations ?? kv.npc_relationships).toLowerCase().trim();
+            const nextRel = !/^(false|off|0|no|disabled)$/i.test(relRaw);
+            if (nextRel !== updated.config.relationships) {
+                updated.config.relationships = nextRel;
+                changes.push(`Relationships dial set to ${nextRel ? 'On' : 'Off'}`);
+            }
+        }
     }
 
     return {
@@ -1041,14 +1112,19 @@ export function serializeDossierToMarkdown(dossier) {
     let gearMd = (p.gear || []).map(g => `* ${g}`).join('\n') || '* Basic equipment.';
 
     let npcsMd = npcs.length
-        ? npcs.map(n => `### 👤 ${n.name}
+        ? npcs.map(n => {
+            const standingsLine = (n.friendship !== undefined || n.affection !== undefined)
+                ? `\n* **Standings:** Friendship ${n.friendship >= 0 ? '+' : ''}${n.friendship || 0} · Affection ${n.affection >= 0 ? '+' : ''}${n.affection || 0}`
+                : '';
+            return `### 👤 ${n.name}
 * **Role:** ${n.role || 'Ally'}${n.species ? `\n* **Species:** ${n.species}` : ''}
 * **Appearance:** ${n.appearance || 'None specified'}${n.equipment ? `\n* **Equipment:** ${n.equipment}` : ''}
 * **Demeanor:** ${n.demeanor || 'None specified'}
-* **Relationship:** ${n.relationship || 'Allied with protagonist'}
+* **Relationship:** ${n.relationship || 'Allied with protagonist'}${standingsLine}
 * **Background:** ${n.background || 'None specified'}
 * **Moves/Boons:** ${n.movesOrBoons || 'None'}
-* **Notes:** ${n.notes || 'None'}`).join('\n\n')
+* **Notes:** ${n.notes || 'None'}`;
+        }).join('\n\n')
         : '_No supporting NPCs staged yet._';
 
     let monstersMd = monsters.length
@@ -1130,7 +1206,7 @@ ${mapsMd}
 * **Playstyle:** ${dossier.config.playstyle || 'cyoa_5'}
 * **Harm Capacity:** ${dossier.config.harmMax || 5}
 * **Party Mode:** ${dossier.config.partyMode || 'squad'}
-* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}` : ''}`;
+* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}` : ''}`;
 }
 
 /**
@@ -1222,6 +1298,7 @@ export function parseMarkdownToDossier(markdown) {
             const appM = block.match(/\*\s*\*\*Appearance:\*\*\s*([^\n\r]+)/i);
             const demeanorM = block.match(/\*\s*\*\*Demeanor:\*\*\s*([^\n\r]+)/i);
             const relM = block.match(/\*\s*\*\*Relationship:\*\*\s*([^\n\r]+)/i);
+            const standingsM = block.match(/\*\s*\*\*Standings:\*\*\s*Friendship\s*([+-]?\d+)\s*·\s*Affection\s*([+-]?\d+)/i);
             const bgM = block.match(/\*\s*\*\*Background:\*\*\s*([^\n\r]+)/i);
             const boonsM = block.match(/\*\s*\*\*Moves\/Boons:\*\*\s*([^\n\r]+)/i);
             const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
@@ -1229,14 +1306,29 @@ export function parseMarkdownToDossier(markdown) {
             const speciesM = block.match(/\*\s*\*\*Species:\*\*\s*([^\n\r]+)/i);
             const equipM = block.match(/\*\s*\*\*Equipment:\*\*\s*([^\n\r]+)/i);
 
+            const role = roleM ? roleM[1].trim() : 'Ally';
+            const relText = relM ? relM[1].trim() : '';
+            let fVal = 0;
+            let aVal = 0;
+            if (standingsM) {
+                fVal = clampRelationshipScore(standingsM[1]);
+                aVal = clampRelationshipScore(standingsM[2]);
+            } else {
+                const inferred = inferStartingNpcRelationships(role, relText);
+                fVal = inferred.friendship;
+                aVal = inferred.affection;
+            }
+
             dossier.npcs.push({
                 name,
-                role: roleM ? roleM[1].trim() : 'Ally',
+                role,
                 species: speciesM ? speciesM[1].trim() : '',
                 appearance: appM && !appM[1].includes('None specified') ? appM[1].trim() : '',
                 equipment: equipM ? equipM[1].trim() : '',
                 demeanor: demeanorM ? demeanorM[1].trim() : '',
-                relationship: relM ? relM[1].trim() : '',
+                relationship: relText,
+                friendship: fVal,
+                affection: aVal,
                 background: bgM ? bgM[1].trim() : '',
                 movesOrBoons: boonsM ? boonsM[1].trim() : '',
                 notes: notesM ? notesM[1].trim() : '',
@@ -1348,6 +1440,7 @@ export function parseMarkdownToDossier(markdown) {
         const simM = configSection[1].match(/\*\s*\*\*Simulation Depth:\*\*\s*([^\n\r]+)/i);
         const artM = configSection[1].match(/\*\s*\*\*Art Direction:\*\*\s*([^\n\r]+)/i);
         const xpM = configSection[1].match(/\*\s*\*\*XP Pacing:\*\*\s*([^\n\r]+)/i);
+        const relM = configSection[1].match(/\*\s*\*\*Relationships:\*\*\s*([^\n\r]+)/i);
 
         dossier.config = dossier.config || {};
         if (psM) dossier.config.playstyle = psM[1].trim();
@@ -1363,6 +1456,7 @@ export function parseMarkdownToDossier(markdown) {
             const xpVal = parseInt(xpM[1], 10);
             if (!isNaN(xpVal)) dossier.config.pacingXp = xpVal;
         }
+        if (relM) dossier.config.relationships = !/disabled|false|off/i.test(relM[1]);
     }
 
     return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign') ? dossier : null;

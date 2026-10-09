@@ -198,6 +198,9 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
 
     const npcs = (dossier.npcs || []).map(n => ({
         name: n.name,
+        role: n.role,
+        friendship: n.friendship ?? 0,
+        affection: n.affection ?? 0,
         keys: buildNpcKeys(n.name),
         ...buildNpcEntryContent(n, sectionNames),
     })).filter(e => e.name && e.core);

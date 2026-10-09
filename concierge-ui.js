@@ -173,6 +173,9 @@ function updateBlueprintDeck() {
     else if (simDepth === 'static') simLabel = 'Static Solo';
     $('#mhc_dial_sim_depth_btn').text(`🌍 Sim: ${simLabel}`);
 
+    const relsOn = cfg.relationships !== false;
+    $('#mhc_dial_relationships_btn').text(`🤝 Relations: ${relsOn ? 'On' : 'Off'}`).css('opacity', relsOn ? '1' : '0.65');
+
     if (cfg.artStyle) {
         $('#mhc_deck_dial_art_text').text(cfg.artStyle);
         $('#mhc_deck_dial_art').show();
@@ -210,6 +213,27 @@ function updateBlueprintDeck() {
             const app = n.appearance ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Look:</b> ${n.appearance}</div>` : '';
             const rel = n.relationship ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Bond:</b> ${n.relationship}</div>` : '';
             const boons = n.movesOrBoons ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>Boons/Moves:</b> ${n.movesOrBoons}</div>` : '';
+
+            let relControls = '';
+            if (relsOn) {
+                const fVal = n.friendship ?? 0;
+                const aVal = n.affection ?? 0;
+                const fSign = fVal >= 0 ? '+' : '';
+                const aSign = aVal >= 0 ? '+' : '';
+                relControls = `
+                    <div class="mhc-npc-rel-controls" style="margin-top: 6px; padding: 6px 8px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 0.78em;">
+                            <span style="color: #4ade80;">🤝 Friendship: <b class="mhc-rel-val-friendship">${fSign}${fVal}</b></span>
+                            <input type="range" class="mhc-npc-rel-slider" data-npc="${encodeURIComponent(n.name)}" data-axis="friendship" min="-150" max="150" step="5" value="${fVal}" style="flex: 1; max-width: 130px; height: 3px; accent-color: #4ade80; cursor: pointer;">
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.78em;">
+                            <span style="color: #f472b6;">💗 Affection: <b class="mhc-rel-val-affection">${aSign}${aVal}</b></span>
+                            <input type="range" class="mhc-npc-rel-slider" data-npc="${encodeURIComponent(n.name)}" data-axis="affection" min="-150" max="150" step="5" value="${aVal}" style="flex: 1; max-width: 130px; height: 3px; accent-color: #f472b6; cursor: pointer;">
+                        </div>
+                    </div>
+                `;
+            }
+
             npcList.append(`
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
@@ -221,6 +245,7 @@ function updateBlueprintDeck() {
                     <div class="mhc-deck-item-detail">
                         ${app}
                         ${rel}
+                        ${relControls}
                         ${boons}
                     </div>
                 </div>
@@ -1109,6 +1134,42 @@ function bindModalEvents() {
         changelog.push(`Toggled simulation depth to ${label}`);
         updateBlueprintDeck();
         saveDraft();
+    });
+
+    $('#mhc_dial_relationships_btn').on('click', () => {
+        activeDossier.config = activeDossier.config || {};
+        activeDossier.config.relationships = activeDossier.config.relationships === false ? true : false;
+        changelog.push(`Toggled NPC relationships to ${activeDossier.config.relationships ? 'On' : 'Off'}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    // NPC relationship slider adjustments
+    $('#mhc_concierge_modal').on('input change', '.mhc-npc-rel-slider', function (e) {
+        e.stopPropagation();
+        const rawName = decodeURIComponent($(this).data('npc') || '');
+        const axis = $(this).data('axis');
+        const val = parseInt($(this).val(), 10) || 0;
+        const sign = val >= 0 ? '+' : '';
+
+        if (!activeDossier?.npcs) return;
+        const npc = activeDossier.npcs.find(n => n.name && n.name.toLowerCase() === rawName.toLowerCase());
+        if (npc) {
+            npc[axis] = val;
+            const container = $(this).closest('.mhc-npc-rel-controls');
+            if (axis === 'friendship') {
+                container.find('.mhc-rel-val-friendship').text(`${sign}${val}`);
+            } else if (axis === 'affection') {
+                container.find('.mhc-rel-val-affection').text(`${sign}${val}`);
+            }
+        }
+        if (e.type === 'change') {
+            saveDraft();
+        }
+    });
+
+    $('#mhc_concierge_modal').on('click', '.mhc-npc-rel-controls', function (e) {
+        e.stopPropagation();
     });
 
     // Collapsible blueprint items (NPCs, Monsters, Maps)

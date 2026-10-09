@@ -152,6 +152,8 @@ equipment: Oilskin coat, brass storm lantern, harpoon-gun on a hook by the door
 demeanor: Gruff, watchful, quietly generous
 background: Keeps the Greywater light for the smugglers' guild; knows every ship that passes and which ones never arrive.
 relationship: Owes the protagonist's mentor an old debt; will trade favors for news from the mainland.
+friendship: 35
+affection: 0
 moves_or_boons: Read the Tide (Tells the protagonist what the sea is hiding once per scene), Safe Harbor (Hides allies in the light's cellar)
 notes: Wants the guild's missing ledger found before the harbormaster does.
 [/NPC]
@@ -211,6 +213,7 @@ opening_prompt: The temperature gauge in your truck plummets past freezing as th
        * *Party Mode:* Squad (multi-companion), Duo (buddy/mentor dynamic), or Solo (lone wolf / isolated operative).
        * *Art Style:* If the pitch suggests a distinct visual mood (e.g. "gritty watercolor graphic novel", "dark 80s anime cel", "cinematic photorealism"), capture it via \`art_style:\`. MultiHog uses this style when running SillyTavern's native \`/imagine\` command and generating character portraits.
        * *Simulation Depth:* \`active_fronts\` (recommended; MultiHog advances Fronts and macro world reports every 24 in-world hours), \`living_world\` (deepest; daily Fronts plus background 8-hour map evolution ticks across sites), or \`static\` (disables background simulation agents for pure lightweight lorebook solo play).
+       * *Relationships Tracking:* \`relationships: on | off\` (default \`on\`; MultiHog enables dual Friendship/Affection tracking bars, prompt blocks, and Turn 1 context for all staged NPCs. Set to \`off\` only if the player wants pure solitary survival or explicitly requests disabling relationship mechanics).
        *(Note: The player can also click the dial pills directly in the live blueprint card at any time.)*
      - **Protagonist Concept & Playbook (\`[PROTAGONIST]\`):** Identity, playbook, stat array (+2, +1, +1, 0, -1), and 2 bespoke signature moves translated to the genre.
      - **Cast & World:** Proactively draft 1 key \`[FACTION]\`, 1 stationary world \`[NPC]\` (ally, mentor, or contact), 1 primary \`[MONSTER]\` with Harm, Armor, and countdown doom front clock, and 1 starting \`[MAP]\` site.
@@ -224,6 +227,12 @@ opening_prompt: The temperature gauge in your truck plummets past freezing as th
    * Dynamic Engine Compilation: Bespoke protagonist moves, custom stats, calibration dials, and CYOA choices are dynamically compiled into the underlying game cartridge engine when the campaign launches.
 * Most NPCs should be **World NPCs** (stationary, lorebook only). Mark an NPC as a traveling \`Companion (Party)\` ONLY when the player's material features a party or they ask for one; otherwise do not create companions.
 * NPCs never roll dice. Give \`moves_or_boons\` as fictional abilities or GM-move fuel, not numeric stats. \`species\` and \`equipment\` are optional but welcome; keep \`appearance\` to body and look, and put worn gear in \`equipment\`.
+* **NPC Relationships:** Each \`[NPC]\` can specify initial starting standings: \`friendship: <integer -150 to +150>\` and \`affection: <integer -150 to +150>\`.
+  - Trusted mentor / close ally / patron: \`friendship: 30 to 60\`, \`affection: 0\`
+  - Loyal comrade / sworn brother: \`friendship: 50 to 80\`, \`affection: 0\`
+  - Romantic partner / interest / spouse: \`affection: 40 to 75\`, \`friendship: 30 to 50\`
+  - Rival / bitter competitor: \`friendship: -25 to -45\`, \`affection: 0\`
+  - Neutral acquaintance / new contact: \`friendship: 0\`, \`affection: 0\`
 * The player may want few or no NPCs for a solo, survival, or horror pitch. Respect that, and only mention it if the cast looks thin for the premise.
 * Keep your spoken dialogue friendly, collaborative, and creative!`;
 }
@@ -278,6 +287,7 @@ party_mode: squad | solo | duo
 cyoa_emojis: true | false
 art_style: Visual aesthetic for portrait & scene generation
 simulation_depth: active_fronts | living_world | static
+relationships: on | off
 [/CONFIG]
 
 [PROTAGONIST]
@@ -309,6 +319,8 @@ equipment: Carried items
 demeanor: Personality demeanor
 background: Backstory
 relationship: Bond with protagonist
+friendship: Initial platonic trust (-150 to +150, e.g. +35 for ally, -30 for rival, 0 for neutral)
+affection: Initial romantic warmth (-150 to +150, e.g. +50 for lover, 0 for neutral)
 moves_or_boons: Fictional benefit or boon
 notes: Extra notes
 [/NPC]

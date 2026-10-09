@@ -357,7 +357,60 @@
                 </div>
             </div>
 
-            <!-- ── 6. Developer & Debug Mode ── -->
+            <!-- ── 6. Relationship Narrative Sync ── -->
+            <div id="mhc_rel_sync_section" class="inline-drawer mhc-rel-sync-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 0.9em;"><b>🤝 Relationship Narrative Sync</b></span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand relationship narrative sync settings">
+                        <span id="mhc_rel_sync_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); white-space: nowrap;">Sync: Ready</span>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
+                    </div>
+                </div>
+
+                <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                    <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
+                        Synchronizes MultiHog's relationship meters with SillyTavern's campaign lorebooks both ways. On first encounter, evaluates baseline numbers from lorebook text. When relationships cross major tier thresholds during play, rewrites lorebook narratives using MultiHog's State Tracker API connection.
+                    </p>
+
+                    <!-- MultiHog Master Status Indicator -->
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); font-size: 0.8em;">
+                        <span><b>MultiHog Relationships Engine:</b></span>
+                        <span id="mhc_multihog_rel_status" style="font-weight: bold; color: #88ffbb;">● Active</span>
+                    </div>
+
+                    <!-- Sync Toggle -->
+                    <div class="mhc-setting-row" style="margin-bottom: 8px;">
+                        <label class="checkbox_label" title="Enable two-way synchronization between relationship points and lorebook entries" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_rel_narrative_sync" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>Enable Narrative Sync:</b> Two-way lorebook synchronization</span>
+                        </label>
+                    </div>
+
+                    <!-- Scan & Init Button -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <span style="font-size: 0.78em; opacity: 0.75;">Scan for unsynced NPCs:</span>
+                        <button id="mhc_scan_unsynced_npcs_btn" class="menu_button interactable" type="button" style="font-size: 0.78em; padding: 2px 8px; display: inline-flex; align-items: center; gap: 5px;">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <span>Scan &amp; Init Unsynced NPCs</span>
+                        </button>
+                    </div>
+
+                    <!-- Live Tracked NPCs Table/List -->
+                    <div style="margin-bottom: 4px;">
+                        <div style="font-size: 0.8em; font-weight: bold; color: #88ccff; margin-bottom: 4px; display: flex; justify-content: space-between;">
+                            <span>Tracked NPCs &amp; Standings:</span>
+                            <span id="mhc_rel_sync_count" style="font-size: 0.9em; opacity: 0.7;">0 NPCs</span>
+                        </div>
+                        <div id="mhc_rel_sync_list" style="max-height: 140px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px; font-size: 0.78em; line-height: 1.4;">
+                            <span style="opacity: 0.6;">(No tracked NPCs in active chat)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── 7. Developer & Debug Mode ── -->
             <div id="mhc_debug_section" class="inline-drawer mhc-debug-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
                 <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
                     <label class="checkbox_label" title="Enable Concierge Debug Inspector to examine the Builder agent and last build command" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">

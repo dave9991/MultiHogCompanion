@@ -244,14 +244,14 @@ async function sendViaDefault(context, messages, { signal = null } = {}) {
 }
 
 /**
- * Main entry point: routes a Concierge chat completion request according to user settings.
+ * Generic router: routes an LLM chat completion request according to provided connection settings.
  *
+ * @param {object} settings Connection settings (source, profile, ollama, openai, maxTokens)
  * @param {Array<{role: string, content: string|Array}>} messages
  * @param {AbortSignal|null} [signal]
  * @returns {Promise<string>}
  */
-export async function sendConciergeRequest(messages, signal = null) {
-    const settings = getConciergeConnectionSettings();
+export async function sendRoutedLlmRequest(settings, messages, signal = null) {
     const context = SillyTavern.getContext();
 
     // Sanitize all outgoing messages to strip any straggling SillyTavern macros ({{user}}, {{persona}}, {{char}}, etc.)
@@ -289,4 +289,16 @@ export async function sendConciergeRequest(messages, signal = null) {
 
     // 4. Default SillyTavern Connection
     return await sendViaDefault(context, sanitizedMessages, { signal });
+}
+
+/**
+ * Main entry point: routes a Concierge chat completion request according to user settings.
+ *
+ * @param {Array<{role: string, content: string|Array}>} messages
+ * @param {AbortSignal|null} [signal]
+ * @returns {Promise<string>}
+ */
+export async function sendConciergeRequest(messages, signal = null) {
+    const settings = getConciergeConnectionSettings();
+    return await sendRoutedLlmRequest(settings, messages, signal);
 }

@@ -41,6 +41,11 @@ import {
 import {
     setupCompanionDocInterceptor,
 } from './pbta-companion-bridge.js';
+import {
+    scanAndInitUnsyncedNpcs,
+    checkAndSyncTierCrossovers,
+    getRelationshipSyncStatus,
+} from './relationship-narrative-sync.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -63,6 +68,7 @@ const DEFAULT_SETTINGS = {
     nameRagEnhanceConcierge: true,
     nameRagAdhocSysprompt: true,
     conciergeDebugMode: false,
+    enableRelationshipNarrativeSync: true,
 };
 
 function getSettings() {
@@ -1143,6 +1149,66 @@ export async function updateLorebookSyncUI() {
 }
 
 /**
+ * Update the status badge and live NPC list in the Relationship Narrative Sync section.
+ */
+export function updateRelationshipSyncUI() {
+    try {
+        const status = getRelationshipSyncStatus();
+        const badge = $('#mhc_rel_sync_badge');
+        const mhStatus = $('#mhc_multihog_rel_status');
+        const countLabel = $('#mhc_rel_sync_count');
+        const listEl = $('#mhc_rel_sync_list');
+
+        if (!status.barsEnabled) {
+            mhStatus.html('<span style="color: #ff8888;">○ Disabled in MultiHog</span>');
+            badge.text('MultiHog Bars Off').css({
+                background: 'rgba(150,150,150,0.2)',
+                color: '#aaa',
+                borderColor: 'rgba(255,255,255,0.15)',
+            });
+        } else {
+            mhStatus.html('<span style="color: #88ffbb;">● Active in MultiHog</span>');
+            if (status.syncEnabled) {
+                badge.text(`🟢 Sync: Active (${status.trackedCount})`).css({
+                    background: 'rgba(80,180,120,0.2)',
+                    color: '#88ffbb',
+                    borderColor: 'rgba(80,180,120,0.35)',
+                });
+            } else {
+                badge.text('⏸️ Sync: Paused').css({
+                    background: 'rgba(255,180,60,0.2)',
+                    color: '#ffcc88',
+                    borderColor: 'rgba(255,180,60,0.4)',
+                });
+            }
+        }
+
+        countLabel.text(`${status.trackedCount} NPC${status.trackedCount === 1 ? '' : 's'}`);
+
+        if (status.items.length === 0) {
+            listEl.html('<span style="opacity: 0.6;">(No tracked NPCs in active chat)</span>');
+        } else {
+            const escapeHtml = (str) => String(str || '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+            const html = status.items.map(item => {
+                const name = item.uid || item.fullId.split('::')[1] || item.fullId;
+                const fSign = item.friendship >= 0 ? '+' : '';
+                const aSign = item.affection >= 0 ? '+' : '';
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.04);">
+                        <span style="font-weight: bold; color: #88ccff;">${escapeHtml(name)}</span>
+                        <div style="display: flex; gap: 8px; font-size: 0.9em;">
+                            <span style="color: #4ade80;" title="Friendship: ${escapeHtml(item.friendshipTier)}">🤝 ${fSign}${item.friendship} <span style="opacity: 0.7; font-size: 0.85em;">(${escapeHtml(item.friendshipTier)})</span></span>
+                            <span style="color: #f472b6;" title="Affection: ${escapeHtml(item.affectionTier)}">💗 ${aSign}${item.affection} <span style="opacity: 0.7; font-size: 0.85em;">(${escapeHtml(item.affectionTier)})</span></span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            listEl.html(html);
+        }
+    } catch (_) {}
+}
+
+/**
  * Update the status badge in the sync section header.
  */
 function updateSyncBadge() {
@@ -1563,7 +1629,41 @@ async function initUI() {
 
         await initNameRagUI();
 
-        // ── 6. Developer & Debug Mode Controls ──
+        // ── 6. Relationship Narrative Sync Controls ──
+        async function initRelationshipSyncUI() {
+            try {
+                const syncCb = $('#mhc_rel_narrative_sync');
+                syncCb.prop('checked', current.enableRelationshipNarrativeSync !== false);
+
+                syncCb.on('change', function () {
+                    const val = $(this).is(':checked');
+                    updateSettings({ enableRelationshipNarrativeSync: val });
+                    updateRelationshipSyncUI();
+                });
+
+                $('#mhc_scan_unsynced_npcs_btn').on('click', async function () {
+                    const btn = $(this);
+                    btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> Scanning...');
+                    try {
+                        const res = await scanAndInitUnsyncedNpcs({ forceAll: false });
+                        showToast('success', `Scanned ${res.scanned} NPCs: initialized ${res.initialized}, skipped ${res.skipped}.`, 'Relationship Narrative Sync');
+                        updateRelationshipSyncUI();
+                    } catch (err) {
+                        showToast('error', `Scan failed: ${err.message}`, 'Relationship Narrative Sync');
+                    } finally {
+                        btn.prop('disabled', false).html('<i class="fa-solid fa-magnifying-glass"></i> <span>Scan &amp; Init Unsynced NPCs</span>');
+                    }
+                });
+
+                updateRelationshipSyncUI();
+            } catch (err) {
+                console.warn('[MultiHog Companion] Error initializing Relationship Sync UI:', err);
+            }
+        }
+
+        await initRelationshipSyncUI();
+
+        // ── 7. Developer & Debug Mode Controls ──
         const debugCb = $('#mhc_concierge_debug_mode');
         debugCb.prop('checked', current.conciergeDebugMode || false);
         debugCb.on('change', function () {
@@ -1808,6 +1908,18 @@ jQuery(async () => {
             },
             helpString: '<div>Synchronizes MultiHog campaign lorebooks with the active adventure chat name.</div>',
         }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-rel-sync',
+            aliases: ['rel-sync'],
+            callback: async () => {
+                const initRes = await scanAndInitUnsyncedNpcs({ forceAll: false });
+                const tierRes = await checkAndSyncTierCrossovers();
+                updateRelationshipSyncUI();
+                return `Relationship Sync: scanned ${initRes.scanned} (initialized ${initRes.initialized}), checked ${tierRes.checked} (tier evolved ${tierRes.updated}).`;
+            },
+            helpString: '<div>Synchronizes MultiHog NPC relationships and campaign lorebooks.</div>',
+        }));
     }
 
     // 4. Register Event Listeners
@@ -1833,19 +1945,37 @@ jQuery(async () => {
         scheduleSync('CHAT_CHANGED', 500);
         setTimeout(updateRulesetBadge, 600);
         setTimeout(updateLorebookSyncUI, 650);
+        setTimeout(() => {
+            updateRelationshipSyncUI();
+            scanAndInitUnsyncedNpcs().then(updateRelationshipSyncUI);
+        }, 800);
     });
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => scheduleSync('CHARACTER_MESSAGE_RENDERED', 400));
-    eventSource.on(event_types.MESSAGE_RECEIVED, () => scheduleSync('MESSAGE_RECEIVED', 400));
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
+        scheduleSync('CHARACTER_MESSAGE_RENDERED', 400);
+        setTimeout(async () => {
+            await checkAndSyncTierCrossovers();
+            updateRelationshipSyncUI();
+        }, 600);
+    });
+    eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+        scheduleSync('MESSAGE_RECEIVED', 400);
+        setTimeout(async () => {
+            await checkAndSyncTierCrossovers();
+            updateRelationshipSyncUI();
+        }, 600);
+    });
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
         scheduleSync('SETTINGS_UPDATED', 600);
         setTimeout(updateRulesetBadge, 700);
         setTimeout(updateLorebookSyncUI, 750);
+        setTimeout(updateRelationshipSyncUI, 800);
     });
 
     // Initial check on load
     scheduleSync('INITIAL_LOAD', 1000);
     setTimeout(updateRulesetBadge, 1200);
     setTimeout(updateLorebookSyncUI, 1300);
+    setTimeout(updateRelationshipSyncUI, 1400);
 
     console.log('[MultiHog Companion] Extension loaded successfully.');
 });

@@ -193,6 +193,29 @@ opening_prompt: The temperature gauge in your truck plummets past freezing as th
 - 🪓 Pry open the iced supply shed door — [Act Under Fire (+Hard)]
 - 🗣️ "Hello? Ranger Station! Is anyone inside?"
 [/CYOA]
+
+[WORLD_RULES] (Optional — for settings with radical physical, biological, or technological laws)
+title: Biomechanical Substitution (or Universal Innate Flight)
+category: technology | physiology | metaphysics | ecology | social | general
+axiom: Core physical/technological truth of this world (e.g. "Biology replaces machines; animals for cars, snake guns")
+substitutions:
+- Cars/Vehicles -> Six-legged crawler beasts and chitin carriages
+- Firearms -> Spitting vipers and acid-bladder beetles
+negative_constraints:
+- BANNED: Internal combustion engines, tires, gunpowder, metal firearms
+architectural_notes: Parking garages replaced by stabling pens; armories are nurseries
+[/WORLD_RULES]
+
+[CUSTOM_MODULE] (Optional — dynamically equips MultiHog HUD with a tracker card)
+tag: SYMBIOTES (or AERIAL, MUTATIONS, etc. — uppercase tag)
+label: Living Arsenal & Mounts
+icon: 🐍
+instruction: Track bonded symbiotes, feeding status (e.g. Fed 3/3), and stabled mounts.
+sample:
+- Spitting Viper: Fed (3/3 venom) | Docile
+- Chitin Carapace: Molting in 2 days | +2 Armor
+- Six-Legged Runner: Stabled at Gate | Well-fed
+[/CUSTOM_MODULE]
 [/UPDATE_DOSSIER]
 \`\`\`
 *(Tip: \`[CONCIERGE_STATE]\` is also recognized interchangeably with \`[UPDATE_DOSSIER]\`.)*
@@ -216,6 +239,10 @@ opening_prompt: The temperature gauge in your truck plummets past freezing as th
        * *Relationships Tracking:* \`relationships: on | off\` (default \`on\`; MultiHog enables dual Friendship/Affection tracking bars, prompt blocks, and Turn 1 context for all staged NPCs. Set to \`off\` only if the player wants pure solitary survival or explicitly requests disabling relationship mechanics).
        *(Note: The player can also click the dial pills directly in the live blueprint card at any time.)*
      - **Protagonist Concept & Playbook (\`[PROTAGONIST]\`):** Identity, playbook, stat array (+2, +1, +1, 0, -1), and 2 bespoke signature moves translated to the genre.
+     - **World Rules & Custom Trackers (\`[WORLD_RULES]\` & \`[CUSTOM_MODULE]\`):** When the pitch features a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal flight with wings, underwater cities):
+       * Proactively emit a \`[WORLD_RULES]\` block establishing the core axiom, concrete substitutions, negative constraints, and architectural notes.
+       * If this rule introduces a unique resource or character state (e.g. symbiote hunger, wing stamina), emit a matching \`[CUSTOM_MODULE]\` block.
+       * Support partial edits and removals: \`remove_world_rule: Title\`, \`remove_custom_module: true\`, \`clear_world_rules: true\`.
      - **Cast & World:** Proactively draft 1 key \`[FACTION]\`, 1 stationary world \`[NPC]\` (ally, mentor, or contact), 1 primary \`[MONSTER]\` with Harm, Armor, and countdown doom front clock, and 1 starting \`[MAP]\` site.
      - **The Kick (\`[KICK]\`):** Starting location, imminent crisis, and opening prompt hook.
 2. **Draft Framing & Interactive Polish:**
@@ -352,14 +379,38 @@ starting_location: Name of initial site
 crisis: Imminent crisis or danger upon arrival
 opening_prompt: Vivid narrative setup
 [/KICK]
+
+[WORLD_RULES]
+title: Biomechanical Substitution (or Universal Innate Flight)
+category: technology | physiology | metaphysics | ecology | social | general
+axiom: Core physical/technological truth of this world
+substitutions:
+- Replaced Item -> In-world Replacement (e.g. "Cars/Vehicles -> Six-legged crawler beasts")
+- Replaced Item -> In-world Replacement (e.g. "Firearms -> Spitting vipers and acid beetles")
+negative_constraints:
+- BANNED: Prohibited technology or tropes (e.g. "Internal combustion, metal firearms, gunpowder")
+architectural_notes: How this law alters buildings/cities (e.g. "Stables replace parking garages")
+[/WORLD_RULES]
+
+[CUSTOM_MODULE]
+tag: SYMBIOTES (or AERIAL, MUTATIONS, etc. — uppercase tag)
+label: Living Arsenal & Mounts
+icon: 🐍
+instruction: Track bonded symbiotes, feeding status (e.g. Fed 3/3), and stabled mounts.
+sample:
+- Spitting Viper: Fed (3/3 venom) | Docile
+- Chitin Carapace: Molting in 2 days | +2 Armor
+- Six-Legged Runner: Stabled at Gate | Well-fed
+[/CUSTOM_MODULE]
 [/UPDATE_DOSSIER]
 \`\`\`
 
 ### 🏗️ Proactive Scaffolding & Delta Rules:
 1. **Turn 1 / Initial Scaffolding:** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:
    Proactively scaffold a complete, coherent starting draft into [UPDATE_DOSSIER]: summary: ..., title, engine, tone, premise, [CONFIG] dials, [PROTAGONIST] (+2, +1, +1, 0, -1 with 2 signature moves), 1 [FACTION], 1 world [NPC], 1 [MONSTER] with countdown doom track, 1 starting [MAP], and [KICK].
+   * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include [WORLD_RULES] and a tailored [CUSTOM_MODULE].
 2. **Follow-Up Edits (Partial Patches):** When modifying an existing blueprint, emit ONLY the tags being added, edited, or removed. Unchanged entities and fields are preserved automatically.
-3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, or remove_faction: Name.
+3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
 4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.`;
 }
 
@@ -413,7 +464,13 @@ ${genreSummaries}
    Keep responses concise (2–4 sentences): highlight the dramatic vibe and 1–2 key highlights or choices, and ask what they would like to adjust.
 3. **Working Draft Framing:**
    Treat pre-populated cards in the deck as working drafts / sketches. Emphasize that the player has complete creative authority to tweak, swap, or scrap anything.
-4. **Keep Spoken Dialogue Friendly, Collaborative, and Creative!**`;
+4. **Worldbuilding & Consequence Probing:**
+   When the player pitches a world-altering premise (e.g. universal flight, living technology, sunless world) or when [CURRENT_LIVE_BLUEPRINT] establishes World Rules:
+   * Do not simply say "cool idea" — actively probe 1–2 dramatic and practical consequences in your dialogue:
+     - How does society, infrastructure, or architecture adapt (e.g. rooftop perches instead of street doors, stable-garages)?
+     - What unique dilemmas, gear, or adaptations does the protagonist face under these world laws?
+   * Point the player to the World Laws and Custom Tracker cards in their live deck as collaborative working drafts.
+5. **Keep Spoken Dialogue Friendly, Collaborative, and Creative!**`;
 }
 
 /**

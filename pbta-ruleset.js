@@ -685,6 +685,53 @@ Other Items:
 }
 
 /**
+ * Formats setting axioms, substitutions, and strict negative constraints into a
+ * prompt block for MultiHog's compiled system prompt.
+ *
+ * @param {object} worldRules
+ * @returns {string}
+ */
+export function buildPbtAWorldRulesContent(worldRules) {
+    if (!worldRules || typeof worldRules !== 'object') return '';
+    const axioms = Array.isArray(worldRules.axioms) ? worldRules.axioms : [];
+    if (!axioms.length) return '';
+
+    const lines = [
+        '<world_rules>',
+        '[MANDATORY PHYSICAL & SETTING LAWS OF THIS WORLD]',
+        'Adhere strictly to the following setting axioms and physical reality:',
+    ];
+
+    axioms.forEach((ax, idx) => {
+        const title = (ax.title || `Axiom ${idx + 1}`).trim();
+        const cat = (ax.category || 'physics').toUpperCase();
+        lines.push(`\n# Axiom ${idx + 1}: ${title} (${cat})`);
+        if (ax.axiom) {
+            lines.push(`- Setting Law: ${ax.axiom.trim()}`);
+        }
+
+        const subs = Array.isArray(ax.substitutions) ? ax.substitutions.filter(Boolean) : [];
+        if (subs.length) {
+            lines.push('- Required Substitutions:');
+            subs.forEach(s => lines.push(`  • ${s.trim()}`));
+        }
+
+        const negs = Array.isArray(ax.negativeConstraints) ? ax.negativeConstraints.filter(Boolean) : [];
+        if (negs.length) {
+            lines.push('- ABSENCES & STRICT NEGATIVE CONSTRAINTS:');
+            negs.forEach(n => lines.push(`  • NEVER introduce: ${n.trim()}`));
+        }
+
+        if (ax.architecturalNotes) {
+            lines.push(`- Infrastructure & Living Architecture:\n  • ${ax.architecturalNotes.trim()}`);
+        }
+    });
+
+    lines.push('\nNEVER violate these axioms or revert to generic real-world/mechanical tropes.\n</world_rules>');
+    return lines.join('\n');
+}
+
+/**
  * Builds the complete PbtA Game Cartridge object, optionally accepting dynamic overrides.
  *
  * @param {string} [genreKey='fantasy']
@@ -813,6 +860,25 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         });
     }
 
+    // Setting World Rules (Axioms, Substitutions, Negative Constraints)
+    const worldRules = overrides.worldRules || config.worldRules;
+    if (worldRules && Array.isArray(worldRules.axioms) && worldRules.axioms.length > 0) {
+        const wrContent = buildPbtAWorldRulesContent(worldRules);
+        if (wrContent) {
+            customSyspromptLibrary.push({
+                id: 'pbta_custom_world_rules',
+                tag: 'world_rules',
+                content: wrContent,
+                enabled: true,
+                scope: 'chat',
+                icon: 'fa-globe',
+                description: 'Setting Axioms, Laws, and Negative Constraints',
+                origin: 'unlocked_base',
+                baseTag: 'world_rules',
+            });
+        }
+    }
+
     const syspromptModules = {
         // Unlocked overrides active
         role: false,
@@ -832,7 +898,19 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         resting: false,
         loot: false,
         random_events: false,
+        world_rules: false, // Override active via customSyspromptLibrary
     };
+
+    const baseBlockOrder = partyMode === 'solo'
+        ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME']
+        : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
+    const customMod = worldRules?.customModule;
+    if (customMod && (customMod.fieldKey || customMod.label)) {
+        const cTag = (customMod.fieldKey || customMod.label).replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
+        if (!baseBlockOrder.includes(cTag)) {
+            baseBlockOrder.push(cTag);
+        }
+    }
 
     const payload = {
         customSyspromptLibrary,
@@ -854,9 +932,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         rngQueueD100: false,
         diceD100Mode: false,
         diceFunctionTool: false, // Disable AI function-call dice to avoid player interruptions
-        blockOrder: partyMode === 'solo'
-            ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME']
-            : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'],
+        blockOrder: baseBlockOrder,
         modules: {
             combat: true,
             character: true,
@@ -1068,6 +1144,17 @@ export function formatInitialPbtaMemo(dossier) {
         }
         fLines.push('[/FACTIONS]');
         blocks.push(fLines.join('\n'));
+    }
+
+    // 6. If Custom HUD Module exists, add initial custom module block
+    const customMod = dossier?.worldRules?.customModule;
+    if (customMod && (customMod.fieldKey || customMod.label)) {
+        const rawTag = (customMod.fieldKey || customMod.label || 'CUSTOM')
+            .replace(/[^a-zA-Z0-9_]/g, '_')
+            .toUpperCase();
+        const label = customMod.label || customMod.fieldKey || 'Custom Tracker';
+        const sampleContent = (customMod.sample || `${label}: Initialized`).trim();
+        blocks.push(`[${rawTag}]\n${sampleContent}\n[/${rawTag}]`);
     }
 
     return blocks.join('\n\n');

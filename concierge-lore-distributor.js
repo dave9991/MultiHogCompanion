@@ -155,6 +155,208 @@ export function buildStartingQuestEntry(theKick, meta = {}) {
     };
 }
 
+const COMMON_STOPWORDS = new Set([
+    'a', 'an', 'the', 'and', 'or', 'for', 'nor', 'but', 'so', 'yet',
+    'at', 'by', 'in', 'of', 'on', 'to', 'with', 'from', 'into', 'upon',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'no', 'not', 'none', 'neither', 'never', 'without', 'banned', 'against',
+    'this', 'that', 'these', 'those', 'their', 'them', 'they', 'our', 'all',
+]);
+
+/**
+ * Extracts high-signal bi-directional trigger keywords from a World Rule axiom.
+ * Captures both replaced mundane concepts (e.g. cars, guns) and their in-world
+ * biological/magical counterparts (e.g. beetles, cobras) as well as banned terms.
+ *
+ * @param {object} axiom
+ * @returns {string[]}
+ */
+export function extractWorldRuleKeywords(axiom) {
+    if (!axiom || typeof axiom !== 'object') return [];
+    const keys = new Set();
+
+    // 1. Title and category
+    if (axiom.title) {
+        keys.add(axiom.title.trim());
+        const titleTokens = axiom.title
+            .replace(/[^\w\s'-]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !COMMON_STOPWORDS.has(w.toLowerCase()));
+        for (const t of titleTokens) keys.add(t);
+    }
+    if (axiom.category) {
+        const catClean = axiom.category.replace(/_/g, ' ').trim();
+        if (catClean) keys.add(catClean);
+    }
+
+    // 2. Substitutions: extract both sides of ->, =>, :, or "for"
+    const substitutions = Array.isArray(axiom.substitutions) ? axiom.substitutions : [];
+    for (const sub of substitutions) {
+        if (!sub || typeof sub !== 'string') continue;
+
+        let leftSide = '';
+        let rightSide = '';
+
+        if (/->|=>|→|:| - /i.test(sub)) {
+            const parts = sub.split(/->|=>|→|:| - /i);
+            leftSide = parts[0]?.trim() || '';
+            rightSide = parts.slice(1).join(' ').trim();
+        } else if (/\bfor\b/i.test(sub)) {
+            // E.g. "animals for cars" -> right is replaced concept ("cars"), left is replacement ("animals")
+            const parts = sub.split(/\bfor\b/i);
+            rightSide = parts[0]?.trim() || '';
+            leftSide = parts[1]?.trim() || '';
+        } else {
+            leftSide = sub.trim();
+        }
+
+        if (leftSide && leftSide.length < 35) keys.add(leftSide);
+        if (rightSide && rightSide.length < 35) keys.add(rightSide);
+
+        const extractTokens = (str) => {
+            return str
+                .replace(/[^\w\s'-]/g, ' ')
+                .split(/\s+/)
+                .filter(w => w.length > 2 && !COMMON_STOPWORDS.has(w.toLowerCase()));
+        };
+
+        for (const token of extractTokens(leftSide)) {
+            keys.add(token);
+            if (token.endsWith('s') && token.length > 3) {
+                keys.add(token.slice(0, -1));
+            }
+        }
+        for (const token of extractTokens(rightSide)) {
+            keys.add(token);
+            if (token.endsWith('s') && token.length > 3) {
+                keys.add(token.slice(0, -1));
+            }
+        }
+    }
+
+    // 3. Negative Constraints: strip leading negatives and extract banned nouns/adjectives
+    const negativeConstraints = Array.isArray(axiom.negativeConstraints) ? axiom.negativeConstraints : [];
+    for (const nc of negativeConstraints) {
+        if (!nc || typeof nc !== 'string') continue;
+        const cleaned = nc
+            .replace(/^(no|none|never|without|zero|banned)\s+/i, '')
+            .trim();
+        if (cleaned && cleaned.length < 35) keys.add(cleaned);
+
+        const tokens = cleaned
+            .replace(/[^\w\s'-]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !COMMON_STOPWORDS.has(w.toLowerCase()));
+        for (const t of tokens) {
+            keys.add(t);
+            if (t.endsWith('s') && t.length > 3) {
+                keys.add(t.slice(0, -1));
+            }
+        }
+    }
+
+    // 4. Setting system anchors
+    keys.add('world rule');
+    keys.add('world law');
+
+    return Array.from(keys).filter(Boolean).slice(0, 12);
+}
+
+/**
+ * Formats a World Rule axiom into a protected [CORE] World Info entry.
+ * Configured with constant: false so it is dynamically pulled by MultiHog's
+ * Keyring Attention Model only when relevant keywords appear.
+ *
+ * @param {object} axiom
+ * @returns {{ name: string, comment: string, keys: string[], core: string, full: string }|null}
+ */
+export function buildWorldRuleEntry(axiom) {
+    if (!axiom || typeof axiom !== 'object') return null;
+    const cleanTitle = (axiom.title || 'World Law').trim();
+    const category = (axiom.category || 'physics').trim();
+    const lawText = (axiom.axiom || '').trim();
+    const substitutions = Array.isArray(axiom.substitutions) ? axiom.substitutions : [];
+    const negativeConstraints = Array.isArray(axiom.negativeConstraints) ? axiom.negativeConstraints : [];
+    const architecturalNotes = (axiom.architecturalNotes || '').trim();
+
+    if (!cleanTitle && !lawText && !substitutions.length) return null;
+
+    const subLines = substitutions.length
+        ? ['Substitutions:', ...substitutions.map(s => `- ${s}`)]
+        : [];
+    const negLines = negativeConstraints.length
+        ? ['Banned / Impossible:', ...negativeConstraints.map(n => `- ${n}`)]
+        : [];
+    const archLines = architecturalNotes
+        ? [`Infrastructure & Architecture: ${architecturalNotes}`]
+        : [];
+
+    const core = [
+        `[CORE]`,
+        `Name: ${cleanTitle}`,
+        `Type: World Axiom (${category.toUpperCase()})`,
+        `Axiom: ${lawText || cleanTitle}`,
+        ...subLines,
+        ...negLines,
+        ...archLines,
+        `[/CORE]`,
+    ].join('\n');
+
+    const keys = extractWorldRuleKeywords(axiom);
+    const label = `World Axiom: ${cleanTitle}`;
+
+    return {
+        name: label,
+        comment: label,
+        keys,
+        core,
+        full: core,
+    };
+}
+
+/**
+ * Formats a Custom HUD Tracker Module into a protected [CORE] World Info entry.
+ *
+ * @param {object} customModule
+ * @returns {{ name: string, comment: string, keys: string[], core: string, full: string }|null}
+ */
+export function buildCustomModuleLoreEntry(customModule) {
+    if (!customModule || typeof customModule !== 'object') return null;
+    const fieldKey = (customModule.fieldKey || 'custom').trim();
+    const label = (customModule.label || fieldKey).trim();
+    const instruction = (customModule.instruction || '').trim();
+    const sample = (customModule.sample || '').trim();
+
+    if (!fieldKey && !instruction) return null;
+
+    const core = [
+        `[CORE]`,
+        `Name: ${label}`,
+        `Type: Custom HUD Tracker / Game System`,
+        `Field: ${fieldKey}`,
+        ...(instruction ? [`Instruction: ${instruction}`] : []),
+        ...(sample ? [`Format Sample: ${sample}`] : []),
+        `[/CORE]`,
+    ].join('\n');
+
+    const keys = Array.from(new Set([
+        label.toLowerCase(),
+        fieldKey.toLowerCase(),
+        ...extractCleanKeywords(label),
+        'hud tracker',
+        'tracker',
+    ])).slice(0, 6);
+
+    const entryLabel = `HUD Tracker: ${label}`;
+    return {
+        name: entryLabel,
+        comment: entryLabel,
+        keys,
+        core,
+        full: core,
+    };
+}
+
 /**
  * Builds the World Info entry object for the full Campaign Dossier artifact.
  * Configured with `constant: false` so it no longer hogs context on every turn.
@@ -193,7 +395,7 @@ export function buildDossierWorldInfoEntry(dossierMarkdown, targetUid = null) {
  */
 export function prepareCampaignLorebookDistributions(dossier, sectionNames = null) {
     if (!dossier || typeof dossier !== 'object') {
-        return { npcs: [], factions: [], locations: [], quests: [] };
+        return { npcs: [], factions: [], locations: [], quests: [], worldRules: [] };
     }
 
     const npcs = (dossier.npcs || []).map(n => ({
@@ -248,11 +450,30 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
         questEntries.push(startingQuest);
     }
 
+    // World Rules and Custom HUD Module entries
+    const worldRuleEntries = [];
+    const worldRules = dossier.worldRules || {};
+    if (Array.isArray(worldRules.axioms)) {
+        for (const ax of worldRules.axioms) {
+            const entry = buildWorldRuleEntry(ax);
+            if (entry && entry.name && entry.core) {
+                worldRuleEntries.push(entry);
+            }
+        }
+    }
+    if (worldRules.customModule) {
+        const modEntry = buildCustomModuleLoreEntry(worldRules.customModule);
+        if (modEntry && modEntry.name && modEntry.core) {
+            worldRuleEntries.push(modEntry);
+        }
+    }
+
     return {
         npcs: [...npcs, ...monsters],
         factions,
         locations: locationEntries,
         quests: questEntries,
+        worldRules: worldRuleEntries,
     };
 }
 
@@ -295,12 +516,19 @@ export function buildWorldSkeletonMarkdown(dossier) {
     // 2. Locations
     const locEntries = [];
     const seenLocs = new Set();
+    const axioms = Array.isArray(dossier.worldRules?.axioms) ? dossier.worldRules.axioms : [];
+    const archNotes = axioms
+        .map(a => a.architecturalNotes ? a.architecturalNotes.trim() : '')
+        .filter(Boolean);
+    const archSuffix = archNotes.length > 0 ? ` (Architecture: ${archNotes.join('; ')})` : '';
+
     if (Array.isArray(dossier.maps)) {
         for (const m of dossier.maps) {
             const site = (m.site || m.name || '').trim();
             if (site && !seenLocs.has(site.toLowerCase())) {
                 seenLocs.add(site.toLowerCase());
-                const desc = (m.briefDescription || m.prompt || 'A notable regional territory.').trim();
+                let desc = (m.briefDescription || m.prompt || 'A notable regional territory.').trim();
+                if (archSuffix) desc += archSuffix;
                 locEntries.push(`### ${site}\n${desc}`);
             }
         }
@@ -309,7 +537,9 @@ export function buildWorldSkeletonMarkdown(dossier) {
         const startLoc = dossier.theKick.startingLocation.trim();
         if (startLoc && !seenLocs.has(startLoc.toLowerCase())) {
             seenLocs.add(startLoc.toLowerCase());
-            locEntries.push(`### ${startLoc}\nThe primary staging grounds for the impending journey.`);
+            let startDesc = 'The primary staging grounds for the impending journey.';
+            if (archSuffix) startDesc += archSuffix;
+            locEntries.push(`### ${startLoc}\n${startDesc}`);
         }
     }
     if (locEntries.length > 0) {
@@ -390,11 +620,18 @@ export function buildWorldSkeletonEntries(dossier) {
     // Locations -> LOC
     const seenLocs = new Set();
     const mapList = Array.isArray(dossier.maps) ? dossier.maps : [];
+    const axioms = Array.isArray(dossier.worldRules?.axioms) ? dossier.worldRules.axioms : [];
+    const archNotes = axioms
+        .map(a => a.architecturalNotes ? a.architecturalNotes.trim() : '')
+        .filter(Boolean);
+    const archSuffix = archNotes.length > 0 ? ` (Architecture: ${archNotes.join('; ')})` : '';
+
     for (const m of mapList) {
         const site = (m.site || m.name || '').trim();
         if (!site || seenLocs.has(site.toLowerCase())) continue;
         seenLocs.add(site.toLowerCase());
-        const desc = (m.briefDescription || m.prompt || 'A notable regional territory.').trim();
+        let desc = (m.briefDescription || m.prompt || 'A notable regional territory.').trim();
+        if (archSuffix) desc += archSuffix;
 
         entries.push({
             comment: `LOCATION: ${site}`,
@@ -421,9 +658,11 @@ export function buildWorldSkeletonEntries(dossier) {
         const startLoc = dossier.theKick.startingLocation.trim();
         if (startLoc && !seenLocs.has(startLoc.toLowerCase())) {
             seenLocs.add(startLoc.toLowerCase());
+            let startDesc = 'The primary staging grounds for the impending journey.';
+            if (archSuffix) startDesc += archSuffix;
             entries.push({
                 comment: `LOCATION: ${startLoc}`,
-                content: `[Day 0 Baseline]\nThe primary staging grounds for the impending journey.`,
+                content: `[Day 0 Baseline]\n${startDesc}`,
                 key: [],
                 keysecondary: [],
                 constant: false,

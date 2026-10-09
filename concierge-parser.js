@@ -41,6 +41,10 @@ export function createEmptyDossier() {
             openingPrompt: '',
         },
         cyoaExamples: [],
+        worldRules: {
+            axioms: [],
+            customModule: null,
+        },
         config: {
             playstyle: 'cyoa_5',
             cyoaEmojis: true,
@@ -266,6 +270,23 @@ function parseBulletList(block, sectionKey) {
 }
 
 /**
+ * Resilient list item parser for bullet lines or inline comma/semicolon-separated values.
+ * @param {string} block
+ * @param {string} sectionKey
+ * @returns {string[]}
+ */
+function parseBulletOrListItems(block, sectionKey) {
+    const fromBullets = parseBulletList(block, sectionKey);
+    if (fromBullets.length > 0) return fromBullets;
+    const kv = parseKeyValueLines(block);
+    const rawVal = kv[sectionKey.toLowerCase()];
+    if (rawVal) {
+        return rawVal.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+}
+
+/**
  * Formats a live dossier object into a clean, compact markdown representation
  * pinned into LLM context as the single Source of Truth.
  *
@@ -289,6 +310,8 @@ export function formatDossierForContext(dossier) {
         npcs.length > 0 ||
         monsters.length > 0 ||
         maps.length > 0 ||
+        (dossier.worldRules?.axioms && dossier.worldRules.axioms.length > 0) ||
+        (dossier.worldRules?.customModule != null) ||
         kick.crisis ||
         kick.startingLocation
     );
@@ -427,6 +450,37 @@ The Kick: Unset
         lines.push('[/CYOA]');
     }
 
+    if (dossier.worldRules?.axioms && dossier.worldRules.axioms.length) {
+        lines.push(`World Rules (${dossier.worldRules.axioms.length}):`);
+        dossier.worldRules.axioms.forEach(r => {
+            lines.push('[WORLD_RULES]');
+            lines.push(`title: ${r.title}`);
+            if (r.category) lines.push(`category: ${r.category}`);
+            if (r.axiom) lines.push(`axiom: ${r.axiom}`);
+            if (r.substitutions && r.substitutions.length) {
+                lines.push('substitutions:');
+                r.substitutions.forEach(s => lines.push(`- ${s}`));
+            }
+            if (r.negativeConstraints && r.negativeConstraints.length) {
+                lines.push('negative_constraints:');
+                r.negativeConstraints.forEach(nc => lines.push(`- ${nc}`));
+            }
+            if (r.architecturalNotes) lines.push(`architectural_notes: ${r.architecturalNotes}`);
+            lines.push('[/WORLD_RULES]');
+        });
+    }
+
+    if (dossier.worldRules?.customModule) {
+        const cm = dossier.worldRules.customModule;
+        lines.push('[CUSTOM_MODULE]');
+        lines.push(`tag: ${cm.tag}`);
+        lines.push(`label: ${cm.label}`);
+        if (cm.icon) lines.push(`icon: ${cm.icon}`);
+        if (cm.instruction) lines.push(`instruction: ${cm.instruction}`);
+        if (cm.sampleContent) lines.push(`sample: ${cm.sampleContent}`);
+        lines.push('[/CUSTOM_MODULE]');
+    }
+
     lines.push('[/CURRENT_CAMPAIGN_DOSSIER]');
     return lines.filter(Boolean).join('\n');
 }
@@ -511,7 +565,7 @@ export function applyDossierUpdates(text, dossier) {
         raw = stateMatch[1];
     } else {
         // Fallback: check if text contains standalone blocks directly
-        const hasDirectBlocks = /\[(?:CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS)\]/i.test(text);
+        const hasDirectBlocks = /\[(?:CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)\]/i.test(text);
         if (hasDirectBlocks) {
             raw = text;
         }
@@ -953,6 +1007,125 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
+    // ── 7b. World Rules & Physical Axioms ──────────────────────────────────────
+    updated.worldRules = updated.worldRules || { axioms: [], customModule: null };
+    updated.worldRules.axioms = updated.worldRules.axioms || [];
+
+    if (/\[CLEAR_WORLD_RULES\]/i.test(raw) || /clear_world_rules\s*:\s*true/i.test(raw)) {
+        if (updated.worldRules.axioms.length > 0) {
+            changes.push(`Cleared all ${updated.worldRules.axioms.length} world rules`);
+            updated.worldRules.axioms = [];
+        }
+    }
+
+    const removeRuleMatches = raw.matchAll(/(?:\[REMOVE_WORLD_RULE:\s*([^\]]+)\]|remove_world_rule\s*:\s*([^\n\r]+))/gi);
+    for (const rm of removeRuleMatches) {
+        const targetTitle = cleanTargetName(rm[1] || rm[2] || '');
+        if (targetTitle) {
+            const beforeLen = updated.worldRules.axioms.length;
+            updated.worldRules.axioms = updated.worldRules.axioms.filter(r =>
+                r.title.toLowerCase() !== targetTitle.toLowerCase() &&
+                r.id?.toLowerCase() !== targetTitle.toLowerCase()
+            );
+            if (updated.worldRules.axioms.length < beforeLen) {
+                changes.push(`Removed World Rule "${targetTitle}"`);
+            }
+        }
+    }
+
+    const ruleMatches = raw.matchAll(/\[WORLD_RULES?\]([\s\S]*?)(?:\[\/WORLD_RULES?\]|$)/gi);
+    for (const match of ruleMatches) {
+        const rBlock = match[1];
+        const kv = parseKeyValueLines(rBlock);
+        const title = cleanTargetName(kv.title || kv.name || '');
+        if (!title && !kv.axiom && !kv.rule && !kv.core_axiom) continue;
+
+        const effectiveTitle = title || 'World Axiom';
+        const rawCategory = (kv.category || 'technology').toLowerCase().trim();
+        const category = ['technology', 'physiology', 'metaphysics', 'ecology', 'social', 'general'].includes(rawCategory)
+            ? rawCategory
+            : 'general';
+        const axiom = kv.axiom || kv.rule || kv.core_axiom || '';
+        const substitutions = parseBulletOrListItems(rBlock, 'substitutions');
+        const negativeConstraints = parseBulletOrListItems(rBlock, 'negative_constraints').length
+            ? parseBulletOrListItems(rBlock, 'negative_constraints')
+            : parseBulletOrListItems(rBlock, 'banned');
+        const architecturalNotes = kv.architectural_notes || kv.architecture || kv.architectural_implications || '';
+        const id = kv.id || `rule_${effectiveTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+
+        const ruleObj = {
+            id,
+            category,
+            title: effectiveTitle,
+            axiom,
+            substitutions,
+            negativeConstraints,
+            architecturalNotes,
+        };
+
+        const existingIdx = updated.worldRules.axioms.findIndex(r =>
+            r.id.toLowerCase() === ruleObj.id.toLowerCase() ||
+            r.title.toLowerCase() === ruleObj.title.toLowerCase()
+        );
+
+        if (existingIdx >= 0) {
+            const patch = {};
+            if (kv.category) patch.category = ruleObj.category;
+            if (ruleObj.axiom) patch.axiom = ruleObj.axiom;
+            if (ruleObj.substitutions.length) patch.substitutions = ruleObj.substitutions;
+            if (ruleObj.negativeConstraints.length) patch.negativeConstraints = ruleObj.negativeConstraints;
+            if (ruleObj.architecturalNotes) patch.architecturalNotes = ruleObj.architecturalNotes;
+            updated.worldRules.axioms[existingIdx] = Object.assign({}, updated.worldRules.axioms[existingIdx], patch);
+            changes.push(`Updated World Rule "${ruleObj.title}"`);
+        } else {
+            updated.worldRules.axioms.push(ruleObj);
+            changes.push(`Added World Rule "${ruleObj.title}" (${ruleObj.category})`);
+        }
+    }
+
+    // ── 7c. Custom Tracker Module ──────────────────────────────────────────────
+    if (/\[REMOVE_CUSTOM_MODULE\]/i.test(raw) || /remove_custom_module\s*:\s*true/i.test(raw)) {
+        if (updated.worldRules.customModule) {
+            changes.push(`Removed Custom Tracker Module [${updated.worldRules.customModule.tag}]`);
+            updated.worldRules.customModule = null;
+        }
+    }
+
+    const customModuleMatch = raw.match(/\[CUSTOM_MODULE\]([\s\S]*?)(?:\[\/CUSTOM_MODULE\]|$)/i);
+    if (customModuleMatch) {
+        const cmBlock = customModuleMatch[1];
+        const kv = parseKeyValueLines(cmBlock);
+        const tag = (kv.tag || kv.name || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '');
+        if (tag) {
+            const label = cleanTargetName(kv.label || kv.title || tag);
+            const icon = (kv.icon || '📦').trim();
+            const instruction = kv.instruction || kv.prompt || kv.description || '';
+            let sampleContent = '';
+            const codeBlockM = cmBlock.match(/```(?:text)?\s*([\s\S]*?)```/i);
+            if (codeBlockM) {
+                sampleContent = codeBlockM[1].trim();
+            } else {
+                const sampleM = cmBlock.match(/(?:^|\n)\s*(?:sample|sample_content|content)\s*:\s*\n?([\s\S]*?)(?=(?:\n\s*[a-zA-Z0-9_\-]+\s*:)|$)/i);
+                if (sampleM && sampleM[1].trim()) {
+                    sampleContent = sampleM[1].trim();
+                } else {
+                    sampleContent = (kv.sample || kv.sample_content || kv.content || '').trim();
+                }
+            }
+
+            const moduleObj = {
+                tag,
+                label: label || tag,
+                icon,
+                instruction,
+                sampleContent,
+            };
+
+            updated.worldRules.customModule = moduleObj;
+            changes.push(`Configured Custom Tracker Module [${tag}] "${moduleObj.label}"`);
+        }
+    }
+
     // ── 8. Configuration / Campaign Dials ───────────────────────────────────────
     updated.config = updated.config || {
         playstyle: 'cyoa_5',
@@ -1154,6 +1327,30 @@ export function serializeDossierToMarkdown(dossier) {
   * Premise: ${m.briefDescription}`).join('\n')
         : '_No locations staged yet._';
 
+    let worldRulesMd = '';
+    if (dossier.worldRules?.axioms && dossier.worldRules.axioms.length) {
+        worldRulesMd = '\n\n---\n\n## 🌐 World Rules & Physical Axioms:\n' +
+            dossier.worldRules.axioms.map(r => {
+                let subLines = (r.substitutions && r.substitutions.length)
+                    ? `\n* **Substitutions:**\n  ${r.substitutions.map(s => `* ${s}`).join('\n  ')}`
+                    : '';
+                let conLines = (r.negativeConstraints && r.negativeConstraints.length)
+                    ? `\n* **Negative Constraints (Banned):**\n  ${r.negativeConstraints.map(c => `* ${c}`).join('\n  ')}`
+                    : '';
+                let archLine = r.architecturalNotes
+                    ? `\n* **Architectural Implications:** ${r.architecturalNotes}`
+                    : '';
+                return `### 🌐 ${r.title} (${r.category || 'general'})\n* **Core Axiom:** ${r.axiom || 'None specified'}${subLines}${conLines}${archLine}`;
+            }).join('\n\n');
+    }
+
+    let customModuleMd = '';
+    if (dossier.worldRules?.customModule) {
+        const cm = dossier.worldRules.customModule;
+        const sampleBlock = cm.sampleContent ? `\n\n\`\`\`text\n${cm.sampleContent}\n\`\`\`` : '';
+        customModuleMd = `\n\n---\n\n## 📊 Custom Tracker Module:\n* **Tag:** [${cm.tag}]\n* **Label:** ${cm.label}\n* **Icon:** ${cm.icon || '📦'}\n* **State Model Instruction:** ${cm.instruction || 'None'}${sampleBlock}`;
+    }
+
     const toneLine = meta.tone
         ? `\n* **Tone:** ${meta.tone}`
         : '';
@@ -1195,7 +1392,7 @@ ${factionsMd}
 ---
 
 ## 🗺️ Locations & Sites:
-${mapsMd}
+${mapsMd}${worldRulesMd}${customModuleMd}
 
 ---
 
@@ -1459,7 +1656,76 @@ export function parseMarkdownToDossier(markdown) {
         if (relM) dossier.config.relationships = !/disabled|false|off/i.test(relM[1]);
     }
 
-    return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign') ? dossier : null;
+    // 12. World Rules & Physical Axioms
+    const worldRulesSection = markdown.match(/##\s*(?:🌐\s*)?World Rules[^\n]*:\s*([\s\S]*?)(?=\n##[^#]|\n---|Ref:|$)/i);
+    if (worldRulesSection) {
+        const ruleBlocks = worldRulesSection[1].split(/###\s*(?:🌐\s*)?/);
+        for (const block of ruleBlocks) {
+            const lines = block.trim().split('\n');
+            const header = lines[0]?.trim();
+            if (!header || header.startsWith('_No')) continue;
+
+            const headerM = header.match(/^([^(]+?)(?:\s*\(([^)]+)\))?$/);
+            const title = headerM ? headerM[1].trim() : header;
+            const category = headerM && headerM[2] ? headerM[2].trim().toLowerCase() : 'general';
+
+            const axiomM = block.match(/\*\s*\*\*Core Axiom:\*\*\s*([^\n\r]+)/i);
+            const archM = block.match(/\*\s*\*\*Architectural Implications:\*\*\s*([^\n\r]+)/i);
+
+            const subM = block.match(/\*\s*\*\*Substitutions:\*\*\s*([\s\S]*?)(?=\*\s*\*\*|$)/i);
+            const substitutions = [];
+            if (subM) {
+                const sLines = subM[1].split('\n')
+                    .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+                    .filter(Boolean);
+                substitutions.push(...sLines);
+            }
+
+            const conM = block.match(/\*\s*\*\*Negative Constraints[^\*]*:\*\*\s*([\s\S]*?)(?=\*\s*\*\*|$)/i);
+            const negativeConstraints = [];
+            if (conM) {
+                const cLines = conM[1].split('\n')
+                    .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+                    .filter(Boolean);
+                negativeConstraints.push(...cLines);
+            }
+
+            dossier.worldRules = dossier.worldRules || { axioms: [], customModule: null };
+            dossier.worldRules.axioms = dossier.worldRules.axioms || [];
+            dossier.worldRules.axioms.push({
+                id: `rule_${title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+                category,
+                title,
+                axiom: axiomM ? axiomM[1].trim() : '',
+                substitutions,
+                negativeConstraints,
+                architecturalNotes: archM ? archM[1].trim() : '',
+            });
+        }
+    }
+
+    // 13. Custom Tracker Module
+    const customModSection = markdown.match(/##\s*(?:📊\s*)?Custom Tracker Module[^:]*:\s*([\s\S]*?)(?=\n##[^#]|\n---|Ref:|$)/i);
+    if (customModSection) {
+        const tagM = customModSection[1].match(/\*\s*\*\*Tag:\*\*\s*\[?([A-Z0-9_]+)\]?/i);
+        const labelM = customModSection[1].match(/\*\s*\*\*Label:\*\*\s*([^\n\r]+)/i);
+        const iconM = customModSection[1].match(/\*\s*\*\*Icon:\*\*\s*([^\n\r]+)/i);
+        const instM = customModSection[1].match(/\*\s*\*\*State Model Instruction:\*\*\s*([^\n\r]+)/i);
+        const sampleM = customModSection[1].match(/```(?:text)?\s*([\s\S]*?)```/i);
+
+        if (tagM) {
+            dossier.worldRules = dossier.worldRules || { axioms: [], customModule: null };
+            dossier.worldRules.customModule = {
+                tag: tagM[1].trim().toUpperCase(),
+                label: labelM ? labelM[1].trim() : tagM[1].trim(),
+                icon: iconM ? iconM[1].trim() : '📦',
+                instruction: instM ? instM[1].trim() : '',
+                sampleContent: sampleM ? sampleM[1].trim() : '',
+            };
+        }
+    }
+
+    return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign' || (dossier.worldRules?.axioms && dossier.worldRules.axioms.length > 0)) ? dossier : null;
 }
 
 /**

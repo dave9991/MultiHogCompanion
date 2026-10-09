@@ -183,6 +183,68 @@ function updateBlueprintDeck() {
         $('#mhc_deck_dial_art').hide();
     }
 
+    // World Axioms & Laws Card
+    const worldRules = activeDossier.worldRules || { axioms: [], customModule: null };
+    const axioms = worldRules.axioms || [];
+    $('#mhc_deck_world_rules_count').text(axioms.length);
+    const wrList = $('#mhc_deck_world_rules_list');
+    wrList.empty();
+    if (axioms.length) {
+        axioms.forEach(ax => {
+            const cat = (ax.category || 'physics').toLowerCase();
+            let catColor = 'rgba(156, 163, 175, 0.4)';
+            if (cat.includes('bio')) catColor = 'rgba(16, 185, 129, 0.4)';
+            else if (cat.includes('magic')) catColor = 'rgba(168, 85, 247, 0.4)';
+            else if (cat.includes('physic')) catColor = 'rgba(56, 189, 248, 0.4)';
+            else if (cat.includes('social')) catColor = 'rgba(245, 158, 11, 0.4)';
+
+            const subsHtml = ax.substitutions?.length
+                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>Substitutions:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.substitutions.map(s => `<li>🔄 ${escapeHtml(s)}</li>`).join('')}</ul></div>`
+                : '';
+            const negHtml = ax.negativeConstraints?.length
+                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.9;"><b>Banned & Absences:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.negativeConstraints.map(nc => `<li>🚫 <span class="mhc-constraint-banned">${escapeHtml(nc)}</span></li>`).join('')}</ul></div>`
+                : '';
+            const archHtml = ax.architecturalNotes
+                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;">🏛️ <b>Infrastructure:</b> ${escapeHtml(ax.architecturalNotes)}</div>`
+                : '';
+
+            wrList.append(`
+                <div class="mhc-deck-item collapsible">
+                    <div class="mhc-deck-item-header">
+                        <div class="mhc-deck-item-title" style="color: #10b981;">
+                            🌐 ${escapeHtml(ax.title || 'World Law')} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${catColor};">${escapeHtml(ax.category || 'physics').toUpperCase()}</span>
+                        </div>
+                        <span class="mhc-deck-item-toggle">▼</span>
+                    </div>
+                    <div class="mhc-deck-item-detail">
+                        <div style="font-size: 0.85em; opacity: 0.95; margin-bottom: 4px;"><b>Axiom:</b> ${escapeHtml(ax.axiom || '')}</div>
+                        ${subsHtml}
+                        ${negHtml}
+                        ${archHtml}
+                    </div>
+                </div>
+            `);
+        });
+    } else {
+        wrList.append('<div class="mhc-empty-hint">Standard world physics & tropes apply.</div>');
+    }
+
+    // Custom HUD Tracker Module Card
+    const customMod = worldRules.customModule;
+    if (customMod && (customMod.fieldKey || customMod.label)) {
+        $('#mhc_deck_custom_module_tag').text((customMod.fieldKey || 'CUSTOM').toUpperCase());
+        $('#mhc_deck_custom_module_label').text(customMod.label || customMod.fieldKey);
+        $('#mhc_deck_custom_module_instruction').text(customMod.instruction || '');
+        if (customMod.sample) {
+            $('#mhc_deck_custom_module_sample').text(customMod.sample).show();
+        } else {
+            $('#mhc_deck_custom_module_sample').hide();
+        }
+        $('#mhc_deck_custom_module_card').show();
+    } else {
+        $('#mhc_deck_custom_module_card').hide();
+    }
+
     // Protagonist Card
     $('#mhc_deck_char_playbook').text(proto.playbook || 'In Development');
     $('#mhc_deck_char_name').text(proto.name || 'Unnamed Adventurer');

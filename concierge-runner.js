@@ -251,6 +251,7 @@ async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, secti
             upsertWorldInfoBook(factionBookName, dist.factions),
             upsertWorldInfoBook(locBookName, dist.locations),
             upsertWorldInfoBook(questBookName, dist.quests),
+            ...(dist.worldRules?.length ? [upsertWorldInfoBook(locBookName, dist.worldRules)] : []),
         ]);
         return npcMap || {};
     } catch (err) {
@@ -390,6 +391,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
             description: dossier.meta?.premise,
             tone: dossier.meta?.tone,
             factions: dossier.factions,
+            worldRules: dossier.worldRules,
             stats: statsList.length >= 3 ? statsList : null,
             startingMoves: dossier.protagonist?.startingMoves,
             cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
@@ -484,14 +486,19 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                     if (primaryMap?.site) {
                         onProgress(`🗺️ Generating starting map: ${primaryMap.site}...`, 45);
                         try {
+                            const archNotes = (dossier.worldRules?.axioms || [])
+                                .map(a => a.architecturalNotes ? a.architecturalNotes.trim() : '')
+                                .filter(Boolean);
+                            const archContext = archNotes.length > 0 ? ` Living Architecture & Infrastructure: ${archNotes.join('; ')}.` : '';
+
                             await mapArch.runMapArchitect({
                                 site: primaryMap.site,
                                 entrance: primaryMap.entrance || 'Main Threshold',
                                 kind: primaryMap.kind || 'SETTLEMENT',
                                 scale: 'SMALL',
                                 threat: primaryMap.threat || 'MODERATE',
-                                prompt: primaryMap.prompt || primaryMap.briefDescription,
-                                brief_description: primaryMap.briefDescription || primaryMap.prompt,
+                                prompt: `${primaryMap.prompt || primaryMap.briefDescription}${archContext}`,
+                                brief_description: `${primaryMap.briefDescription || primaryMap.prompt}${archContext}`,
                             });
                         } catch (mapErr) {
                             console.warn(`[PbtA Concierge] Map Architect skipped starting map "${primaryMap.site}":`, mapErr);
@@ -647,6 +654,35 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
                     }
                     if (dossier.config?.artStyle) {
                         rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
+                    }
+
+                    // Register Custom HUD Tracker Module in MultiHog Settings if defined
+                    const customMod = dossier.worldRules?.customModule;
+                    if (customMod && (customMod.fieldKey || customMod.label)) {
+                        const customTag = (customMod.fieldKey || customMod.label)
+                            .replace(/[^a-zA-Z0-9_]/g, '_')
+                            .toUpperCase();
+                        rpgSettings.customFields = rpgSettings.customFields || [];
+                        const existingIdx = rpgSettings.customFields.findIndex(f => f.tag?.toUpperCase() === customTag);
+                        const fieldDef = {
+                            tag: customTag,
+                            label: customMod.label || customMod.fieldKey || customTag,
+                            icon: '📟',
+                            prompt: customMod.instruction || '',
+                            template: customMod.sample || '',
+                            enabled: true,
+                            scope: 'chat',
+                        };
+                        if (existingIdx >= 0) {
+                            rpgSettings.customFields[existingIdx] = fieldDef;
+                        } else {
+                            rpgSettings.customFields.push(fieldDef);
+                        }
+
+                        if (Array.isArray(rpgSettings.blockOrder) && !rpgSettings.blockOrder.includes(customTag)) {
+                            rpgSettings.blockOrder.push(customTag);
+                        }
+                        rpgSettings.chatStates[chatId].customFields = [...rpgSettings.customFields];
                     }
                 }
 

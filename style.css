@@ -586,6 +586,40 @@
     font-style: italic;
 }
 
+/* ── World Rules & Custom Module Cards ── */
+.mhc-card-world-rules {
+    border-left: 3px solid #10b981;
+}
+
+.mhc-card-world-rules .mhc-card-title {
+    color: #10b981;
+}
+
+.mhc-card-custom-module {
+    border-left: 3px solid #8b5cf6;
+}
+
+.mhc-card-custom-module .mhc-card-title {
+    color: #c084fc;
+}
+
+.mhc-constraint-banned {
+    color: #ef4444;
+    font-weight: 500;
+}
+
+.mhc-module-sample-preview {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: var(--rt-font-mono, monospace);
+    font-size: 0.78em;
+    color: #a7f3d0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 /* ── Footer ── */
 .mhc-concierge-footer {
     display: flex;

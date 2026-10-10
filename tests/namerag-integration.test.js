@@ -104,6 +104,9 @@ const mockSettings = {
         customSyspromptLibrary: [
             { id: 'custom_tone', tag: 'tone', enabled: true },
         ],
+        syspromptSnippetDatabase: [
+            { id: 'custom_tone', tag: 'tone', scope: 'global', globalEnabled: true },
+        ],
     },
 };
 globalThis.SillyTavern = {
@@ -119,16 +122,26 @@ const lib = mockSettings.rpg_tracker.customSyspromptLibrary;
 const entry = lib.find(p => p.id === NAMERAG_SYSPROMPT_ID);
 assert.ok(entry, 'Ad-hoc NameRAG prompt snippet should be present');
 assert.strictEqual(entry.enabled, true);
+assert.strictEqual(entry.scope, 'global', 'Scope should be explicitly global');
+assert.strictEqual(entry.globalEnabled, true, 'globalEnabled should be true');
 assert.ok(entry.content.includes('search_names'));
 assert.ok(entry.content.includes('Elidor'));
 assert.strictEqual(refreshed, true, 'Refresh callback should have fired');
+
+const dbEntry = mockSettings.rpg_tracker.syspromptSnippetDatabase.find(p => p.id === NAMERAG_SYSPROMPT_ID);
+assert.ok(dbEntry, 'Snippet should be synced into syspromptSnippetDatabase');
+assert.strictEqual(dbEntry.scope, 'global');
+assert.strictEqual(dbEntry.globalEnabled, true);
 
 // Toggle off
 refreshed = false;
 await syncNameRagAdhocSysprompt(false, () => { refreshed = true; });
 assert.strictEqual(entry.enabled, false, 'Entry should be disabled when toggled off');
+assert.strictEqual(entry.scope, 'global', 'Scope should remain global');
+assert.strictEqual(entry.globalEnabled, false, 'globalEnabled should be false when toggled off');
+assert.strictEqual(dbEntry.globalEnabled, false, 'Database entry globalEnabled should be false when toggled off');
 assert.strictEqual(refreshed, true);
-console.log('✓ Ad-hoc GM Guidance safely registered, toggled, and verified in customSyspromptLibrary');
+console.log('✓ Ad-hoc GM Guidance safely registered, toggled, and verified as GLOBAL in customSyspromptLibrary & syspromptSnippetDatabase');
 
 // 5. Test dynamic discovery fallback when no servers present
 console.log('Testing dynamic discovery fallback...');

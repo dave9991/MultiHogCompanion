@@ -1945,6 +1945,11 @@ jQuery(async () => {
         scheduleSync('CHAT_CHANGED', 500);
         setTimeout(updateRulesetBadge, 600);
         setTimeout(updateLorebookSyncUI, 650);
+        setTimeout(async () => {
+            const s = getSettings();
+            const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
+            await syncNameRagAdhocSysprompt(adhocActive);
+        }, 700);
         setTimeout(() => {
             updateRelationshipSyncUI();
             scanAndInitUnsyncedNpcs().then(updateRelationshipSyncUI);
@@ -1968,11 +1973,23 @@ jQuery(async () => {
         scheduleSync('SETTINGS_UPDATED', 600);
         setTimeout(updateRulesetBadge, 700);
         setTimeout(updateLorebookSyncUI, 750);
-        setTimeout(updateRelationshipSyncUI, 800);
+        setTimeout(() => {
+            updateRelationshipSyncUI();
+        }, 800);
+        setTimeout(async () => {
+            const s = getSettings();
+            const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
+            await syncNameRagAdhocSysprompt(adhocActive);
+        }, 850);
     });
 
     // Initial check on load
     scheduleSync('INITIAL_LOAD', 1000);
+    setTimeout(async () => {
+        const s = getSettings();
+        const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
+        await syncNameRagAdhocSysprompt(adhocActive);
+    }, 1100);
     setTimeout(updateRulesetBadge, 1200);
     setTimeout(updateLorebookSyncUI, 1300);
     setTimeout(updateRelationshipSyncUI, 1400);

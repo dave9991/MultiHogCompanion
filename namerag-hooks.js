@@ -329,6 +329,8 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
     if (enabled) {
         if (existingIndex >= 0) {
             settings.customSyspromptLibrary[existingIndex].enabled = true;
+            settings.customSyspromptLibrary[existingIndex].scope = 'global';
+            settings.customSyspromptLibrary[existingIndex].globalEnabled = true;
             settings.customSyspromptLibrary[existingIndex].content = promptContent;
         } else {
             settings.customSyspromptLibrary.push({
@@ -338,14 +340,51 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
                 description: 'Guides the Narrator/GM to avoid repetitive names and use search_names when available',
                 content: promptContent,
                 enabled: true,
+                scope: 'global',
+                globalEnabled: true,
                 origin: 'companion',
             });
         }
     } else {
         if (existingIndex >= 0) {
             settings.customSyspromptLibrary[existingIndex].enabled = false;
+            settings.customSyspromptLibrary[existingIndex].scope = 'global';
+            settings.customSyspromptLibrary[existingIndex].globalEnabled = false;
         }
     }
+
+    if (Array.isArray(settings.syspromptSnippetDatabase)) {
+        const dbIndex = settings.syspromptSnippetDatabase.findIndex((p) => p.id === NAMERAG_SYSPROMPT_ID);
+        if (enabled) {
+            if (dbIndex >= 0) {
+                settings.syspromptSnippetDatabase[dbIndex].scope = 'global';
+                settings.syspromptSnippetDatabase[dbIndex].globalEnabled = true;
+                settings.syspromptSnippetDatabase[dbIndex].content = promptContent;
+            } else {
+                settings.syspromptSnippetDatabase.push({
+                    id: NAMERAG_SYSPROMPT_ID,
+                    tag: 'name_generation',
+                    title: 'Name Diversity & NameRAG Guidance',
+                    description: 'Guides the Narrator/GM to avoid repetitive names and use search_names when available',
+                    content: promptContent,
+                    scope: 'global',
+                    globalEnabled: true,
+                    origin: 'companion',
+                });
+            }
+        } else {
+            if (dbIndex >= 0) {
+                settings.syspromptSnippetDatabase[dbIndex].scope = 'global';
+                settings.syspromptSnippetDatabase[dbIndex].globalEnabled = false;
+            }
+        }
+    }
+
+    try {
+        if (typeof ctx?.saveSettingsDebounced === 'function') {
+            ctx.saveSettingsDebounced();
+        }
+    } catch (_) {}
 
     if (typeof onRefresh === 'function') {
         await onRefresh();

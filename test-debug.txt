@@ -1,0 +1,2 @@
+TypeError: Cannot read properties of undefined (reading 'friendship')
+    at file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/tests/relationship-narrative-sync.test.js:220:72

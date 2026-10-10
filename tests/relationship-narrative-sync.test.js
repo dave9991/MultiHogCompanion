@@ -147,6 +147,86 @@ assert.strictEqual(curTier.label, ledger[fullId].lastSyncedTier.friendship, 'Sco
 const evolvedScore = 20; // Crosses to WARMING/FAVORABLE
 const evolvedTier = getFriendshipTier(evolvedScore);
 assert.notStrictEqual(evolvedTier.label, ledger[fullId].lastSyncedTier.friendship, 'Score of 20 crosses tier boundary; must trigger Direction B');
-console.log('✓ Ledger tracking and tier crossover boundary logic verified');
+// ── 5. Chat Switch & Pre-Existing Relationship Preservation ──────────────────
+console.log('Testing Chat Switch & Pre-Existing Relationship Preservation...');
+
+import { scanAndInitUnsyncedNpcs } from '../relationship-narrative-sync.js';
+
+// Setup global mock environment mimicking SillyTavern and MultiHog framework
+const mockChatId = 'old-adventure-chat-123';
+const mockRpgTracker = {
+    npcRelationshipBars: true,
+    campaignBooks: { npcs: 'Eldoria_NPCs' },
+    npcRelationshipValues: {
+        'Eldoria_NPCs::1': { friendship: 45, affection: 15 },
+    },
+    npcRelationshipLog: {
+        'Eldoria_NPCs::1': [
+            { field: 'friendship', delta: 45, newValue: 45, reason: 'Historical campaign bond' },
+        ],
+    },
+    chatStates: {
+        [mockChatId]: {
+            npcRelationshipValues: {
+                'Eldoria_NPCs::1': { friendship: 45, affection: 15 },
+                'Eldoria_NPCs::2': { friendship: 60, affection: 25 },
+            },
+        },
+    },
+};
+
+const mockMetadata = {
+    character_name: 'Silas Vance',
+    mhc_rel_narrative_sync: {},
+};
+
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chatId: mockChatId,
+        getCurrentChatId: () => mockChatId,
+        name1: 'Silas Vance',
+        chat_metadata: mockMetadata,
+        extensionSettings: {
+            rpg_tracker: mockRpgTracker,
+            multihog_companion: {
+                enableRelationshipNarrativeSync: true,
+            },
+        },
+        getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+    }),
+};
+
+// Mock fetch for world info
+globalThis.fetch = async (url, options) => {
+    if (url === '/api/worldinfo/get') {
+        return {
+            ok: true,
+            json: async () => ({
+                entries: {
+                    1: { comment: 'Marta Okonkwo', content: 'Cyborg quartermaster with no known affiliations.' },
+                    2: { comment: 'Kaelen Thorne', content: 'Rogue scout wandering the borderlands.' },
+                },
+            }),
+        };
+    }
+    return { ok: true, json: async () => ({}) };
+};
+
+// Run scanAndInitUnsyncedNpcs simulating chat switch into the old chat
+const scanResult = await scanAndInitUnsyncedNpcs();
+assert.strictEqual(scanResult.scanned, 2, 'Should scan the 2 NPCs');
+assert.strictEqual(scanResult.initialized, 0, 'Should not overwrite or re-initialize existing NPCs with 0,0');
+assert.strictEqual(scanResult.skipped, 2, 'Both NPCs with pre-existing non-zero values must be skipped');
+
+assert.strictEqual(mockRpgTracker.npcRelationshipValues['Eldoria_NPCs::1'].friendship, 45, 'Marta friendship must remain 45');
+assert.strictEqual(mockRpgTracker.npcRelationshipValues['Eldoria_NPCs::1'].affection, 15, 'Marta affection must remain 15');
+assert.strictEqual(mockRpgTracker.npcRelationshipValues['Eldoria_NPCs::2'].friendship, 60, 'Kaelen friendship must be preserved from chatStates');
+assert.strictEqual(mockRpgTracker.npcRelationshipValues['Eldoria_NPCs::2'].affection, 25, 'Kaelen affection must be preserved from chatStates');
+
+const ledgerAfter = getRelationshipSyncLedger(mockChatId);
+assert.strictEqual(ledgerAfter['Eldoria_NPCs::1'].initialSource, 'pre_existing', 'Must be marked pre_existing');
+assert.strictEqual(ledgerAfter['Eldoria_NPCs::2'].initialSource, 'pre_existing', 'Must be marked pre_existing');
+console.log('✓ Pre-existing relationship values are strictly preserved and never wiped on chat switch');
 
 console.log('--- ALL RELATIONSHIP NARRATIVE SYNC TESTS PASSED CLEANLY! ---');
+

@@ -20,7 +20,30 @@
 const EXTENSION_NAME = 'multihog_companion';
 
 function getExtSettings() {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    if (ctx?.extensionSettings && typeof ctx.extensionSettings === 'object') return ctx.extensionSettings;
     return (typeof extension_settings !== 'undefined' ? extension_settings : (globalThis.extension_settings || {})) || {};
+}
+
+function getMultiHogSettings() {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const fromCtx = ctx?.extensionSettings?.rpg_tracker;
+    if (fromCtx && typeof fromCtx === 'object') return fromCtx;
+    const ext = getExtSettings();
+    if (ext.rpg_tracker && typeof ext.rpg_tracker === 'object') return ext.rpg_tracker;
+    // Fallback if structured under multihog_dnd in legacy mock environments
+    if (ext.multihog_dnd?.rpgSettings) return ext.multihog_dnd.rpgSettings;
+    ext.rpg_tracker = ext.rpg_tracker || {};
+    return ext.rpg_tracker;
+}
+
+function triggerSaveMultiHogSettings() {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    if (typeof ctx?.saveSettingsDebounced === 'function') {
+        try { ctx.saveSettingsDebounced(); } catch (_) {}
+    } else if (typeof globalThis.saveSettingsDebounced === 'function') {
+        try { globalThis.saveSettingsDebounced(); } catch (_) {}
+    }
 }
 
 function triggerSaveMetadata() {
@@ -226,9 +249,7 @@ export function parseDirectionBResponse(rawText) {
  * @returns {object}
  */
 export function getStateTrackerConnectionSettings() {
-    const extSettings = getExtSettings();
-    const dnd = extSettings.multihog_dnd || {};
-    const s = dnd.rpgSettings || {};
+    const s = getMultiHogSettings();
 
     return {
         connectionSource: s.connectionSource || 'default',
@@ -300,8 +321,7 @@ let isSyncInProgress = false;
 export function isNarrativeSyncEnabled() {
     const extSettings = getExtSettings();
     const companion = extSettings[EXTENSION_NAME] || {};
-    const dnd = extSettings.multihog_dnd || {};
-    const rpg = dnd.rpgSettings || {};
+    const rpg = getMultiHogSettings();
 
     const barsEnabled = rpg.npcRelationshipBars !== false;
     const syncEnabled = companion.enableRelationshipNarrativeSync !== false;
@@ -333,13 +353,18 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
         if (!ctx) return { scanned: 0, initialized: 0, skipped: 0 };
 
-        const extSettings = getExtSettings();
-        const dnd = extSettings.multihog_dnd || {};
-        const rpg = dnd.rpgSettings = dnd.rpgSettings || {};
+        const rpg = getMultiHogSettings();
         rpg.npcRelationshipValues = rpg.npcRelationshipValues || {};
         rpg.npcRelationshipLog = rpg.npcRelationshipLog || {};
 
-        const ledger = getRelationshipSyncLedger();
+        const activeChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+            || ctx.getCurrentChatId?.()
+            || ctx.chatId
+            || '';
+
+        const partitionRelValues = (activeChatId && rpg.chatStates?.[activeChatId]?.npcRelationshipValues) || null;
+
+        const ledger = getRelationshipSyncLedger(activeChatId);
         const pcName = resolveActiveProtagonistName();
         const connSettings = getStateTrackerConnectionSettings();
 
@@ -348,8 +373,7 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
         if (!npcBookName) {
             try {
                 const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
-                const chatId = ctx.getCurrentChatId?.() || ctx.chatId || '';
-                const prefix = stateMgr.getEffectiveRouterCampaignPrefix?.(chatId);
+                const prefix = stateMgr.getEffectiveRouterCampaignPrefix?.(activeChatId);
                 if (prefix) npcBookName = `${prefix}_NPCs`;
             } catch (_) {}
         }
@@ -381,10 +405,21 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
                 continue;
             }
 
-            // Check existing values in MultiHog
-            const existingVal = rpg.npcRelationshipValues[fullId];
+            // Check existing values in MultiHog (check active settings first, then chat partition)
+            const existingVal = rpg.npcRelationshipValues[fullId]
+                || partitionRelValues?.[fullId]
+                || null;
+
             if (existingVal && (existingVal.friendship !== 0 || existingVal.affection !== 0) && !forceAll) {
-                // Already has non-zero values (e.g. from Concierge or manual edit)
+                // Already has non-zero values (e.g. from pre-companion chat, Concierge, or manual edit)
+                // Ensure active settings mirror it if missing
+                if (!rpg.npcRelationshipValues[fullId]) {
+                    rpg.npcRelationshipValues[fullId] = {
+                        friendship: existingVal.friendship,
+                        affection: existingVal.affection,
+                    };
+                }
+
                 updateRelationshipSyncLedger(fullId, {
                     initialized: true,
                     lastSyncedTier: {
@@ -395,7 +430,7 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
                     lastAffectionScore: existingVal.affection,
                     lastSyncedAt: Date.now(),
                     initialSource: 'pre_existing',
-                });
+                }, activeChatId);
                 skipped++;
                 continue;
             }
@@ -406,10 +441,23 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
                 const rawOutput = await sendLlmPrompt(connSettings, messages);
                 const parsed = parseDirectionAResponse(rawOutput);
                 if (parsed) {
+                    // Double check existing value didn't populate asynchronously
+                    const checkCurrent = rpg.npcRelationshipValues[fullId] || partitionRelValues?.[fullId];
+                    if (checkCurrent && (checkCurrent.friendship !== 0 || checkCurrent.affection !== 0) && !forceAll) {
+                        skipped++;
+                        continue;
+                    }
+
                     rpg.npcRelationshipValues[fullId] = {
                         friendship: parsed.friendship,
                         affection: parsed.affection,
                     };
+                    if (partitionRelValues) {
+                        partitionRelValues[fullId] = {
+                            friendship: parsed.friendship,
+                            affection: parsed.affection,
+                        };
+                    }
                     rpg.npcRelationshipLog[fullId] = rpg.npcRelationshipLog[fullId] || [];
                     rpg.npcRelationshipLog[fullId].unshift({
                         timestamp: Date.now(),
@@ -430,7 +478,8 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
                         lastAffectionScore: parsed.affection,
                         lastSyncedAt: Date.now(),
                         initialSource: 'narrative_scan',
-                    });
+                    }, activeChatId);
+                    triggerSaveMultiHogSettings();
                     initialized++;
                 } else {
                     // Default to neutral 0,0 and record so we do not re-run repeatedly
@@ -444,7 +493,7 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
                         lastAffectionScore: 0,
                         lastSyncedAt: Date.now(),
                         initialSource: 'default_neutral',
-                    });
+                    }, activeChatId);
                 }
             } catch (err) {
                 console.warn(`[MultiHog Companion] Direction A scan failed for ${npcName}:`, err);
@@ -478,11 +527,15 @@ export async function checkAndSyncTierCrossovers() {
         if (!ctx) return { checked: 0, updated: 0 };
 
         const extSettings = getExtSettings();
-        const dnd = extSettings.multihog_dnd || {};
-        const rpg = dnd.rpgSettings || {};
+        const rpg = getMultiHogSettings();
+        const activeChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+            || ctx.getCurrentChatId?.()
+            || ctx.chatId
+            || '';
+
         const relValues = rpg.npcRelationshipValues || {};
         const relLogs = rpg.npcRelationshipLog || {};
-        const ledger = getRelationshipSyncLedger();
+        const ledger = getRelationshipSyncLedger(activeChatId);
         const pcName = resolveActiveProtagonistName();
         const connSettings = getStateTrackerConnectionSettings();
 
@@ -556,7 +609,7 @@ export async function checkAndSyncTierCrossovers() {
                         lastFriendshipScore: fVal,
                         lastAffectionScore: aVal,
                         lastSyncedAt: Date.now(),
-                    });
+                    }, activeChatId);
                     updated++;
 
                     if (typeof toastr !== 'undefined' && extSettings[EXTENSION_NAME]?.showToasts !== false) {
@@ -580,8 +633,7 @@ export async function checkAndSyncTierCrossovers() {
  */
 export function getRelationshipSyncStatus() {
     const extSettings = getExtSettings();
-    const dnd = extSettings.multihog_dnd || {};
-    const rpg = dnd.rpgSettings || {};
+    const rpg = getMultiHogSettings();
     const relValues = rpg.npcRelationshipValues || {};
     const ledger = getRelationshipSyncLedger();
 

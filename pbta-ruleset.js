@@ -1050,16 +1050,27 @@ export function formatInitialPbtaMemo(dossier) {
     blocks.push(`[LOCATION]\n${locationStr}\n[/LOCATION]`);
 
     // 3. CHARACTER Block
+    const harmCurrent = Math.max(0, parseInt(p.harm?.current, 10) || 0);
+    const curHp = Math.max(0, harmMax - harmCurrent);
+    const rawConditions = Array.isArray(p.conditions)
+        ? p.conditions
+        : (p.conditions ? [p.conditions] : []);
+    let condsStr = rawConditions.map(normalizePill).join(', ');
+    if (!condsStr) {
+        condsStr = harmCurrent > 0 ? '(-) Wounded' : 'None';
+    }
+    const statusStr = p.status ? p.status.trim() : (harmCurrent > 0 ? '(-) Wounded' : 'Healthy');
+
     const charLines = [
         `[CHARACTER]`,
-        `${charName} (${playbook}): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: ${armor}`,
+        `${charName} (${playbook}): ${curHp}/${harmMax} HP | Harm: ${harmCurrent}/${harmMax} | Armor: ${armor}`,
         `Stats: ${statsStr}`,
         `((PILLS)) Moves: ${movesStr}`,
         `((PILLS)) Gear: ${gearStr}`,
-        `((PILLS)) Conditions: None`,
+        `((PILLS)) Conditions: ${condsStr}`,
         `Hold/Forward: None`,
         `XP: 0/${pacingXp}`,
-        `Status: Healthy`,
+        `Status: ${statusStr}`,
         `[/CHARACTER]`,
     ];
     blocks.push(charLines.join('\n'));
@@ -1097,15 +1108,27 @@ export function formatInitialPbtaMemo(dossier) {
             const cBondsStr = rawCompBonds.map(normalizePill).join(', ');
 
             const cApp = comp.appearance || comp.description || (comp.demeanor ? `${comp.demeanor} demeanor` : '');
+
+            const cHarmMax = comp.harm?.max || 5;
+            const cHarmCur = Math.max(0, parseInt(comp.harm?.current, 10) || 0);
+            const cCurHp = Math.max(0, cHarmMax - cHarmCur);
+            const cArmor = comp.harm?.armor || parseInt(comp.armor, 10) || 0;
+            const rawCConds = Array.isArray(comp.conditions) ? comp.conditions : (comp.conditions ? [comp.conditions] : []);
+            let cCondsStr = rawCConds.map(normalizePill).join(', ');
+            if (!cCondsStr) {
+                cCondsStr = cHarmCur > 0 ? '(-) Wounded' : 'None';
+            }
+            const cStatus = comp.status ? comp.status.trim() : (cHarmCur > 0 ? '(-) Wounded' : 'Healthy');
+
             if (i > 0) partyLines.push('');
             partyLines.push(
-                `${cName} (${cRole}): 5/5 HP | Harm: 0/5 | Armor: 0`,
+                `${cName} (${cRole}): ${cCurHp}/${cHarmMax} HP | Harm: ${cHarmCur}/${cHarmMax} | Armor: ${cArmor}`,
                 ...(cApp ? [`Appearance: ${cApp}`] : []),
                 `((PILLS)) Moves: ${cBoonsStr}`,
                 `((PILLS)) Gear: ${cGearStr}`,
                 `((PILLS)) Bonds: ${cBondsStr}`,
-                `((PILLS)) Conditions: None`,
-                `Status: Healthy`
+                `((PILLS)) Conditions: ${cCondsStr}`,
+                `Status: ${cStatus}`
             );
         }
         partyLines.push('[/PARTY]');

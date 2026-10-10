@@ -128,17 +128,20 @@ export function buildNpcEntryContent(npc, names = FALLBACK_SECTION_NAMES) {
 export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES) {
     const attacks = Array.isArray(monster.attacks) ? monster.attacks : [];
     const doom = Array.isArray(monster.impendingDoom) ? monster.impendingDoom : [];
-    const harmMax = Math.max(1, parseInt(monster.harm, 10) || 4);
+    const harmMax = Math.max(1, parseInt(monster.harm?.max ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[1] : monster.harm), 10) || 4);
+    const harmCur = Math.max(0, parseInt(monster.currentHarm ?? monster.harm?.current ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[0] : 0), 10) || 0);
+    const curHp = Math.max(0, harmMax - harmCur);
+    const status = monster.status ? monster.status.trim() : (harmCur > 0 ? '(-) Wounded' : 'Healthy');
 
     // Main's combatant parser (combat-persistence.js) and Enemies panel only recognize
     // "Name: cur/max HP ..." headers, so PbtA adversaries carry a redundant HP token that
     // descends in tandem with Harm — the same workaround the [PARTY] block uses.
     const combatLines = [
-        `${monster.name}: ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: ${parseInt(monster.armor, 10) || 0}`,
+        `${monster.name}: ${curHp}/${harmMax} HP | Harm: ${harmCur}/${harmMax} | Armor: ${parseInt(monster.armor, 10) || 0}`,
         attacks.length ? `((PILLS)) Attacks: ${attacks.join(', ')}` : '',
         monster.weakness && monster.weakness !== 'Unknown' ? `((PILLS)) Weakness: ${monster.weakness}` : '',
         doom.length ? `Countdown: ${doom.join(' → ')}` : '',
-        'Status: Healthy',
+        `Status: ${status}`,
     ].filter(Boolean);
 
     const core = assembleCore({

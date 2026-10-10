@@ -74,6 +74,11 @@ ${genreSummaries}
   * **World NPCs (\`role: Mentor\`, \`Patron\`, \`Merchant\`, \`Town Guard\`, \`Faction Contact\`, \`Ally\`):** The default. Stationary setting characters who inhabit a specific village, shop, guild, temple, or fortress. They are registered into the NPC library and campaign lorebook and do NOT travel in the Party.
   * **Traveling Companions (\`role: Companion (Party)\` or \`Traveling Companion\`):** Opt-in only. Use when the player's material features a party or they ask for one — characters who journey side-by-side with the protagonist. They are also seeded into the active Party roster upon launch. Include their distinctive physical appearance (\`appearance: ...\`) so it renders clearly on their party card.
   * Build the cast from the outline's needs (see the Session Zero Flow below), not from a quota.
+* **Wounded Starts & Starting Injuries:**
+  * When the player asks to start injured/gritty (e.g. surviving an ambush, escaping captivity, nursing broken bones), or an imported character card explicitly establishes existing injuries or trauma:
+  * Reflect starting Harm via \`harm: cur/max\` (e.g. \`harm: 2/5\`) on \`[PROTAGONIST]\`, Traveling Companions (\`[NPC]\`), or Adversaries (\`[MONSTER]\`).
+  * Assign matching negative condition pills via \`conditions: (-) Broken Rib (-1 to Hard), (-) Concussed\` and \`status: (-) Wounded\`.
+  * MultiHog will automatically initialize their descending tandem HP (\`3/5 HP | Harm: 2/5\`), populate active conditions, and set \`Status: (-) Wounded\` upon campaign launch.
 
 ---
 
@@ -130,8 +135,10 @@ stats: Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1
 moves:
 - Investigate a Mystery (+Sharp) (When reading a crime scene, ask 1 question from the GM list)
 - Act Under Fire (+Cool) (Roll +Cool to stay steady when panic strikes)
-harm: 5
+harm: 5 (or harm: 2/5 if starting wounded)
 armor: 1
+conditions: (-) Broken Rib (-1 Hard), (-) Concussed (Optional starting injuries)
+status: (-) Wounded (Optional starting status — defaults to Healthy or (-) Wounded)
 gear: 9mm service pistol (2-Harm, close), tactical vest (1-Armor), badge
 bio: Former detective turned freelance paranormal investigator.
 [/PROTAGONIST]
@@ -145,7 +152,7 @@ notes: Garrisoned at High Watch under Commander Kael
 
 [NPC]
 name: Marta Okonkwo
-role: Lighthouse Keeper & Faction Contact
+role: Lighthouse Keeper & Faction Contact (or Traveling Companion)
 species: Human, woman, late 50s
 appearance: Weathered face, cropped silver hair, rope-scarred hands
 equipment: Oilskin coat, brass storm lantern, harpoon-gun on a hook by the door
@@ -155,13 +162,18 @@ relationship: Owes the protagonist's mentor an old debt; will trade favors for n
 friendship: 35
 affection: 0
 moves_or_boons: Read the Tide (Tells the protagonist what the sea is hiding once per scene), Safe Harbor (Hides allies in the light's cellar)
+harm: 1/5 (Optional — if traveling companion starts wounded)
+armor: 0 (Optional)
+conditions: (-) Sprained Ankle (Optional starting injury)
+status: (-) Wounded (Optional starting status)
 notes: Wants the guild's missing ledger found before the harbormaster does.
 [/NPC]
 
 [MONSTER]
 name: The Ash Wendigo
-harm: 4
+harm: 4 (or harm: 2/4 if already wounded)
 armor: 1
+status: (-) Wounded (Optional — defaults to Healthy or (-) Wounded)
 attacks: Frost Claws (2 Harm, intimate), Paralyzing Shriek (1 Harm, near)
 weakness: White birch fire, shattering its frozen heart
 countdown:

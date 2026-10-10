@@ -27,6 +27,8 @@ export function createEmptyDossier() {
             stats: {},
             startingMoves: [],
             harm: { max: 5, current: 0, armor: 0 },
+            conditions: [],
+            status: '',
             gear: [],
             bio: '',
             portraitSrc: null,
@@ -349,8 +351,19 @@ The Kick: Unset
         if (p.stats && Object.keys(p.stats).length) {
             lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}`);
         }
-        lines.push(`harm: ${p.harm?.max ?? 5}`);
-        lines.push(`armor: ${p.harm?.armor ?? 0}`);
+        if (p.harm) {
+            const curH = parseInt(p.harm.current, 10) || 0;
+            const maxH = parseInt(p.harm.max, 10) || 5;
+            lines.push(curH > 0 ? `harm: ${curH}/${maxH}` : `harm: ${maxH}`);
+            lines.push(`armor: ${p.harm?.armor ?? 0}`);
+        } else {
+            lines.push('harm: 5');
+            lines.push('armor: 0');
+        }
+        if (p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) {
+            lines.push(`conditions: ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}`);
+        }
+        if (p.status) lines.push(`status: ${p.status}`);
         if (p.startingMoves && p.startingMoves.length) {
             lines.push('moves:');
             p.startingMoves.forEach(mv => lines.push(`- ${mv}`));
@@ -376,6 +389,16 @@ The Kick: Unset
                 ['affection', n.affection !== undefined ? n.affection : null],
                 ['moves_or_boons', n.movesOrBoons], ['notes', n.notes],
             ];
+            if (n.harm) {
+                const curH = parseInt(n.harm.current, 10) || 0;
+                const maxH = parseInt(n.harm.max, 10) || 5;
+                if (curH > 0) fields.push(['harm', `${curH}/${maxH}`]);
+                if (n.harm.armor) fields.push(['armor', n.harm.armor]);
+            }
+            if (n.conditions && (Array.isArray(n.conditions) ? n.conditions.length : String(n.conditions).trim())) {
+                fields.push(['conditions', Array.isArray(n.conditions) ? n.conditions.join(', ') : n.conditions]);
+            }
+            if (n.status) fields.push(['status', n.status]);
             fields.forEach(([k, v]) => { if (v !== null && v !== undefined && v !== '') lines.push(`${k}: ${v}`); });
             lines.push('[/NPC]');
         });
@@ -388,8 +411,11 @@ The Kick: Unset
         monsters.forEach(m => {
             lines.push('[MONSTER]');
             lines.push(`name: ${m.name}`);
-            lines.push(`harm: ${m.harm}`);
-            lines.push(`armor: ${m.armor}`);
+            const curHarm = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
+            const maxHarm = parseInt(m.harm?.max ?? m.harm, 10) || 4;
+            lines.push(curHarm > 0 ? `harm: ${curHarm}/${maxHarm}` : `harm: ${maxHarm}`);
+            lines.push(`armor: ${m.armor || 0}`);
+            if (m.status) lines.push(`status: ${m.status}`);
             if (m.attacks && m.attacks.length) lines.push(`attacks: ${[].concat(m.attacks).join(', ')}`);
             lines.push(`weakness: ${m.weakness || 'Unknown'}`);
             if (m.impendingDoom && m.impendingDoom.length) {
@@ -665,10 +691,26 @@ export function applyDossierUpdates(text, dossier) {
             }
         }
         if (kv.harm) {
-            const h = parseInt(kv.harm, 10);
-            if (!isNaN(h)) {
-                updated.protagonist.harm.max = h;
-                changes.push(`Protagonist Harm max set to ${h}`);
+            const slashMatch = String(kv.harm).match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (slashMatch) {
+                const cur = parseInt(slashMatch[1], 10);
+                const max = parseInt(slashMatch[2], 10);
+                updated.protagonist.harm.current = Math.max(0, cur);
+                updated.protagonist.harm.max = Math.max(1, max);
+                changes.push(`Protagonist Harm set to ${updated.protagonist.harm.current}/${updated.protagonist.harm.max}`);
+            } else {
+                const h = parseInt(kv.harm, 10);
+                if (!isNaN(h)) {
+                    updated.protagonist.harm.max = h;
+                    changes.push(`Protagonist Harm max set to ${h}`);
+                }
+            }
+        }
+        if (kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
+            const curVal = parseInt(kv.current_harm ?? kv.harm_current ?? kv.wounds, 10);
+            if (!isNaN(curVal)) {
+                updated.protagonist.harm.current = Math.max(0, curVal);
+                changes.push(`Protagonist starting Harm set to ${updated.protagonist.harm.current}`);
             }
         }
         if (kv.armor) {
@@ -677,6 +719,17 @@ export function applyDossierUpdates(text, dossier) {
                 updated.protagonist.harm.armor = a;
                 changes.push(`Protagonist Armor set to ${a}`);
             }
+        }
+        if (kv.conditions) {
+            const condList = kv.conditions.split(/[,;]/).map(c => c.trim()).filter(Boolean);
+            if (condList.length) {
+                updated.protagonist.conditions = condList;
+                changes.push(`Protagonist conditions set: ${condList.join(', ')}`);
+            }
+        }
+        if (kv.status) {
+            updated.protagonist.status = kv.status.trim();
+            changes.push(`Protagonist status set to "${updated.protagonist.status}"`);
         }
 
         const moves = parseBulletList(pBlock, 'moves');
@@ -746,6 +799,36 @@ export function applyDossierUpdates(text, dossier) {
             aVal = aVal ?? 0;
         }
 
+        let nHarm = null;
+        if (kv.harm) {
+            const slashMatch = String(kv.harm).match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (slashMatch) {
+                nHarm = { current: parseInt(slashMatch[1], 10), max: parseInt(slashMatch[2], 10), armor: 0 };
+            } else {
+                const h = parseInt(kv.harm, 10);
+                if (!isNaN(h)) nHarm = { current: 0, max: h, armor: 0 };
+            }
+        }
+        if (kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
+            const cVal = parseInt(kv.current_harm ?? kv.harm_current ?? kv.wounds, 10);
+            if (!isNaN(cVal)) {
+                nHarm = nHarm || { current: 0, max: 5, armor: 0 };
+                nHarm.current = cVal;
+            }
+        }
+        if (kv.armor !== undefined) {
+            const aVal = parseInt(kv.armor, 10);
+            if (!isNaN(aVal)) {
+                nHarm = nHarm || { current: 0, max: 5, armor: 0 };
+                nHarm.armor = aVal;
+            }
+        }
+
+        let nConditions = [];
+        if (kv.conditions) {
+            nConditions = kv.conditions.split(/[,;]/).map(c => c.trim()).filter(Boolean);
+        }
+
         const npcObj = {
             name: kv.name,
             role: kv.role || 'Ally',
@@ -760,6 +843,9 @@ export function applyDossierUpdates(text, dossier) {
             movesOrBoons: kv.moves_or_boons || kv.moves || '',
             notes: kv.notes || '',
             portraitSrc: null,
+            harm: nHarm,
+            conditions: nConditions,
+            status: kv.status ? kv.status.trim() : (nHarm?.current > 0 ? '(-) Wounded' : ''),
         };
 
         const existingIdx = updated.npcs.findIndex(n => n.name.toLowerCase() === npcObj.name.toLowerCase());
@@ -778,6 +864,9 @@ export function applyDossierUpdates(text, dossier) {
             if (given('affection')) patch.affection = clampRelationshipScore(kv.affection);
             if (given('moves_or_boons', 'moves')) patch.movesOrBoons = npcObj.movesOrBoons;
             if (given('notes')) patch.notes = npcObj.notes;
+            if (given('harm', 'current_harm', 'harm_current', 'wounds', 'armor') && nHarm) patch.harm = nHarm;
+            if (given('conditions')) patch.conditions = npcObj.conditions;
+            if (given('status')) patch.status = npcObj.status;
             updated.npcs[existingIdx] = Object.assign({}, updated.npcs[existingIdx], patch);
             changes.push(`Updated NPC "${npcObj.name}" (${npcObj.role})`);
         } else {
@@ -823,31 +912,58 @@ export function applyDossierUpdates(text, dossier) {
             continue;
         }
 
+        let mCurHarm = 0;
+        let mMaxHarm = 4;
+        if (kv.harm) {
+            const slashMatch = String(kv.harm).match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (slashMatch) {
+                mCurHarm = parseInt(slashMatch[1], 10);
+                mMaxHarm = parseInt(slashMatch[2], 10);
+            } else {
+                const h = parseInt(kv.harm, 10);
+                if (!isNaN(h)) mMaxHarm = h;
+            }
+        }
+        if (kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
+            const cVal = parseInt(kv.current_harm ?? kv.harm_current ?? kv.wounds, 10);
+            if (!isNaN(cVal)) mCurHarm = cVal;
+        }
+
         const monsterObj = {
             name: kv.name,
-            harm: parseInt(kv.harm, 10) || 4,
+            harm: mMaxHarm,
+            currentHarm: mCurHarm,
             armor: parseInt(kv.armor, 10) || 0,
             attacks: kv.attacks ? kv.attacks.split(/[,;]/).map(a => a.trim()).filter(Boolean) : [],
             weakness: kv.weakness || 'Unknown',
             impendingDoom: parseBulletList(mBlock, 'countdown'),
             notes: kv.notes || '',
+            status: kv.status ? kv.status.trim() : (mCurHarm > 0 ? '(-) Wounded' : ''),
+            conditions: kv.conditions ? kv.conditions.split(/[,;]/).map(c => c.trim()).filter(Boolean) : [],
         };
 
         const existingIdx = updated.monsters.findIndex(m => m.name.toLowerCase() === monsterObj.name.toLowerCase());
         if (existingIdx >= 0) {
             const patch = {};
-            if (kv.harm) patch.harm = monsterObj.harm;
+            if (kv.harm || kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
+                patch.harm = monsterObj.harm;
+                patch.currentHarm = monsterObj.currentHarm;
+            }
             if (kv.armor) patch.armor = monsterObj.armor;
             if (kv.attacks) patch.attacks = monsterObj.attacks;
             if (kv.weakness) patch.weakness = monsterObj.weakness;
             if (monsterObj.impendingDoom.length) patch.impendingDoom = monsterObj.impendingDoom;
             if (kv.notes) patch.notes = monsterObj.notes;
+            if (kv.status) patch.status = monsterObj.status;
+            if (kv.conditions) patch.conditions = monsterObj.conditions;
             updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], patch);
             Object.assign(monsterObj, updated.monsters[existingIdx]);
-            changes.push(`Updated Adversary "${monsterObj.name}" (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`);
+            const woundLabel = monsterObj.currentHarm > 0 ? `Harm: ${monsterObj.currentHarm}/${monsterObj.harm}` : `Harm: ${monsterObj.harm}`;
+            changes.push(`Updated Adversary "${monsterObj.name}" (${woundLabel}, Armor: ${monsterObj.armor})`);
         } else {
             updated.monsters.push(monsterObj);
-            changes.push(`Added Adversary "${monsterObj.name}" (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`);
+            const woundLabel = monsterObj.currentHarm > 0 ? ` (Harm: ${monsterObj.currentHarm}/${monsterObj.harm}, Armor: ${monsterObj.armor})` : ` (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`;
+            changes.push(`Added Adversary "${monsterObj.name}"${woundLabel}`);
         }
     }
 
@@ -1289,8 +1405,15 @@ export function serializeDossierToMarkdown(dossier) {
             const standingsLine = (n.friendship !== undefined || n.affection !== undefined)
                 ? `\n* **Standings:** Friendship ${n.friendship >= 0 ? '+' : ''}${n.friendship || 0} · Affection ${n.affection >= 0 ? '+' : ''}${n.affection || 0}`
                 : '';
+            const harmPart = (n.harm && (n.harm.current > 0 || n.harm.max !== undefined))
+                ? `\n* **Harm:** ${n.harm.current || 0}/${n.harm.max || 5}${n.harm.armor ? ` | **Armor:** ${n.harm.armor}` : ''}`
+                : '';
+            const condPart = (n.conditions && (Array.isArray(n.conditions) ? n.conditions.length : String(n.conditions).trim()))
+                ? `\n* **Conditions:** ${Array.isArray(n.conditions) ? n.conditions.join(', ') : n.conditions}`
+                : '';
+            const statusPart = n.status ? `\n* **Status:** ${n.status}` : (n.harm?.current > 0 ? '\n* **Status:** (-) Wounded' : '');
             return `### 👤 ${n.name}
-* **Role:** ${n.role || 'Ally'}${n.species ? `\n* **Species:** ${n.species}` : ''}
+* **Role:** ${n.role || 'Ally'}${n.species ? `\n* **Species:** ${n.species}` : ''}${harmPart}${statusPart}${condPart}
 * **Appearance:** ${n.appearance || 'None specified'}${n.equipment ? `\n* **Equipment:** ${n.equipment}` : ''}
 * **Demeanor:** ${n.demeanor || 'None specified'}
 * **Relationship:** ${n.relationship || 'Allied with protagonist'}${standingsLine}
@@ -1302,14 +1425,18 @@ export function serializeDossierToMarkdown(dossier) {
 
     let monstersMd = monsters.length
         ? monsters.map(m => {
-            let attacks = m.attacks.length ? m.attacks.join(', ') : 'Natural attacks';
-            let doom = m.impendingDoom.length
+            let attacks = (m.attacks && m.attacks.length) ? m.attacks.join(', ') : 'Natural attacks';
+            let doom = (m.impendingDoom && m.impendingDoom.length)
                 ? `\n  * **Countdown Clock:**\n    ${m.impendingDoom.map(d => `* ${d}`).join('\n    ')}`
                 : '';
+            const mCurHarm = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
+            const mMaxHarm = parseInt(m.harm?.max ?? m.harm, 10) || 4;
+            const harmStr = mCurHarm > 0 ? `${mCurHarm}/${mMaxHarm} (Wounded)` : `${mMaxHarm}`;
+            const statusLine = m.status ? `\n* **Status:** ${m.status}` : (mCurHarm > 0 ? '\n* **Status:** (-) Wounded' : '');
             return `### 👹 ${m.name}
-* **Harm:** ${m.harm} | **Armor:** ${m.armor}
+* **Harm:** ${harmStr} | **Armor:** ${m.armor || 0}${statusLine}
 * **Attacks:** ${attacks}
-* **Weakness:** ${m.weakness}${doom}
+* **Weakness:** ${m.weakness || 'Unknown'}${doom}
 * **Notes:** ${m.notes || 'None'}`;
         }).join('\n\n')
         : '_No adversaries staged yet._';
@@ -1365,7 +1492,7 @@ export function serializeDossierToMarkdown(dossier) {
 ## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
 * **Playbook:** ${p.playbook || 'Wanderer'}
 * **Stats:** ${statString || 'Not assigned'}
-* **Harm Capacity:** ${p.harm?.max || 5} | **Armor:** ${p.harm?.armor || 0}
+* **Harm Capacity:** ${(p.harm?.current > 0) ? `${p.harm.current}/${p.harm.max || 5} (Wounded)` : (p.harm?.max || 5)} | **Armor:** ${p.harm?.armor || 0}${(p.status || (p.harm?.current > 0 ? '(-) Wounded' : '')) ? `\n* **Status:** ${p.status || '(-) Wounded'}` : ''}${(p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) ? `\n* **Conditions:** ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}` : ''}
 * **Background Bio:** ${p.bio || 'None'}
 
 ### ⚡ Key Moves:

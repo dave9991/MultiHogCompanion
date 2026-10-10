@@ -249,6 +249,22 @@ function updateBlueprintDeck() {
     $('#mhc_deck_char_playbook').text(proto.playbook || 'In Development');
     $('#mhc_deck_char_name').text(proto.name || 'Unnamed Adventurer');
 
+    const curHarm = parseInt(proto.harm?.current, 10) || 0;
+    const maxHarm = parseInt(proto.harm?.max ?? activeDossier.config?.harmMax, 10) || 5;
+    const curHp = Math.max(0, maxHarm - curHarm);
+    if (curHarm > 0 || (proto.conditions && proto.conditions.length) || proto.status) {
+        const condList = Array.isArray(proto.conditions) ? proto.conditions : (proto.conditions ? [proto.conditions] : []);
+        const condText = condList.length ? ` · ${condList.join(', ')}` : '';
+        const statusLabel = proto.status || (curHarm > 0 ? 'Wounded' : 'Healthy');
+        $('#mhc_deck_char_vitals').html(`
+            <span class="mhc-pill" style="border-color: rgba(239, 68, 68, 0.5); color: #f87171; background: rgba(239, 68, 68, 0.1);" title="Vitals & Injuries">
+                🩸 ${curHp}/${maxHarm} HP (Harm: ${curHarm}/${maxHarm}) · ${escapeHtml(statusLabel)}${escapeHtml(condText)}
+            </span>
+        `).show();
+    } else {
+        $('#mhc_deck_char_vitals').empty().hide();
+    }
+
     const statsEl = $('#mhc_deck_char_stats');
     statsEl.empty();
     const statsObj = proto.stats && Object.keys(proto.stats).length ? proto.stats : { Might: 0, Agility: 0, Wits: 0, Heart: 0, Arcana: 0 };
@@ -276,6 +292,21 @@ function updateBlueprintDeck() {
             const rel = n.relationship ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Bond:</b> ${n.relationship}</div>` : '';
             const boons = n.movesOrBoons ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>Boons/Moves:</b> ${n.movesOrBoons}</div>` : '';
 
+            let woundBadge = '';
+            let condsHtml = '';
+            if (n.harm && (n.harm.current > 0 || n.status || (n.conditions && n.conditions.length))) {
+                const nCur = parseInt(n.harm.current, 10) || 0;
+                const nMax = parseInt(n.harm.max, 10) || 5;
+                const nHp = Math.max(0, nMax - nCur);
+                if (nCur > 0) {
+                    woundBadge = ` <span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.5); color: #f87171;">🩸 ${nHp}/${nMax} HP (${nCur}/${nMax} Harm)</span>`;
+                }
+            }
+            if (n.conditions && n.conditions.length) {
+                const condList = Array.isArray(n.conditions) ? n.conditions : [n.conditions];
+                condsHtml = `<div style="font-size: 0.8em; opacity: 0.85; color: #f87171;"><b>Conditions:</b> ${escapeHtml(condList.join(', '))}</div>`;
+            }
+
             let relControls = '';
             if (relsOn) {
                 const fVal = n.friendship ?? 0;
@@ -300,13 +331,14 @@ function updateBlueprintDeck() {
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
                         <div class="mhc-deck-item-title" style="color: var(--mhc-accent, #3b82f6);">
-                            👤 ${n.name} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${demeanor}
+                            👤 ${n.name} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${woundBadge}${demeanor}
                         </div>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
                     <div class="mhc-deck-item-detail">
                         ${app}
                         ${rel}
+                        ${condsHtml}
                         ${relControls}
                         ${boons}
                     </div>
@@ -332,11 +364,19 @@ function updateBlueprintDeck() {
             const doomLine = m.impendingDoom?.length
                 ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>⏳ Impending Doom:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${m.impendingDoom.map(d => `<li>${d}</li>`).join('')}</ul></div>`
                 : '';
+
+            const mCur = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
+            const mMax = parseInt(m.harm?.max ?? m.harm, 10) || 4;
+            const mHp = Math.max(0, mMax - mCur);
+            const harmBadge = mCur > 0
+                ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">🩸 ${mHp}/${mMax} HP (Harm: ${mCur}/${mMax}) · Wounded</span>`
+                : `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${mMax} | Armor: ${m.armor}</span>`;
+
             mList.append(`
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
                         <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
-                            👹 ${m.name} <span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${m.harm} | Armor: ${m.armor}</span> ${doomBadge}
+                            👹 ${m.name} ${harmBadge} ${doomBadge}
                         </div>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>

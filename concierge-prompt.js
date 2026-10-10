@@ -318,7 +318,7 @@ relationships: on | off
 [/CONFIG]
 
 [PROTAGONIST]
-name: Silas Vance
+name: [[NAME:protagonist]]
 playbook: The Sleuth
 stats: Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1
 moves:
@@ -338,7 +338,7 @@ notes: Details
 [/FACTION]
 
 [NPC]
-name: Character Name
+name: [[NAME:mentor]]
 role: Mentor | Patron | Merchant | Faction Contact | Companion (Party)
 species: Species / ancestry
 appearance: Distinct visual look
@@ -353,7 +353,7 @@ notes: Extra notes
 [/NPC]
 
 [MONSTER]
-name: Monster Name
+name: [[NAME:stalker]]
 harm: 4
 armor: 1
 attacks: Attack Name (Harm, range)
@@ -404,6 +404,14 @@ sample:
 [/CUSTOM_MODULE]
 [/UPDATE_DOSSIER]
 \`\`\`
+
+### 📇 Name Diversity & Unique Placeholders Directive:
+* **Never invent cliché or repetitive LLM default names** (e.g., Silas, Vance, Elidor, Lyra, Aurelia, Malachi, Thorne).
+* **If the player explicitly specifies or names a character** (e.g., "His name is John" or an imported character card): Use their exact specified name directly in \`name:\`.
+* **When inventing an un-named protagonist, NPC, or adversary:**
+  Emit a unique tagged placeholder token: \`name: [[NAME:tag]]\` (or \`[[NAME:archetype_hint]]\`).
+  Examples: \`name: [[NAME:protagonist]]\`, \`name: [[NAME:mentor]]\`, \`name: [[NAME:blacksmith]]\`, \`name: [[NAME:monster]]\`.
+  The downstream Name Diversity Engine (NameRAG) will automatically resolve each placeholder into an authentic, culturally evocative name tailored to that character's specific demeanor and backstory before updating the live campaign.
 
 ### 🏗️ Proactive Scaffolding & Delta Rules:
 1. **Turn 1 / Initial Scaffolding:** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:

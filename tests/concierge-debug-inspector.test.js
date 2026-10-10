@@ -140,6 +140,17 @@ const sampleTransaction = {
         meta: { title: 'Neon Shadows', systemKey: 'cyberpunk' },
         protagonist: { name: 'Kael', gear: ['Neural Deck'] },
     },
+    nameRagResolutions: [
+        {
+            placeholder: '[[NAME:protagonist]]',
+            tag: 'protagonist',
+            blockType: 'PROTAGONIST',
+            query: 'cyberpunk operative star pilot cyborg',
+            source: 'NameRAG (namerag-mcp)',
+            candidates: ['Kaelen', 'Vex', 'Rix'],
+            selectedName: 'Kaelen',
+        },
+    ],
 };
 
 const traceMd = formatDiagnosticTrace(sampleTransaction);
@@ -152,11 +163,15 @@ assert.ok(traceMd.includes('#### Execution Attempts:'));
 assert.ok(traceMd.includes('Attempt 1:'));
 assert.ok(traceMd.includes('Protagonist gear updated: Neural Deck'));
 assert.ok(traceMd.includes('```text\n[UPDATE_DOSSIER]'));
+assert.ok(traceMd.includes('#### 📇 Name Diversity Engine (NameRAG) Resolutions:'));
+assert.ok(traceMd.includes('[[NAME:protagonist]]'));
+assert.ok(traceMd.includes('NameRAG (namerag-mcp)'));
+assert.ok(traceMd.includes('Selected Name:** **Kaelen**'));
 assert.ok(traceMd.includes('#### Last Builder Request (Input Messages):'));
 assert.ok(traceMd.includes('You are the PbtA Blueprint Builder.'));
 assert.ok(traceMd.includes('#### Current Blueprint Snapshot (activeDossier):'));
 assert.ok(traceMd.includes('"Neon Shadows"'));
-console.log('✓ formatDiagnosticTrace constructs rich, readable Markdown traces for Antigravity debug');
+console.log('✓ formatDiagnosticTrace constructs rich, readable Markdown traces with NameRAG resolutions for Antigravity debug');
 
 // ── 5. HTML Template Element Verification ─────────────────────────────────────
 console.log('Testing HTML Template Element Integrations...');
@@ -169,6 +184,8 @@ assert.ok(modalHtml.includes('id="mhc_tab_debug"'), 'Modal must have #mhc_tab_de
 assert.ok(modalHtml.includes('id="mhc_debug_status_badge"'), 'Modal must have #mhc_debug_status_badge');
 assert.ok(modalHtml.includes('id="mhc_debug_timestamp"'), 'Modal must have #mhc_debug_timestamp');
 assert.ok(modalHtml.includes('id="mhc_debug_summary_text"'), 'Modal must have #mhc_debug_summary_text');
+assert.ok(modalHtml.includes('id="mhc_debug_namerag_count"'), 'Modal must have #mhc_debug_namerag_count');
+assert.ok(modalHtml.includes('id="mhc_debug_namerag_list"'), 'Modal must have #mhc_debug_namerag_list');
 assert.ok(modalHtml.includes('id="mhc_debug_raw_output"'), 'Modal must have #mhc_debug_raw_output');
 assert.ok(modalHtml.includes('id="mhc_debug_prompt_input"'), 'Modal must have #mhc_debug_prompt_input');
 assert.ok(modalHtml.includes('id="mhc_debug_dossier_json"'), 'Modal must have #mhc_debug_dossier_json');

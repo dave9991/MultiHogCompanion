@@ -73,7 +73,209 @@ export async function rollNameRagCandidate(genre = 'fantasy', classHint = '') {
 }
 
 /**
+ * Extracts all [[NAME:...]] or [[NAME]] placeholder tokens from raw text.
+ * @param {string} text
+ * @returns {Array<{ token: string, tag: string }>}
+ */
+export function extractNamePlaceholders(text) {
+    if (!text || typeof text !== 'string') return [];
+    const matches = [];
+    const seen = new Set();
+    const regex = /\[\[NAME(?::\s*([^\]]+))?\]\]/gi;
+    let m;
+    while ((m = regex.exec(text)) !== null) {
+        const token = m[0];
+        if (!seen.has(token)) {
+            seen.add(token);
+            matches.push({
+                token,
+                tag: (m[1] || '').trim(),
+            });
+        }
+    }
+    return matches;
+}
+
+/**
+ * Extracts surrounding entity context (role, playbook, species, background, demeanor, notes)
+ * from a raw [UPDATE_DOSSIER] block for a given placeholder token.
+ * @param {string} rawText
+ * @param {string} token
+ * @returns {{ blockType: string, contextSummary: string }}
+ */
+export function extractContextForPlaceholder(rawText, token) {
+    if (!rawText || !token) return { blockType: 'general', contextSummary: '' };
+
+    // Find the enclosing block containing this token
+    const blockRegex = /\[(PROTAGONIST|NPC|MONSTER)(?::\s*[^\]]+)?\]([\s\S]*?)(?:\[\/\1\]|$)/gi;
+    let bMatch;
+    while ((bMatch = blockRegex.exec(rawText)) !== null) {
+        const blockType = bMatch[1].toUpperCase();
+        const blockContent = bMatch[2];
+        if (blockContent.includes(token)) {
+            const lines = blockContent.split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(l => l && !l.includes(token) && !l.startsWith('moves:'));
+            return {
+                blockType,
+                contextSummary: lines.slice(0, 8).join(' '),
+            };
+        }
+    }
+
+    return { blockType: 'general', contextSummary: '' };
+}
+
+/**
+ * Builds a search query from placeholder metadata, surrounding entity text, and campaign setting.
+ * @param {object} opts
+ * @param {string} opts.tag
+ * @param {string} opts.genre
+ * @param {string} opts.blockType
+ * @param {string} opts.contextSummary
+ * @returns {string}
+ */
+export function buildQueryFromPlaceholderContext({ tag = '', genre = 'fantasy', blockType = '', contextSummary = '' } = {}) {
+    const genreBase = GENRE_QUERY_MAP[genre?.toLowerCase()] || GENRE_QUERY_MAP.fantasy;
+    const pieces = [genreBase];
+
+    if (tag) pieces.push(tag.replace(/_/g, ' '));
+    if (blockType && blockType !== 'GENERAL') pieces.push(blockType.toLowerCase());
+
+    if (contextSummary) {
+        // Strip common field prefixes to keep pure evocative words
+        const cleaned = contextSummary
+            .replace(/\b(playbook|role|species|demeanor|background|relationship|notes|attacks|weakness|gear|bio|appearance):\s*/gi, ' ')
+            .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !['and', 'the', 'for', 'with', 'from'].includes(w.toLowerCase()))
+            .slice(0, 15)
+            .join(' ');
+        if (cleaned) pieces.push(cleaned);
+    }
+
+    return pieces.filter(Boolean).join(' ').trim();
+}
+
+/**
+ * Resolves all [[NAME:...]] placeholders across raw Builder output by performing
+ * targeted NameRAG searches per entity, gracefully falling back to offline pools if unavailable.
+ *
+ * @param {string} rawBuilderOutput Raw LLM output containing [UPDATE_DOSSIER]
+ * @param {object} activeDossier Current campaign dossier for genre and premise context
+ * @param {object} [options]
+ * @param {boolean} [options.returnDetails=false] If true, returns { text: string, resolutions: Array<object> }
+ * @returns {Promise<string|{ text: string, resolutions: Array<object> }>} The raw output with all [[NAME:...]] tokens resolved to unique names
+ */
+export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDossier = {}, { returnDetails = false } = {}) {
+    const emptyResult = returnDetails ? { text: rawBuilderOutput, resolutions: [] } : rawBuilderOutput;
+    if (!rawBuilderOutput || typeof rawBuilderOutput !== 'string') return emptyResult;
+
+    const placeholders = extractNamePlaceholders(rawBuilderOutput);
+    if (placeholders.length === 0) return emptyResult;
+
+    // Detect genre from output or active dossier
+    const sysMatch = rawBuilderOutput.match(/system\s*:\s*([^\n\r]+)/i);
+    const genre = (sysMatch ? sysMatch[1].trim() : (activeDossier?.meta?.systemKey || activeDossier?.meta?.system || 'fantasy')).toLowerCase();
+
+    // Check NameRAG availability
+    let nameRagAvailable = false;
+    let activeServerName = null;
+    try {
+        const discovery = await discoverNameRagServer();
+        nameRagAvailable = !!(discovery?.available && discovery?.serverName);
+        activeServerName = discovery?.serverName || null;
+    } catch (_) {}
+
+    // Track names already used in this dossier to guarantee zero intra-campaign duplicates
+    const usedNames = new Set();
+    if (activeDossier?.protagonist?.name) usedNames.add(activeDossier.protagonist.name.toLowerCase());
+    (activeDossier?.npcs || []).forEach(n => n.name && usedNames.add(n.name.toLowerCase()));
+    (activeDossier?.monsters || []).forEach(m => m.name && usedNames.add(m.name.toLowerCase()));
+
+    let resolvedOutput = rawBuilderOutput;
+    const resolutions = [];
+
+    for (const ph of placeholders) {
+        const { blockType, contextSummary } = extractContextForPlaceholder(rawBuilderOutput, ph.token);
+        const query = buildQueryFromPlaceholderContext({
+            tag: ph.tag,
+            genre,
+            blockType,
+            contextSummary,
+        });
+
+        let chosenName = null;
+        let candidatePool = [];
+        let source = nameRagAvailable ? `NameRAG (${activeServerName || 'MCP'})` : 'Offline Fallback Pool';
+
+        if (nameRagAvailable) {
+            try {
+                const results = await searchNames({ query, limit: 6 });
+                if (Array.isArray(results) && results.length > 0) {
+                    candidatePool = results.map(r => r?.name).filter(Boolean);
+                    const candidate = results.find(r => r?.name && !usedNames.has(r.name.toLowerCase()));
+                    if (candidate) {
+                        chosenName = candidate.name.trim();
+                    } else if (results[0]?.name) {
+                        chosenName = results[0].name.trim();
+                    }
+                }
+            } catch (err) {
+                console.warn('[MultiHog Companion] Targeted NameRAG search failed for placeholder:', ph.token, err);
+                source = 'Offline Fallback (Error)';
+            }
+        }
+
+        // Offline fallback if NameRAG didn't resolve a name
+        if (!chosenName) {
+            source = source.includes('Error') ? source : 'Offline Fallback Pool';
+            try {
+                const mod = await import('../SillyTavern-MultihogDnDFramework/src/state/character-names.js');
+                if (typeof mod?.pickGenreCharacterName === 'function') {
+                    for (let i = 0; i < 5; i++) {
+                        const fallback = mod.pickGenreCharacterName(genre);
+                        if (fallback && !candidatePool.includes(fallback)) candidatePool.push(fallback);
+                        if (fallback && !usedNames.has(fallback.toLowerCase())) {
+                            chosenName = fallback;
+                            break;
+                        }
+                    }
+                }
+            } catch (_) {}
+        }
+
+        if (!chosenName) {
+            const defaultPool = ['Kaelen', 'Theron', 'Kaelis', 'Bryn', 'Maren', 'Sariel', 'Corin', 'Vael'];
+            candidatePool = defaultPool.slice(0, 5);
+            chosenName = defaultPool.find(n => !usedNames.has(n.toLowerCase())) || 'Kaelen';
+        }
+
+        usedNames.add(chosenName.toLowerCase());
+
+        // Perform exact replacement across the entire text
+        resolvedOutput = resolvedOutput.split(ph.token).join(chosenName);
+
+        resolutions.push({
+            placeholder: ph.token,
+            tag: ph.tag || 'general',
+            blockType,
+            query,
+            source,
+            candidates: candidatePool,
+            selectedName: chosenName,
+        });
+    }
+
+    if (returnDetails) {
+        return { text: resolvedOutput, resolutions };
+    }
+    return resolvedOutput;
+}
+
+/**
  * Fetches a batch of NameRAG candidate names and formats them into a prompt seed block for Concierge Session Zero.
+ * (Maintained for legacy/fallback single-prompt compatibility)
  * @param {object} opts
  * @param {string} opts.genre
  * @param {string} [opts.premise]

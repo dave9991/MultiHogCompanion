@@ -8,16 +8,24 @@ import {
     NAMERAG_SYSPROMPT_ID,
     syncNameRagAdhocSysprompt,
     buildNameRagSeedsForConcierge,
+    extractNamePlaceholders,
+    extractContextForPlaceholder,
+    buildQueryFromPlaceholderContext,
+    resolveDossierNamePlaceholders,
 } from '../namerag-hooks.js';
-import { buildConciergeSystemPrompt } from '../concierge-prompt.js';
+import { buildConciergeSystemPrompt, buildConciergeBuilderPrompt } from '../concierge-prompt.js';
 
 console.log('--- Running NameRAG Integration & Diversity Test Suite ---');
 
-// 1. Verify Concierge prompt includes NAME_DIVERSITY_SEEDS directive
+// 1. Verify Concierge prompts include anti-repetition guidance and Builder directives
 const prompt = buildConciergeSystemPrompt();
 assert.ok(prompt.includes('[NAME_DIVERSITY_SEEDS]'), 'Concierge prompt should contain NAME_DIVERSITY_SEEDS guideline');
 assert.ok(prompt.includes('repetitive LLM name tropes'), 'Prompt should instruct to avoid repetitive LLM clichés');
-console.log('✓ Concierge prompt includes NAME_DIVERSITY_SEEDS directive and anti-repetition guidance');
+
+const builderPrompt = buildConciergeBuilderPrompt();
+assert.ok(builderPrompt.includes('[[NAME:'), 'Builder prompt must document unique placeholder tokens [[NAME:tag]]');
+assert.ok(builderPrompt.includes('Never invent cliché or repetitive LLM default names'), 'Builder prompt must instruct against cliché default names');
+console.log('✓ Concierge & Builder prompts include anti-repetition guidance and unique placeholder directives');
 
 // 2. Test parseNameRagOutput with various MCP payload structures
 console.log('Testing parseNameRagOutput parsing resilience...');
@@ -150,5 +158,129 @@ assert.strictEqual(okDisc.available, true);
 assert.strictEqual(okDisc.serverName, 'namerag-mcp');
 assert.strictEqual(okDisc.isRunning, true);
 console.log('✓ Discovery dynamically identifies server providing search_names with zero hardcoded addresses');
+
+// 7. Test placeholder extraction & context extraction
+console.log('Testing placeholder extraction & context parsing...');
+const sampleBlueprint = `[UPDATE_DOSSIER]
+[PROTAGONIST]
+name: [[NAME:protagonist]]
+playbook: The Sleuth
+demeanor: Cynical and watchful
+bio: Former detective investigating occult crimes.
+[/PROTAGONIST]
+[NPC]
+name: [[NAME:mentor]]
+role: Mentor
+species: Dwarf
+background: Veteran runemith who forged the silver seal.
+[/NPC]
+[MONSTER]
+name: [[NAME:stalker]]
+attacks: Razor Claws (3 Harm)
+[/MONSTER]
+[/UPDATE_DOSSIER]`;
+
+const placeholders = extractNamePlaceholders(sampleBlueprint);
+assert.strictEqual(placeholders.length, 3);
+assert.strictEqual(placeholders[0].token, '[[NAME:protagonist]]');
+assert.strictEqual(placeholders[0].tag, 'protagonist');
+assert.strictEqual(placeholders[1].token, '[[NAME:mentor]]');
+assert.strictEqual(placeholders[1].tag, 'mentor');
+assert.strictEqual(placeholders[2].token, '[[NAME:stalker]]');
+
+const protoCtx = extractContextForPlaceholder(sampleBlueprint, '[[NAME:protagonist]]');
+assert.strictEqual(protoCtx.blockType, 'PROTAGONIST');
+assert.ok(protoCtx.contextSummary.includes('Sleuth'));
+assert.ok(protoCtx.contextSummary.includes('occult'));
+
+const query = buildQueryFromPlaceholderContext({
+    tag: 'mentor',
+    genre: 'fantasy',
+    blockType: 'NPC',
+    contextSummary: 'Veteran runemith who forged the silver seal.',
+});
+assert.ok(query.includes('fantasy'));
+assert.ok(query.includes('mentor'));
+assert.ok(query.includes('runemith'));
+console.log('✓ Unique placeholders, entity contexts, and targeted queries extracted accurately');
+
+// 8. Test resolveDossierNamePlaceholders with mocked NameRAG server
+console.log('Testing resolveDossierNamePlaceholders with mocked NameRAG responses...');
+globalThis.fetch = async (url, opts) => {
+    if (url.includes('/call-tool')) {
+        const body = JSON.parse(opts.body);
+        const q = body.arguments.query;
+        if (q.includes('protagonist') || q.includes('Sleuth')) {
+            return {
+                ok: true,
+                json: async () => ({
+                    result: [
+                        { name: 'Kaelen Valerius', vibe: 'cynical noir investigator' },
+                    ],
+                }),
+            };
+        }
+        if (q.includes('mentor') || q.includes('runemith')) {
+            return {
+                ok: true,
+                json: async () => ({
+                    result: [
+                        { name: 'Thorgar Ironbeard', vibe: 'gruff dwarf runemaster' },
+                    ],
+                }),
+            };
+        }
+        return {
+            ok: true,
+            json: async () => ({
+                result: [
+                    { name: 'Morvath', vibe: 'night stalker' },
+                ],
+            }),
+        };
+    }
+    return {
+        ok: true,
+        json: async () => [
+            {
+                name: 'namerag-mcp',
+                isRunning: true,
+                cachedTools: [{ name: 'search_names' }],
+            },
+        ],
+    };
+};
+
+const resolvedOutput = await resolveDossierNamePlaceholders(sampleBlueprint, {
+    meta: { systemKey: 'fantasy' },
+});
+assert.ok(!resolvedOutput.includes('[[NAME:'), 'All [[NAME:...]] placeholders must be resolved');
+assert.ok(resolvedOutput.includes('name: Kaelen Valerius'), 'Protagonist name resolved to NameRAG candidate');
+assert.ok(resolvedOutput.includes('name: Thorgar Ironbeard'), 'Mentor name resolved to NameRAG candidate');
+assert.ok(resolvedOutput.includes('name: Morvath'), 'Monster name resolved to NameRAG candidate');
+console.log('✓ Targeted NameRAG resolution pipeline successfully replaced all placeholders without collisions');
+
+// 9. Test resolveDossierNamePlaceholders offline fallback
+console.log('Testing resolveDossierNamePlaceholders offline fallback...');
+globalThis.fetch = async () => ({
+    ok: false,
+    status: 500,
+});
+// Force discovery cache refresh
+await discoverNameRagServer(true);
+
+const offlineBlueprint = `[UPDATE_DOSSIER]
+[PROTAGONIST]
+name: [[NAME:wanderer]]
+playbook: The Wanderer
+[/PROTAGONIST]
+[/UPDATE_DOSSIER]`;
+
+const offlineResolved = await resolveDossierNamePlaceholders(offlineBlueprint, {
+    meta: { systemKey: 'fantasy' },
+});
+assert.ok(!offlineResolved.includes('[[NAME:'), 'Offline fallback must resolve placeholders completely');
+assert.ok(/name:\s+[A-Za-z]+/.test(offlineResolved), 'A clean replacement name must be assigned');
+console.log('✓ Offline fallback cleanly populates names without leaving placeholder tokens');
 
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

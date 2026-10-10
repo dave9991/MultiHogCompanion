@@ -47,7 +47,7 @@ import {
 } from './concierge-parser.js';
 import { launchPbtaCampaign } from './concierge-runner.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
-import { buildNameRagSeedsForConcierge } from './namerag-hooks.js';
+import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders } from './namerag-hooks.js';
 import { extension_settings } from '../../../extensions.js';
 
 const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
@@ -677,7 +677,7 @@ async function handleUserSend() {
         if (!activeNameRagSeeds && extension_settings?.multihog_companion?.nameRagEnhanceConcierge !== false && extension_settings?.multihog_companion?.enableNameRag !== false) {
             try {
                 activeNameRagSeeds = await buildNameRagSeedsForConcierge({
-                    genre: activeDossier?.meta?.system || 'fantasy',
+                    genre: activeDossier?.meta?.systemKey || activeDossier?.meta?.system || 'fantasy',
                     premise: activeDossier?.meta?.premise || '',
                     limit: 8,
                 });
@@ -725,14 +725,35 @@ async function handleUserSend() {
         let currentBuilderMessages = [...builderMessages];
         const diagnosticAttempts = [];
 
+        let latestNameRagResolutions = [];
+
         while (builderAttempts < maxBuilderAttempts) {
             builderAttempts++;
             builderRawResponse = await sendConciergeRequest(currentBuilderMessages);
+            const preNameRagResponse = builderRawResponse;
+            let turnNameRagResolutions = [];
+
+            // Resolve unique Name Diversity placeholders ([[NAME:...]]) via NameRAG before parsing
+            if (extension_settings?.multihog_companion?.enableNameRag !== false) {
+                try {
+                    const resolved = await resolveDossierNamePlaceholders(builderRawResponse, activeDossier, { returnDetails: true });
+                    builderRawResponse = resolved.text;
+                    turnNameRagResolutions = resolved.resolutions || [];
+                    if (turnNameRagResolutions.length > 0) {
+                        latestNameRagResolutions = turnNameRagResolutions;
+                    }
+                } catch (resErr) {
+                    console.warn('[MultiHog Companion] Placeholder name resolution error:', resErr);
+                }
+            }
+
             builderReport = applyDossierUpdates(builderRawResponse, activeDossier);
 
             diagnosticAttempts.push({
                 attempt: builderAttempts,
                 rawResponse: builderRawResponse,
+                rawResponseBeforeNameRag: preNameRagResponse,
+                nameRagResolutions: turnNameRagResolutions,
                 errors: builderReport.errors,
                 hasMutations: builderReport.hasMutations,
                 isNoop: builderReport.isNoop,
@@ -804,6 +825,7 @@ async function handleUserSend() {
             attempts: diagnosticAttempts,
             finalStatus,
             builderSummary: builderSummaryText,
+            nameRagResolutions: latestNameRagResolutions,
             activeDossierSnapshot: JSON.parse(JSON.stringify(activeDossier)),
         };
         window._mhcLastBuilderTransaction = transactionRecord;
@@ -1385,6 +1407,8 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     const modalAttempts = $('#mhc_debug_attempt_count');
     const modalPrompt = $('#mhc_debug_prompt_input');
     const modalDossier = $('#mhc_debug_dossier_json');
+    const modalNameRagCount = $('#mhc_debug_namerag_count');
+    const modalNameRagList = $('#mhc_debug_namerag_list');
 
     // 2. Settings Drawer Elements
     const settingsBadge = $('#mhc_settings_debug_badge');
@@ -1399,6 +1423,8 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
         modalSummary.text('No build transactions recorded yet.');
         modalChanges.empty();
         modalErrors.empty();
+        modalNameRagCount.text('0 resolved').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc' });
+        modalNameRagList.html('<div style="opacity: 0.6; font-style: italic;">No name placeholders resolved in this transaction.</div>');
         modalRaw.text('(No raw Builder response captured yet)');
         modalAttempts.text('Attempt 0/2');
         modalPrompt.text('(No prompt recorded yet)');
@@ -1454,6 +1480,31 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     const errors = lastAttempt?.report?.errors || lastAttempt?.errors || [];
     if (errors.length) {
         modalErrors.html(`<b>Errors:</b> ${errors.map(e => `⚠️ ${escapeHtml(e)}`).join('; ')}`);
+    }
+
+    // Name Diversity Engine (NameRAG) Resolutions
+    const resolutions = tx.nameRagResolutions || lastAttempt?.nameRagResolutions || [];
+    if (resolutions.length > 0) {
+        modalNameRagCount.text(`${resolutions.length} resolved`).css({ background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8' });
+        const itemsHtml = resolutions.map((r, i) => {
+            const candidatesStr = (r.candidates && r.candidates.length)
+                ? r.candidates.map(c => c === r.selectedName ? `<b style="color: #4ade80;">${escapeHtml(c)} (picked)</b>` : escapeHtml(c)).join(', ')
+                : '(none returned)';
+            return `
+                <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 4px; padding: 6px 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                        <span style="font-weight: 600; color: #facc15;">${escapeHtml(r.placeholder)}</span>
+                        <span style="font-size: 0.85em; opacity: 0.75;">${escapeHtml(r.source || 'NameRAG')}</span>
+                    </div>
+                    <div style="color: #94a3b8; font-size: 0.9em; margin-bottom: 2px;"><b>Query:</b> <i>"${escapeHtml(r.query || '')}"</i></div>
+                    <div style="color: #cbd5e1; font-size: 0.9em;"><b>Pool:</b> ${candidatesStr}</div>
+                </div>
+            `;
+        }).join('');
+        modalNameRagList.html(itemsHtml);
+    } else {
+        modalNameRagCount.text('0 resolved').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc' });
+        modalNameRagList.html('<div style="opacity: 0.6; font-style: italic;">No name placeholders resolved in this transaction.</div>');
     }
 
     modalRaw.text(rawText);

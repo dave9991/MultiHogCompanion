@@ -1792,6 +1792,19 @@ export function formatDiagnosticTrace(tx) {
             ].join('\n');
         }),
         '',
+        '#### 📇 Name Diversity Engine (NameRAG) Resolutions:',
+        ...(() => {
+            const res = tx.nameRagResolutions || [];
+            if (!res.length) return ['*(No name placeholders resolved in this transaction)*'];
+            return res.map((r, i) => [
+                `* **[${i + 1}] ${r.placeholder}** (${r.tag}, ${r.blockType})`,
+                `  - **Source:** ${r.source || 'NameRAG'}`,
+                `  - **Search Query:** "${r.query || ''}"`,
+                `  - **Pool Candidates:** ${(r.candidates && r.candidates.length) ? r.candidates.join(', ') : '(none)'}`,
+                `  - **Selected Name:** **${r.selectedName}**`,
+            ].join('\n'));
+        })(),
+        '',
         '#### Last Builder Request (Input Messages):',
         '```json',
         JSON.stringify(tx.builderRequest?.messages || [], null, 2),

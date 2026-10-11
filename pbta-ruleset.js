@@ -555,6 +555,7 @@ You must generate exactly 5 choices following narrative context:
 
     return `[END OF OUTPUT REQUIREMENT]
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for the user. NEVER forget the choices.
+- Output sequence: (1) Scene narrative -> (2) <choices> block -> (3) Status footer.
 - Enclose all choices inside a single <choices> XML block.
 - Wrap every single choice in a <button> tag.${emojiLine}
 - NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), Armor Class ("vs AC 15"), or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ Full Success | 7–9 Mixed Success | 6- Miss).
@@ -794,7 +795,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_footer',
             tag: 'end_of_output_footer',
-            content: `<end_of_output_footer>\nALWAYS end every narrative output with:\n*(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*\nFooter shows ONLY {{user}}'s Harm/XP/Hold/location — never party or NPC status.\n</end_of_output_footer>`,
+            content: `<end_of_output_footer>\nOutput immediately after the narrative prose and choices:\n*(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*\nFooter shows ONLY {{user}}'s Harm/XP/Hold/location — never party or NPC status.\n</end_of_output_footer>`,
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',

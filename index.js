@@ -46,6 +46,15 @@ import {
     checkAndSyncTierCrossovers,
     getRelationshipSyncStatus,
 } from './relationship-narrative-sync.js';
+import {
+    initCyoaGuardian,
+    interceptCyoaSteering,
+    registerCyoaSlashCommands,
+    tryRepairMarkdownChoices,
+    applyRepairedMessage,
+    armCyoaSteeringReminder,
+    triggerSwipeRight,
+} from './cyoa-guardian.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -69,6 +78,9 @@ const DEFAULT_SETTINGS = {
     nameRagAdhocSysprompt: true,
     conciergeDebugMode: false,
     enableRelationshipNarrativeSync: true,
+    enableCyoaAutoRetry: true,
+    cyoaMaxRetries: 1,
+    enableCyoaMarkdownAutoRepair: true,
 };
 
 function getSettings() {
@@ -1694,6 +1706,62 @@ async function initUI() {
         });
 
         renderDebugInspectorView();
+
+        // ── 8. CYOA Guardian Controls ──
+        const cyoaAutoRetryCb = $('#mhc_cyoa_auto_retry_enable');
+        const cyoaAutoRepairCb = $('#mhc_cyoa_auto_repair_enable');
+        const cyoaAutoSwipeCb = $('#mhc_cyoa_auto_swipe_enable');
+
+        cyoaAutoRetryCb.prop('checked', current.enableCyoaAutoRetry !== false || current.enableCyoaMarkdownAutoRepair !== false);
+        cyoaAutoRepairCb.prop('checked', current.enableCyoaMarkdownAutoRepair !== false);
+        cyoaAutoSwipeCb.prop('checked', current.enableCyoaAutoRetry !== false);
+
+        cyoaAutoRetryCb.on('change', function () {
+            const val = $(this).is(':checked');
+            updateSettings({ enableCyoaAutoRetry: val, enableCyoaMarkdownAutoRepair: val });
+            cyoaAutoRepairCb.prop('checked', val);
+            cyoaAutoSwipeCb.prop('checked', val);
+        });
+
+        cyoaAutoRepairCb.on('change', function () {
+            updateSettings({ enableCyoaMarkdownAutoRepair: $(this).is(':checked') });
+        });
+
+        cyoaAutoSwipeCb.on('change', function () {
+            updateSettings({ enableCyoaAutoRetry: $(this).is(':checked') });
+        });
+
+        $('#mhc_cyoa_manual_repair_btn').on('click', async function () {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+            const chat = ctx?.chat;
+            if (!Array.isArray(chat) || chat.length === 0) {
+                showToast('warning', 'No messages in chat to repair.', 'CYOA Guardian');
+                return;
+            }
+            const lastIdx = chat.length - 1;
+            const lastMsg = chat[lastIdx];
+            if (lastMsg.is_user || lastMsg.is_system) {
+                showToast('warning', 'Latest message is not from the narrator.', 'CYOA Guardian');
+                return;
+            }
+            const repaired = tryRepairMarkdownChoices(lastMsg.mes);
+            if (repaired) {
+                await applyRepairedMessage(lastIdx, repaired);
+                showToast('success', 'Converted markdown choices into CYOA buttons! 🧭', 'CYOA Guardian');
+            } else {
+                showToast('warning', 'No markdown choices found to convert. Use re-roll instead.', 'CYOA Guardian');
+            }
+        });
+
+        $('#mhc_cyoa_manual_retry_btn').on('click', async function () {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+            const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+            const pbtaActive = isPbtAActive();
+            const choiceCount = pbtaActive && (rpgSettings?.cyoaConfig?.playstyle === 'cyoa_3') ? 3 : 5;
+            armCyoaSteeringReminder({ isPbta: pbtaActive, choiceCount });
+            showToast('info', 'Swiping with CYOA steering reminder... 🎲', 'CYOA Guardian');
+            await triggerSwipeRight();
+        });
     } catch (err) {
         console.error('[MultiHog Companion] Failed to load UI template:', err);
     }
@@ -1749,8 +1817,13 @@ function buildPbtA2d6Block(lineCount = 12) {
  * Registered on globalThis via the manifest's generate_interceptor field.
  */
 function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
-    if (!isPbtAActive()) return;
     if (!Array.isArray(chat)) return;
+
+    // 1. CYOA Guardian: Inject steering reminder if armed (works for both D&D and PbtA)
+    interceptCyoaSteering(chat);
+
+    // 2. PbtA RNG Queue replacement
+    if (!isPbtAActive()) return;
 
     // MultiHog prepends its RNG block into the last user message's content.
     // Find it and replace with our clean 2d6 block.
@@ -1920,9 +1993,13 @@ jQuery(async () => {
             },
             helpString: '<div>Synchronizes MultiHog NPC relationships and campaign lorebooks.</div>',
         }));
+
+        registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive, showToast });
     }
 
     // 4. Register Event Listeners
+    initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSource, event_types });
+
     if (event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, setupImagineInterceptor);
     }

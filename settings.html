@@ -457,6 +457,54 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ── 8. CYOA Guardian (Choice Recovery & Repair) ── -->
+            <div id="mhc_cyoa_guardian_section" class="inline-drawer mhc-cyoa-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
+                    <label class="checkbox_label" title="Enable CYOA Guardian to catch and auto-recover omitted choices for both D&amp;D and PbtA" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                        <input id="mhc_cyoa_auto_retry_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
+                        <span style="font-size: 0.9em;"><b>🧭 CYOA Guardian:</b> Choice Recovery &amp; Repair</span>
+                    </label>
+                    <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand CYOA Guardian settings">
+                        <span id="mhc_cyoa_guardian_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); white-space: nowrap;">Active</span>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
+                    </div>
+                </div>
+
+                <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                    <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
+                        Monitors narrator responses for both <b>D&amp;D 5e</b> and <b>PbtA</b>. If the model drops the CYOA buttons (due to attention drift or footer collision), Guardian automatically recovers them.
+                    </p>
+
+                    <!-- Auto-Repair Markdown Choices -->
+                    <div class="mhc-setting-row" style="margin-bottom: 6px;">
+                        <label class="checkbox_label" title="If the model outputs numbered choices in plain text or markdown without button tags, automatically convert them into interactive CYOA buttons without wasting a re-roll" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_cyoa_auto_repair_enable" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>Instant Markdown Repair:</b> Auto-wrap plain text choices into buttons</span>
+                        </label>
+                    </div>
+
+                    <!-- Auto-Swipe with Steering Reminder -->
+                    <div class="mhc-setting-row" style="margin-bottom: 6px;">
+                        <label class="checkbox_label" title="If the model completely forgets choices, automatically generate a swipe with a high-priority steering reminder" style="display: flex; align-items: center; cursor: pointer;">
+                            <input id="mhc_cyoa_auto_swipe_enable" type="checkbox" style="margin-right: 8px;">
+                            <span style="font-size: 0.85em;"><b>Auto-Swipe with Reminder:</b> Re-roll with strict formatting reminder</span>
+                        </label>
+                    </div>
+
+                    <!-- Manual Actions Sub-bar -->
+                    <div style="display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <button type="button" id="mhc_cyoa_manual_repair_btn" class="menu_button interactable" style="flex: 1; font-size: 0.78em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="Scan latest narrator message and convert markdown choices to buttons (/cyoafix)">
+                            <i class="fa-solid fa-wrench"></i>
+                            <span>Repair Last Turn (/cyoafix)</span>
+                        </button>
+                        <button type="button" id="mhc_cyoa_manual_retry_btn" class="menu_button interactable" style="flex: 1; font-size: 0.78em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="Swipe latest message with CYOA steering reminder (/cyoaretry)">
+                            <i class="fa-solid fa-rotate-right"></i>
+                            <span>Re-roll with Reminder (/cyoaretry)</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>

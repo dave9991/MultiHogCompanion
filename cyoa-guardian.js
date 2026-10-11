@@ -143,8 +143,8 @@ export function tryRepairMarkdownChoices(text) {
  */
 export function armCyoaSteeringReminder({ isPbta = false, choiceCount = 5 }) {
     const example = isPbta
-        ? `<choices>\n<button>1. ⚔️ Strike with blade — [Hack & Slash (+Might)]</button>\n<button>2. 🗣️ Attempt to reason with them — [Parley (+Heart)]</button>\n<button>3. 🚪 Fall back toward the entrance</button>\n</choices>`
-        : `<choices>\n<button>1. ⚔️ Attack the target — [Attack (+5) vs AC 14]</button>\n<button>2. 🗣️ Persuade the guard — [Persuasion (+3) DC 12]</button>\n<button>3. 🚪 Fall back toward the entrance</button>\n</choices>`;
+        ? `<choices>\n<button>1. ⚡ Take direct action to address the situation — [Move Name (+Stat)]</button>\n<button>2. 💬 "What's your read on this? Does anything feel off to you?"</button>\n<button>3. 🔍 Scan the surrounding area for anyone watching or listening in</button>\n</choices>`
+        : `<choices>\n<button>1. ⚡ Take direct action to engage the target — [Attack (+5) vs AC 14]</button>\n<button>2. 💬 "Hold on. Let's talk before anyone does something reckless." — [Persuasion (+3) DC 12]</button>\n<button>3. 🔍 Scan the surrounding area for hidden threats or escape routes</button>\n</choices>`;
 
     _pendingSteeringReminder = `\n\n[CRITICAL GM FORMATTING REQUIREMENT]
 Your previous response failed because it omitted the required CYOA choice buttons.

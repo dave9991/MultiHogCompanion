@@ -184,7 +184,7 @@ const injectedPbta = interceptCyoaSteering(chatPbta);
 assert.strictEqual(injectedPbta, true, 'Interception should inject into user message');
 assert.ok(chatPbta[2].mes.includes('[CRITICAL GM FORMATTING REQUIREMENT]'), 'User message contains reminder');
 assert.ok(chatPbta[2].mes.includes('exactly 3 choices'), 'PbtA specifies 3 choices');
-assert.ok(chatPbta[2].mes.includes('[Hack & Slash (+Might)]'), 'PbtA includes move example');
+assert.ok(chatPbta[2].mes.includes('[Move Name (+Stat)]'), 'PbtA includes genre-agnostic move template');
 
 // Reminder should be cleared after one injection
 const secondPbtaPass = interceptCyoaSteering(chatPbta);

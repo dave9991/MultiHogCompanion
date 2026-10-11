@@ -523,7 +523,19 @@ export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
     }
 
     if (!buttonList || buttonList.length === 0) {
-        buttonList = ['1. ⚔️ Leap forward with blade drawn to strike the beast — [Hack & Slash (+Might)]'];
+        buttonList = playstyle === 'cyoa_3'
+            ? [
+                '1. ⚡ Take direct, decisive action to engage the challenge — [Move Name (+Stat)]',
+                '2. 💬 "What\'s your read on this? Does anything feel off to you?"',
+                '3. 🔍 Scan the surrounding area for anyone watching or listening in',
+            ]
+            : [
+                '1. ⚡ Take direct, decisive action to engage the challenge — [Move Name (+Stat)]',
+                '2. 💬 "What\'s your read on this? Does anything feel off to you?"',
+                '3. 🔍 Scan the surrounding area for anyone watching or listening in',
+                '4. ☕ Take a moment to rest and observe before making a decision',
+                '5. 📜 Review the situation and consider an alternative approach',
+            ];
     }
 
     // Slice to desired choice count
@@ -535,25 +547,24 @@ export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
 
     const exampleButtons = buttonList.map(e => `<button>${e}</button>`).join('\n');
     const examples = `<choices>\n${exampleButtons}\n</choices>`;
-    const displayLabel = overrides.systemLabel || overrides.name || genre.label;
 
     const emojiLine = cyoaEmojis ? '\n- Prefix each choice text with a fitting emoji.' : '';
 
     const orderInstructions = playstyle === 'cyoa_3'
         ? `STRICT GENERATION ORDER:
 You must generate exactly 3 choices following narrative context:
-1. MOVE TRIGGER / ACTION: Action leveraging a Move, physical maneuver, or high-stakes check.
-2. CONVERSATIONAL / INQUIRY: Dialogue, interrogation, probing for clues, or social leverage.
-3. TACTICAL / CAUTIOUS: Observation, positioning, fallback, stealth, or defensive preparation.`
+1. PRIMARY ACTION / MOVE: Decisive action (at most 1 move trigger — [Move (+Stat)] if scene tension warrants, otherwise narrative action).
+2. CONVERSATIONAL / INQUIRY: Dialogue, questions, social leverage, or probing intentions (ZERO moves or dice).
+3. TACTICAL / CAUTION: Observation, positioning, fallback, or defensive preparation (ZERO moves or dice).`
         : `STRICT GENERATION ORDER:
 You must generate exactly 5 choices following narrative context:
-1. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-2. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-3. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-4. NARRATIVE-DECIDED (Choose whichever format fits the story best).
-5. NARRATIVE-DECIDED (Choose whichever format fits the story best).`;
+1. PRIMARY ACTION / MOVE: Decisive action (at most 1 move trigger — [Move (+Stat)] if scene tension warrants, otherwise narrative action).
+2. CONVERSATIONAL / INQUIRY: Dialogue, questioning, social leverage, or spoken discussion in quotes (ZERO moves or dice).
+3. PERCEPTION / OBSERVATION: Inspecting details, sensing the atmosphere, searching, or scanning surroundings (ZERO moves or dice).
+4. TACTICAL / CAUTION: Positioning, taking cover, defensive readiness, or waiting for an opening (ZERO moves or dice).
+5. DOWNTIME / ALTERNATIVE: Consulting records, resting, tending gear, regrouping, or pursuing another lead (ZERO moves or dice).`;
 
-    return `[END OF OUTPUT REQUIREMENT]
+    return `[INTERACTIVE CHOICE BUTTONS]
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for the user. NEVER forget the choices.
 - Output sequence: (1) Scene narrative -> (2) <choices> block -> (3) Status footer.
 - Enclose all choices inside a single <choices> XML block.
@@ -577,7 +588,7 @@ TENSION-ADAPTIVE MOVE PACING:
     1 to 2 choices may trigger tactical Moves (e.g. melee, ranged, spells/tech), while the remaining choices provide tactical maneuvers, taking cover, positioning, or spoken commands (no move tags).
 - NEVER OVERLOAD: Never offer more than 2 choices with moves even in deadly combat. Most choices should always be narrative or conversational options.
 
-EXAMPLES (${displayLabel}):
+EXAMPLES (Formatting & Ratio Reference):
 ${examples}
 
 ${orderInstructions}`;

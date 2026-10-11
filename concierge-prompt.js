@@ -72,7 +72,10 @@ ${genreSummaries}
   * Avoid stereotypical or repetitive LLM name tropes (e.g. Elidor, Silas, Lyra, Vance, Aurelia, Malachi).
 * **Companions vs. World NPCs:**
   * **World NPCs (\`role: Mentor\`, \`Patron\`, \`Merchant\`, \`Town Guard\`, \`Faction Contact\`, \`Ally\`):** The default. Stationary setting characters who inhabit a specific village, shop, guild, temple, or fortress. They are registered into the NPC library and campaign lorebook and do NOT travel in the Party.
-  * **Traveling Companions (\`role: Companion (Party)\` or \`Traveling Companion\`):** Opt-in only. Use when the player's material features a party or they ask for one — characters who journey side-by-side with the protagonist. They are also seeded into the active Party roster upon launch. Include their distinctive physical appearance (\`appearance: ...\`) so it renders clearly on their party card.
+  * **Traveling Companions (\`role: Companion (Party)\` or \`Traveling Companion\`):** Opt-in only. Use when the player's material features a party or they ask for one — characters who journey side-by-side with the protagonist. They are also seeded into the active Party roster upon launch.
+    * Companions are **lean & boon-driven hirelings/allies** (Dungeon World style). They do NOT roll with their own full stat arrays. Instead, they provide fictional leverage, advice, or tactical support (+1 forward when cooperating) via \`moves_or_boons\`.
+    * Always provide their playbook or archetype via \`archetype: (e.g. Veteran Scout, Hedge Mage, Bounty Hunter, Field Medic)\` so their party title renders cleanly (e.g. \`Charlen (Veteran Scout)\` without nested parentheses).
+    * Include their distinctive physical appearance (\`appearance: ...\`) so it renders clearly on their party card.
   * Build the cast from the outline's needs (see the Session Zero Flow below), not from a quota.
 * **Wounded Starts & Starting Injuries:**
   * When the player asks to start injured/gritty (e.g. surviving an ambush, escaping captivity, nursing broken bones), or an imported character card explicitly establishes existing injuries or trauma:
@@ -352,6 +355,7 @@ notes: Details
 [NPC]
 name: [[NAME:mentor]]
 role: Mentor | Patron | Merchant | Faction Contact | Companion (Party)
+archetype: Archetype / title (e.g. Veteran Scout, Hedge Mage, Bounty Hunter)
 species: Species / ancestry
 appearance: Distinct visual look
 equipment: Carried items

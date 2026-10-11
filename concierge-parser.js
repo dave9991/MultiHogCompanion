@@ -382,7 +382,7 @@ The Kick: Unset
             lines.push('[NPC]');
             lines.push(`name: ${n.name}`);
             const fields = [
-                ['role', n.role], ['species', n.species], ['appearance', n.appearance],
+                ['role', n.role], ['archetype', n.archetype], ['species', n.species], ['appearance', n.appearance],
                 ['equipment', n.equipment], ['demeanor', n.demeanor], ['background', n.background],
                 ['relationship', n.relationship],
                 ['friendship', n.friendship !== undefined ? n.friendship : null],
@@ -832,6 +832,7 @@ export function applyDossierUpdates(text, dossier) {
         const npcObj = {
             name: kv.name,
             role: kv.role || 'Ally',
+            archetype: kv.archetype || kv.playbook || kv.class || '',
             species: kv.species || kv.race || '',
             appearance: kv.appearance || kv.description || kv.look || '',
             equipment: kv.equipment || kv.gear || '',
@@ -854,6 +855,7 @@ export function applyDossierUpdates(text, dossier) {
             const patch = {};
             const given = (...ks) => ks.some(k => kv[k] !== undefined && kv[k] !== '');
             if (given('role')) patch.role = npcObj.role;
+            if (given('archetype', 'playbook', 'class')) patch.archetype = npcObj.archetype;
             if (given('species', 'race')) patch.species = npcObj.species;
             if (given('appearance', 'description', 'look')) patch.appearance = npcObj.appearance;
             if (given('equipment', 'gear')) patch.equipment = npcObj.equipment;
@@ -1412,8 +1414,9 @@ export function serializeDossierToMarkdown(dossier) {
                 ? `\n* **Conditions:** ${Array.isArray(n.conditions) ? n.conditions.join(', ') : n.conditions}`
                 : '';
             const statusPart = n.status ? `\n* **Status:** ${n.status}` : (n.harm?.current > 0 ? '\n* **Status:** (-) Wounded' : '');
+            const archetypePart = n.archetype ? `\n* **Archetype:** ${n.archetype}` : '';
             return `### 👤 ${n.name}
-* **Role:** ${n.role || 'Ally'}${n.species ? `\n* **Species:** ${n.species}` : ''}${harmPart}${statusPart}${condPart}
+* **Role:** ${n.role || 'Ally'}${archetypePart}${n.species ? `\n* **Species:** ${n.species}` : ''}${harmPart}${statusPart}${condPart}
 * **Appearance:** ${n.appearance || 'None specified'}${n.equipment ? `\n* **Equipment:** ${n.equipment}` : ''}
 * **Demeanor:** ${n.demeanor || 'None specified'}
 * **Relationship:** ${n.relationship || 'Allied with protagonist'}${standingsLine}
@@ -1629,6 +1632,7 @@ export function parseMarkdownToDossier(markdown) {
 
             const speciesM = block.match(/\*\s*\*\*Species:\*\*\s*([^\n\r]+)/i);
             const equipM = block.match(/\*\s*\*\*Equipment:\*\*\s*([^\n\r]+)/i);
+            const archM = block.match(/\*\s*\*\*Archetype:\*\*\s*([^\n\r]+)/i);
 
             const role = roleM ? roleM[1].trim() : 'Ally';
             const relText = relM ? relM[1].trim() : '';
@@ -1646,6 +1650,7 @@ export function parseMarkdownToDossier(markdown) {
             dossier.npcs.push({
                 name,
                 role,
+                archetype: archM ? archM[1].trim() : '',
                 species: speciesM ? speciesM[1].trim() : '',
                 appearance: appM && !appM[1].includes('None specified') ? appM[1].trim() : '',
                 equipment: equipM ? equipM[1].trim() : '',

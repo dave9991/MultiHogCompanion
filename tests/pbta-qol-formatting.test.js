@@ -93,6 +93,37 @@ assert.ok(squadMemo.includes('((PILLS)) Bonds: Bound by secret origin'), 'Compan
 assert.ok(squadMemo.includes('((PILLS)) Conditions: None'), 'Companion missing ((PILLS)) Conditions');
 console.log('✓ formatInitialPbtaMemo correctly formats squad companions with 5/5 HP, ((PILLS)) moves, gear, and bonds');
 
+// 4b. Verify archetype preference and prevention of nested parentheses like (Companion (Party))
+const charlenDossier = {
+    ...soloDossier,
+    config: { harmMax: 5, pacingXp: 5, partyMode: 'squad' },
+    npcs: [
+        {
+            name: 'Charlen',
+            role: 'Companion (Party)',
+            archetype: 'Veteran Scout',
+            movesOrBoons: 'Tactical Support (+1 forward on defense or positioning when standing near companion)',
+            appearance: 'Lean build, practical leather armor, messy chestnut hair',
+            relationship: 'Bond with protagonist (Veteran Scout mentoring new recruit)',
+            equipment: 'Shortsword, Shield, Satchel of Bandages & Salves',
+        },
+        {
+            name: 'Brant',
+            role: 'Companion (Party)', // No archetype provided, tests (Party) stripping
+            movesOrBoons: 'Field First Aid',
+        },
+    ],
+};
+const charlenMemo = formatInitialPbtaMemo(charlenDossier);
+assert.ok(charlenMemo.includes('- Charlen (Veteran Scout): 5/5 HP | Harm: 0/5 | Armor: 0'), 'Charlen should render with archetype Veteran Scout');
+assert.ok(charlenMemo.includes('- Brant (Companion): 5/5 HP | Harm: 0/5 | Armor: 0'), 'Brant should strip (Party) and avoid nested parens');
+
+// Verify upstream normalizeEntityName simulation extracts clean name without dangling parenthesis
+const simulateNormalizeEntityName = (name) => name.replace(/\s*\(.*?\)/g, '').trim();
+assert.strictEqual(simulateNormalizeEntityName('Charlen (Veteran Scout)'), 'Charlen', 'Charlen entity name cleans without dangling parens');
+assert.strictEqual(simulateNormalizeEntityName('Brant (Companion)'), 'Brant', 'Brant entity name cleans without dangling parens');
+console.log('✓ Companion archetype title resolution & nested paren prevention verified');
+
 // 5. buildMonsterEntryContent
 const mockMonster = {
     name: 'Gargoyle Stalker',

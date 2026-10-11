@@ -621,11 +621,10 @@ PILL FORMATTING (renders as interactive badges with mouse-over tooltips):
 - Gear: Separate equipped items with commas, placing weapon tags, armor values, or uses inside trailing parentheses: Item Name (Tags, harm/armor). Use (+) for armor or protective bonuses, e.g. Static Shroud ((+) +1 Armor).
 - Conditions: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward). Use plain "None" when unaffected.`,
 
-        party: `Companion and party members. MECHANICS ONLY. Every member MUST begin with their own header line. Separate distinct members with an empty line:
+        party: `Companion and party members. MECHANICS ONLY. Lean & boon-driven hirelings/allies (Dungeon World style) — no full stat arrays. Every member MUST begin with their own header line. Separate distinct members with an empty line:
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
-Stats: ${statsExample}
-((PILLS)) Moves: Signature Move (Trigger and narrative effect), Second Move (Trigger and narrative effect)
+((PILLS)) Moves: Tactical Support (+1 forward on defense or positioning when standing near companion), Second Move (Trigger and narrative effect)
 ((PILLS)) Gear: Signature weapon (Tags, 2 Harm), Protective gear ((+) Armor 1)
 ((PILLS)) Bonds: Protagonist Name (Bond or debt detail), Faction Name (Relationship context)
 ((PILLS)) Conditions: None
@@ -1086,7 +1085,13 @@ export function formatInitialPbtaMemo(dossier) {
         for (let i = 0; i < companions.length; i++) {
             const comp = companions[i];
             const cName = comp.name || 'Companion';
-            const cRole = comp.role || 'Companion';
+            // Determine display archetype/role: prefer archetype/playbook, or cleaned role without parentheticals like '(Party)'
+            let cTitle = comp.archetype || comp.playbook || '';
+            if (!cTitle) {
+                const rawRole = (comp.role || 'Companion').replace(/\s*\([^)]*\)/g, '').trim();
+                cTitle = rawRole || 'Companion';
+            }
+            cTitle = cTitle.replace(/[()]/g, '').trim() || 'Companion';
             let cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
             const rawBoons = Array.isArray(cBoons) ? cBoons : [cBoons];
             const cBoonsStr = rawBoons.map(normalizePill).join(', ');
@@ -1122,7 +1127,7 @@ export function formatInitialPbtaMemo(dossier) {
 
             if (i > 0) partyLines.push('');
             partyLines.push(
-                `${cName} (${cRole}): ${cCurHp}/${cHarmMax} HP | Harm: ${cHarmCur}/${cHarmMax} | Armor: ${cArmor}`,
+                `- ${cName} (${cTitle}): ${cCurHp}/${cHarmMax} HP | Harm: ${cHarmCur}/${cHarmMax} | Armor: ${cArmor}`,
                 ...(cApp ? [`Appearance: ${cApp}`] : []),
                 `((PILLS)) Moves: ${cBoonsStr}`,
                 `((PILLS)) Gear: ${cGearStr}`,

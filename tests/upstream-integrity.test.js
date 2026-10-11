@@ -14,6 +14,16 @@ const REPOS_TO_CHECK = [
     companionDir: 'extensions/MultiHogCompanion'
   },
   {
+    name: 'Extension-Summaryception',
+    relPath: '../../Extension-Summaryception',
+    companionDir: 'extensions/MultiHogCompanion'
+  },
+  {
+    name: 'SillyTavern-MCP-Client',
+    relPath: '../../SillyTavern-MCP-Client',
+    companionDir: 'extensions/MultiHogCompanion'
+  },
+  {
     name: 'st-source (Core SillyTavern)',
     relPath: '../../../st-source',
     companionDir: 'extensions/MultiHogCompanion'

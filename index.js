@@ -22,9 +22,6 @@ import {
     formatDiagnosticTrace,
 } from './concierge-ui.js';
 import {
-    migrateMisplacedLocationsEntries,
-} from './concierge-runner.js';
-import {
     getCampaignLorebookStatus,
     syncCampaignLorebooks,
 } from './campaign-lore-sync.js';
@@ -1923,21 +1920,6 @@ jQuery(async () => {
             },
             helpString: '<div>Synchronizes MultiHog NPC relationships and campaign lorebooks.</div>',
         }));
-
-        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-            name: 'mhc-migrate-rules',
-            aliases: ['migrate-rules'],
-            callback: async () => {
-                const res = await migrateMisplacedLocationsEntries();
-                if (res.movedAxioms > 0 || res.purgedTrackers > 0) {
-                    showToast('success', `Moved ${res.movedAxioms} axiom(s) and ${res.purgedTrackers} tracker(s) into the Rules lorebook!`, 'Rules Migration');
-                    return `Migrated ${res.movedAxioms} axiom(s) and ${res.purgedTrackers} tracker(s) from Locations into Rules lorebook.`;
-                }
-                showToast('info', 'Locations lorebook is already clean.', 'Rules Migration');
-                return 'Locations lorebook is already clean.';
-            },
-            helpString: '<div>Migrates misplaced World Axioms and Game Systems out of Locations into the Rules lorebook.</div>',
-        }));
     }
 
     // 4. Register Event Listeners
@@ -1972,11 +1954,6 @@ jQuery(async () => {
             updateRelationshipSyncUI();
             scanAndInitUnsyncedNpcs().then(updateRelationshipSyncUI);
         }, 800);
-        setTimeout(async () => {
-            try {
-                await migrateMisplacedLocationsEntries();
-            } catch (_) {}
-        }, 900);
     });
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
         scheduleSync('CHARACTER_MESSAGE_RENDERED', 400);
@@ -2016,11 +1993,6 @@ jQuery(async () => {
     setTimeout(updateRulesetBadge, 1200);
     setTimeout(updateLorebookSyncUI, 1300);
     setTimeout(updateRelationshipSyncUI, 1400);
-    setTimeout(async () => {
-        try {
-            await migrateMisplacedLocationsEntries();
-        } catch (_) {}
-    }, 1500);
 
     console.log('[MultiHog Companion] Extension loaded successfully.');
 });

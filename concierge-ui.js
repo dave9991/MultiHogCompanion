@@ -1201,6 +1201,17 @@ function bindModalEvents() {
         }
     });
 
+    // Custom HUD Tracker Module dismiss / remove button
+    $('#mhc_deck_remove_custom_mod_btn').on('click', (e) => {
+        e.stopPropagation();
+        if (activeDossier.worldRules) {
+            activeDossier.worldRules.customModule = null;
+            changelog.push('Removed custom HUD tracker module');
+            updateBlueprintDeck();
+            saveDraft();
+        }
+    });
+
     // Campaign Calibration Dial click interactions (manual cycling)
     $('#mhc_deck_dial_playstyle').on('click', () => {
         activeDossier.config = activeDossier.config || {};

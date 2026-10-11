@@ -256,7 +256,7 @@ sample:
      - **Protagonist Concept & Playbook (\`[PROTAGONIST]\`):** Identity, playbook, stat array (+2, +1, +1, 0, -1), and 2 bespoke signature moves translated to the genre.
      - **World Rules & Custom Trackers (\`[WORLD_RULES]\` & \`[CUSTOM_MODULE]\`):** When the pitch features a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal flight with wings, underwater cities):
        * Proactively emit a \`[WORLD_RULES]\` block establishing the core axiom, concrete substitutions, negative constraints, and architectural notes.
-       * If this rule introduces a unique resource or character state (e.g. symbiote hunger, wing stamina), emit a matching \`[CUSTOM_MODULE]\` block.
+       * ONLY emit a matching \`[CUSTOM_MODULE]\` block if this rule introduces a unique, setting-specific physical resource or mechanical gauge (e.g. symbiote hunger, wing stamina, radiation, corruption). DO NOT emit \`[CUSTOM_MODULE]\` for social, legal, or military doctrines with no bespoke mechanical gauge. NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking", "Health", "Combat", "Inventory") — MultiHog natively tracks all conditions, health, combat rounds, and encounters.
        * Support partial edits and removals: \`remove_world_rule: Title\`, \`remove_custom_module: true\`, \`clear_world_rules: true\`.
      - **Cast & World:** Proactively draft 1 key \`[FACTION]\`, 1 stationary world \`[NPC]\` (ally, mentor, or contact), 1 primary \`[MONSTER]\` with Harm, Armor, and countdown doom front clock, and 1 starting \`[MAP]\` site.
      - **The Kick (\`[KICK]\`):** Starting location, imminent crisis, and opening prompt hook.
@@ -432,7 +432,7 @@ sample:
 ### 🏗️ Proactive Scaffolding & Delta Rules:
 1. **Turn 1 / Initial Scaffolding:** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:
    Proactively scaffold a complete, coherent starting draft into [UPDATE_DOSSIER]: summary: ..., title, engine, tone, premise, [CONFIG] dials, [PROTAGONIST] (+2, +1, +1, 0, -1 with 2 signature moves), 1 [FACTION], 1 world [NPC], 1 [MONSTER] with countdown doom track, 1 starting [MAP], and [KICK].
-   * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include [WORLD_RULES] and a tailored [CUSTOM_MODULE].
+   * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include [WORLD_RULES]. Only include a [CUSTOM_MODULE] if this rule requires a bespoke physical resource gauge (e.g. symbiote hunger, wing stamina); NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking").
 2. **Follow-Up Edits (Partial Patches):** When modifying an existing blueprint, emit ONLY the tags being added, edited, or removed. Unchanged entities and fields are preserved automatically.
 3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
 4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.`;

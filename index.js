@@ -2112,11 +2112,11 @@ jQuery(async () => {
             helpString: '<div>Synchronizes MultiHog NPC relationships and campaign lorebooks.</div>',
         }));
 
-        registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive, showToast });
+        registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive: isPbtAActive, showToast });
     }
 
     // 4. Register Event Listeners
-    initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSource, event_types });
+    initCyoaGuardian({ getSettings, isPbtaActive: isPbtAActive, showToast, eventSource, event_types });
 
     if (event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, setupImagineInterceptor);

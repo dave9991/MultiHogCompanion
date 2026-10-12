@@ -1554,7 +1554,7 @@ export function formatDiagnosticTrace(tx = (window._mhcLastBuilderTransaction ||
 }
 
 /**
- * Renders the latest Builder transaction state into both the in-modal debug inspector and settings drawer.
+ * Renders the latest Builder transaction state into the in-modal debug inspector.
  * @param {object} [tx]
  */
 export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction || window._lastConciergeBuilderDiagnostic)) {
@@ -1571,13 +1571,6 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     const modalNameRagCount = $('#mhc_debug_namerag_count');
     const modalNameRagList = $('#mhc_debug_namerag_list');
 
-    // 2. Settings Drawer Elements
-    const settingsBadge = $('#mhc_settings_debug_badge');
-    const settingsStatus = $('#mhc_settings_debug_status');
-    const settingsTime = $('#mhc_settings_debug_time');
-    const settingsRaw = $('#mhc_settings_debug_raw');
-    const settingsSummary = $('#mhc_settings_debug_summary');
-
     if (!tx) {
         modalBadge.text('Awaiting Turn').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc', borderColor: 'rgba(156,163,175,0.4)' });
         modalTime.text('--:--:--');
@@ -1590,12 +1583,6 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
         modalAttempts.text('Attempt 0/2');
         modalPrompt.text('(No prompt recorded yet)');
         modalDossier.text(JSON.stringify(activeDossier || {}, null, 2));
-
-        settingsBadge.text('Idle').css({ background: 'rgba(150,150,150,0.2)', color: '#ccc', borderColor: 'rgba(255,255,255,0.15)' });
-        settingsStatus.text('None');
-        settingsTime.text('--:--:--');
-        settingsRaw.text('(No build transactions recorded yet)');
-        settingsSummary.text('None');
         return;
     }
 
@@ -1672,13 +1659,6 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     modalAttempts.text(`Attempt ${attempts.length}/2`);
     modalPrompt.text(JSON.stringify(tx.builderRequest?.messages || [], null, 2));
     modalDossier.text(JSON.stringify(tx.activeDossierSnapshot || tx.currentDossierSnapshot || activeDossier || {}, null, 2));
-
-    // Settings drawer updates
-    settingsBadge.text(status).css({ color: badgeColor, background: badgeBg, borderColor: badgeBorder });
-    settingsStatus.text(status);
-    settingsTime.text(timeFormatted);
-    settingsRaw.text(rawText);
-    settingsSummary.text(tx.builderSummary || 'None');
 }
 
 /**

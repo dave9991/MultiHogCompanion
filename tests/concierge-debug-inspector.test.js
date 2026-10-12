@@ -195,15 +195,9 @@ console.log('✓ concierge-modal.html contains all required debug inspector elem
 const settingsHtmlPath = path.join(ROOT_DIR, 'settings.html');
 const settingsHtml = fs.readFileSync(settingsHtmlPath, 'utf8');
 
-assert.ok(settingsHtml.includes('id="mhc_debug_section"'), 'Settings must have #mhc_debug_section');
-assert.ok(settingsHtml.includes('id="mhc_concierge_debug_mode"'), 'Settings must have #mhc_concierge_debug_mode');
-assert.ok(settingsHtml.includes('id="mhc_settings_debug_badge"'), 'Settings must have #mhc_settings_debug_badge');
-assert.ok(settingsHtml.includes('id="mhc_settings_debug_status"'), 'Settings must have #mhc_settings_debug_status');
-assert.ok(settingsHtml.includes('id="mhc_settings_debug_time"'), 'Settings must have #mhc_settings_debug_time');
-assert.ok(settingsHtml.includes('id="mhc_settings_debug_raw"'), 'Settings must have #mhc_settings_debug_raw');
-assert.ok(settingsHtml.includes('id="mhc_settings_debug_summary"'), 'Settings must have #mhc_settings_debug_summary');
-assert.ok(settingsHtml.includes('id="mhc_refresh_debug_btn"'), 'Settings must have #mhc_refresh_debug_btn');
-assert.ok(settingsHtml.includes('class="menu_button interactable mhc-copy-debug-trace-btn"'), 'Settings must have .mhc-copy-debug-trace-btn');
-console.log('✓ settings.html contains all required Section 6 debug controls and inspector views');
+assert.strictEqual(settingsHtml.includes('id="mhc_debug_section"'), false, 'Settings must not have #mhc_debug_section');
+assert.strictEqual(settingsHtml.includes('id="mhc_concierge_debug_mode"'), false, 'Settings must not have #mhc_concierge_debug_mode');
+assert.strictEqual(settingsHtml.includes('id="mhc_settings_debug_badge"'), false, 'Settings must not have #mhc_settings_debug_badge');
+console.log('✓ settings.html cleanly omits settings-level debug controls');
 
 console.log('--- ALL CONCIERGE DEBUG INSPECTOR TESTS PASSED CLEANLY! ---');

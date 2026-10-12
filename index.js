@@ -87,12 +87,10 @@ const DEFAULT_SETTINGS = {
     nameRagEnhanceMultiHog: true,
     nameRagEnhanceConcierge: true,
     nameRagAdhocSysprompt: true,
-    conciergeDebugMode: false,
     enableRelationshipNarrativeSync: true,
     enableCyoaAutoRetry: true,
     cyoaMaxRetries: 1,
     enableCyoaMarkdownAutoRepair: true,
-    enableRulesetDebug: false,
 };
 
 function getSettings() {
@@ -1753,77 +1751,7 @@ async function initUI() {
 
         await initRelationshipSyncUI();
 
-        // ── 7. Developer & Debug Mode Controls ──
-        const debugCb = $('#mhc_concierge_debug_mode');
-        debugCb.prop('checked', current.conciergeDebugMode || false);
-        debugCb.on('change', function () {
-            updateSettings({ conciergeDebugMode: $(this).is(':checked') });
-        });
-
-        $('#mhc_refresh_debug_btn').on('click', function () {
-            renderDebugInspectorView();
-            showToast('info', 'Concierge debug inspector view refreshed.', 'MultiHog Companion');
-        });
-
-        $(document).off('click.mhcDebugTrace', '.mhc-copy-debug-trace-btn').on('click.mhcDebugTrace', '.mhc-copy-debug-trace-btn', function () {
-            const trace = window._mhcLastBuilderTransaction || window._lastConciergeBuilderDiagnostic;
-            if (!trace) {
-                if (typeof toastr !== 'undefined') toastr.warning('No diagnostic trace recorded yet.');
-                return;
-            }
-            const md = formatDiagnosticTrace(trace);
-            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-                navigator.clipboard.writeText(md).then(() => {
-                    if (typeof toastr !== 'undefined') toastr.success('Copied Antigravity debug trace to clipboard!');
-                }).catch(() => {
-                    prompt('Copy Antigravity debug trace:', md);
-                });
-            } else {
-                prompt('Copy Antigravity debug trace:', md);
-            }
-        });
-
-        renderDebugInspectorView();
-
-        // ── 7b. Ruleset & State Diagnostics Controls ──
-        const rulesetDebugCb = $('#mhc_ruleset_debug_mode');
-        const rulesetDebugPanel = $('#mhc_ruleset_debug_panel');
-        rulesetDebugCb.prop('checked', current.enableRulesetDebug || false);
-        if (current.enableRulesetDebug) {
-            rulesetDebugPanel.show();
-            renderRulesetDiagnostics();
-        }
-
-        rulesetDebugCb.on('change', function () {
-            const isChecked = $(this).is(':checked');
-            updateSettings({ enableRulesetDebug: isChecked });
-            if (isChecked) {
-                rulesetDebugPanel.show();
-                renderRulesetDiagnostics();
-            } else {
-                rulesetDebugPanel.hide();
-            }
-        });
-
-        $('#mhc_refresh_ruleset_debug_btn').on('click', function () {
-            renderRulesetDiagnostics();
-            showToast('info', 'Ruleset and partition diagnostics refreshed.', 'MultiHog Companion');
-        });
-
-        $('#mhc_copy_ruleset_debug_btn').on('click', function () {
-            const diag = collectRulesetDiagnostics(getActiveChatId(), getRpgSettings(), getSettings());
-            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-                navigator.clipboard.writeText(diag).then(() => {
-                    showToast('success', 'Ruleset diagnostics copied to clipboard! 📋', 'MultiHog Companion');
-                }).catch(() => {
-                    prompt('Copy Ruleset Diagnostics for Antigravity:', diag);
-                });
-            } else {
-                prompt('Copy Ruleset Diagnostics for Antigravity:', diag);
-            }
-        });
-
-        // ── 8. CYOA Guardian Controls ──
+        // ── 7. CYOA Guardian Controls ──
         const cyoaAutoRetryCb = $('#mhc_cyoa_auto_retry_enable');
         const cyoaAutoRepairCb = $('#mhc_cyoa_auto_repair_enable');
         const cyoaAutoSwipeCb = $('#mhc_cyoa_auto_swipe_enable');
@@ -1983,16 +1911,6 @@ globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
 // ── Ruleset Status Badge ────────────────────────────────────────────────────────
 
 /**
- * Render the full ruleset and partition diagnostic report into the debug textarea.
- */
-function renderRulesetDiagnostics() {
-    const output = document.getElementById('mhc_ruleset_debug_output');
-    if (!output) return;
-    const diag = collectRulesetDiagnostics(getActiveChatId(), getRpgSettings(), getSettings());
-    output.value = diag;
-}
-
-/**
  * Update the status badge in the settings panel to show the active ruleset.
  */
 function updateRulesetBadge() {
@@ -2010,10 +1928,6 @@ function updateRulesetBadge() {
 
     if (summary) {
         summary.innerHTML = formatted.summaryHtml;
-    }
-
-    if ($('#mhc_ruleset_debug_panel').is(':visible')) {
-        renderRulesetDiagnostics();
     }
 }
 

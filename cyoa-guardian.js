@@ -358,9 +358,9 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive, showToast }) {
     if (!SlashCommandParser?.addCommandObject || !SlashCommand) return;
 
-    SlashCommandParser.addCommandObject(new SlashCommand(
-        'cyoaretry',
-        async () => {
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'cyoaretry',
+        callback: async () => {
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
             const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
             const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
@@ -371,15 +371,12 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { is
             await triggerSwipeRight();
             return 'Swiping with CYOA steering reminder...';
         },
-        [],
-        'Swipes the latest narrator message and injects a strict CYOA choices reminder.',
-        true,
-        true,
-    ));
+        helpString: '<div>Swipes the latest narrator message and injects a strict CYOA choices reminder.</div>',
+    }));
 
-    SlashCommandParser.addCommandObject(new SlashCommand(
-        'cyoafix',
-        async () => {
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'cyoafix',
+        callback: async () => {
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
             const chat = ctx?.chat;
             if (!Array.isArray(chat) || chat.length === 0) {
@@ -404,9 +401,6 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { is
                 return 'No markdown choices found to convert.';
             }
         },
-        [],
-        'Scans the latest narrator message for plain-text numbered choices and wraps them into interactive CYOA buttons.',
-        true,
-        true,
-    ));
+        helpString: '<div>Scans the latest narrator message for plain-text numbered choices and wraps them into interactive CYOA buttons.</div>',
+    }));
 }

@@ -455,6 +455,35 @@
                             <i class="fa-solid fa-clipboard"></i> Copy Diagnostic for Antigravity
                         </button>
                     </div>
+
+                    <!-- ── Ruleset & Partition Debug Diagnostics ── -->
+                    <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);">
+                        <div class="mhc-setting-row" style="margin-bottom: 6px;">
+                            <label class="checkbox_label" title="Enable detailed state and partition diagnostics to capture chat IDs, partition keys, and ruleset persistence across reloads" style="display: flex; align-items: center; cursor: pointer;">
+                                <input id="mhc_ruleset_debug_mode" type="checkbox" style="margin-right: 8px;">
+                                <span style="font-size: 0.85em;"><b>🔍 Ruleset &amp; Partition Diagnostics:</b> Dump state for Antigravity</span>
+                            </label>
+                        </div>
+
+                        <div id="mhc_ruleset_debug_panel" style="display: none; margin-top: 8px;">
+                            <p style="font-size: 0.78em; opacity: 0.75; margin: 0 0 8px 0; line-height: 1.35;">
+                                Captures live candidate chat IDs, MultiHog partition storage, ruleset detection fallbacks, and reload lifecycle events. Copy and send this output to Antigravity to diagnose F5 reload behavior.
+                            </p>
+
+                            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                                <button id="mhc_copy_ruleset_debug_btn" class="menu_button interactable" type="button" style="flex: 1.2; font-size: 0.78em; padding: 4px 8px; color: #88ffbb; font-weight: bold; background: rgba(80,180,120,0.15); border: 1px solid rgba(80,180,120,0.4); display: flex; align-items: center; justify-content: center; gap: 5px;" title="Copy complete diagnostic report to clipboard">
+                                    <i class="fa-solid fa-clipboard"></i>
+                                    <span>Copy Diagnostics to Clipboard</span>
+                                </button>
+                                <button id="mhc_refresh_ruleset_debug_btn" class="menu_button interactable" type="button" style="flex: 0.8; font-size: 0.78em; padding: 4px 8px; display: flex; align-items: center; justify-content: center; gap: 4px;" title="Re-evaluate ruleset and candidate partition states">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                    <span>Refresh State</span>
+                                </button>
+                            </div>
+
+                            <textarea id="mhc_ruleset_debug_output" class="text_pole" readonly rows="8" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 0.72em; line-height: 1.3; white-space: pre; background: rgba(0,0,0,0.35); padding: 6px 8px; border-radius: 4px; resize: vertical;" placeholder="Checking ruleset and partition state..."></textarea>
+                        </div>
+                    </div>
                 </div>
             </div>
 

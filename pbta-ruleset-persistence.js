@@ -221,11 +221,22 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     }
 
     const candidateIds = getCandidateChatIds(chatId, s);
+    let existingDossier = null;
+    for (const cid of candidateIds) {
+        if (s.chatStates?.[cid]?.pbtaCampaignDossier) {
+            existingDossier = s.chatStates[cid].pbtaCampaignDossier;
+            break;
+        }
+    }
+
     s.chatStates = s.chatStates || {};
     for (const cid of candidateIds) {
         s.chatStates[cid] = s.chatStates[cid] || {};
         if (snapshot) {
             s.chatStates[cid].setup = snapshot;
+        }
+        if (existingDossier) {
+            s.chatStates[cid].pbtaCampaignDossier = existingDossier;
         }
     }
 
@@ -241,6 +252,26 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
                 stateMgr.saveChatState(chatId);
             }
         } catch (_) {}
+    }
+
+    // Guarantee pbtaCampaignDossier remains on candidate partitions if saveChatState clobbered it
+    if (existingDossier) {
+        for (const cid of candidateIds) {
+            if (s.chatStates[cid]) {
+                s.chatStates[cid].pbtaCampaignDossier = existingDossier;
+            }
+        }
+    }
+
+    logRulesetEvent('persistPbtaChatState', {
+        chatId,
+        hasDossier: !!existingDossier,
+        candidatesCount: candidateIds.length,
+    });
+
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    if (typeof ctx?.saveSettingsDebounced === 'function') {
+        ctx.saveSettingsDebounced();
     }
 }
 
@@ -271,13 +302,20 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     }
 
     const isPbta = !!dossier || isPbtAActive(chatId, s);
+    const hasLiveOverrides = Array.isArray(s.customSyspromptLibrary)
+        && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled);
+
+    logRulesetEvent('ensureActiveChatRulesetConsistency', {
+        chatId,
+        resolvedChatId,
+        isPbta,
+        hasDossier: !!dossier,
+        hasLiveOverrides,
+    });
+
     if (!isPbta) {
         return false;
     }
-
-    // Chat IS PbtA. Check whether live customSyspromptLibrary has pbta overrides active.
-    const hasLiveOverrides = Array.isArray(s.customSyspromptLibrary)
-        && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled);
 
     if (!hasLiveOverrides) {
         console.log(`[MultiHog Companion] Active chat ${resolvedChatId || chatId} is a PbtA campaign, but live customSyspromptLibrary was not hydrated (e.g. reload or setup reset). Rehydrating cartridge...`);
@@ -348,4 +386,183 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         await persistPbtaChatState(resolvedChatId, s);
     }
     return true;
+}
+
+/**
+ * In-memory ring buffer recording ruleset lifecycle events.
+ *
+ * @param {string} eventName
+ * @param {object} [details={}]
+ */
+export function logRulesetEvent(eventName, details = {}) {
+    if (typeof globalThis === 'undefined') return;
+    globalThis._mhcRulesetEventLog = globalThis._mhcRulesetEventLog || [];
+    const entry = {
+        time: new Date().toISOString().substring(11, 23),
+        event: eventName,
+        ...details,
+    };
+    globalThis._mhcRulesetEventLog.push(entry);
+    if (globalThis._mhcRulesetEventLog.length > 50) {
+        globalThis._mhcRulesetEventLog.shift();
+    }
+}
+
+/**
+ * Gather a comprehensive markdown diagnostic report of active chat state,
+ * ruleset detection layers, MultiHog partitions, setup snapshots, and recent event logs.
+ *
+ * @param {string|null} [chatId=null]
+ * @param {object|null} [rpgSettings=null]
+ * @param {object|null} [companionSettings=null]
+ * @returns {string} Markdown-formatted diagnostic report
+ */
+export function collectRulesetDiagnostics(chatId = null, rpgSettings = null, companionSettings = null) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const s = rpgSettings || ctx?.extensionSettings?.rpg_tracker || null;
+    const currentChatId = typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null;
+    const candidates = getCandidateChatIds(chatId, s);
+    const pbtaActive = isPbtAActive(chatId, s);
+    const pbtaChat = isPbtaChat(chatId, s);
+    const badge = formatRulesetBadge(chatId, s, companionSettings?.lastGenre || 'fantasy');
+
+    // Identify which detection layers matched
+    const layerMatches = [];
+    if (Array.isArray(s?.customSyspromptLibrary) && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled)) {
+        layerMatches.push('Layer 1: Live customSyspromptLibrary pbta_ snippets active');
+    }
+    for (const cid of candidates) {
+        if (s?.chatStates?.[cid]?.pbtaCampaignDossier) {
+            layerMatches.push(`Layer 2: Partition [${cid}] contains pbtaCampaignDossier`);
+        }
+        const snippetStates = s?.chatStates?.[cid]?.setup?.syspromptSnippetStates;
+        if (snippetStates && typeof snippetStates === 'object') {
+            if (Object.keys(snippetStates).some(k => k.startsWith('pbta_') && snippetStates[k])) {
+                layerMatches.push(`Layer 3: Partition [${cid}] setup has enabled pbta_ snippets`);
+            }
+        }
+        const partitionMemo = s?.chatStates?.[cid]?.currentMemo || '';
+        if (typeof partitionMemo === 'string' && partitionMemo) {
+            if (/Harm:\s*\d+/i.test(partitionMemo) || /\[PBTA_/i.test(partitionMemo) || /Hack & Slash/i.test(partitionMemo)) {
+                layerMatches.push(`Layer 4: Partition [${cid}] memo contains Harm/PbtA markers`);
+            }
+        }
+    }
+    if (typeof s?.currentMemo === 'string' && s.currentMemo) {
+        if (/Harm:\s*\d+/i.test(s.currentMemo) || /\[PBTA_/i.test(s.currentMemo) || /Hack & Slash/i.test(s.currentMemo)) {
+            layerMatches.push('Layer 5: Live memo contains Harm/PbtA markers');
+        }
+    }
+
+    const lines = [];
+    lines.push('### MultiHog Companion — Ruleset & State Diagnostics');
+    lines.push(`- **Report Time**: ${new Date().toISOString()}`);
+    lines.push('');
+
+    lines.push('#### 1. Chat Identification & Candidates');
+    lines.push(`- **Supplied chatId**: \`${chatId || 'null'}\``);
+    lines.push(`- **ctx.getCurrentChatId()**: \`${ctx?.getCurrentChatId?.() ?? 'null'}\``);
+    lines.push(`- **ctx.chatId**: \`${ctx?.chatId ?? 'null'}\``);
+    lines.push(`- **ctx.chatMetadata.chat_id**: \`${ctx?.chatMetadata?.chat_id ?? 'null'}\``);
+    lines.push(`- **_rpgCurrentChatId()**: \`${currentChatId ?? 'null'}\``);
+    lines.push(`- **s.chatStateProjectionOwner**: \`${s?.chatStateProjectionOwner ?? 'null'}\``);
+    lines.push(`- **s.currentChatId**: \`${s?.currentChatId ?? 'null'}\``);
+    const charName = ctx?.characters?.[ctx?.characterId]?.name || ctx?.character?.name || null;
+    lines.push(`- **Active Character**: \`${charName ?? 'null'}\` (ID: \`${ctx?.characterId ?? 'null'}\`)`);
+    lines.push(`- **Candidate Chat IDs**: ${JSON.stringify(candidates)}`);
+    lines.push('');
+
+    lines.push('#### 2. Ruleset Status & Detection Layers');
+    lines.push(`- **Ruleset Badge**: \`${badge.badgeText}\` (Active: \`${badge.isActive}\`, Label: \`${badge.displayLabel}\`)`);
+    lines.push(`- **isPbtAActive()**: \`${pbtaActive}\``);
+    lines.push(`- **isPbtaChat()**: \`${pbtaChat}\``);
+    lines.push(`- **Matching Detection Layers**: ${layerMatches.length > 0 ? layerMatches.join('; ') : 'None (evaluates as stock D&D 5e)'}`);
+    lines.push('');
+
+    lines.push('#### 3. MultiHog Framework Settings');
+    lines.push(`- **chatLinkEnabled**: \`${s?.chatLinkEnabled ?? 'undefined'}\``);
+    lines.push(`- **chatSetupLinkEnabled**: \`${s?.chatSetupLinkEnabled ?? 'undefined'}\``);
+    lines.push(`- **chatSetupCatalogVersion**: \`${s?.chatSetupCatalogVersion ?? 'undefined'}\``);
+    lines.push(`- **rngEnabled**: \`${s?.rngEnabled ?? 'undefined'}\` | **rngQueueD20**: \`${s?.rngQueueD20 ?? 'undefined'}\` | **diceFunctionTool**: \`${s?.diceFunctionTool ?? 'undefined'}\``);
+    lines.push(`- **debugMode**: \`${s?.debugMode ?? 'undefined'}\``);
+    lines.push('');
+
+    lines.push('#### 4. MultiHog Partition Storage (chatStates)');
+    const allPartitionKeys = Object.keys(s?.chatStates || {});
+    lines.push(`- **Total Partitions Count**: \`${allPartitionKeys.length}\``);
+    lines.push(`- **Partition Keys**: ${JSON.stringify(allPartitionKeys.slice(0, 15))}${allPartitionKeys.length > 15 ? ` (+${allPartitionKeys.length - 15} more)` : ''}`);
+    lines.push('');
+
+    lines.push('##### Candidate Partitions Detail:');
+    if (candidates.length === 0) {
+        lines.push('*(No candidate chat IDs resolved)*');
+    } else {
+        for (const cid of candidates) {
+            const part = s?.chatStates?.[cid];
+            if (!part) {
+                lines.push(`- **Partition \`${cid}\`**: *NOT FOUND in chatStates*`);
+            } else {
+                lines.push(`- **Partition \`${cid}\`**:`);
+                lines.push(`  - \`characterName\`: \`${part.characterName || 'undefined'}\``);
+                lines.push(`  - \`historyStorage\`: \`${part.historyStorage ?? 'undefined'}\``);
+                if (part.pbtaCampaignDossier) {
+                    const d = part.pbtaCampaignDossier;
+                    const stats = Object.keys(d.protagonist?.stats || {});
+                    lines.push(`  - \`pbtaCampaignDossier\`: PRESENT`);
+                    lines.push(`    - Title: "${d.meta?.title || 'Untitled'}" | System: ${d.meta?.systemKey} (${d.meta?.systemLabel || 'none'})`);
+                    lines.push(`    - Protagonist: "${d.protagonist?.name || 'Unnamed'}" (Playbook: ${d.protagonist?.playbook || 'none'}, Stats: [${stats.join(', ')}])`);
+                    lines.push(`    - Harm Limit: ${d.config?.harmLimit ?? 'default'} | Stress Limit: ${d.config?.stressLimit ?? 'default'}`);
+                    lines.push(`    - Last Updated: ${d.meta?.lastUpdated || 'unknown'}`);
+                } else {
+                    lines.push(`  - \`pbtaCampaignDossier\`: *NONE*`);
+                }
+
+                if (part.setup) {
+                    const snips = Object.keys(part.setup.syspromptSnippetStates || {});
+                    const activeSnips = snips.filter(k => part.setup.syspromptSnippetStates[k]);
+                    lines.push(`  - \`setup\`: PRESENT (v${part.setup.version})`);
+                    lines.push(`    - Active sysprompt snippets: [${activeSnips.join(', ')}]`);
+                    lines.push(`    - All snippet states: ${JSON.stringify(part.setup.syspromptSnippetStates || {})}`);
+                } else {
+                    lines.push(`  - \`setup\`: *NONE*`);
+                }
+
+                const memo = String(part.currentMemo || '');
+                lines.push(`  - \`currentMemo\`: ${memo.length} chars (Harm present: ${/Harm:\s*\d+/i.test(memo)}, Excerpt: "${memo.slice(0, 100).replace(/\n/g, ' ')}...")`);
+            }
+        }
+    }
+    lines.push('');
+
+    lines.push('#### 5. Live MultiHog Control Room & Catalogs');
+    const liveSnippets = Array.isArray(s?.customSyspromptLibrary)
+        ? s.customSyspromptLibrary.map(item => `${item.id}(scope:${item.scope},enabled:${item.enabled})`)
+        : [];
+    lines.push(`- **Live customSyspromptLibrary (${liveSnippets.length})**: ${liveSnippets.join(', ') || '*(empty)*'}`);
+
+    const dbSnippets = Array.isArray(s?.syspromptSnippetDatabase)
+        ? s.syspromptSnippetDatabase.map(item => `${item.id}(scope:${item.scope},globalEnabled:${item.globalEnabled})`)
+        : [];
+    lines.push(`- **syspromptSnippetDatabase (${dbSnippets.length})**: ${dbSnippets.join(', ') || '*(empty)*'}`);
+    const liveMemo = String(s?.currentMemo || '');
+    lines.push(`- **Live currentMemo**: ${liveMemo.length} chars (Harm present: ${/Harm:\s*\d+/i.test(liveMemo)}, Excerpt: "${liveMemo.slice(0, 100).replace(/\n/g, ' ')}...")`);
+    lines.push('');
+
+    lines.push('#### 6. MultiHog Companion Settings');
+    lines.push(`\`\`\`json\n${JSON.stringify(companionSettings || {}, null, 2)}\n\`\`\``);
+    lines.push('');
+
+    lines.push('#### 7. Recent Ruleset & Reload Event Log');
+    const events = (globalThis._mhcRulesetEventLog || []).slice(-20);
+    if (events.length === 0) {
+        lines.push('*(No lifecycle events recorded yet)*');
+    } else {
+        lines.push('```');
+        for (const ev of events) {
+            lines.push(`[${ev.time}] ${ev.event}: ${JSON.stringify(ev)}`);
+        }
+        lines.push('```');
+    }
+
+    return lines.join('\n');
 }

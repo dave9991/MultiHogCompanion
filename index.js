@@ -47,6 +47,8 @@ import {
     formatRulesetBadge,
     persistPbtaChatState,
     ensureActiveChatRulesetConsistency,
+    logRulesetEvent,
+    collectRulesetDiagnostics,
 } from './pbta-ruleset-persistence.js';
 import {
     scanAndInitUnsyncedNpcs,
@@ -88,6 +90,7 @@ const DEFAULT_SETTINGS = {
     enableCyoaAutoRetry: true,
     cyoaMaxRetries: 1,
     enableCyoaMarkdownAutoRepair: true,
+    enableRulesetDebug: false,
 };
 
 function getSettings() {
@@ -949,6 +952,11 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     saveSettingsDebounced();
 
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
+    logRulesetEvent('applyPbtACartridge', {
+        genreKey,
+        activeChatId,
+        hasOverrides: Object.keys(overrides || {}).length > 0,
+    });
     showToast('success', `PbtA ruleset (${activeLabel}) applied to this chat! 🎲`, 'PbtA Engine Active');
     updateRulesetBadge();
     return true;
@@ -1039,6 +1047,9 @@ export async function restoreStockDnd() {
     }
     await refreshMultihogRuntime();
 
+    logRulesetEvent('restoreStockDnd', {
+        activeChatId,
+    });
     showToast('info', 'Restored this chat to factory D&D 5e ruleset. 📦', 'Ruleset Restored');
     updateRulesetBadge();
     return true;
@@ -1758,6 +1769,44 @@ async function initUI() {
 
         renderDebugInspectorView();
 
+        // ── 7b. Ruleset & State Diagnostics Controls ──
+        const rulesetDebugCb = $('#mhc_ruleset_debug_mode');
+        const rulesetDebugPanel = $('#mhc_ruleset_debug_panel');
+        rulesetDebugCb.prop('checked', current.enableRulesetDebug || false);
+        if (current.enableRulesetDebug) {
+            rulesetDebugPanel.show();
+            renderRulesetDiagnostics();
+        }
+
+        rulesetDebugCb.on('change', function () {
+            const isChecked = $(this).is(':checked');
+            updateSettings({ enableRulesetDebug: isChecked });
+            if (isChecked) {
+                rulesetDebugPanel.show();
+                renderRulesetDiagnostics();
+            } else {
+                rulesetDebugPanel.hide();
+            }
+        });
+
+        $('#mhc_refresh_ruleset_debug_btn').on('click', function () {
+            renderRulesetDiagnostics();
+            showToast('info', 'Ruleset and partition diagnostics refreshed.', 'MultiHog Companion');
+        });
+
+        $('#mhc_copy_ruleset_debug_btn').on('click', function () {
+            const diag = collectRulesetDiagnostics(getActiveChatId(), getRpgSettings(), getSettings());
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                navigator.clipboard.writeText(diag).then(() => {
+                    showToast('success', 'Ruleset diagnostics copied to clipboard! 📋', 'MultiHog Companion');
+                }).catch(() => {
+                    prompt('Copy Ruleset Diagnostics for Antigravity:', diag);
+                });
+            } else {
+                prompt('Copy Ruleset Diagnostics for Antigravity:', diag);
+            }
+        });
+
         // ── 8. CYOA Guardian Controls ──
         const cyoaAutoRetryCb = $('#mhc_cyoa_auto_retry_enable');
         const cyoaAutoRepairCb = $('#mhc_cyoa_auto_repair_enable');
@@ -1825,6 +1874,9 @@ export {
     formatRulesetBadge,
     persistPbtaChatState,
     ensureActiveChatRulesetConsistency,
+    logRulesetEvent,
+    collectRulesetDiagnostics,
+    renderRulesetDiagnostics,
 };
 
 // ── 2d6 RNG Queue Interceptor ───────────────────────────────────────────────────
@@ -1913,6 +1965,16 @@ globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
 // ── Ruleset Status Badge ────────────────────────────────────────────────────────
 
 /**
+ * Render the full ruleset and partition diagnostic report into the debug textarea.
+ */
+function renderRulesetDiagnostics() {
+    const output = document.getElementById('mhc_ruleset_debug_output');
+    if (!output) return;
+    const diag = collectRulesetDiagnostics(getActiveChatId(), getRpgSettings(), getSettings());
+    output.value = diag;
+}
+
+/**
  * Update the status badge in the settings panel to show the active ruleset.
  */
 function updateRulesetBadge() {
@@ -1930,6 +1992,10 @@ function updateRulesetBadge() {
 
     if (summary) {
         summary.innerHTML = formatted.summaryHtml;
+    }
+
+    if ($('#mhc_ruleset_debug_panel').is(':visible')) {
+        renderRulesetDiagnostics();
     }
 }
 
@@ -2053,6 +2119,7 @@ jQuery(async () => {
         });
     }
     eventSource.on(event_types.CHAT_CHANGED, () => {
+        logRulesetEvent('CHAT_CHANGED', { activeChatId: getActiveChatId() });
         scheduleSync('CHAT_CHANGED', 500);
         setTimeout(async () => {
             await ensureActiveChatRulesetConsistency();
@@ -2085,6 +2152,7 @@ jQuery(async () => {
         }, 600);
     });
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
+        logRulesetEvent('SETTINGS_UPDATED', { activeChatId: getActiveChatId() });
         scheduleSync('SETTINGS_UPDATED', 600);
         setTimeout(async () => {
             await ensureActiveChatRulesetConsistency();
@@ -2103,6 +2171,10 @@ jQuery(async () => {
     });
 
     // Initial check on load
+    logRulesetEvent('INITIAL_LOAD', {
+        activeChatId: getActiveChatId(),
+        isPbta: isPbtAActive(getActiveChatId()),
+    });
     scheduleSync('INITIAL_LOAD', 1000);
     setTimeout(async () => {
         const s = getSettings();

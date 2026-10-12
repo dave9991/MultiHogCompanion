@@ -13,6 +13,8 @@ import {
     formatRulesetBadge,
     persistPbtaChatState,
     ensureActiveChatRulesetConsistency,
+    logRulesetEvent,
+    collectRulesetDiagnostics,
 } from '../pbta-ruleset-persistence.js';
 import {
     applyChatSetup,
@@ -256,6 +258,45 @@ mockSettings.customSyspromptLibrary = [
 await persistPbtaChatState(mockChatId, mockSettings);
 assert.strictEqual(mockSettings.chatStates[mockChatId].setup?.syspromptSnippetStates?.['pbta_base_override_combat'], true);
 console.log('✓ Memo vitality normalization and partition setup persistence pipeline verified');
+
+// ── 7. Test Diagnostic Event Logging & Markdown Report Collection ────────────
+console.log('Testing diagnostic event logging and collectRulesetDiagnostics report...');
+
+logRulesetEvent('TEST_BOOT', { activeChatId: 'chat_diag_test' });
+assert.ok(Array.isArray(globalThis._mhcRulesetEventLog));
+assert.ok(globalThis._mhcRulesetEventLog.some(e => e.event === 'TEST_BOOT'));
+
+mockChatId = 'chat_diag_test';
+mockSettings = buildDefaultSettings();
+mockSettings.chatStates = {
+    [mockChatId]: {
+        pbtaCampaignDossier: {
+            meta: { title: 'Diagnostic Campaign', systemKey: 'fantasy', systemLabel: 'Dungeon World' },
+            protagonist: { name: 'DiagHero', stats: { might: 1 } },
+            config: { harmLimit: 6 },
+        },
+        setup: {
+            version: 3,
+            syspromptSnippetStates: { pbta_core: true },
+        },
+        currentMemo: '[CHARACTER]\nDiagHero: 5/6 HP | Harm: 1/6\n[/CHARACTER]',
+    },
+};
+
+const diagReport = collectRulesetDiagnostics(mockChatId, mockSettings, { lastGenre: 'fantasy', enableRulesetDebug: true });
+assert.ok(typeof diagReport === 'string');
+assert.ok(diagReport.includes('MultiHog Companion — Ruleset & State Diagnostics'));
+assert.ok(diagReport.includes('1. Chat Identification & Candidates'));
+assert.ok(diagReport.includes('2. Ruleset Status & Detection Layers'));
+assert.ok(diagReport.includes('3. MultiHog Framework Settings'));
+assert.ok(diagReport.includes('4. MultiHog Partition Storage (chatStates)'));
+assert.ok(diagReport.includes('5. Live MultiHog Control Room & Catalogs'));
+assert.ok(diagReport.includes('6. MultiHog Companion Settings'));
+assert.ok(diagReport.includes('7. Recent Ruleset & Reload Event Log'));
+assert.ok(diagReport.includes('DiagHero'));
+assert.ok(diagReport.includes('Diagnostic Campaign'));
+assert.ok(diagReport.includes('TEST_BOOT'));
+console.log('✓ Diagnostic event logging and collectRulesetDiagnostics verified cleanly');
 
 console.log('\n--- ALL PBTA RULESET PERSISTENCE TESTS PASSED CLEANLY! ---');
 

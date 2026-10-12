@@ -621,7 +621,7 @@ async function tryRecoverDossierFromWorldInfo(ctx, candidateChatIds) {
  * @param {string} memo
  * @returns {Promise<boolean>}
  */
-async function forceRenderTrackerView(s, chatId, memo) {
+export async function forceRenderTrackerView(s, chatId, memo) {
     if (!memo) return false;
 
     // 1. Textarea

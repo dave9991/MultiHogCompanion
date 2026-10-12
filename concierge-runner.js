@@ -770,13 +770,22 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     const { healAndNormalizeDossier } = await import('./concierge-parser.js');
     const { applyPbtACartridge } = await import('./index.js');
-    const { syncLivePbtaMemoVitality } = await import('./pbta-vitality-sync.js');
+    const { formatInitialPbtaMemo } = await import('./pbta-ruleset.js');
+    const { forceRenderTrackerView } = await import('./index.js');
 
     const dossier = healAndNormalizeDossier(rawDossier);
     const systemKey = dossier.meta?.systemKey || 'fantasy';
     const charName = (dossier.protagonist?.name || '').trim();
     const adventureTitle = (dossier.meta?.title || '').trim();
-    const chatId = ctx?.chatId || ctx?.chatMetadata?.chat_id || '';
+    
+    // Robust active chat ID resolution matching framework & companion conventions
+    const chatId = String(
+        (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || ctx?.getCurrentChatId?.()
+        || ctx?.chatId
+        || ctx?.chatMetadata?.chat_id
+        || ''
+    );
 
     try {
         // 1. Inscribe updated dossier into World Info
@@ -818,9 +827,9 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
         if (rpgSettings) {
             const nextHarmMax = dossier.config?.harmMax || 5;
 
-            // Update live memo if present
-            let memo = rpgSettings.currentMemo || '';
-            if (memo) {
+            // Update live memo if present, or format initial PbtA memo if blank
+            let memo = rpgSettings.currentMemo || (chatId && rpgSettings.chatStates?.[chatId]?.currentMemo) || '';
+            if (memo && memo.trim()) {
                 // Synchronize protagonist header in memo
                 const protoHeaderRe = new RegExp(`(^\\s*[-*+•–—]?\\s*${charName || '[^:\\n]+'}(?:\\s*\\([^)]+\\))?:\\s*)(\\d+)(?:/(\\d+))?\\s*HP\\s*\\|\\s*Harm:\\s*(\\d+)(?:/(\\d+))?(.*)$`, 'im');
                 if (protoHeaderRe.test(memo)) {
@@ -831,9 +840,13 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                     });
                 }
                 rpgSettings.currentMemo = syncLivePbtaMemoVitality(memo, nextHarmMax);
+            } else {
+                // If the memo was empty or not initialized yet, format the initial PbtA memo from dossier
+                rpgSettings.currentMemo = formatInitialPbtaMemo(dossier);
             }
 
             if (chatId) {
+                rpgSettings.chatStateProjectionOwner = chatId;
                 rpgSettings.chatStates = rpgSettings.chatStates || {};
                 rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
                 rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
@@ -841,12 +854,8 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 rpgSettings.chatStates[chatId].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
             }
 
-            // UI Refresh poke
-            try {
-                const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
-                if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
-                if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
-            } catch (_) {}
+            // Force tracker view hydration so Multihog HUD transitions immediately out of .rt-empty onboarding
+            await forceRenderTrackerView(rpgSettings, chatId || 'active', rpgSettings.currentMemo);
         }
 
         onProgress('✨ Active campaign successfully synchronized!', 100);

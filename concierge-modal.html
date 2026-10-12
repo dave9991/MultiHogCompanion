@@ -49,6 +49,10 @@
 
                 <!-- Inspiration Quick Toolbar -->
                 <div class="mhc-inspiration-bar">
+                    <button type="button" id="mhc_load_active_campaign_btn" class="menu_button mhc-bar-btn" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #7dd3fc;" title="Pull the active chat's Campaign Dossier into Session Zero to view or edit">
+                        📂 Load Active Campaign
+                    </button>
+
                     <button type="button" id="mhc_pick_st_char_btn" class="menu_button mhc-bar-btn" title="Import an existing SillyTavern character as protagonist inspiration">
                         👤 Pick ST Character ▾
                     </button>
@@ -321,7 +325,10 @@
                 <button type="button" id="mhc_export_dossier_btn" class="menu_button" title="Download Campaign Dossier markdown file">📥 Export Dossier</button>
                 <button type="button" id="mhc_reset_session_btn" class="menu_button" style="color: #ff8888;" title="Reset session zero and start fresh">↺ Reset</button>
             </div>
-            <div class="mhc-footer-right">
+            <div class="mhc-footer-right" style="display: flex; gap: 8px;">
+                <button type="button" id="mhc_sync_active_campaign_btn" class="menu_button" style="display: none; background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(56, 189, 248, 0.25)); border: 1px solid rgba(52, 211, 153, 0.6); color: #a7f3d0; font-weight: bold; padding: 6px 14px;" title="Sync modified rules, Harm scaling, and blueprint back to the ongoing chat without resetting messages">
+                    🔄 Sync to Active Game
+                </button>
                 <button type="button" id="mhc_launch_campaign_btn" class="menu_button mhc-launch-btn">
                     🚀 Finalize &amp; Launch Campaign
                 </button>

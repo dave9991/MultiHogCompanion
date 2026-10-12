@@ -756,3 +756,147 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         return { success: false, message: err.message || String(err) };
     }
 }
+
+/**
+ * In-place synchronization of an active campaign's dossier.
+ * Updates rules, cartridge prompts, character harm capacity & tandem HP,
+ * and World Info without resetting chat history or sending turn 1.
+ *
+ * @param {object} rawDossier The modified PbtaCampaignDossier
+ * @param {(stepText: string, pct: number) => void} [onProgress] Progress callback
+ * @returns {Promise<{ success: boolean, message: string }>}
+ */
+export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {}) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    const { healAndNormalizeDossier } = await import('./concierge-parser.js');
+    const { applyPbtACartridge } = await import('./index.js');
+    const { syncLivePbtaMemoVitality } = await import('./pbta-vitality-sync.js');
+
+    const dossier = healAndNormalizeDossier(rawDossier);
+    const systemKey = dossier.meta?.systemKey || 'fantasy';
+    const charName = (dossier.protagonist?.name || '').trim();
+    const adventureTitle = (dossier.meta?.title || '').trim();
+    const chatId = ctx?.chatId || ctx?.chatMetadata?.chat_id || '';
+
+    try {
+        // 1. Inscribe updated dossier into World Info
+        onProgress('📜 Inscribing updated dossier into World Info...', 20);
+        const dossierMd = serializeDossierToMarkdown(dossier);
+        await injectDossierIntoWorldInfo(chatId, dossierMd);
+
+        // 2. Distribute updated entities into campaign lorebooks
+        onProgress('📚 Updating campaign lorebooks...', 40);
+        const sectionNames = await loadMainNpcSectionNames();
+        try {
+            await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
+        } catch (loreErr) {
+            console.warn('[PbtA Concierge] Lorebook sync warning:', loreErr);
+        }
+
+        // 3. Update PbtA Cartridge with dynamic rules and Harm tiers
+        onProgress('🎲 Re-applying PbtA ruleset cartridge...', 60);
+        const statsList = Object.keys(dossier.protagonist?.stats || {});
+        const cartridgeOverrides = {
+            id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+            campaignTitle: adventureTitle,
+            name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
+            systemLabel: dossier.meta?.systemLabel,
+            description: dossier.meta?.premise,
+            tone: dossier.meta?.tone,
+            factions: dossier.factions,
+            worldRules: dossier.worldRules,
+            stats: statsList.length >= 3 ? statsList : null,
+            startingMoves: dossier.protagonist?.startingMoves,
+            cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
+            config: dossier.config || {},
+        };
+        await applyPbtACartridge(systemKey, cartridgeOverrides);
+
+        // 4. Update live state memo and MultiHog memory
+        onProgress('⚙️ Synchronizing live state memo & character vitals...', 80);
+        const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+        if (rpgSettings) {
+            const nextHarmMax = dossier.config?.harmMax || 5;
+
+            // Update live memo if present
+            let memo = rpgSettings.currentMemo || '';
+            if (memo) {
+                // Synchronize protagonist header in memo
+                const protoHeaderRe = new RegExp(`(^\\s*[-*+•–—]?\\s*${charName || '[^:\\n]+'}(?:\\s*\\([^)]+\\))?:\\s*)(\\d+)(?:/(\\d+))?\\s*HP\\s*\\|\\s*Harm:\\s*(\\d+)(?:/(\\d+))?(.*)$`, 'im');
+                if (protoHeaderRe.test(memo)) {
+                    memo = memo.replace(protoHeaderRe, (match, lead, curHp, maxHp, curHarm, oldMaxHarm, rest) => {
+                        const cH = Math.min(nextHarmMax, parseInt(curHarm, 10) || 0);
+                        const cHp = Math.max(0, nextHarmMax - cH);
+                        return `${lead}${cHp}/${nextHarmMax} HP | Harm: ${cH}/${nextHarmMax}${rest}`;
+                    });
+                }
+                rpgSettings.currentMemo = syncLivePbtaMemoVitality(memo, nextHarmMax);
+            }
+
+            if (chatId) {
+                rpgSettings.chatStates = rpgSettings.chatStates || {};
+                rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
+                rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+                rpgSettings.chatStates[chatId].currentMemo = rpgSettings.currentMemo;
+                rpgSettings.chatStates[chatId].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
+            }
+
+            // UI Refresh poke
+            try {
+                const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+                if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+                if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
+            } catch (_) {}
+        }
+
+        onProgress('✨ Active campaign successfully synchronized!', 100);
+        return { success: true, message: `Active campaign synchronized with Harm capacity ${dossier.config?.harmMax || 5}!` };
+    } catch (err) {
+        console.error('[PbtA Concierge] Active campaign sync failed:', err);
+        return { success: false, message: err.message || String(err) };
+    }
+}
+
+/**
+ * AI Maker Fallback: Sends malformed, legacy, or unstructured markdown to the
+ * Concierge Builder model to reconstruct into a valid PbtA Campaign Dossier.
+ *
+ * @param {string} rawMarkdown
+ * @param {(msg: string) => void} [onProgress]
+ * @returns {Promise<object>} Healed PbtaCampaignDossier
+ */
+export async function reconstituteDossierWithAi(rawMarkdown, onProgress = () => {}) {
+    onProgress('Consulting the AI Campaign Architect to heal dossier...');
+    const { sendConciergeRequest } = await import('./concierge-connection.js');
+    const { createEmptyDossier, parseConciergeStateBlock, applyDossierUpdates, healAndNormalizeDossier } = await import('./concierge-parser.js');
+
+    const prompt = `[TASK: RECONSTITUTE_CAMPAIGN_DOSSIER]
+You are the PbtA Campaign Architect. The following text contains an unstructured, corrupted, or legacy campaign outline.
+Your goal is to parse and reconstruct this campaign into a complete PbtA Campaign Dossier.
+Analyze the text and output complete [UPDATE_DOSSIER] blocks declaring:
+- [META] title, system (e.g. fantasy, scifi, horror), premise, tone [/META]
+- [PROTAGONIST] name, playbook, stats (Might +2, Agility +1, etc.), harm_max (default 5 or extracted), bio [/PROTAGONIST]
+- [NPC] name, role, appearance, demeanor, relationship [/NPC] for any supporting characters
+- [MONSTER] name, harm, armor, attacks [/MONSTER] for any adversaries
+- [FACTION] name, agenda, standing [/FACTION] for any factions
+- [CONFIG] playstyle: cyoa_5, harm_max: 5 (or matching protagonist), party_mode: squad, simulation_depth: active_fronts [/CONFIG]
+
+SOURCE TEXT:
+${String(rawMarkdown || '').slice(0, 12000)}
+
+Output the [UPDATE_DOSSIER] ... [/UPDATE_DOSSIER] block now.`;
+
+    const response = await sendConciergeRequest([
+        { role: 'system', content: 'You are the PbtA Campaign Architect. Reconstruct the provided campaign into structured [UPDATE_DOSSIER] blocks.' },
+        { role: 'user', content: prompt },
+    ]);
+
+    const stateBlock = parseConciergeStateBlock(response || '');
+    let dossier = createEmptyDossier();
+    if (stateBlock) {
+        const updateResult = applyDossierUpdates(dossier, stateBlock);
+        dossier = updateResult.updatedDossier || dossier;
+    }
+
+    return healAndNormalizeDossier(dossier, rawMarkdown);
+}

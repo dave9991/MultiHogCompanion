@@ -1542,20 +1542,198 @@ ${mapsMd}${worldRulesMd}${customModuleMd}
  *
  * @param {string} markdown
  * @returns {object|null}
+/**
+ * Normalizes, repairs, and heals a PbtA Campaign Dossier object to guarantee
+ * full compliance with the active runtime schema. Resilient against missing
+ * fields, legacy version structures, or corrupt data types.
+ *
+ * @param {object} dossier Raw or partially loaded dossier
+ * @param {string} [rawMarkdown=''] Optional source markdown for contextual recovery
+ * @returns {object} Fully validated and healed dossier
+ */
+export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
+    const empty = createEmptyDossier();
+    if (!dossier || typeof dossier !== 'object') {
+        dossier = createEmptyDossier();
+    }
+
+    // 1. Meta
+    dossier.meta = dossier.meta || {};
+    if (!dossier.meta.title || typeof dossier.meta.title !== 'string') {
+        dossier.meta.title = empty.meta.title;
+    }
+    const rawKey = (dossier.meta.systemKey || '').toLowerCase();
+    if (rawKey && PBTA_GENRES[rawKey]) {
+        dossier.meta.systemKey = rawKey;
+        dossier.meta.systemLabel = PBTA_GENRES[rawKey].label;
+    } else {
+        const labelLower = (dossier.meta.systemLabel || '').toLowerCase();
+        const found = Object.values(PBTA_GENRES).find(g =>
+            (rawKey && g.id.toLowerCase() === rawKey) ||
+            (labelLower && (g.label.toLowerCase().includes(labelLower) || labelLower.includes(g.id.toLowerCase()) || labelLower.includes(g.label.split(' ')[0].toLowerCase())))
+        );
+        dossier.meta.systemKey = found ? found.id : 'fantasy';
+        dossier.meta.systemLabel = found ? found.label : PBTA_GENRES.fantasy.label;
+    }
+    dossier.meta.premise = dossier.meta.premise || '';
+    dossier.meta.tone = dossier.meta.tone || '';
+    dossier.meta.createdAt = dossier.meta.createdAt || Date.now();
+
+    const activeGenre = PBTA_GENRES[dossier.meta.systemKey] || PBTA_GENRES.fantasy;
+
+    // 2. Config & Dials
+    dossier.config = dossier.config || {};
+    let harmMaxVal = parseInt(dossier.config.harmMax, 10);
+    if (isNaN(harmMaxVal) || harmMaxVal < 2 || harmMaxVal > 8) {
+        const protoHarmMax = parseInt(dossier.protagonist?.harm?.max ?? (typeof dossier.protagonist?.harm === 'number' ? dossier.protagonist?.harm : null), 10);
+        harmMaxVal = (!isNaN(protoHarmMax) && protoHarmMax >= 2 && protoHarmMax <= 8) ? protoHarmMax : 5;
+    }
+    dossier.config.harmMax = harmMaxVal;
+
+    let ps = (dossier.config.playstyle || 'cyoa_5').toLowerCase();
+    if (!['cyoa_5', 'cyoa_3', 'freeform'].includes(ps)) ps = 'cyoa_5';
+    dossier.config.playstyle = ps;
+
+    let pm = (dossier.config.partyMode || 'squad').toLowerCase();
+    if (!['squad', 'solo', 'duo'].includes(pm)) pm = 'squad';
+    dossier.config.partyMode = pm;
+
+    let sd = (dossier.config.simulationDepth || 'active_fronts').toLowerCase();
+    if (!['active_fronts', 'living_world', 'static'].includes(sd)) sd = 'active_fronts';
+    dossier.config.simulationDepth = sd;
+
+    let xp = parseInt(dossier.config.pacingXp, 10);
+    if (isNaN(xp) || xp < 1 || xp > 10) xp = 5;
+    dossier.config.pacingXp = xp;
+
+    dossier.config.cyoaEmojis = dossier.config.cyoaEmojis !== false;
+    dossier.config.relationships = dossier.config.relationships !== false;
+    dossier.config.artStyle = dossier.config.artStyle || '';
+
+    // 3. Protagonist
+    dossier.protagonist = dossier.protagonist || {};
+    dossier.protagonist.name = (dossier.protagonist.name || '').trim();
+    dossier.protagonist.playbook = (dossier.protagonist.playbook || '').trim();
+    dossier.protagonist.bio = dossier.protagonist.bio || '';
+    dossier.protagonist.portraitSrc = dossier.protagonist.portraitSrc || null;
+    dossier.protagonist.conditions = Array.isArray(dossier.protagonist.conditions) ? dossier.protagonist.conditions : [];
+
+    // Harm normalization
+    let protoHarmObj = { max: harmMaxVal, current: 0, armor: 0 };
+    if (typeof dossier.protagonist.harm === 'number') {
+        protoHarmObj.max = Math.max(2, Math.min(8, dossier.protagonist.harm));
+    } else if (typeof dossier.protagonist.harm === 'string') {
+        const parts = dossier.protagonist.harm.split('/');
+        if (parts.length === 2) {
+            protoHarmObj.current = parseInt(parts[0], 10) || 0;
+            protoHarmObj.max = parseInt(parts[1], 10) || harmMaxVal;
+        } else {
+            protoHarmObj.max = parseInt(dossier.protagonist.harm, 10) || harmMaxVal;
+        }
+    } else if (dossier.protagonist.harm && typeof dossier.protagonist.harm === 'object') {
+        protoHarmObj.max = parseInt(dossier.protagonist.harm.max, 10) || harmMaxVal;
+        protoHarmObj.current = parseInt(dossier.protagonist.harm.current, 10) || 0;
+        protoHarmObj.armor = parseInt(dossier.protagonist.harm.armor, 10) || 0;
+    }
+    protoHarmObj.max = Math.max(2, Math.min(8, protoHarmObj.max));
+    protoHarmObj.current = Math.max(0, Math.min(protoHarmObj.max, protoHarmObj.current));
+    protoHarmObj.armor = Math.max(0, protoHarmObj.armor);
+    dossier.protagonist.harm = protoHarmObj;
+    dossier.config.harmMax = protoHarmObj.max; // strictly synchronize
+
+    if (dossier.protagonist.status) {
+        dossier.protagonist.status = String(dossier.protagonist.status).trim();
+    } else {
+        dossier.protagonist.status = protoHarmObj.current > 0 ? '(-) Wounded' : '';
+    }
+
+    if (!dossier.protagonist.stats || typeof dossier.protagonist.stats !== 'object' || Object.keys(dossier.protagonist.stats).length === 0) {
+        const stdMods = [+2, +1, +1, 0, -1];
+        const healedStats = {};
+        activeGenre.stats.forEach((s, idx) => {
+            healedStats[s] = stdMods[idx] ?? 0;
+        });
+        dossier.protagonist.stats = healedStats;
+    } else {
+        for (const [k, v] of Object.entries(dossier.protagonist.stats)) {
+            dossier.protagonist.stats[k] = parseInt(v, 10) || 0;
+        }
+    }
+
+    if (!Array.isArray(dossier.protagonist.startingMoves) || dossier.protagonist.startingMoves.length === 0) {
+        dossier.protagonist.startingMoves = activeGenre.moves.slice(0, 2);
+    }
+
+    if (!Array.isArray(dossier.protagonist.gear) || dossier.protagonist.gear.length === 0) {
+        dossier.protagonist.gear = ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'];
+    }
+
+    // 4. Arrays
+    dossier.npcs = Array.isArray(dossier.npcs) ? dossier.npcs : [];
+    dossier.npcs.forEach(n => {
+        n.name = (n.name || 'Unnamed NPC').trim();
+        n.role = (n.role || 'Ally').trim();
+        n.friendship = typeof n.friendship === 'number' ? Math.max(-100, Math.min(100, n.friendship)) : 0;
+        n.affection = typeof n.affection === 'number' ? Math.max(-100, Math.min(100, n.affection)) : 0;
+    });
+
+    dossier.monsters = Array.isArray(dossier.monsters) ? dossier.monsters : [];
+    dossier.monsters.forEach(m => {
+        m.name = (m.name || 'Threat').trim();
+        m.harm = parseInt(m.harm, 10) || 3;
+        m.armor = parseInt(m.armor, 10) || 0;
+        m.attacks = Array.isArray(m.attacks) ? m.attacks : (m.attacks ? [String(m.attacks)] : ['Claw/Strike (2 Harm)']);
+        m.impendingDoom = Array.isArray(m.impendingDoom) ? m.impendingDoom : [];
+    });
+
+    dossier.factions = Array.isArray(dossier.factions) ? dossier.factions : [];
+    dossier.factions.forEach(f => {
+        f.name = (f.name || 'Faction').trim();
+        f.standing = (f.standing || 'Neutral').trim();
+        f.agenda = f.agenda || '';
+    });
+
+    dossier.maps = Array.isArray(dossier.maps) ? dossier.maps : [];
+    dossier.cyoaExamples = Array.isArray(dossier.cyoaExamples) ? dossier.cyoaExamples : [];
+
+    // 5. theKick
+    dossier.theKick = dossier.theKick || {};
+    dossier.theKick.startingLocation = dossier.theKick.startingLocation || '';
+    dossier.theKick.crisis = dossier.theKick.crisis || '';
+    dossier.theKick.openingPrompt = dossier.theKick.openingPrompt || '';
+
+    // 6. worldRules
+    dossier.worldRules = dossier.worldRules || {};
+    dossier.worldRules.axioms = Array.isArray(dossier.worldRules.axioms) ? dossier.worldRules.axioms : [];
+    dossier.worldRules.customModule = (dossier.worldRules.customModule && typeof dossier.worldRules.customModule === 'object') ? dossier.worldRules.customModule : null;
+
+    return dossier;
+}
+
+/**
+ * Parses markdown representation of a Campaign Dossier into a validated,
+ * self-healed PbtaCampaignDossier object.
+ *
+ * @param {string} markdown
+ * @returns {object|null}
  */
 export function parseMarkdownToDossier(markdown) {
     if (!markdown || typeof markdown !== 'string') return null;
     const dossier = createEmptyDossier();
 
-    // 1. Title
-    const titleMatch = markdown.match(/#\s*(?:📜\s*)?CAMPAIGN DOSSIER:\s*([^\n\r]+)/i);
+    // 1. Title (flexible matching for legacy versions)
+    const titleMatch = markdown.match(/(?:#\s*)?(?:📜\s*)?(?:CAMPAIGN DOSSIER|Campaign Blueprint|Campaign Overview|Campaign Dossier)[:\s]*([^\n\r]+)/i);
     if (titleMatch) dossier.meta.title = titleMatch[1].trim();
 
-    // 2. System Engine
-    const systemMatch = markdown.match(/\*\s*\*\*System Engine:\*\*\s*([^(]+?)(?:\s*\(`?([a-z0-9_\-]+)`?\))?(?:\n|$)/i);
-    if (systemMatch) {
-        dossier.meta.systemLabel = systemMatch[1].trim();
-        if (systemMatch[2]) dossier.meta.systemKey = systemMatch[2].trim();
+    // 2. System Engine (flexible matching)
+    const systemLineMatch = markdown.match(/\*\s*\*\*System Engine:\*\*\s*([^\n\r]+)/i);
+    if (systemLineMatch) {
+        const fullSysLine = systemLineMatch[1].trim();
+        const keyMatch = fullSysLine.match(/[`(]([a-z0-9_\-]+)[`)]/i);
+        if (keyMatch && PBTA_GENRES[keyMatch[1].toLowerCase()]) {
+            dossier.meta.systemKey = keyMatch[1].toLowerCase();
+        }
+        dossier.meta.systemLabel = fullSysLine.replace(/\s*\(?`?[a-z0-9_\-]+`?\)?\s*$/i, '').trim();
     }
 
     // 3. Premise & Tone
@@ -1567,8 +1745,8 @@ export function parseMarkdownToDossier(markdown) {
         dossier.meta.tone = toneMatch[1].trim();
     }
 
-    // 4. Protagonist
-    const protoMatch = markdown.match(/##\s*(?:👤\s*)?Protagonist:\s*([^\n\r]+)/i);
+    // 4. Protagonist (flexible matching)
+    const protoMatch = markdown.match(/(?:##\s*)?(?:👤\s*)?Protagonist[:\s]*([^\n\r]+)/i);
     if (protoMatch) dossier.protagonist.name = protoMatch[1].trim();
 
     const playbookMatch = markdown.match(/\*\s*\*\*Playbook:\*\*\s*([^\n\r]+)/i);
@@ -1857,7 +2035,8 @@ export function parseMarkdownToDossier(markdown) {
         }
     }
 
-    return (dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign' || (dossier.worldRules?.axioms && dossier.worldRules.axioms.length > 0)) ? dossier : null;
+    const isValid = Boolean(dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign' || (dossier.worldRules?.axioms && dossier.worldRules.axioms.length > 0));
+    return isValid ? healAndNormalizeDossier(dossier, markdown) : null;
 }
 
 /**

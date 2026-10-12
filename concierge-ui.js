@@ -44,8 +44,10 @@ import {
     classifyBuilderReport,
     buildTalkerInstructionNotice,
     formatDiagnosticTrace as formatDiagnosticTraceParser,
+    healAndNormalizeDossier,
+    parseMarkdownToDossier,
 } from './concierge-parser.js';
-import { launchPbtaCampaign } from './concierge-runner.js';
+import { launchPbtaCampaign, syncPbtaCampaignUpdates, reconstituteDossierWithAi } from './concierge-runner.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
 import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders } from './namerag-hooks.js';
 import { extension_settings } from '../../../extensions.js';
@@ -1120,6 +1122,89 @@ function bindModalEvents() {
         }
     });
 
+    // Helper: Find and heal active campaign dossier from memory or World Info
+    async function loadActiveCampaignDossier() {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+        const chatId = ctx?.chatId || ctx?.chatMetadata?.chat_id || '';
+        const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+
+        // 1. Check memory first
+        if (chatId && rpgSettings?.chatStates?.[chatId]?.pbtaCampaignDossier) {
+            return healAndNormalizeDossier(rpgSettings.chatStates[chatId].pbtaCampaignDossier);
+        }
+
+        // 2. Check World Info
+        const bookCandidates = [
+            ctx?.chatMetadata?.world_info,
+            chatId ? `Campaign_${chatId}` : null,
+            'Campaign_PbtA',
+        ].filter(Boolean);
+
+        for (const book of bookCandidates) {
+            try {
+                const data = await fetchWorldInfoBook(book);
+                if (!data?.entries) continue;
+                for (const entry of Object.values(data.entries)) {
+                    if (entry?.comment?.includes('CAMPAIGN_DOSSIER') ||
+                        entry?.comment?.includes('PbtA Concierge') ||
+                        entry?.key?.includes('campaign_dossier') ||
+                        entry?.content?.includes('CAMPAIGN DOSSIER') ||
+                        entry?.content?.includes('Protagonist:')) {
+                        const parsed = parseMarkdownToDossier(entry.content);
+                        if (parsed) return parsed;
+                    }
+                }
+            } catch (_) {}
+        }
+        return null;
+    }
+
+    // Inspiration Toolbar: Load Active Campaign Dossier
+    $('#mhc_load_active_campaign_btn').on('click', async () => {
+        startImportProgress('Active Campaign');
+        try {
+            toastr?.info('Scanning for active campaign dossier...');
+            let dossier = await loadActiveCampaignDossier();
+            if (!dossier) {
+                const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+                const bookName = ctx?.chatMetadata?.world_info || (ctx?.chatId ? `Campaign_${ctx.chatId}` : '');
+                let rawEntryText = '';
+                if (bookName) {
+                    try {
+                        const data = await fetchWorldInfoBook(bookName);
+                        const found = Object.values(data?.entries || {}).find(e =>
+                            e?.comment?.includes('PbtA Concierge') || e?.content?.includes('Protagonist')
+                        );
+                        if (found) rawEntryText = found.content;
+                    } catch (_) {}
+                }
+
+                if (rawEntryText && confirm('A legacy or unparsed campaign entry was found. Would you like the AI Campaign Architect to rehydrate and heal it?')) {
+                    dossier = await reconstituteDossierWithAi(rawEntryText, msg => toastr?.info(msg));
+                }
+            }
+
+            if (!dossier) {
+                toastr?.warning('No active PbtA campaign dossier found in this chat.');
+                return;
+            }
+
+            activeDossier = healAndNormalizeDossier(dossier);
+            updateBlueprintDeck();
+            saveDraft();
+            $('#mhc_sync_active_campaign_btn').show();
+            toastr?.success(`Loaded active campaign: "${activeDossier.meta?.title || 'Active Adventure'}"! Dials and cards are now editable.`);
+            appendChatBubble(
+                'assistant',
+                `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust Harm capacity, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`
+            );
+        } catch (err) {
+            toastr?.error(`Failed to load active campaign: ${err.message}`);
+        } finally {
+            stopImportProgress('Active Campaign');
+        }
+    });
+
     // Inspiration Toolbar: ST Lorebook Picker
     $('#mhc_pick_st_lore_btn').on('click', () => {
         $('#mhc_st_lore_select').toggle();
@@ -1404,6 +1489,31 @@ function bindModalEvents() {
         }, 600);
     });
 
+    // Sync Active Campaign (in-place update without resetting chat)
+    $('#mhc_sync_active_campaign_btn').on('click', async () => {
+        const overlay = $('#mhc_launch_progress_overlay');
+        const label = $('#mhc_launch_progress_label');
+        const bar = $('#mhc_launch_progress_bar');
+
+        overlay.show();
+        const progressCb = (msg, pct) => {
+            label.text(msg);
+            bar.css('width', `${pct}%`);
+        };
+
+        const res = await syncPbtaCampaignUpdates(activeDossier, progressCb);
+        setTimeout(() => {
+            overlay.hide();
+            if (res.success) {
+                localStorage.removeItem(STORAGE_DRAFT_KEY);
+                $('#mhc_concierge_modal').fadeOut(250);
+                toastr?.success(res.message, 'Campaign Synchronized');
+            } else {
+                toastr?.error(`Sync error: ${res.message}`, 'Sync Failed');
+            }
+        }, 500);
+    });
+
     // Copy Antigravity Debug Trace
     $('#mhc_concierge_modal').on('click', '.mhc-copy-debug-trace-btn', function () {
         const trace = window._mhcLastBuilderTransaction || window._lastConciergeBuilderDiagnostic;
@@ -1609,6 +1719,27 @@ export async function openConciergeModal() {
             'assistant',
             "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?",
         );
+    }
+
+    // Check if active chat has a running campaign dossier
+    try {
+        const activeRunning = await loadActiveCampaignDossier();
+        if (activeRunning?.meta?.title && activeRunning.meta.title !== 'Untitled PbtA Campaign') {
+            const shortTitle = activeRunning.meta.title.length > 20 ? `${activeRunning.meta.title.slice(0, 18)}...` : activeRunning.meta.title;
+            $('#mhc_load_active_campaign_btn')
+                .attr('title', `Active campaign "${activeRunning.meta.title}" detected in this chat! Click to pull into Session Zero.`)
+                .html(`📂 Load "${shortTitle}"`);
+        } else {
+            $('#mhc_load_active_campaign_btn')
+                .attr('title', 'Pull the active chat\'s Campaign Dossier into Session Zero to view or edit')
+                .html('📂 Load Active Campaign');
+        }
+    } catch (_) {}
+
+    if (activeDossier?.protagonist?.name || (activeDossier?.meta?.title && activeDossier.meta.title !== 'Untitled PbtA Campaign')) {
+        $('#mhc_sync_active_campaign_btn').show();
+    } else {
+        $('#mhc_sync_active_campaign_btn').hide();
     }
 
     updateBlueprintDeck();

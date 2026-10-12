@@ -1820,7 +1820,6 @@ export {
     ensureActiveChatRulesetConsistency,
     logRulesetEvent,
     collectRulesetDiagnostics,
-    renderRulesetDiagnostics,
     getCompanionActiveCartridge,
     setCompanionActiveCartridge,
 };

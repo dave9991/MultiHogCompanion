@@ -724,7 +724,7 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         }
 
         try {
-            const { persistPbtaChatState } = await import('./index.js');
+            const { persistPbtaChatState } = await import('./pbta-ruleset-persistence.js');
             if (typeof persistPbtaChatState === 'function' && chatId) {
                 await persistPbtaChatState(chatId);
             }
@@ -779,6 +779,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
     const { applyPbtACartridge } = await import('./index.js');
     const { formatInitialPbtaMemo } = await import('./pbta-ruleset.js');
     const { forceRenderTrackerView } = await import('./index.js');
+    const { normalizePbtaMemo, syncLivePbtaMemoVitality } = await import('./pbta-vitality-sync.js');
 
     const dossier = healAndNormalizeDossier(rawDossier);
     const systemKey = dossier.meta?.systemKey || 'fantasy';
@@ -846,7 +847,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                         return `${lead}${cHp}/${nextHarmMax} HP | Harm: ${cH}/${nextHarmMax}${rest}`;
                     });
                 }
-                rpgSettings.currentMemo = syncLivePbtaMemoVitality(memo, nextHarmMax);
+                rpgSettings.currentMemo = normalizePbtaMemo(memo);
             } else {
                 // If the memo was empty or not initialized yet, format the initial PbtA memo from dossier
                 rpgSettings.currentMemo = formatInitialPbtaMemo(dossier);
@@ -859,6 +860,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
                 rpgSettings.chatStates[chatId].currentMemo = rpgSettings.currentMemo;
                 rpgSettings.chatStates[chatId].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
+                syncLivePbtaMemoVitality(rpgSettings, chatId);
             }
 
             // Force tracker view hydration so Multihog HUD transitions immediately out of .rt-empty onboarding
@@ -866,7 +868,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
 
             // Persist MultiHog setup snapshot and chat partition so F5 reloads retain PbtA
             try {
-                const { persistPbtaChatState } = await import('./index.js');
+                const { persistPbtaChatState } = await import('./pbta-ruleset-persistence.js');
                 if (typeof persistPbtaChatState === 'function' && chatId) {
                     await persistPbtaChatState(chatId);
                 }

@@ -226,5 +226,36 @@ assert.strictEqual(dndBadge.summaryHtml, 'MultiHog running factory D&D 5e rulese
 
 console.log('✓ formatRulesetBadge produces accurate badge text and labels for Dungeon World and D&D');
 
+// ── 6. Test Memo Vitality Sync & Setup Persistence Pipeline ──────────────────
+console.log('Testing memo vitality sync and partition persistence pipeline...');
+import { normalizePbtaMemo, syncLivePbtaMemoVitality } from '../pbta-vitality-sync.js';
+
+mockChatId = 'chat_sync_test';
+mockSettings = buildDefaultSettings();
+mockSettings.chatStates = {
+    [mockChatId]: {
+        currentMemo: '[CHARACTER]\nKael: 5/5 HP | Harm: 1/6\n[/CHARACTER]',
+    },
+};
+mockSettings.currentMemo = mockSettings.chatStates[mockChatId].currentMemo;
+
+// 1. Normalize line with updated harm capacity 6
+const normalized = normalizePbtaMemo(mockSettings.currentMemo);
+assert.ok(normalized.includes('5/6 HP | Harm: 1/6'), 'Tandem HP must recalculate to 5/6 HP for Harm 1/6');
+
+// 2. Sync live settings and partition
+const didSync = syncLivePbtaMemoVitality(mockSettings, mockChatId);
+assert.strictEqual(didSync, true, 'syncLivePbtaMemoVitality must report update applied');
+assert.ok(mockSettings.currentMemo.includes('5/6 HP | Harm: 1/6'), 'Live currentMemo must be updated');
+assert.ok(mockSettings.chatStates[mockChatId].currentMemo.includes('5/6 HP | Harm: 1/6'), 'Partition currentMemo must be updated');
+
+// 3. Persist PbtA setup snapshot
+mockSettings.customSyspromptLibrary = [
+    { id: 'pbta_base_override_combat', enabled: true, scope: 'chat', _chatSetupMember: true },
+];
+await persistPbtaChatState(mockChatId, mockSettings);
+assert.strictEqual(mockSettings.chatStates[mockChatId].setup?.syspromptSnippetStates?.['pbta_base_override_combat'], true);
+console.log('✓ Memo vitality normalization and partition setup persistence pipeline verified');
+
 console.log('\n--- ALL PBTA RULESET PERSISTENCE TESTS PASSED CLEANLY! ---');
 

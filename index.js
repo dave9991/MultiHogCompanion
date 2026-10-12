@@ -42,6 +42,13 @@ import {
     setupCompanionDocInterceptor,
 } from './pbta-companion-bridge.js';
 import {
+    isPbtAActive,
+    isPbtaChat,
+    formatRulesetBadge,
+    persistPbtaChatState,
+    ensureActiveChatRulesetConsistency,
+} from './pbta-ruleset-persistence.js';
+import {
     scanAndInitUnsyncedNpcs,
     checkAndSyncTierCrossovers,
     getRelationshipSyncStatus,
@@ -774,6 +781,10 @@ export async function runSync(reason = '') {
 
         let didWork = false;
 
+        // 0. Ensure active chat ruleset consistency (rehydrates cartridge if MultiHog reset to D&D)
+        const rulesetChanged = await ensureActiveChatRulesetConsistency(chatId);
+        if (rulesetChanged) didWork = true;
+
         // 1. Auto-hydrate PbtA game state memo if needed
         const memoHydrated = await hydratePbtaMemoIfNeeded(chatId);
         if (memoHydrated) didWork = true;
@@ -847,6 +858,7 @@ function scheduleSync(reason = '', delay = 350) {
     }, delay);
 }
 
+
 /**
  * Applies the PbtA Game Cartridge to MultiHog settings, optionally accepting dynamic overrides.
  * @param {string} genreKey
@@ -876,7 +888,21 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     // 2. Install unlocked base overrides into customSyspromptLibrary
     if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
     s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_'));
-    s.customSyspromptLibrary.push(...cartridge.payload.customSyspromptLibrary);
+    const pbtaSnippets = cartridge.payload.customSyspromptLibrary.map(item => ({
+        ...item,
+        enabled: true,
+        scope: 'chat',
+        _chatSetupMember: true,
+    }));
+    s.customSyspromptLibrary.push(...pbtaSnippets);
+
+    // 2b. Synchronize MultiHog's global snippet catalog
+    if (!s.syspromptSnippetDatabase) s.syspromptSnippetDatabase = [];
+    for (const sn of pbtaSnippets) {
+        const catIdx = s.syspromptSnippetDatabase.findIndex(p => p.id === sn.id);
+        if (catIdx >= 0) s.syspromptSnippetDatabase[catIdx] = { ...sn };
+        else s.syspromptSnippetDatabase.push({ ...sn });
+    }
 
     // 3. Update sysprompt modules (deactivate base sections replaced by overrides or not used)
     s.syspromptModules = s.syspromptModules || {};
@@ -908,8 +934,19 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     // 7. Save settings
     saveSettingsDebounced();
 
+    // 7b. Persist PbtA setup snapshot so MultiHog's Chat Setup Link & F5 reloads preserve PbtA
+    const activeChatId = getActiveChatId();
+    if (activeChatId) {
+        await persistPbtaChatState(activeChatId);
+    }
+
     // 8. Re-apply sysprompt via MultiHog runtime bridge
     await refreshMultihogRuntime();
+
+    // Persist active genre in Companion settings
+    const compSettings = getSettings();
+    compSettings.lastGenre = genreKey;
+    saveSettings();
 
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
     showToast('success', `PbtA ruleset (${activeLabel}) applied to this chat! 🎲`, 'PbtA Engine Active');
@@ -986,6 +1023,20 @@ export async function restoreStockDnd() {
     s.diceFunctionTool = factory?.diceFunctionTool ?? false;
 
     saveSettingsDebounced();
+    const activeChatId = getActiveChatId();
+    if (activeChatId && s.chatStates?.[activeChatId]) {
+        delete s.chatStates[activeChatId].pbtaCampaignDossier;
+        try {
+            const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
+            if (typeof setupMod.snapshotChatSetup === 'function') {
+                s.chatStates[activeChatId].setup = setupMod.snapshotChatSetup(s);
+            }
+            const persMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-persistence.js');
+            if (typeof persMod.saveChatState === 'function') {
+                persMod.saveChatState(activeChatId);
+            }
+        } catch (_) {}
+    }
     await refreshMultihogRuntime();
 
     showToast('info', 'Restored this chat to factory D&D 5e ruleset. 📦', 'Ruleset Restored');
@@ -1767,18 +1818,14 @@ async function initUI() {
     }
 }
 
-// ── PbtA Detection ──────────────────────────────────────────────────────────────
-
-/**
- * Check if PbtA overrides are currently enabled in MultiHog's live settings.
- * Per-chat scoping is handled by MultiHog's Chat Setup Link, which hydrates
- * the live customSyspromptLibrary with per-chat enabled states on chat switch.
- */
-export function isPbtAActive() {
-    const s = SillyTavern.getContext().extensionSettings?.rpg_tracker;
-    if (!s?.customSyspromptLibrary) return false;
-    return s.customSyspromptLibrary.some(p => p.id.startsWith('pbta_') && p.enabled);
-}
+// ── PbtA Detection & State Recovery ──────────────────────────────────────────────
+export {
+    isPbtAActive,
+    isPbtaChat,
+    formatRulesetBadge,
+    persistPbtaChatState,
+    ensureActiveChatRulesetConsistency,
+};
 
 // ── 2d6 RNG Queue Interceptor ───────────────────────────────────────────────────
 
@@ -1873,29 +1920,16 @@ function updateRulesetBadge() {
     const summary = document.getElementById('mhc_pbta_summary_line');
     if (!badge) return;
 
-    if (isPbtAActive()) {
-        const current = getSettings();
-        const genreKey = current.lastGenre || 'fantasy';
-        const genreObj = PBTA_GENRES[genreKey];
-        const genreLabel = genreObj ? genreObj.label.split(' (')[0].replace(/^[^\w\s]+\s*/, '') : 'PbtA';
+    const current = getSettings();
+    const formatted = formatRulesetBadge(getActiveChatId(), getRpgSettings(), current.lastGenre || 'fantasy');
 
-        badge.textContent = `🎲 PbtA (${genreLabel})`;
-        badge.style.background = 'rgba(90,160,250,0.2)';
-        badge.style.borderColor = 'rgba(90,160,250,0.5)';
-        badge.style.color = '#88ccff';
+    badge.textContent = formatted.badgeText;
+    badge.style.background = formatted.badgeStyle.background;
+    badge.style.borderColor = formatted.badgeStyle.borderColor;
+    badge.style.color = formatted.badgeStyle.color;
 
-        if (summary) {
-            summary.innerHTML = `<span style="color: #88ccff; font-weight: 500;">🎲 ${genreObj?.icon || ''} ${genreLabel}</span> &mdash; 2d6 moves &amp; Harm clocks active`;
-        }
-    } else {
-        badge.textContent = '⚔️ D&D 5e Active';
-        badge.style.background = 'rgba(255,180,60,0.15)';
-        badge.style.borderColor = 'rgba(255,180,60,0.4)';
-        badge.style.color = '#ffcc88';
-
-        if (summary) {
-            summary.textContent = 'MultiHog running factory D&D 5e ruleset';
-        }
+    if (summary) {
+        summary.innerHTML = formatted.summaryHtml;
     }
 }
 
@@ -2020,6 +2054,10 @@ jQuery(async () => {
     }
     eventSource.on(event_types.CHAT_CHANGED, () => {
         scheduleSync('CHAT_CHANGED', 500);
+        setTimeout(async () => {
+            await ensureActiveChatRulesetConsistency();
+            updateRulesetBadge();
+        }, 550);
         setTimeout(updateRulesetBadge, 600);
         setTimeout(updateLorebookSyncUI, 650);
         setTimeout(async () => {
@@ -2048,6 +2086,10 @@ jQuery(async () => {
     });
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
         scheduleSync('SETTINGS_UPDATED', 600);
+        setTimeout(async () => {
+            await ensureActiveChatRulesetConsistency();
+            updateRulesetBadge();
+        }, 650);
         setTimeout(updateRulesetBadge, 700);
         setTimeout(updateLorebookSyncUI, 750);
         setTimeout(() => {
@@ -2066,6 +2108,8 @@ jQuery(async () => {
         const s = getSettings();
         const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
         await syncNameRagAdhocSysprompt(adhocActive);
+        await ensureActiveChatRulesetConsistency();
+        updateRulesetBadge();
     }, 1100);
     setTimeout(updateRulesetBadge, 1200);
     setTimeout(updateLorebookSyncUI, 1300);

@@ -724,11 +724,18 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
         }
 
         try {
-            const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
-            if (typeof stateMgr.saveChatState === 'function' && chatId) {
-                stateMgr.saveChatState(chatId);
+            const { persistPbtaChatState } = await import('./index.js');
+            if (typeof persistPbtaChatState === 'function' && chatId) {
+                await persistPbtaChatState(chatId);
             }
-        } catch (_) {}
+        } catch (_) {
+            try {
+                const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+                if (typeof stateMgr.saveChatState === 'function' && chatId) {
+                    stateMgr.saveChatState(chatId);
+                }
+            } catch (_) {}
+        }
 
         // ── 6. Opening Fiction Scene (Turn 0) ───────────────────────────────────
         onProgress('🚀 Launching opening adventure turn...', 95);
@@ -856,6 +863,14 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
 
             // Force tracker view hydration so Multihog HUD transitions immediately out of .rt-empty onboarding
             await forceRenderTrackerView(rpgSettings, chatId || 'active', rpgSettings.currentMemo);
+
+            // Persist MultiHog setup snapshot and chat partition so F5 reloads retain PbtA
+            try {
+                const { persistPbtaChatState } = await import('./index.js');
+                if (typeof persistPbtaChatState === 'function' && chatId) {
+                    await persistPbtaChatState(chatId);
+                }
+            } catch (_) {}
         }
 
         onProgress('✨ Active campaign successfully synchronized!', 100);

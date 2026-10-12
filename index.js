@@ -946,7 +946,7 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     // Persist active genre in Companion settings
     const compSettings = getSettings();
     compSettings.lastGenre = genreKey;
-    saveSettings();
+    saveSettingsDebounced();
 
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
     showToast('success', `PbtA ruleset (${activeLabel}) applied to this chat! 🎲`, 'PbtA Engine Active');

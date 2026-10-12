@@ -9,10 +9,41 @@
 import { PBTA_GENRES, buildPbtACartridge } from './pbta-ruleset.js';
 
 /**
+ * Helper to gather candidate chat IDs across SillyTavern and MultiHog context,
+ * expanding .jsonl extensions and checking projection owners.
+ *
+ * @param {string|null} chatId
+ * @param {object|null} [rpgSettings=null]
+ * @returns {string[]}
+ */
+export function getCandidateChatIds(chatId, rpgSettings = null) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const raw = [
+        chatId,
+        (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+        ctx?.getCurrentChatId?.(),
+        ctx?.chatId,
+        ctx?.chatMetadata?.chat_id,
+        rpgSettings?.chatStateProjectionOwner,
+    ].filter(Boolean).map(String);
+
+    const expanded = [];
+    for (const id of raw) {
+        expanded.push(id);
+        if (id.endsWith('.jsonl')) {
+            expanded.push(id.slice(0, -6));
+        } else {
+            expanded.push(`${id}.jsonl`);
+        }
+    }
+    return [...new Set(expanded)];
+}
+
+/**
  * Check if PbtA overrides are active for the given or current chat.
  * Checks:
  * 1. Live customSyspromptLibrary pbta_ entries
- * 2. Chat partition pbtaCampaignDossier
+ * 2. Chat partition pbtaCampaignDossier across candidate IDs
  * 3. Chat setup syspromptSnippetStates
  * 4. Partition memo or live memo Harm markers
  *
@@ -29,26 +60,28 @@ export function isPbtAActive(chatId = null, rpgSettings = null) {
         return true;
     }
 
-    const cid = chatId || (typeof SillyTavern !== 'undefined' ? (SillyTavern.getContext()?.getCurrentChatId?.() || SillyTavern.getContext()?.chatId) : null);
-    if (cid && s.chatStates?.[cid]) {
-        // 2. Chat partition contains a PbtA campaign dossier
-        if (s.chatStates[cid].pbtaCampaignDossier) {
-            return true;
-        }
-
-        // 3. Chat setup states have enabled pbta snippets
-        const snippetStates = s.chatStates[cid].setup?.syspromptSnippetStates;
-        if (snippetStates && typeof snippetStates === 'object') {
-            if (Object.keys(snippetStates).some(k => k.startsWith('pbta_') && snippetStates[k])) {
+    const candidateIds = getCandidateChatIds(chatId, s);
+    for (const cid of candidateIds) {
+        if (s.chatStates?.[cid]) {
+            // 2. Chat partition contains a PbtA campaign dossier
+            if (s.chatStates[cid].pbtaCampaignDossier) {
                 return true;
             }
-        }
 
-        // 4. Chat memo contains PbtA markers
-        const partitionMemo = s.chatStates[cid].currentMemo || '';
-        if (typeof partitionMemo === 'string' && partitionMemo) {
-            if (/Harm:\s*\d+/i.test(partitionMemo) || /\[PBTA_/i.test(partitionMemo) || /Hack & Slash/i.test(partitionMemo)) {
-                return true;
+            // 3. Chat setup states have enabled pbta snippets
+            const snippetStates = s.chatStates[cid].setup?.syspromptSnippetStates;
+            if (snippetStates && typeof snippetStates === 'object') {
+                if (Object.keys(snippetStates).some(k => k.startsWith('pbta_') && snippetStates[k])) {
+                    return true;
+                }
+            }
+
+            // 4. Chat memo contains PbtA markers
+            const partitionMemo = s.chatStates[cid].currentMemo || '';
+            if (typeof partitionMemo === 'string' && partitionMemo) {
+                if (/Harm:\s*\d+/i.test(partitionMemo) || /\[PBTA_/i.test(partitionMemo) || /Hack & Slash/i.test(partitionMemo)) {
+                    return true;
+                }
             }
         }
     }
@@ -73,9 +106,11 @@ export function isPbtAActive(chatId = null, rpgSettings = null) {
 export function isPbtaChat(chatId = null, rpgSettings = null) {
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
-    const cid = chatId || (typeof SillyTavern !== 'undefined' ? (SillyTavern.getContext()?.getCurrentChatId?.() || SillyTavern.getContext()?.chatId) : null);
-    if (cid && s.chatStates?.[cid]?.pbtaCampaignDossier) return true;
-    return isPbtAActive(cid, s);
+    const candidateIds = getCandidateChatIds(chatId, s);
+    for (const cid of candidateIds) {
+        if (s.chatStates?.[cid]?.pbtaCampaignDossier) return true;
+    }
+    return isPbtAActive(chatId, s);
 }
 
 /**
@@ -88,10 +123,16 @@ export function isPbtaChat(chatId = null, rpgSettings = null) {
  */
 export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre = 'fantasy') {
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
-    const cid = chatId || (typeof SillyTavern !== 'undefined' ? (SillyTavern.getContext()?.getCurrentChatId?.() || SillyTavern.getContext()?.chatId) : null);
-    const dossier = (cid && s?.chatStates?.[cid]?.pbtaCampaignDossier) || null;
+    const candidateIds = getCandidateChatIds(chatId, s);
+    let dossier = null;
+    for (const cid of candidateIds) {
+        if (s?.chatStates?.[cid]?.pbtaCampaignDossier) {
+            dossier = s.chatStates[cid].pbtaCampaignDossier;
+            break;
+        }
+    }
 
-    if (isPbtAActive(cid, s)) {
+    if (isPbtAActive(chatId, s)) {
         const genreKey = dossier?.meta?.systemKey || lastGenre || 'fantasy';
         const genreObj = PBTA_GENRES[genreKey];
 
@@ -141,15 +182,15 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return;
 
+    let snapshot = null;
+
     try {
         const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
         if (typeof setupMod.syncChatSetupCatalogs === 'function') {
             setupMod.syncChatSetupCatalogs(s);
         }
         if (typeof setupMod.snapshotChatSetup === 'function') {
-            s.chatStates = s.chatStates || {};
-            s.chatStates[chatId] = s.chatStates[chatId] || {};
-            s.chatStates[chatId].setup = setupMod.snapshotChatSetup(s);
+            snapshot = setupMod.snapshotChatSetup(s);
         }
     } catch (_) {
         // Fallback: manually ensure catalog & setup
@@ -161,14 +202,30 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
                 else s.syspromptSnippetDatabase.push({ ...item });
             }
         }
-        if (s.chatStates?.[chatId]) {
-            s.chatStates[chatId].setup = s.chatStates[chatId].setup || { version: 3, syspromptSnippetStates: {} };
-            s.chatStates[chatId].setup.syspromptSnippetStates = s.chatStates[chatId].setup.syspromptSnippetStates || {};
-            if (Array.isArray(s.customSyspromptLibrary)) {
-                for (const item of s.customSyspromptLibrary) {
-                    if (item.id) s.chatStates[chatId].setup.syspromptSnippetStates[item.id] = !!item.enabled;
-                }
+        snapshot = {
+            version: 3,
+            syspromptSnippetStates: {},
+            customFieldStates: {},
+            gameSystemStates: {},
+            stockPrompts: s.stockPrompts,
+            modules: s.modules,
+            blockOrder: s.blockOrder,
+            syspromptModules: s.syspromptModules,
+            cyoaConfig: s.cyoaConfig,
+        };
+        if (Array.isArray(s.customSyspromptLibrary)) {
+            for (const item of s.customSyspromptLibrary) {
+                if (item.id) snapshot.syspromptSnippetStates[item.id] = !!item.enabled;
             }
+        }
+    }
+
+    const candidateIds = getCandidateChatIds(chatId, s);
+    s.chatStates = s.chatStates || {};
+    for (const cid of candidateIds) {
+        s.chatStates[cid] = s.chatStates[cid] || {};
+        if (snapshot) {
+            s.chatStates[cid].setup = snapshot;
         }
     }
 
@@ -201,13 +258,19 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
 
-    const cid = chatId || (typeof SillyTavern !== 'undefined' ? (SillyTavern.getContext()?.getCurrentChatId?.() || SillyTavern.getContext()?.chatId) : null);
-    if (!cid) return false;
+    const candidateIds = getCandidateChatIds(chatId, s);
+    let resolvedChatId = candidateIds[0] || null;
+    let dossier = null;
 
-    const partition = s.chatStates?.[cid];
-    const dossier = partition?.pbtaCampaignDossier;
-    const isPbta = !!dossier || isPbtAActive(cid, s);
+    for (const cid of candidateIds) {
+        if (s.chatStates?.[cid]?.pbtaCampaignDossier) {
+            dossier = s.chatStates[cid].pbtaCampaignDossier;
+            resolvedChatId = cid;
+            break;
+        }
+    }
 
+    const isPbta = !!dossier || isPbtAActive(chatId, s);
     if (!isPbta) {
         return false;
     }
@@ -217,11 +280,12 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled);
 
     if (!hasLiveOverrides) {
-        console.log(`[MultiHog Companion] Active chat ${cid} is a PbtA campaign, but live customSyspromptLibrary was not hydrated (e.g. reload or setup reset). Rehydrating cartridge...`);
+        console.log(`[MultiHog Companion] Active chat ${resolvedChatId || chatId} is a PbtA campaign, but live customSyspromptLibrary was not hydrated (e.g. reload or setup reset). Rehydrating cartridge...`);
         const genreKey = dossier?.meta?.systemKey || 'fantasy';
         const statsList = Object.keys(dossier?.protagonist?.stats || {});
+        const safeId = (resolvedChatId || chatId || 'pbta').toLowerCase().replace(/[^a-z0-9]+/g, '_');
         const overrides = dossier ? {
-            id: `pbta_${cid.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+            id: `pbta_${safeId}`,
             campaignTitle: dossier.meta?.title,
             name: dossier.meta?.title ? `PbtA: ${dossier.meta.title}` : null,
             systemLabel: dossier.meta?.systemLabel,
@@ -272,12 +336,16 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
                 Object.assign(s.modules, cartridge.payload.modules);
             }
 
-            await persistPbtaChatState(cid, s);
+            if (resolvedChatId) {
+                await persistPbtaChatState(resolvedChatId, s);
+            }
         }
         return true;
     }
 
     // Overrides are live; make sure setup snapshot is current in the partition
-    await persistPbtaChatState(cid, s);
+    if (resolvedChatId) {
+        await persistPbtaChatState(resolvedChatId, s);
+    }
     return true;
 }

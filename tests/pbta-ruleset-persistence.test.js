@@ -216,6 +216,8 @@ assert.strictEqual(defaultBadge.isActive, true);
 assert.strictEqual(defaultBadge.badgeText, '🎲 PbtA (Dungeon World)');
 
 // Stock D&D badge
+mockSettings.customSyspromptLibrary = [];
+mockChatId = 'chat_dnd';
 mockSettings.chatStates['chat_dnd'] = {};
 const dndBadge = formatRulesetBadge('chat_dnd', mockSettings);
 assert.strictEqual(dndBadge.isActive, false);

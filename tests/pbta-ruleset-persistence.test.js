@@ -307,7 +307,7 @@ const cartChatId = 'chat_cartridge_test_01';
 const mockComp = { companionActiveCartridges: {} };
 
 // Stamp PbtA
-setCompanionActiveCartridge(cartChatId, {
+await setCompanionActiveCartridge(cartChatId, {
     cartridgeId: 'pbta',
     genre: 'fantasy',
     systemLabel: 'Dungeon World',
@@ -341,13 +341,31 @@ assert.strictEqual(rehydrated, true);
 assert.ok(emptyRpgSettings.customSyspromptLibrary.some(p => p.id.startsWith('pbta_') && p.enabled), 'Rehydration must restore PbtA snippets');
 
 // Stamp D&D 5e
-setCompanionActiveCartridge(cartChatId, {
+await setCompanionActiveCartridge(cartChatId, {
     cartridgeId: 'dnd5e',
 }, null, mockComp);
 assert.strictEqual(isPbtAActive(cartChatId, emptyRpgSettings), false, 'Explicit dnd5e cartridge must evaluate isPbtAActive as false');
 const dndCartBadge = formatRulesetBadge(cartChatId, emptyRpgSettings);
 assert.strictEqual(dndCartBadge.isActive, false);
 assert.strictEqual(dndCartBadge.badgeText, '⚔️ D&D 5e Active');
+
+// Test chatMetadata writing and saving directly
+let savedMetadataCalled = false;
+let savedSettingsCalled = false;
+const metaCtx = {
+    chatMetadata: {},
+    saveMetadata: async () => { savedMetadataCalled = true; },
+    saveSettings: async () => { savedSettingsCalled = true; },
+};
+globalThis.SillyTavern.getContext = () => metaCtx;
+await setCompanionActiveCartridge('chat_with_meta', {
+    cartridgeId: 'pbta',
+    genre: 'fantasy',
+    systemLabel: 'Dungeon World',
+});
+assert.strictEqual(metaCtx.chatMetadata.CompanionActiveCartridge?.cartridgeId, 'pbta');
+assert.strictEqual(savedMetadataCalled, true, 'saveMetadata must be awaited when saving cartridge');
+assert.strictEqual(savedSettingsCalled, true, 'saveSettings must be awaited when saving cartridge');
 
 console.log('✓ Explicit CompanionActiveCartridge registry and auto-rehydration verified cleanly');
 

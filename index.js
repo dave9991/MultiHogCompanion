@@ -955,7 +955,7 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
 
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
     if (activeChatId) {
-        setCompanionActiveCartridge(activeChatId, {
+        await setCompanionActiveCartridge(activeChatId, {
             cartridgeId: 'pbta',
             genre: genreKey,
             systemLabel: activeLabel,
@@ -1058,7 +1058,7 @@ export async function restoreStockDnd() {
     await refreshMultihogRuntime();
 
     if (activeChatId) {
-        setCompanionActiveCartridge(activeChatId, {
+        await setCompanionActiveCartridge(activeChatId, {
             cartridgeId: 'dnd5e',
         });
     }

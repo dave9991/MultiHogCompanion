@@ -81,7 +81,7 @@ export function getCompanionActiveCartridge(chatId = null, rpgSettings = null, c
  * @param {object|null} [companionSettings=null]
  * @returns {boolean}
  */
-export function setCompanionActiveCartridge(chatId = null, cartridgeData = {}, rpgSettings = null, companionSettings = null) {
+export async function setCompanionActiveCartridge(chatId = null, cartridgeData = {}, rpgSettings = null, companionSettings = null) {
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
     let comp = companionSettings
         || ctx?.extensionSettings?.multihog_companion
@@ -107,10 +107,21 @@ export function setCompanionActiveCartridge(chatId = null, cartridgeData = {}, r
         }
     }
 
+    // Persist directly to chat metadata (written into line 1 of the chat .jsonl file)
+    let chatMetaSaved = false;
     if (ctx?.chatMetadata) {
         ctx.chatMetadata.CompanionActiveCartridge = { ...record };
-        if (typeof ctx.saveChatMetadata === 'function') {
-            ctx.saveChatMetadata();
+        if (typeof ctx.saveMetadata === 'function') {
+            try {
+                await ctx.saveMetadata();
+                chatMetaSaved = true;
+            } catch (err) {
+                console.warn('[MultiHog Companion] saveMetadata failed:', err);
+            }
+        }
+        if (!chatMetaSaved && typeof ctx.saveMetadataDebounced === 'function') {
+            ctx.saveMetadataDebounced();
+            chatMetaSaved = true;
         }
     }
 
@@ -119,9 +130,19 @@ export function setCompanionActiveCartridge(chatId = null, cartridgeData = {}, r
         cartridgeId: record.cartridgeId,
         genre: record.genre,
         systemLabel: record.systemLabel,
+        chatMetaSaved,
     });
 
-    if (typeof ctx?.saveSettingsDebounced === 'function') {
+    // Save extension settings (attempt immediate saveSettings first to prevent F5 reload loss)
+    if (typeof ctx?.saveSettings === 'function') {
+        try {
+            await ctx.saveSettings();
+        } catch (_) {
+            if (typeof ctx?.saveSettingsDebounced === 'function') {
+                ctx.saveSettingsDebounced();
+            }
+        }
+    } else if (typeof ctx?.saveSettingsDebounced === 'function') {
         ctx.saveSettingsDebounced();
     }
 

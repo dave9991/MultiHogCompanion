@@ -870,7 +870,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             try {
                 const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
                 if (typeof setCompanionActiveCartridge === 'function' && chatId) {
-                    setCompanionActiveCartridge(chatId, {
+                    await setCompanionActiveCartridge(chatId, {
                         cartridgeId: 'pbta',
                         genre: systemKey,
                         systemLabel: dossier.meta?.systemLabel || 'PbtA',

@@ -102,7 +102,7 @@ Whenever a player action triggers a Move in the narrative, resolve using **2d6 +
 
 * **Zero-Touch RNG:** Players do not manually roll dice. SillyTavern supplies pre-rolled dice from its background queue directly to the Game Master / Ref.
 * **No Initiative or Enemy Rolls:** Combat is a fluid conversation. Enemies do not roll attack bonuses or saving throws; their actions unfold when the player rolls a 7–9 or 6-, or hesitates in the fiction.
-* **Harm Clock (0–5):** Health is tracked via Harm (0 = unharmed, 5 = incapacitated/fatal). Armor directly reduces incoming Harm (e.g. Armor 1 turns 2 Harm into 1 Harm).
+* **Harm Clock (0–5):** Health is tracked via Harm (0 = unharmed, max Harm = incapacitated/fatal; configurable via dial). Armor directly reduces incoming Harm (e.g. Armor 1 turns 2 Harm into 1 Harm). At Max Harm (0 HP), the protagonist is completely incapacitated or dying; CYOA choices adapt to crisis and survival (clinging to life, faint plea, ally intervention, or slipping into darkness) rather than ordinary actions.
 
 ---
 
@@ -126,9 +126,10 @@ ${active.archetypes.join(', ')}
 2. **Interpreting Weak Hits (7–9):**
    * Treat 7–9 as success with a catch: offer dramatic compromises, sacrifices, hard choices, or temporary set-backs rather than outright failure.
 3. **State Tracker Commands (\`command_state_tracker\`):**
-   * Use PbtA Harm (e.g., \`Harm: 2/5\`) and debilities (e.g., \`(-) Shaken: -1 Wits\`) instead of D&D HP bloat or spell slots.
+   * Use PbtA Harm (e.g., \`Harm: 2/5\`) and debilities (e.g., \`(-) Shaken: -1 Wits\`) instead of D&D HP bloat, spell slots, or round-by-round damage counters.
+   * When a combatant reaches Max Harm (0 HP), set status to \`(-) Incapacitated\`, \`(-) Dying\`, or \`Defeated\`.
 4. **Acting for the Player (\`act_for_user\`):**
-   * When CYOA choices are present, look for move triggers (\`[Move (+Stat)]\`).
+   * When CYOA choices are present, look for move triggers (\`[Move (+Stat)]\`). If downed, focus on desperate survival, rallying an ally, or enduring.
    * When composing free-form actions, write concise in-character fictional moves that trigger the active genre's mechanics.
 
 ---

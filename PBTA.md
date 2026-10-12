@@ -21,10 +21,11 @@ Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves
 ### 3. Fiction-First Combat
 * **No Initiative Order:** Combat is a fluid conversation rather than round-by-round tactical math.
 * **No Enemy Rolls:** Enemies do not roll attack bonuses or saving throws; their actions unfold when you roll a 7–9 or 6-, or when you hesitate in the fiction.
-* **Harm Clock (0–5):** Instead of bloated HP pools, characters and enemies track Harm (1–5). Armor directly reduces incoming Harm (e.g., Armor 1 turns 2 Harm into 1 Harm).
+* **Harm Clock (0–5 or dynamic dial):** Instead of bloated HP pools, characters and enemies track Harm (1–5 or configured dial). Armor directly reduces incoming Harm (e.g., Armor 1 turns 2 Harm into 1 Harm). At Max Harm (0 HP), the character is incapacitated / defeated, triggering crisis consequences.
 
 ### 4. PbtA CYOA & Party Mechanics
 * **Move-Triggered Choices:** In CYOA mode, rollable options represent dramatic fictional Moves (`— [Move Name (+Stat)]`) rather than D&D skill checks against target DCs or ACs.
+* **Downed / Incapacitated Adaptive Choices:** When the protagonist drops to Max Harm (0 HP), standard actions and dialogue are replaced with crisis choices (clinging to life, whispering a plea, rallying an ally, or succumbing to the dark).
 * **Companion Bench Resolution:** Off-screen ally tasks resolve with 2d6 + Companion Stat against PbtA tiers (10+ clean return, 7–9 mixed success, 6- trouble/injury), completely removing d20 and DC checks.
 
 ### 5. MultiHog State Tracker & Interactive Pills

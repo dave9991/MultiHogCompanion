@@ -335,20 +335,57 @@ TRI-STATE OUTCOME RESOLUTION (STRICT):
 }
 
 /**
- * Builds the PbtA combat rules section.
+ * Builds the PbtA combat rules section with dynamically scaled Harm tiers.
+ *
+ * @param {number|object} [harmMaxOrOverrides=5] Max Harm capacity or config object
+ * @returns {string} Formatted combat XML content
  */
-export function buildPbtACombatContent() {
+export function buildPbtACombatContent(harmMaxOrOverrides = 5) {
+    let max = 5;
+    if (typeof harmMaxOrOverrides === 'number') {
+        max = harmMaxOrOverrides;
+    } else if (harmMaxOrOverrides && typeof harmMaxOrOverrides === 'object') {
+        max = harmMaxOrOverrides.config?.harmMax || harmMaxOrOverrides.harmMax || 5;
+    }
+    max = Math.max(2, parseInt(max, 10) || 5);
+
+    const tiers = [];
+    tiers.push(`  1 Harm: Scratches, bruises, wind knocked out (in slice-of-life: minor embarrassment or fluster).`);
+    if (max === 2) {
+        tiers.push(`  2 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+    } else if (max === 3) {
+        tiers.push(`  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).`);
+        tiers.push(`  3 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+    } else if (max === 4) {
+        tiers.push(`  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).`);
+        tiers.push(`  3 Harm: Critical wound, severe trauma, verge of death (in slice-of-life: near burnout, -2 forward).`);
+        tiers.push(`  4 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+    } else if (max === 5) {
+        tiers.push(`  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).`);
+        tiers.push(`  3 Harm: Severe trauma, debilitating injury (in slice-of-life: acute emotional distress or social tension).`);
+        tiers.push(`  4 Harm: Critical wound, organ damage, verge of death (in slice-of-life: near burnout, -2 forward).`);
+        tiers.push(`  5 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+    } else {
+        // max >= 6 (e.g. 6, 7, 8)
+        tiers.push(`  2 Harm: Flesh wound, persistent pain, bruised ribs.`);
+        tiers.push(`  3 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).`);
+        for (let i = 4; i <= max - 2; i++) {
+            tiers.push(`  ${i} Harm: Severe trauma, heavy bleeding, debilitating wound (in slice-of-life: acute emotional distress, -1 forward).`);
+        }
+        tiers.push(`  ${max - 1} Harm: Critical wound, organ damage, verge of collapse / death (in slice-of-life: near burnout, -2 forward).`);
+        tiers.push(`  ${max} Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+    }
+
     return `<combat>
 NO INITIATIVE TURNS. Combat is a cinematic conversation, not round-by-round math.
 - NPCs do NOT roll attacks or saving throws. Their actions and counter-attacks happen naturally when the player rolls a 7–9 (compromise/counter-attack) or 6- (miss), or when the player hesitates.
-- Enemies do not have bloated HP or AC. They have a threat tier and a Harm clock (typically 1 to 5 Harm to defeat). In the [COMBAT] state memo, format enemy headers with their descending vitality token alongside Harm (e.g. Name: 4/4 HP | Harm: 0/4 | Armor: 1).
+- Enemies do not have bloated HP or AC. They have a threat tier and a Harm clock (typically 1 to ${max} Harm to defeat). In the [COMBAT] state memo, format enemy headers with their descending vitality token alongside Harm (e.g. Name: 4/4 HP | Harm: 0/4 | Armor: 1).
 - ARMOR: Armor reduces incoming Harm by its value (e.g. Armor 1 turns 3 Harm into 2 Harm).
 - HARM TIERS:
-  1 Harm: Scratches, bruises, wind knocked out (in slice-of-life: minor embarrassment or fluster).
-  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).
-  3 Harm: Severe, incapacitating trauma (in slice-of-life: acute emotional distress or social tension).
-  4 Harm: Critical wound, organ damage, verge of death (in slice-of-life: near burnout, -2 forward).
-  5 Harm: Lethal / dying (Status: Defeated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).
+${tiers.join('\n')}
+- AT MAX HARM (${max} Harm, 0 HP):
+  When {{user}} or an adversary reaches Max Harm (${max}/${max} Harm, 0/${max} HP), they are completely incapacitated, unconscious, or at death's door (Status: Defeated or (-) Incapacitated).
+  CRITICAL: {{user}} CANNOT perform ordinary physical actions, hold normal conversation, or initiate combat maneuvers when downed. Immediate fictional consequences apply (capture, desperate rescue, last breath / sacrifice, or slipping into darkness).
 </combat>`;
 }
 
@@ -555,14 +592,16 @@ export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
 You must generate exactly 3 choices following narrative context:
 1. PRIMARY ACTION / MOVE: Decisive action (at most 1 move trigger — [Move (+Stat)] if scene tension warrants, otherwise narrative action).
 2. CONVERSATIONAL / INQUIRY: Dialogue, questions, social leverage, or probing intentions (ZERO moves or dice).
-3. TACTICAL / CAUTION: Observation, positioning, fallback, or defensive preparation (ZERO moves or dice).`
+3. TACTICAL / CAUTION: Observation, positioning, fallback, or defensive preparation (ZERO moves or dice).
+(CRITICAL EXCEPTION: If {{user}} is downed at Max Harm / 0 HP, ignore the categories above and output 3 Downed/Crisis choices: Cling to life, Faint plea, Slip into darkness/endure).`
         : `STRICT GENERATION ORDER:
 You must generate exactly 5 choices following narrative context:
 1. PRIMARY ACTION / MOVE: Decisive action (at most 1 move trigger — [Move (+Stat)] if scene tension warrants, otherwise narrative action).
 2. CONVERSATIONAL / INQUIRY: Dialogue, questioning, social leverage, or spoken discussion in quotes (ZERO moves or dice).
 3. PERCEPTION / OBSERVATION: Inspecting details, sensing the atmosphere, searching, or scanning surroundings (ZERO moves or dice).
 4. TACTICAL / CAUTION: Positioning, taking cover, defensive readiness, or waiting for an opening (ZERO moves or dice).
-5. DOWNTIME / ALTERNATIVE: Consulting records, resting, tending gear, regrouping, or pursuing another lead (ZERO moves or dice).`;
+5. DOWNTIME / ALTERNATIVE: Consulting records, resting, tending gear, regrouping, or pursuing another lead (ZERO moves or dice).
+(CRITICAL EXCEPTION: If {{user}} is downed at Max Harm / 0 HP, ignore the categories above and output 5 Downed/Crisis choices: Cling to life, Faint plea, Desperate fading gambit, Slip into darkness, Rally ally intervention).`;
 
     return `[INTERACTIVE CHOICE BUTTONS]
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for the user. NEVER forget the choices.
@@ -587,6 +626,17 @@ TENSION-ADAPTIVE MOVE PACING:
   • HIGH TENSION / PERIL (Active combat, chases, lethal traps, frantic escape):
     1 to 2 choices may trigger tactical Moves (e.g. melee, ranged, spells/tech), while the remaining choices provide tactical maneuvers, taking cover, positioning, or spoken commands (no move tags).
 - NEVER OVERLOAD: Never offer more than 2 choices with moves even in deadly combat. Most choices should always be narrative or conversational options.
+
+CRITICAL — DOWNED / MAX HARM (0 HP) ADAPTIVE CHOICES:
+- When {{user}} is at Max Harm / 0 HP (Incapacitated / Defeated / Dying):
+  • STRICT MANDATE: DO NOT offer standard active actions, confident dialogue, or physical combat maneuvers. The protagonist is completely incapacitated or on the verge of death.
+  • Adapt all choices to reflect their desperate, helpless, or unconscious condition:
+    1. CLING TO LIFE / LAST BREATH: Fight to remain conscious or hold on to life.
+    2. FAINT UTTERANCE / CALL FOR AID: Whisper a desperate final word, reach out to an ally, or signal for help.
+    3. DESPERATE SACRIFICE / GAMBIT: A last-ditch, fading gesture or protective sacrifice.
+    4. SLIP INTO THE DARKNESS: Succumb to unconsciousness, play dead, or endure the blackness.
+    5. ALLY INTERVENTION: Look to an ally to step in, drag {{user}} to cover, or turn the tide.
+    (In slice-of-life: choices reflect total emotional/physical burnout, retreating to bed/tears, or letting friends care for them).
 
 EXAMPLES (Formatting & Ratio Reference):
 ${examples}
@@ -631,7 +681,9 @@ Status: Healthy
 PILL FORMATTING (renders as interactive badges with mouse-over tooltips):
 - Moves: Separate moves with commas, placing trigger and mechanical/narrative effect inside trailing parentheses: Move Name (Trigger and effect). The description appears on mouse-over. Keep commas out of the description unless inside parentheses.
 - Gear: Separate equipped items with commas, placing weapon tags, armor values, or uses inside trailing parentheses: Item Name (Tags, harm/armor). Use (+) for armor or protective bonuses, e.g. Static Shroud ((+) +1 Armor).
-- Conditions: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward). Use plain "None" when unaffected.`,
+- Conditions & Status: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward).
+  NO D&D DAMAGE-OVER-TIME OR ROUND/TURN COUNTERS: NEVER output "1 damage per round", "X turns remaining", or saving throw DC tickers. PbtA conditions are fictional debilities or narrative triggers (e.g. "(-) Bleeding (Risk taking +1 Harm on strenuous physical action without medical aid)").
+  When {{user}} is at Max Harm / 0 HP (${harmMax}/${harmMax} Harm, 0/${harmMax} HP), status MUST reflect incapacitation: Status: (-) Incapacitated, (-) Dying, or Defeated. Use plain "Healthy" when unaffected.`,
 
         party: `Companion and party members. MECHANICS ONLY. Lean & boon-driven hirelings/allies (Dungeon World style) — no full stat arrays. Every member MUST begin with their own header line. Separate distinct members with an empty line:
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
@@ -784,7 +836,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_combat',
             tag: 'combat',
-            content: buildPbtACombatContent(),
+            content: buildPbtACombatContent(harmMax),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',

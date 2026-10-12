@@ -200,3 +200,165 @@ export function extractPbtaCharacterState(memoText) {
         isPbta: !!(curHarm !== null || /Harm/i.test(textToSearch)),
     };
 }
+
+/**
+ * Calculates rescaled Harm when the campaign's maximum Harm changes.
+ * Guaranteed rules:
+ * 1. If an entity was at full harm / dying (curHarm >= oldMaxHarm), stays at full harm (newMaxHarm).
+ * 2. If an entity was alive / below max harm (curHarm < oldMaxHarm), they MUST stay below max harm
+ *    and not die/incapacitate (capped strictly at newMaxHarm - 1).
+ *    e.g. 5/6 Harm with newMax 4 becomes 3/4 Harm.
+ * 3. If newMaxHarm >= oldMaxHarm (expanding scale), raw injuries are preserved.
+ *
+ * @param {number} curHarm
+ * @param {number} oldMaxHarm
+ * @param {number} newMaxHarm
+ * @returns {number}
+ */
+export function calculateRescaledHarm(curHarm, oldMaxHarm, newMaxHarm) {
+    const cur = Math.max(0, parseInt(curHarm, 10) || 0);
+    const oldMax = Math.max(1, parseInt(oldMaxHarm, 10) || 5);
+    const newMax = Math.max(1, parseInt(newMaxHarm, 10) || 5);
+
+    if (cur === 0) return 0;
+
+    // 1. If already incapacitated/dying at or above old maximum, map to new maximum
+    if (cur >= oldMax) {
+        return newMax;
+    }
+
+    // 2. Character was alive (< oldMax). Must remain strictly alive (< newMax, at most newMax - 1)
+    const aliveCap = Math.max(0, newMax - 1);
+    if (aliveCap === 0) {
+        return 0;
+    }
+
+    if (newMax < oldMax) {
+        // Compressing scale (e.g. 6 -> 4): calculate proportional harm rounded, clamped strictly to aliveCap
+        const proportional = Math.round((cur / oldMax) * newMax);
+        return Math.min(aliveCap, Math.max(1, proportional));
+    }
+
+    // Expanding or unchanged scale (e.g. 4 -> 6): preserve raw accumulated damage, capped at aliveCap
+    return Math.min(aliveCap, cur);
+}
+
+/**
+ * Rescales the Harm capacity and tandem HP on a single memo vitality line.
+ *
+ * @param {string} line
+ * @param {number} newMaxHarm
+ * @param {string|null} [entityName=null]
+ * @returns {string}
+ */
+export function rescalePbtaHarmLine(line, newMaxHarm, entityName = null) {
+    if (!line || typeof line !== 'string') return line;
+    if (!/Harm/i.test(line)) return line;
+
+    const newMax = Math.max(1, parseInt(newMaxHarm, 10) || 5);
+
+    // Pattern A: Tandem HP and Harm line:
+    // e.g. "Deckard (Blade Runner): 1/6 HP | Harm: 5/6 | Armor: 1"
+    const tandemRegex = /^(\s*[-*+•–—]?\s*)(.+?):\s*([+-]?\d+)(?:\/(\d+))?\s*HP\s*\|\s*Harm\s*[:=]\s*(\d+)(?:\/(\d+))?(.*)$/i;
+    const tandemMatch = line.match(tandemRegex);
+    if (tandemMatch) {
+        const [, lead, name, , oldMaxHpRaw, curHarmRaw, oldMaxHarmRaw, rest] = tandemMatch;
+        if (entityName && !name.toLowerCase().includes(entityName.toLowerCase().trim())) {
+            return line;
+        }
+        const curHarm = parseInt(curHarmRaw, 10) || 0;
+        const oldMax = parseInt(oldMaxHarmRaw || oldMaxHpRaw, 10) || 5;
+        const rescaledHarm = calculateRescaledHarm(curHarm, oldMax, newMax);
+        const rescaledHp = Math.max(0, newMax - rescaledHarm);
+        return `${lead}${name.trim()}: ${rescaledHp}/${newMax} HP | Harm: ${rescaledHarm}/${newMax}${rest}`;
+    }
+
+    // Pattern B: Harm-only line:
+    // e.g. "Deckard: Harm: 5/6 | Armor: 1"
+    const harmOnlyRegex = /^(\s*[-*+•–—]?\s*)(.+?):\s*(?:Harm\s*[:=]\s*(\d+)(?:\/(\d+))?|(\d+)(?:\/(\d+))?\s*Harm)\s*(?:\|\s*)?(.*)$/i;
+    const harmOnlyMatch = line.match(harmOnlyRegex);
+    if (harmOnlyMatch) {
+        const [, lead, name, h1, m1, h2, m2, rest] = harmOnlyMatch;
+        if (entityName && !name.toLowerCase().includes(entityName.toLowerCase().trim())) {
+            return line;
+        }
+        const curHarm = parseInt(h1 || h2, 10) || 0;
+        const oldMax = parseInt(m1 || m2, 10) || 5;
+        const rescaledHarm = calculateRescaledHarm(curHarm, oldMax, newMax);
+        const rescaledHp = Math.max(0, newMax - rescaledHarm);
+        const restSuffix = rest ? ` | ${rest.trim().replace(/^\|\s*/, '')}` : '';
+        return `${lead}${name.trim()}: ${rescaledHp}/${newMax} HP | Harm: ${rescaledHarm}/${newMax}${restSuffix}`;
+    }
+
+    return line;
+}
+
+/**
+ * Non-destructively merges updated dossier configuration into an existing live memo.
+ * Preserves active combat encounters ([COMBAT], [ENEMIES]), party companions, conditions,
+ * location, and in-game time without resetting to Turn 0.
+ *
+ * @param {string} liveMemo The current state memo text
+ * @param {object} dossier The updated PbtaCampaignDossier
+ * @param {string} [charName] The protagonist's name
+ * @returns {string} Merged memo text
+ */
+export function mergeDossierIntoLiveMemo(liveMemo, dossier, charName = null) {
+    if (!liveMemo || typeof liveMemo !== 'string' || !liveMemo.trim()) {
+        return liveMemo;
+    }
+
+    const p = dossier?.protagonist || {};
+    const nextHarmMax = dossier?.config?.harmMax || p.harm?.max || 5;
+    const effectiveName = (charName || p.name || '').trim();
+
+    const lines = liveMemo.split('\n');
+    let insideCharBlock = false;
+    let charUpdated = false;
+
+    const updatedLines = lines.map(line => {
+        if (/^\[CHARACTER\]/i.test(line)) {
+            insideCharBlock = true;
+            return line;
+        }
+        if (/^\[\/CHARACTER\]/i.test(line)) {
+            insideCharBlock = false;
+            return line;
+        }
+
+        // 1. Rescale protagonist vitality line and update playbook if needed
+        if (/Harm/i.test(line)) {
+            const matchesProto = !effectiveName || line.toLowerCase().includes(effectiveName.toLowerCase()) || insideCharBlock;
+            if (matchesProto && !charUpdated) {
+                let workingLine = rescalePbtaHarmLine(line, nextHarmMax, insideCharBlock ? null : effectiveName);
+                if (p.playbook && /^\s*[-*+•–—]?\s*(.+?)\s*\(([^)]+)\):/i.test(workingLine)) {
+                    workingLine = workingLine.replace(/^(\s*[-*+•–—]?\s*)(.+?)\s*\(([^)]+)\)(:.*)$/i, (m, lead, nm, oldPb, rest) => {
+                        return `${lead}${nm} (${p.playbook.trim()})${rest}`;
+                    });
+                }
+                charUpdated = true;
+                return workingLine;
+            }
+        }
+
+        // 2. Fallback Playbook update if line didn't contain Harm
+        if (insideCharBlock && p.playbook && /^\s*[-*+•–—]?\s*(.+?)\s*\(([^)]+)\):/i.test(line)) {
+            const pbMatch = line.match(/^(\s*[-*+•–—]?\s*)(.+?)\s*\(([^)]+)\)(:.*)$/i);
+            if (pbMatch && pbMatch[3].trim() !== p.playbook.trim()) {
+                return `${pbMatch[1]}${pbMatch[2]} (${p.playbook.trim()})${pbMatch[4]}`;
+            }
+        }
+
+        // 3. Update Stats if changed in dossier and inside [CHARACTER]
+        if (insideCharBlock && p.stats && typeof p.stats === 'object' && /^Stats:/i.test(line.trim())) {
+            const statsStr = Object.entries(p.stats)
+                .map(([stat, val]) => `${stat} ${Number(val) > 0 ? '+' : ''}${val}`)
+                .join(', ');
+            return `Stats: ${statsStr}`;
+        }
+
+        return line;
+    });
+
+    return updatedLines.join('\n');
+}

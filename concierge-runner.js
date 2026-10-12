@@ -835,21 +835,22 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
         if (rpgSettings) {
             const nextHarmMax = dossier.config?.harmMax || 5;
 
-            // Update live memo if present, or format initial PbtA memo if blank
+            // Find existing memo across settings, partition, or DOM textarea
             let memo = rpgSettings.currentMemo || (chatId && rpgSettings.chatStates?.[chatId]?.currentMemo) || '';
-            if (memo && memo.trim()) {
-                // Synchronize protagonist header in memo
-                const protoHeaderRe = new RegExp(`(^\\s*[-*+•–—]?\\s*${charName || '[^:\\n]+'}(?:\\s*\\([^)]+\\))?:\\s*)(\\d+)(?:/(\\d+))?\\s*HP\\s*\\|\\s*Harm:\\s*(\\d+)(?:/(\\d+))?(.*)$`, 'im');
-                if (protoHeaderRe.test(memo)) {
-                    memo = memo.replace(protoHeaderRe, (match, lead, curHp, maxHp, curHarm, oldMaxHarm, rest) => {
-                        const cH = Math.min(nextHarmMax, parseInt(curHarm, 10) || 0);
-                        const cHp = Math.max(0, nextHarmMax - cH);
-                        return `${lead}${cHp}/${nextHarmMax} HP | Harm: ${cH}/${nextHarmMax}${rest}`;
-                    });
+            if (!memo || !memo.trim()) {
+                const domEl = typeof document !== 'undefined' ? document.getElementById('rpg-tracker-memo') : null;
+                if (domEl && domEl.value && domEl.value.trim()) {
+                    memo = domEl.value;
                 }
-                rpgSettings.currentMemo = normalizePbtaMemo(memo);
+            }
+
+            if (memo && memo.trim()) {
+                // Non-destructively merge updated protagonist harm capacity and rules into active game
+                const { mergeDossierIntoLiveMemo } = await import('./pbta-vitality-sync.js');
+                rpgSettings.currentMemo = mergeDossierIntoLiveMemo(memo, dossier, charName);
+                rpgSettings.currentMemo = normalizePbtaMemo(rpgSettings.currentMemo);
             } else {
-                // If the memo was empty or not initialized yet, format the initial PbtA memo from dossier
+                // Only if the adventure was never started/memo was completely blank
                 rpgSettings.currentMemo = formatInitialPbtaMemo(dossier);
             }
 

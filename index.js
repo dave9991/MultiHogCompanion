@@ -1345,6 +1345,33 @@ async function initUI() {
         const settingsHtml = await $.get(`${EXTENSION_FOLDER}/settings.html`);
         $('#extensions_settings').append(settingsHtml);
 
+        // ── Settings Sub-Tabs Navigation ──
+        function setActiveTab(tabId) {
+            $('.mhc-tab-btn').removeClass('active');
+            $(`.mhc-tab-btn[data-tab="${tabId}"]`).addClass('active');
+            $('.mhc-tab-content').removeClass('active').hide();
+            $(`#mhc_tab_${tabId}`).addClass('active').show();
+            try {
+                localStorage.setItem('mhc_active_tab', tabId);
+            } catch (_) {}
+        }
+
+        $('.mhc-tab-btn').on('click', function (e) {
+            e.preventDefault();
+            const tabId = $(this).data('tab');
+            if (tabId) setActiveTab(tabId);
+        });
+
+        let savedTab = 'ruleset';
+        try {
+            savedTab = localStorage.getItem('mhc_active_tab') || 'ruleset';
+        } catch (_) {}
+        if ($(`#mhc_tab_${savedTab}`).length) {
+            setActiveTab(savedTab);
+        } else {
+            setActiveTab('ruleset');
+        }
+
         const personaCb = $('#mhc_persona_sync');
         const portraitCb = $('#mhc_portrait_sync');
         const toastCb = $('#mhc_show_toasts');

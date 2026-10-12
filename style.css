@@ -7,6 +7,65 @@
     user-select: none;
 }
 
+/* ── MultiHog Companion Settings Tab Bar ── */
+.mhc-tab-bar {
+    display: flex;
+    gap: 4px;
+    margin: 8px 0 12px 0;
+    padding: 3px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+.mhc-tab-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 8px;
+    font-size: 0.82em;
+    font-weight: 600;
+    color: var(--SmartThemeBodyColorText, #e2e8f0);
+    opacity: 0.72;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.mhc-tab-btn:hover {
+    opacity: 0.95;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.mhc-tab-btn.active {
+    opacity: 1;
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.35);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.mhc-tab-content {
+    display: none;
+}
+
+.mhc-tab-content.active {
+    display: block;
+    animation: mhcFadeIn 0.18s ease-in-out;
+}
+
+@keyframes mhcFadeIn {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 .multihog-companion-settings .mhc-setting-row:hover {
     opacity: 1;
 }

@@ -15,6 +15,8 @@ import {
     ensureActiveChatRulesetConsistency,
     logRulesetEvent,
     collectRulesetDiagnostics,
+    getCompanionActiveCartridge,
+    setCompanionActiveCartridge,
 } from '../pbta-ruleset-persistence.js';
 import {
     applyChatSetup,
@@ -297,6 +299,57 @@ assert.ok(diagReport.includes('DiagHero'));
 assert.ok(diagReport.includes('Diagnostic Campaign'));
 assert.ok(diagReport.includes('TEST_BOOT'));
 console.log('✓ Diagnostic event logging and collectRulesetDiagnostics verified cleanly');
+
+// ── 8. Test Explicit CompanionActiveCartridge Registry ────────────────────────
+console.log('Testing explicit CompanionActiveCartridge registry & auto-rehydration...');
+
+const cartChatId = 'chat_cartridge_test_01';
+const mockComp = { companionActiveCartridges: {} };
+
+// Stamp PbtA
+setCompanionActiveCartridge(cartChatId, {
+    cartridgeId: 'pbta',
+    genre: 'fantasy',
+    systemLabel: 'Dungeon World',
+    title: 'Cartridge Campaign',
+}, null, mockComp);
+
+const retrieved = getCompanionActiveCartridge(cartChatId, null, mockComp);
+assert.strictEqual(retrieved.cartridgeId, 'pbta');
+assert.strictEqual(retrieved.genre, 'fantasy');
+assert.strictEqual(retrieved.systemLabel, 'Dungeon World');
+
+// Global mock extension_settings and SillyTavern context for isPbtAActive test
+globalThis.extension_settings = globalThis.extension_settings || {};
+globalThis.extension_settings.multihog_companion = mockComp;
+Object.assign(mockCompSettings, mockComp);
+
+// Even with zero custom snippets and empty partitions in MultiHog:
+const emptyRpgSettings = buildDefaultSettings();
+emptyRpgSettings.chatStates = { [cartChatId]: {} };
+assert.strictEqual(isPbtAActive(cartChatId, emptyRpgSettings), true, 'Explicit pbta cartridge must evaluate isPbtAActive as true even if MultiHog is wiped');
+assert.strictEqual(isPbtaChat(cartChatId, emptyRpgSettings), true, 'Explicit pbta cartridge must evaluate isPbtaChat as true');
+
+// Format badge using explicit cartridge
+const cartBadge = formatRulesetBadge(cartChatId, emptyRpgSettings);
+assert.strictEqual(cartBadge.isActive, true);
+assert.strictEqual(cartBadge.badgeText, '🎲 PbtA (Dungeon World)');
+
+// Ensure active chat consistency rehydrates cartridge
+const rehydrated = await ensureActiveChatRulesetConsistency(cartChatId, emptyRpgSettings);
+assert.strictEqual(rehydrated, true);
+assert.ok(emptyRpgSettings.customSyspromptLibrary.some(p => p.id.startsWith('pbta_') && p.enabled), 'Rehydration must restore PbtA snippets');
+
+// Stamp D&D 5e
+setCompanionActiveCartridge(cartChatId, {
+    cartridgeId: 'dnd5e',
+}, null, mockComp);
+assert.strictEqual(isPbtAActive(cartChatId, emptyRpgSettings), false, 'Explicit dnd5e cartridge must evaluate isPbtAActive as false');
+const dndCartBadge = formatRulesetBadge(cartChatId, emptyRpgSettings);
+assert.strictEqual(dndCartBadge.isActive, false);
+assert.strictEqual(dndCartBadge.badgeText, '⚔️ D&D 5e Active');
+
+console.log('✓ Explicit CompanionActiveCartridge registry and auto-rehydration verified cleanly');
 
 console.log('\n--- ALL PBTA RULESET PERSISTENCE TESTS PASSED CLEANLY! ---');
 

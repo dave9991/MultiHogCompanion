@@ -49,6 +49,8 @@ import {
     ensureActiveChatRulesetConsistency,
     logRulesetEvent,
     collectRulesetDiagnostics,
+    getCompanionActiveCartridge,
+    setCompanionActiveCartridge,
 } from './pbta-ruleset-persistence.js';
 import {
     scanAndInitUnsyncedNpcs,
@@ -952,6 +954,14 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     saveSettingsDebounced();
 
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
+    if (activeChatId) {
+        setCompanionActiveCartridge(activeChatId, {
+            cartridgeId: 'pbta',
+            genre: genreKey,
+            systemLabel: activeLabel,
+            title: overrides.campaignTitle || overrides.name || null,
+        });
+    }
     logRulesetEvent('applyPbtACartridge', {
         genreKey,
         activeChatId,
@@ -1046,6 +1056,12 @@ export async function restoreStockDnd() {
         } catch (_) {}
     }
     await refreshMultihogRuntime();
+
+    if (activeChatId) {
+        setCompanionActiveCartridge(activeChatId, {
+            cartridgeId: 'dnd5e',
+        });
+    }
 
     logRulesetEvent('restoreStockDnd', {
         activeChatId,
@@ -1877,6 +1893,8 @@ export {
     logRulesetEvent,
     collectRulesetDiagnostics,
     renderRulesetDiagnostics,
+    getCompanionActiveCartridge,
+    setCompanionActiveCartridge,
 };
 
 // ── 2d6 RNG Queue Interceptor ───────────────────────────────────────────────────

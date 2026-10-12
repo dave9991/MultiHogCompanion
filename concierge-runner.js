@@ -868,7 +868,15 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
 
             // Persist MultiHog setup snapshot and chat partition so F5 reloads retain PbtA
             try {
-                const { persistPbtaChatState } = await import('./pbta-ruleset-persistence.js');
+                const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
+                if (typeof setCompanionActiveCartridge === 'function' && chatId) {
+                    setCompanionActiveCartridge(chatId, {
+                        cartridgeId: 'pbta',
+                        genre: systemKey,
+                        systemLabel: dossier.meta?.systemLabel || 'PbtA',
+                        title: dossier.meta?.title || null,
+                    });
+                }
                 if (typeof persistPbtaChatState === 'function' && chatId) {
                     await persistPbtaChatState(chatId);
                 }

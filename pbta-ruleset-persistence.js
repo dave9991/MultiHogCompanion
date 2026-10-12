@@ -40,8 +40,98 @@ export function getCandidateChatIds(chatId, rpgSettings = null) {
 }
 
 /**
+ * Retrieve the explicit CompanionActiveCartridge record for a chat.
+ *
+ * @param {string|null} chatId
+ * @param {object|null} [rpgSettings=null]
+ * @param {object|null} [companionSettings=null]
+ * @returns {object|null}
+ */
+export function getCompanionActiveCartridge(chatId = null, rpgSettings = null, companionSettings = null) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const comp = companionSettings
+        || ctx?.extensionSettings?.multihog_companion
+        || (typeof extension_settings !== 'undefined' ? extension_settings.multihog_companion : null);
+
+    const candidateIds = getCandidateChatIds(chatId, rpgSettings);
+
+    // 1. Check extension_settings.multihog_companion.companionActiveCartridges
+    if (comp?.companionActiveCartridges && typeof comp.companionActiveCartridges === 'object') {
+        for (const cid of candidateIds) {
+            if (comp.companionActiveCartridges[cid]) {
+                return comp.companionActiveCartridges[cid];
+            }
+        }
+    }
+
+    // 2. Check ctx.chatMetadata?.CompanionActiveCartridge
+    if (ctx?.chatMetadata?.CompanionActiveCartridge) {
+        return ctx.chatMetadata.CompanionActiveCartridge;
+    }
+
+    return null;
+}
+
+/**
+ * Stamp the explicit CompanionActiveCartridge record for a chat.
+ *
+ * @param {string|null} chatId
+ * @param {object} cartridgeData e.g. { cartridgeId: 'pbta', genre: 'fantasy', systemLabel: 'Dungeon World' }
+ * @param {object|null} [rpgSettings=null]
+ * @param {object|null} [companionSettings=null]
+ * @returns {boolean}
+ */
+export function setCompanionActiveCartridge(chatId = null, cartridgeData = {}, rpgSettings = null, companionSettings = null) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    let comp = companionSettings
+        || ctx?.extensionSettings?.multihog_companion
+        || (typeof extension_settings !== 'undefined' ? extension_settings.multihog_companion : null);
+
+    if (!comp && typeof extension_settings !== 'undefined') {
+        extension_settings.multihog_companion = extension_settings.multihog_companion || {};
+        comp = extension_settings.multihog_companion;
+    }
+
+    const candidateIds = getCandidateChatIds(chatId, rpgSettings);
+    const primaryId = candidateIds[0] || chatId || 'active';
+
+    const record = {
+        ...cartridgeData,
+        updatedAt: Date.now(),
+    };
+
+    if (comp) {
+        comp.companionActiveCartridges = comp.companionActiveCartridges || {};
+        for (const cid of candidateIds) {
+            comp.companionActiveCartridges[cid] = { ...record };
+        }
+    }
+
+    if (ctx?.chatMetadata) {
+        ctx.chatMetadata.CompanionActiveCartridge = { ...record };
+        if (typeof ctx.saveChatMetadata === 'function') {
+            ctx.saveChatMetadata();
+        }
+    }
+
+    logRulesetEvent('setCompanionActiveCartridge', {
+        chatId: primaryId,
+        cartridgeId: record.cartridgeId,
+        genre: record.genre,
+        systemLabel: record.systemLabel,
+    });
+
+    if (typeof ctx?.saveSettingsDebounced === 'function') {
+        ctx.saveSettingsDebounced();
+    }
+
+    return true;
+}
+
+/**
  * Check if PbtA overrides are active for the given or current chat.
  * Checks:
+ * 0. Explicit CompanionActiveCartridge stamp (Primary source of truth)
  * 1. Live customSyspromptLibrary pbta_ entries
  * 2. Chat partition pbtaCampaignDossier across candidate IDs
  * 3. Chat setup syspromptSnippetStates
@@ -51,7 +141,16 @@ export function getCandidateChatIds(chatId, rpgSettings = null) {
  * @param {object|null} [rpgSettings=null]
  * @returns {boolean}
  */
-export function isPbtAActive(chatId = null, rpgSettings = null) {
+export function isPbtAActive(chatId = null, rpgSettings = null, companionSettings = null) {
+    // 0. Primary Source of Truth: Explicit CompanionActiveCartridge
+    const activeCart = getCompanionActiveCartridge(chatId, rpgSettings, companionSettings);
+    if (activeCart?.cartridgeId === 'pbta') {
+        return true;
+    }
+    if (activeCart?.cartridgeId === 'dnd5e') {
+        return false;
+    }
+
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
 
@@ -103,14 +202,18 @@ export function isPbtAActive(chatId = null, rpgSettings = null) {
  * @param {object|null} [rpgSettings=null]
  * @returns {boolean}
  */
-export function isPbtaChat(chatId = null, rpgSettings = null) {
+export function isPbtaChat(chatId = null, rpgSettings = null, companionSettings = null) {
+    const activeCart = getCompanionActiveCartridge(chatId, rpgSettings, companionSettings);
+    if (activeCart?.cartridgeId === 'pbta') return true;
+    if (activeCart?.cartridgeId === 'dnd5e') return false;
+
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
     const candidateIds = getCandidateChatIds(chatId, s);
     for (const cid of candidateIds) {
         if (s.chatStates?.[cid]?.pbtaCampaignDossier) return true;
     }
-    return isPbtAActive(chatId, s);
+    return isPbtAActive(chatId, s, companionSettings);
 }
 
 /**
@@ -119,11 +222,13 @@ export function isPbtaChat(chatId = null, rpgSettings = null) {
  * @param {string|null} chatId
  * @param {object|null} [rpgSettings=null]
  * @param {string|null} [lastGenre='fantasy']
+ * @param {object|null} [companionSettings=null]
  * @returns {{ isActive: boolean, displayLabel: string, badgeText: string, summaryHtml: string, badgeStyle: object }}
  */
-export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre = 'fantasy') {
+export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre = 'fantasy', companionSettings = null) {
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     const candidateIds = getCandidateChatIds(chatId, s);
+    const activeCart = getCompanionActiveCartridge(chatId, s, companionSettings);
     let dossier = null;
     for (const cid of candidateIds) {
         if (s?.chatStates?.[cid]?.pbtaCampaignDossier) {
@@ -133,11 +238,13 @@ export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre 
     }
 
     if (isPbtAActive(chatId, s)) {
-        const genreKey = dossier?.meta?.systemKey || lastGenre || 'fantasy';
+        const genreKey = activeCart?.genre || dossier?.meta?.systemKey || lastGenre || 'fantasy';
         const genreObj = PBTA_GENRES[genreKey];
 
         let displayLabel = 'PbtA';
-        if (dossier?.meta?.systemLabel) {
+        if (activeCart?.systemLabel) {
+            displayLabel = activeCart.systemLabel.replace(/^PbtA:\s*/i, '').trim();
+        } else if (dossier?.meta?.systemLabel) {
             displayLabel = dossier.meta.systemLabel.replace(/^PbtA:\s*/i, '').trim();
         } else if (genreObj) {
             const m = genreObj.label.match(/\(([^)]+)\)/);
@@ -285,7 +392,7 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
  * @param {Function|null} [applyCartridgeFn=null]
  * @returns {Promise<boolean>}
  */
-export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSettings = null, applyCartridgeFn = null) {
+export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSettings = null, applyCartridgeFn = null, companionSettings = null) {
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
 
@@ -301,7 +408,8 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         }
     }
 
-    const isPbta = !!dossier || isPbtAActive(chatId, s);
+    const activeCart = getCompanionActiveCartridge(chatId, s, companionSettings);
+    const isPbta = activeCart?.cartridgeId === 'pbta' || (!activeCart && (!!dossier || isPbtAActive(chatId, s, companionSettings)));
     const hasLiveOverrides = Array.isArray(s.customSyspromptLibrary)
         && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled);
 
@@ -309,6 +417,7 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         chatId,
         resolvedChatId,
         isPbta,
+        activeCartridge: activeCart?.cartridgeId || null,
         hasDossier: !!dossier,
         hasLiveOverrides,
     });
@@ -318,15 +427,15 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     }
 
     if (!hasLiveOverrides) {
-        console.log(`[MultiHog Companion] Active chat ${resolvedChatId || chatId} is a PbtA campaign, but live customSyspromptLibrary was not hydrated (e.g. reload or setup reset). Rehydrating cartridge...`);
-        const genreKey = dossier?.meta?.systemKey || 'fantasy';
+        console.log(`[MultiHog Companion] Active chat ${resolvedChatId || chatId} has active cartridge PbtA, but live customSyspromptLibrary was not hydrated (e.g. reload or setup reset). Rehydrating cartridge...`);
+        const genreKey = activeCart?.genre || dossier?.meta?.systemKey || 'fantasy';
         const statsList = Object.keys(dossier?.protagonist?.stats || {});
         const safeId = (resolvedChatId || chatId || 'pbta').toLowerCase().replace(/[^a-z0-9]+/g, '_');
         const overrides = dossier ? {
             id: `pbta_${safeId}`,
-            campaignTitle: dossier.meta?.title,
-            name: dossier.meta?.title ? `PbtA: ${dossier.meta.title}` : null,
-            systemLabel: dossier.meta?.systemLabel,
+            campaignTitle: activeCart?.title || dossier.meta?.title,
+            name: activeCart?.systemLabel || (dossier.meta?.title ? `PbtA: ${dossier.meta.title}` : null),
+            systemLabel: activeCart?.systemLabel || dossier.meta?.systemLabel,
             description: dossier.meta?.premise,
             tone: dossier.meta?.tone,
             factions: dossier.factions,
@@ -335,7 +444,11 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
             startingMoves: dossier.protagonist?.startingMoves,
             cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
             config: dossier.config || {},
-        } : {};
+        } : (activeCart ? {
+            id: `pbta_${safeId}`,
+            campaignTitle: activeCart.title,
+            systemLabel: activeCart.systemLabel,
+        } : {});
 
         if (typeof applyCartridgeFn === 'function') {
             await applyCartridgeFn(genreKey, overrides);
@@ -473,6 +586,8 @@ export function collectRulesetDiagnostics(chatId = null, rpgSettings = null, com
     lines.push('');
 
     lines.push('#### 2. Ruleset Status & Detection Layers');
+    const activeCart = getCompanionActiveCartridge(chatId, s, companionSettings);
+    lines.push(`- **CompanionActiveCartridge**: ${activeCart ? `\`${JSON.stringify(activeCart)}\`` : '*(none set)*'}`);
     lines.push(`- **Ruleset Badge**: \`${badge.badgeText}\` (Active: \`${badge.isActive}\`, Label: \`${badge.displayLabel}\`)`);
     lines.push(`- **isPbtAActive()**: \`${pbtaActive}\``);
     lines.push(`- **isPbtaChat()**: \`${pbtaChat}\``);

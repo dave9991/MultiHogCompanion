@@ -20,6 +20,8 @@ import {
 let _wasGenerationStopped = false;
 let _pendingSteeringReminder = null;
 let _retryTracker = { mesId: -1, count: 0 };
+let _lastStage2AttemptedMessageId = -1;
+let _lastStage2AttemptedSwipeId = -1;
 
 /**
  * Strips <CYOA_mode> prompt instructions and historical choice button markup
@@ -337,6 +339,8 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     if (et.GENERATION_STARTED) {
         es.on(et.GENERATION_STARTED, () => {
             _wasGenerationStopped = false;
+            _lastStage2AttemptedMessageId = -1;
+            _lastStage2AttemptedSwipeId = -1;
             // Abort any in-flight Stage 2 pass when a new generation starts (especially swipes)
             abortStage2Cyoa();
         });
@@ -354,6 +358,8 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         es.on(et.CHAT_CHANGED, () => {
             _retryTracker = { mesId: -1, count: 0 };
             _pendingSteeringReminder = null;
+            _lastStage2AttemptedMessageId = -1;
+            _lastStage2AttemptedSwipeId = -1;
             abortStage2Cyoa();
         });
     }
@@ -368,7 +374,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         };
         document.addEventListener('click', (e) => {
             const target = e.target;
-            if (target && (target.closest?.('.mes_stop, #mes_stop') || target.classList?.contains('mes_stop'))) {
+            if (target && (target.closest?.('.mes_stop, #mes_stop, .rt-cyoa-cancel-btn') || target.classList?.contains('mes_stop') || target.classList?.contains('rt-cyoa-cancel-btn'))) {
                 handleStopClick();
             }
         }, true);
@@ -387,6 +393,10 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     if (et.GENERATION_ENDED) {
         es.on(et.GENERATION_ENDED, async () => {
             if (_wasGenerationStopped) return;
+            if (isStage2CyoaRunning()) {
+                // Ignore any internal/quiet generation completion while Stage 2 is already in flight
+                return;
+            }
 
             const s = getSettings();
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
@@ -396,6 +406,12 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             const lastIdx = chat.length - 1;
             const lastMsg = chat[lastIdx];
             if (!lastMsg || lastMsg.is_user || lastMsg.is_system) return;
+
+            const currentSwipeId = lastMsg.swipe_id ?? 0;
+            if (_lastStage2AttemptedMessageId === lastIdx && _lastStage2AttemptedSwipeId === currentSwipeId) {
+                // Prevent duplicate attempts on the same message and swipe (breaks any potential event feedback loops)
+                return;
+            }
 
             const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
             const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
@@ -412,6 +428,9 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                     _retryTracker = { mesId: -1, count: 0 };
                     return;
                 }
+
+                _lastStage2AttemptedMessageId = lastIdx;
+                _lastStage2AttemptedSwipeId = currentSwipeId;
 
                 await runDecoupledCyoaStage2({
                     messageId: lastIdx,
@@ -476,6 +495,10 @@ export async function regenerateCyoaChoicesForMessage({ messageId = -1, isPbtaAc
 
     const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
     const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : (isPbtaActive === true);
+
+    // Reset loop guard so manual re-roll on the same message is permitted
+    _lastStage2AttemptedMessageId = -1;
+    _lastStage2AttemptedSwipeId = -1;
 
     // Strip any existing choices from this message before re-rolling
     const cleanNarrative = String(msg.mes || '')

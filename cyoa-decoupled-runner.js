@@ -190,7 +190,13 @@ Generate the ${choiceCount} choices now inside <choices>...</choices>:`;
 
 /**
  * Extracts and cleans the <choices>...</choices> markup from the model output.
- * If the model output plain buttons or markdown numbers, repairs them cleanly.
+ * Highly resilient parser supporting:
+ * - Proper <choices><button>...</button></choices>
+ * - <choice> or <option> tags
+ * - Unclosed <choices> or unclosed <button> tags
+ * - Plain text/markdown numbered lists (1., 1), [1], Option 1:, etc.)
+ * - Bullet lists (-, *, •) and emoji-prefixed choices
+ * - Stripping reasoning/thinking tokens (<think>...</think>, <thought>...</thought>)
  *
  * @param {string} rawText
  * @returns {string|null}
@@ -198,35 +204,112 @@ Generate the ${choiceCount} choices now inside <choices>...</choices>:`;
 export function extractCleanChoicesMarkup(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
 
-    // 1. Direct <choices> block
-    const choicesMatch = rawText.match(/<choices\b[^>]*>([\s\S]*?)<\/choices\s*>/i);
-    if (choicesMatch) {
-        const inner = choicesMatch[1].trim();
-        // Ensure buttons exist inside
-        if (/<button[\s>]/i.test(inner)) {
-            return `<choices>\n${inner}\n</choices>`;
+    // 0. Strip reasoning/thinking tokens (<think>...</think>, <thought>...</thought>)
+    let text = rawText
+        .replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, '')
+        .replace(/<thought\b[^>]*>[\s\S]*?<\/thought\s*>/gi, '')
+        .trim();
+
+    // Strip markdown code block wrappers (e.g. ```xml ... ``` or ```html ... ``` or ``` ... ```)
+    text = text.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    // 1. Direct <button>...</button> elements found anywhere
+    const buttonTagRegex = /<button\b[^>]*>([\s\S]*?)<\/button\s*>/gi;
+    const directButtons = [];
+    let match;
+    while ((match = buttonTagRegex.exec(text)) !== null) {
+        const content = match[1].trim();
+        if (content) directButtons.push(`<button>${content}</button>`);
+    }
+    if (directButtons.length >= 2) {
+        return `<choices>\n${directButtons.join('\n')}\n</choices>`;
+    }
+
+    // 2. Alternative tag names: <choice>...</choice> or <option>...</option>
+    const altTagRegex = /<(?:choice|option)\b[^>]*>([\s\S]*?)<\/(?:choice|option)\s*>/gi;
+    const altButtons = [];
+    while ((match = altTagRegex.exec(text)) !== null) {
+        const content = match[1].trim();
+        if (content) altButtons.push(`<button>${content}</button>`);
+    }
+    if (altButtons.length >= 2) {
+        return `<choices>\n${altButtons.join('\n')}\n</choices>`;
+    }
+
+    // 3. Extract text inside <choices>...</choices> or unclosed <choices>...
+    let candidateText = text;
+    const choicesBlockMatch = text.match(/<choices\b[^>]*>([\s\S]*?)(?:<\/choices\s*>|$)/i);
+    if (choicesBlockMatch && choicesBlockMatch[1].trim()) {
+        candidateText = choicesBlockMatch[1].trim();
+    }
+
+    // 4. Line-by-line parsing
+    const lines = candidateText.split('\n');
+    const extracted = [];
+    let autoIndex = 1;
+
+    for (let line of lines) {
+        let l = line.trim();
+        if (!l) continue;
+        // Skip opening/closing container tags
+        if (/^<\/?choices\b[^>]*>$/i.test(l)) continue;
+
+        // Strip loose opening/closing tags
+        l = l.replace(/^<(?:button|choice|option)\b[^>]*>\s*/i, '')
+             .replace(/<\/(?:button|choice|option)\s*>$/i, '')
+             .replace(/^\[(?:button|choice|option)\]\s*/i, '')
+             .replace(/\[\/(?:button|choice|option)\]$/i, '')
+             .trim();
+
+        if (!l) continue;
+
+        // Pattern A: Numbered (e.g. "1. Foo", "1) Foo", "**1.** Foo", "1 - Foo", "[1] Foo", "Option 1: Foo", "Choice 1: Foo")
+        const numPattern = /^(?:[\*\-•]\s*)?(?:\*\*)?(?:option|choice)?\s*\[?(\d+)\]?[\.\)\:\-]\s*(?:\*\*)?\s*(.+)$/i;
+        const numM = l.match(numPattern);
+        if (numM) {
+            const num = numM[1];
+            const content = numM[2].trim();
+            if (content) {
+                extracted.push(`<button>${num}. ${content}</button>`);
+                autoIndex = parseInt(num, 10) + 1;
+                continue;
+            }
+        }
+
+        // Pattern B: Lettered (e.g. "A. Foo", "A) Foo", "- A: Foo")
+        const letterPattern = /^(?:[\*\-•]\s*)?(?:\*\*)?([A-Ea-e])[\.\)\:\-]\s*(?:\*\*)?\s*(.+)$/;
+        const letM = l.match(letterPattern);
+        if (letM) {
+            const content = letM[2].trim();
+            if (content) {
+                extracted.push(`<button>${autoIndex}. ${content}</button>`);
+                autoIndex++;
+                continue;
+            }
+        }
+
+        // Pattern C: Bulleted or Dash list (e.g. "- ⚔️ Attack", "* 💬 Speak", "• 🏃 Run")
+        const bulletPattern = /^(?:[\*\-•–—]|\d+\.)\s*(.+)$/;
+        const bulM = l.match(bulletPattern);
+        if (bulM) {
+            const content = bulM[1].trim();
+            if (content && content.length > 3) {
+                extracted.push(`<button>${autoIndex}. ${content}</button>`);
+                autoIndex++;
+                continue;
+            }
+        }
+
+        // Pattern D: Emoji-prefixed line (e.g. "⚔️ Attack the guard", "💬 Talk to them")
+        if (/^[\p{Extended_Pictographic}\u{1F300}-\u{1FAFF}]/u.test(l) && l.length > 4) {
+            extracted.push(`<button>${autoIndex}. ${l}</button>`);
+            autoIndex++;
+            continue;
         }
     }
 
-    // 2. Loose <button> elements
-    const buttonMatches = rawText.match(/<button\b[^>]*>[\s\S]*?<\/button\s*>/gi);
-    if (buttonMatches && buttonMatches.length >= 2) {
-        return `<choices>\n${buttonMatches.join('\n')}\n</choices>`;
-    }
-
-    // 3. Fallback: Numbered markdown list (e.g. "1. ⚔️ Attack", "2. 🏃 Flee")
-    const lines = rawText.split('\n');
-    const buttonList = [];
-    const numRegex = /^\s*(?:[\*\-]\s*)?(?:\*\*)?(\d+)[\.\)](?:\*\*)?\s+(.+)$/;
-    for (const line of lines) {
-        const m = line.trim().match(numRegex);
-        if (m) {
-            buttonList.push(`<button>${m[1]}. ${m[2].trim()}</button>`);
-        }
-    }
-
-    if (buttonList.length >= 2) {
-        return `<choices>\n${buttonList.join('\n')}\n</choices>`;
+    if (extracted.length >= 2) {
+        return `<choices>\n${extracted.join('\n')}\n</choices>`;
     }
 
     return null;
@@ -260,6 +343,7 @@ export async function waitForStateTracker(timeoutMs = 15000) {
 
 /**
  * Injects a temporary visual loading indicator into the active message's DOM.
+ * Includes an inline Cancel button so the user can abort Stage 2 directly.
  *
  * @param {number} messageId
  */
@@ -273,7 +357,16 @@ export function insertCyoaLoadingIndicator(messageId) {
     loader.className = 'rt-cyoa-choices rt-cyoa-loading';
     loader.setAttribute('data-cyoa-loader', 'true');
     loader.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;margin-top:10px;background:rgba(0,0,0,0.22);border-radius:6px;font-style:italic;opacity:0.85;border-left:3px solid var(--SmartThemeQuoteColor, #00ffaa);';
-    loader.innerHTML = '<i class="fa-solid fa-dice-d20 fa-spin" style="color:var(--SmartThemeQuoteColor, #00ffaa);"></i> <span>Formulating tactical choices...</span>';
+    loader.innerHTML = '<i class="fa-solid fa-dice-d20 fa-spin" style="color:var(--SmartThemeQuoteColor, #00ffaa);"></i> <span>Formulating tactical choices...</span> <button type="button" class="menu_button rt-cyoa-cancel-btn" style="margin-left:auto;font-size:0.75em;padding:2px 8px;cursor:pointer;opacity:0.8;" title="Abort choice generation">Cancel</button>';
+
+    const cancelBtn = loader.querySelector('.rt-cyoa-cancel-btn');
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            abortStage2Cyoa();
+        });
+    }
+
     mesEl.appendChild(loader);
 }
 
@@ -286,28 +379,39 @@ export function removeCyoaLoadingIndicator() {
 }
 
 /**
- * Locks the SillyTavern UI during Stage 2 generation (shows stop button, blocks send button).
+ * Locks the SillyTavern send UI during Stage 2 generation.
+ * Operates purely via DOM attributes and styling to avoid calling SillyTavern's
+ * deactivateSendButtons/activateSendButtons (which trigger hideStopButton and spurious GENERATION_ENDED events).
  */
 export function lockSendButtonUI() {
-    const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-    if (typeof context?.deactivateSendButtons === 'function') {
-        context.deactivateSendButtons();
-    } else if (typeof document !== 'undefined') {
-        const sendBtn = document.getElementById('send_but');
-        if (sendBtn) sendBtn.disabled = true;
+    if (typeof document === 'undefined') return;
+    const sendBtn = document.getElementById('send_but');
+    if (sendBtn) {
+        sendBtn.setAttribute('data-mhc-locked', 'true');
+        sendBtn.style.pointerEvents = 'none';
+        sendBtn.style.opacity = '0.5';
+    }
+    const sendText = document.getElementById('send_textarea');
+    if (sendText) {
+        sendText.setAttribute('data-mhc-locked', 'true');
     }
 }
 
 /**
- * Restores the SillyTavern UI after Stage 2 generation completes or aborts.
+ * Restores the SillyTavern send UI after Stage 2 generation completes or aborts.
+ * Restores DOM attributes directly without emitting spurious events.
  */
 export function restoreSendButtonUI() {
-    const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-    if (typeof context?.activateSendButtons === 'function') {
-        context.activateSendButtons();
-    } else if (typeof document !== 'undefined') {
-        const sendBtn = document.getElementById('send_but');
-        if (sendBtn) sendBtn.disabled = false;
+    if (typeof document === 'undefined') return;
+    const sendBtn = document.getElementById('send_but');
+    if (sendBtn && sendBtn.getAttribute('data-mhc-locked')) {
+        sendBtn.removeAttribute('data-mhc-locked');
+        sendBtn.style.pointerEvents = '';
+        sendBtn.style.opacity = '';
+    }
+    const sendText = document.getElementById('send_textarea');
+    if (sendText && sendText.getAttribute('data-mhc-locked')) {
+        sendText.removeAttribute('data-mhc-locked');
     }
 }
 
@@ -354,7 +458,7 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         // 5. Connection settings: reuse concierge/router settings or fallback to default
         const { sendRoutedLlmRequest, getConciergeConnectionSettings } = await import('./concierge-connection.js');
         const connSettings = getConciergeConnectionSettings();
-        connSettings.maxTokens = 400; // CYOA choices are brief
+        connSettings.maxTokens = 600; // CYOA choices + reasoning headroom
 
         const messages = [
             { role: 'system', content: systemPrompt },

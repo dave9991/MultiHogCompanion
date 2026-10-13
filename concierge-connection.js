@@ -207,7 +207,7 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
 /**
  * Send a request via SillyTavern default active connection.
  */
-async function sendViaDefault(context, messages, { signal = null } = {}) {
+async function sendViaDefault(context, settings, messages, { signal = null } = {}) {
     const hasImage = hasImagePayload(messages);
 
     // Explicitly attach names to isolate from SillyTavern's active background character
@@ -237,6 +237,8 @@ async function sendViaDefault(context, messages, { signal = null } = {}) {
             quietToLoud: false,
             quietName: 'PbtA Concierge',
             instructOverride: false,
+            trimNames: false,
+            responseLength: settings?.maxTokens || 600,
         });
     }
 
@@ -288,7 +290,7 @@ export async function sendRoutedLlmRequest(settings, messages, signal = null) {
     }
 
     // 4. Default SillyTavern Connection
-    return await sendViaDefault(context, sanitizedMessages, { signal });
+    return await sendViaDefault(context, settings, sanitizedMessages, { signal });
 }
 
 /**

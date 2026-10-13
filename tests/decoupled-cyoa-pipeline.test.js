@@ -194,7 +194,73 @@ assert.ok(ext3.includes('<button>1. ⚔️ Strike with sword</button>'), 'Line 1
 assert.ok(ext3.includes('<button>2. 🛡️ Raise shield</button>'), 'Line 2 must be button tag');
 assert.ok(ext3.includes('<button>3. 🏃 Fall back</button>'), 'Line 3 must be button tag');
 
-console.log('✓ extractCleanChoicesMarkup extracts and repairs all choice formats');
+// 4d. <choices> block with numbered text but NO <button> tags
+const raw4 = `<choices>
+1. ⚔️ Attack the sentry
+2. 💬 "We don't have to fight."
+3. 🏃 Run for the treeline
+</choices>`;
+const ext4 = extractCleanChoicesMarkup(raw4);
+assert.ok(ext4.startsWith('<choices>'), '<choices> with plain numbers must be parsed');
+assert.ok(ext4.includes('<button>1. ⚔️ Attack the sentry</button>'));
+assert.ok(ext4.includes('<button>2. 💬 "We don\'t have to fight."</button>'));
+assert.ok(ext4.includes('<button>3. 🏃 Run for the treeline</button>'));
+
+// 4e. Unclosed <choices> and unclosed <button> tags
+const raw5 = `<choices>
+<button>1. ⚔️ Strike with blade
+<button>2. 🛡️ Raise shield
+<button>3. 🏃 Fall back`;
+const ext5 = extractCleanChoicesMarkup(raw5);
+assert.ok(ext5.startsWith('<choices>'), 'Unclosed choices and buttons must be recovered');
+assert.ok(ext5.includes('<button>1. ⚔️ Strike with blade</button>'));
+assert.ok(ext5.includes('<button>2. 🛡️ Raise shield</button>'));
+assert.ok(ext5.includes('<button>3. 🏃 Fall back</button>'));
+
+// 4f. <choice> or <option> tags
+const raw6 = `<choices>
+<choice>1. First choice</choice>
+<choice>2. Second choice</choice>
+</choices>`;
+const ext6 = extractCleanChoicesMarkup(raw6);
+assert.ok(ext6.includes('<button>1. First choice</button>'));
+assert.ok(ext6.includes('<button>2. Second choice</button>'));
+
+// 4g. Bullet list (-, •)
+const raw7 = `<choices>
+• ⚔️ Charge head-on
+• 💬 Demand surrender
+• 🏃 Retreat
+</choices>`;
+const ext7 = extractCleanChoicesMarkup(raw7);
+assert.ok(ext7.includes('<button>1. ⚔️ Charge head-on</button>'));
+assert.ok(ext7.includes('<button>2. 💬 Demand surrender</button>'));
+assert.ok(ext7.includes('<button>3. 🏃 Retreat</button>'));
+
+// 4h. Reasoning model output with <think>...</think>
+const raw8 = `<think>
+The character is at full health and in a dark cavern.
+I should give them combat, stealth, and observation options.
+</think>
+<choices>
+<button>1. ⚔️ Draw weapon</button>
+<button>2. 🔍 Look closer</button>
+</choices>`;
+const ext8 = extractCleanChoicesMarkup(raw8);
+assert.strictEqual(ext8, `<choices>\n<button>1. ⚔️ Draw weapon</button>\n<button>2. 🔍 Look closer</button>\n</choices>`);
+assert.ok(!ext8.includes('<think>'), 'Thinking tokens must be stripped');
+
+// 4i. Markdown fenced code block
+const raw9 = `\`\`\`xml
+<choices>
+<button>1. Option Alpha</button>
+<button>2. Option Beta</button>
+</choices>
+\`\`\``;
+const ext9 = extractCleanChoicesMarkup(raw9);
+assert.strictEqual(ext9, `<choices>\n<button>1. Option Alpha</button>\n<button>2. Option Beta</button>\n</choices>`);
+
+console.log('✓ extractCleanChoicesMarkup extracts and repairs all choice formats (including unclosed, bullets, thinking tokens, and XML fences)');
 
 // ── 5. Abort Lifecycle ──
 console.log('5. Testing abortStage2Cyoa...');

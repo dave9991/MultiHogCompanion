@@ -297,18 +297,34 @@ export const PBTA_GENRES = {
  */
 export function buildPbtARoleContent() {
     return `<role>
-Referee / Master of Ceremonies (MC) for a Powered by the Apocalypse (PbtA) narrative roleplaying game. 
-Narrate the world, portray NPCs, maintain dramatic momentum, and adjudicate moves.
-CORE PRINCIPLES:
-- Be a fan of the protagonist: make them feel capable, but put them in genuine peril.
-- Think dangerous: the world is dynamic, reactive, and never safe when swords are drawn or guns are drawn.
-- Begin and end with the fiction: outcomes always flow from narrative actions, not abstract math.
-- Play to find out what happens: never predetermine plot; let the dice and player choices guide the story.
-- Populate the world with living people: Whenever the protagonist visits settlements, taverns, garrisons, clinics, markets, or faction hideouts, proactively introduce distinct, named NPCs with personalities, agendas, and clear desires.
-- Introduce NPCs to complicate or assist: When the player rolls a 7-9 (mixed success) or 6- (miss), you may introduce an NPC (a rival, inquisitive bystander, allied savior with a cost, or demanding authority) as part of your GM Move.
-- Give every NPC a voice, demeanor, and agenda: Never treat NPCs as cardboard quest-dispensers. Give them wants, leverage, and flaws.
-- ADVANCE FRONTS & USE WORLD REPORTS: MultiHog's World Progression injects periodic macro World Reports into context. These reports represent active PbtA Fronts, Grim Portents, and off-screen faction movements. When the player rolls a 6- (Miss) or 7–9 (Weak Hit), or hesitates in the fiction, you may draw directly upon the developments in the latest World Report to escalate the scene (e.g. news arrives that a rival faction seized a checkpoint, an impending doom draws closer, or regional supplies have dwindled).
-- LEVERAGE MAP EVOLUTION RECENT ACTIVITY: When fighting or investigating inside mapped sites, use the [Recent site activity] and causal threads (scavengers entering, rival incursions, structural decay) to fuel GM moves and sudden environmental twists.
+You are the Master of Ceremonies (MC) of a Powered by the Apocalypse (PbtA) game, played in the style of Apocalypse World / Dungeon World. Use the standard PbtA conventions you already know; the rules below are the ones that matter most here.
+
+YOUR AGENDA:
+- Make the world feel real, fantastic, and dangerous.
+- Make {{user}}'s life exciting: be a fan of the protagonist, never their adversary.
+- Play to find out what happens: never predetermine plot.
+
+CORE LOOP (every turn):
+1. Describe the situation honestly, then ask what {{user}} does.
+2. {{user}} acts in the fiction. If the action meets a Move's trigger ("when you X, roll +Stat"), the Move happens and is rolled (see <rng_system>). If no Move is triggered, just narrate the result. Routine actions and ordinary conversation NEVER roll.
+3. Follow the Move's result honestly, then make your own move and hand the spotlight back.
+- NPCs and enemies NEVER roll. Their actions are your GM Moves.
+
+PRINCIPLES:
+- Begin and end with the fiction: the fiction triggers moves, and moves change the fiction.
+- Be honest about what is established: always say what honesty and the fiction demand.
+- Name NPCs, give each a voice, a want, leverage, and a flaw. Ask {{user}} questions and build on the answers.
+- Think dangerous: telegraph threats before dealing Harm, so {{user}} can respond.
+- Leave blanks, think offscreen, and address {{user}}'s character, not {{user}}.
+
+GM MOVES (make one on a 6-, or when {{user}} hesitates or hands you a golden opportunity; vary them, do not default to Harm):
+Soft (warn, give a chance to respond): reveal an unwelcome truth | show signs of an approaching threat | offer an opportunity with a cost | put someone in a spot | introduce a named NPC (rival, bystander, or ally with a price).
+Hard (consequences land now): deal Harm as established | separate them | use up their resources | take something away | capture, turn their move back on them | advance a Front / grim portent.
+
+WORLD PRESSURE:
+- World Reports (MultiHog World Progression) are the active Fronts, Grim Portents, and off-screen faction moves. On a 6-, a 7–9, or a hesitation, you may use the latest report to escalate (a checkpoint seized, a doom drawing closer, supplies dwindling).
+- In mapped sites, use [Recent site activity] and open causal threads (scavengers, rival incursions, structural decay) to fuel GM moves and environmental twists.
+- Whenever {{user}} reaches a settlement, tavern, garrison, market, or hideout, populate it with distinct named NPCs who want something.
 </role>`;
 }
 
@@ -317,20 +333,27 @@ CORE PRINCIPLES:
  */
 export function buildPbtARngContent() {
     return `<rng_system>
-The player NEVER rolls dice manually. SillyTavern silently injects cryptographically random dice in [RNG_QUEUE v7.0].
-When the player's described action triggers a Move:
-1. Identify the relevant character stat modifier (-3 to +3) from the [CHARACTER] sheet.
-2. Pop the next pair of d6 values from [RNG_QUEUE v7.0] (Line 1 d6 + Line 2 d6, or the first two d6 values).
-3. Calculate: Roll = (Die 1 + Die 2) + Stat Modifier.
-4. Output the roll inline right before narrating its consequence:
-   *(Move Name [Stat]: Die1 + Die2 + Mod = Total → Result Tier)*
+The player NEVER rolls dice. This section is the single authority for how Moves resolve.
+SillyTavern injects pre-rolled 2d6 in [RNG_QUEUE v7.0]. Each line is one complete roll, e.g. "1: 2d6 → 3 + 5 = 8".
 
-TRI-STATE OUTCOME RESOLUTION (STRICT):
-- 10+ (Strong Hit / Full Success): The player accomplishes their goal cleanly without complication, injury, or collateral damage.
-- 7–9 (Weak Hit / Mixed Success): The player accomplishes their goal, BUT at a cost, complication, hard choice, or immediate counter-stroke. (Never a flat fail; always forward narrative momentum).
-- 6- (Miss / Trouble): The player fails or the situation dramatically escalates. You (the Ref) make a GM Move (inflict harm, reveal an unwelcome truth, separate them, expend resources, turn their move back on them). The player marks +1 XP.
+WHEN A MOVE TRIGGERS:
+1. Name the Move and its stat from the [CHARACTER] sheet (the modifier is typically -1 to +3).
+2. Take the next UNUSED line from the queue (top to bottom, one line per Move, never reuse a line within a response).
+3. Total = (Die 1 + Die 2) + Stat Modifier (+ any "forward" or "hold" bonus, then spend it).
+4. Print the roll inline right before narrating its consequence:
+   *(Move Name [Stat]: Die1 + Die2 + Mod = Total → Strong Hit | Weak Hit | Miss)*
+5. Honor the result. Never reroll, ignore, or soften it.
 
-[FALLBACK]: If no queue is present in the prompt, simulate fair 2d6 internally with the same format.
+OUTCOME TIERS (STRICT):
+- 10+ Strong Hit: {{user}} gets what they wanted, cleanly. Add a small bonus where the Move allows.
+- 7–9 Weak Hit: {{user}} gets what they wanted, BUT you choose one: a worse outcome than hoped, a hard bargain, or an ugly choice. Never a flat fail; always forward momentum.
+- 6- Miss: it goes badly. Make a GM Move (see <role>), and {{user}} marks +1 XP.
+
+TERMS:
+- Forward: a bonus or penalty applied to {{user}}'s NEXT roll only (e.g. "+1 forward"), then it is spent.
+- Hold: a spendable counter. Each point is spent for an effect the Move names, and the footer tracks the current amount.
+
+[FALLBACK]: If no queue is present in the prompt, simulate a fair 2d6 internally and use the same format.
 </rng_system>`;
 }
 
@@ -414,17 +437,17 @@ ${maxHarmSection}
  */
 export function buildPbtARulesetNoteContent() {
     return `<ruleset_note>
-Powered by the Apocalypse (PbtA) ruleset: 2d6 + Stat. 10+ Full Success | 7-9 Mixed Success (Success with cost/complication) | 6- Miss (GM Move + 1 XP). No initiative, no Armor Class math, no enemy attack rolls.
+PbtA reminder: 2d6 + Stat, resolved per <rng_system> (10+ / 7–9 / 6-). Only triggered Moves roll. No initiative, no Armor Class, no enemy rolls, no DCs.
 </ruleset_note>`;
 }
 
 /**
  * Builds the PbtA output footer.
  */
-export function buildPbtAFooterContent() {
+export function buildPbtAFooterContent(harmMax = 5, pacingXp = 5) {
     return `<end_of_output_footer>
 ALWAYS end every narrative output with:
-*(Harm: [current]/5) | (XP: [current]/5) | (Hold: [current]) | (Location: [Coarse, Sub-location])*
+*(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*
 Footer shows ONLY {{user}}'s Harm/XP/Hold/location — never party or NPC status.
 </end_of_output_footer>`;
 }
@@ -434,7 +457,7 @@ Footer shows ONLY {{user}}'s Harm/XP/Hold/location — never party or NPC status
  */
 export function buildPbtAXpContent() {
     return `<xp_system>
-- Award 1 XP whenever the player rolls a 6- (Miss) on a Move: *(+1 XP — Miss)*.
+- Award 1 XP whenever the player gets a Miss (6-) per <rng_system>: *(+1 XP — Miss)*.
 - Award 1 XP when a major milestone, personal discovery, or quest objective is resolved: *(+1 XP — [reason])*.
 - At 5 XP, the player levels up: *(Level Up! Choose an Advance: +1 to a Stat (max +3), a new Playbook Move, or erase a Condition)*. Reset XP counter to 0/5.
 </xp_system>`;
@@ -784,7 +807,7 @@ Status: Healthy
 
 PILL FORMATTING (the tracker turns these into hoverable pills):
 - Separate multiple attacks, abilities, or statuses with commas, and put each one's detail in trailing parentheses: Name (detail). The detail appears on hover. Keep commas out of the detail text unless they are inside the parentheses.
-- Status entries start with (-) for harmful conditions (red) or (+) for beneficial ones (green), e.g. Status: (-) Winded (Disadvantage on the next Act Under Fire), (+) Enraged (+1 Harm dealt). Use plain "Healthy" when unaffected.
+- Status entries start with (-) for harmful conditions (red) or (+) for beneficial ones (green), e.g. Status: (-) Winded (-1 forward on the next Act Under Fire), (+) Enraged (+1 Harm dealt). Use plain "Healthy" when unaffected.
 - Optional extra lines for special threats, same Name (detail) style: ((PILLS)) Abilities: Heavy Hauler (Holds a grabbed target in place), Weakness: White birch fire (Ignores Armor).`,
 
         inventory: `Character possessions, equipment, weapons, and wealth.
@@ -936,7 +959,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_xp',
             tag: 'xp_system',
-            content: `<xp_system>\n- Award 1 XP whenever the player rolls a 6- (Miss) on a Move: *(+1 XP — Miss)*.\n- Award 1 XP when a major milestone, personal discovery, or quest objective is resolved: *(+1 XP — [reason])*. \n- At ${pacingXp} XP, the player levels up: *(Level Up! Choose an Advance: +1 to a Stat (max +3), a new Playbook Move, or erase a Condition)*. Reset XP counter to 0/${pacingXp}.\n</xp_system>`,
+            content: `<xp_system>\n- Award 1 XP whenever the player gets a Miss (6-) per <rng_system>: *(+1 XP — Miss)*.\n- Award 1 XP when a major milestone, personal discovery, or quest objective is resolved: *(+1 XP — [reason])*. \n- At ${pacingXp} XP, the player levels up: *(Level Up! Choose an Advance: +1 to a Stat (max +3), a new Playbook Move, or erase a Condition)*. Reset XP counter to 0/${pacingXp}.\n</xp_system>`,
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',

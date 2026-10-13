@@ -92,7 +92,7 @@ export function buildTailoredPbtaDocumentation(genreKey = 'fantasy') {
 ---
 
 ## 🎲 1. Core 2d6 Move Resolution
-Whenever a player action triggers a Move in the narrative, resolve using **2d6 + Stat Modifier** (-1 to +2):
+Whenever a player action triggers a Move in the narrative, resolve using **2d6 + Stat Modifier** (typically -1 to +3):
 
 | Roll Total | Outcome Tier | Narrative Consequence |
 | :--- | :--- | :--- |

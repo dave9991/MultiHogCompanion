@@ -7,7 +7,7 @@ MultiHog Companion includes a built-in **PbtA Narrative Engine** that replaces t
 ## 🎲 Core Mechanics
 
 ### 1. The 2d6 Roll
-Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves the outcome using **2d6 + Stat Modifier** (-1 to +2):
+Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves the outcome using **2d6 + Stat Modifier** (typically -1 to +3):
 
 | Roll Total | Outcome Tier | Narrative Consequence |
 | :--- | :--- | :--- |

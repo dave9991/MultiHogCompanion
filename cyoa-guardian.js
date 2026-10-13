@@ -451,54 +451,124 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 }
 
 /**
- * Registers CYOA slash commands (/cyoaretry and /cyoafix).
+ * Regenerates CYOA choices for a given message using Stage 2 without touching the narrative prose.
+ *
+ * @param {object} opts
+ * @param {number} [opts.messageId=-1]
+ * @param {boolean|Function} [opts.isPbtaActive=false]
+ * @param {Function} [opts.showToast]
+ * @returns {Promise<boolean>}
+ */
+export async function regenerateCyoaChoicesForMessage({ messageId = -1, isPbtaActive, showToast } = {}) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const chat = ctx?.chat;
+    if (!Array.isArray(chat) || chat.length === 0) {
+        if (showToast) showToast('warning', 'No messages in chat to regenerate choices.', 'CYOA Engine');
+        return false;
+    }
+
+    const idx = messageId >= 0 ? messageId : chat.length - 1;
+    const msg = chat[idx];
+    if (!msg || msg.is_user || msg.is_system) {
+        if (showToast) showToast('warning', 'Target message is not a narrator message.', 'CYOA Engine');
+        return false;
+    }
+
+    const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+    const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : (isPbtaActive === true);
+
+    // Strip any existing choices from this message before re-rolling
+    const cleanNarrative = String(msg.mes || '')
+        .replace(/<choices\b[^>]*>[\s\S]*?<\/choices\s*>/gi, '')
+        .replace(/<div\b[^>]*\brt-cyoa-choices\b[^>]*>[\s\S]*?<\/div\s*>/gi, '')
+        .trim();
+
+    msg.mes = cleanNarrative;
+    if (Array.isArray(msg.swipes) && msg.swipe_id !== undefined) {
+        msg.swipes[msg.swipe_id] = cleanNarrative;
+    }
+
+    if (showToast) showToast('info', 'Formulating fresh choices... 🎲', 'CYOA Engine');
+
+    return await runDecoupledCyoaStage2({
+        messageId: idx,
+        narrative: cleanNarrative,
+        isPbta: pbtaActive,
+        rpgSettings,
+        showToast,
+    });
+}
+
+/**
+ * Repairs existing plain-text markdown choices into buttons, or generates
+ * fresh choices via Stage 2 if no choices exist at all.
+ *
+ * @param {object} opts
+ * @param {number} [opts.messageId=-1]
+ * @param {boolean|Function} [opts.isPbtaActive=false]
+ * @param {Function} [opts.showToast]
+ * @returns {Promise<boolean>}
+ */
+export async function repairOrGenerateChoicesForMessage({ messageId = -1, isPbtaActive, showToast } = {}) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const chat = ctx?.chat;
+    if (!Array.isArray(chat) || chat.length === 0) {
+        if (showToast) showToast('warning', 'No messages in chat to repair.', 'CYOA Engine');
+        return false;
+    }
+
+    const idx = messageId >= 0 ? messageId : chat.length - 1;
+    const msg = chat[idx];
+    if (!msg || msg.is_user || msg.is_system) {
+        if (showToast) showToast('warning', 'Target message is not from narrator.', 'CYOA Engine');
+        return false;
+    }
+
+    // 1. If plain markdown choices exist, wrap them instantly
+    const repaired = tryRepairMarkdownChoices(msg.mes);
+    if (repaired) {
+        const ok = await applyRepairedMessage(idx, repaired);
+        if (ok && showToast) {
+            showToast('success', 'Converted markdown choices into CYOA buttons! 🧭', 'CYOA Engine');
+        }
+        return ok;
+    }
+
+    // 2. If no choices exist at all, trigger Stage 2 to generate them!
+    return await regenerateCyoaChoicesForMessage({ messageId: idx, isPbtaActive, showToast });
+}
+
+/**
+ * Registers CYOA slash commands (/cyoagen, /cyoafix, /cyoaretry).
  */
 export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive, showToast }) {
     if (!SlashCommandParser?.addCommandObject || !SlashCommand) return;
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'cyoagen',
+        callback: async () => {
+            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast });
+            return ok ? 'Regenerated CYOA choices.' : 'Failed to regenerate CYOA choices.';
+        },
+        helpString: '<div>Formulates fresh CYOA choices for the latest narrator turn without touching the story prose.</div>',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoaretry',
         callback: async () => {
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-            const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
-            const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
-            const choiceCount = pbtaActive && (rpgSettings?.cyoaConfig?.playstyle === 'cyoa_3') ? 3 : 5;
-
-            armCyoaSteeringReminder({ isPbta: pbtaActive, choiceCount });
-            showToast('info', 'Swiping with CYOA steering reminder... 🎲', 'CYOA Guardian');
-            await triggerSwipeRight();
-            return 'Swiping with CYOA steering reminder...';
+            // Backward-compatible alias for /cyoagen
+            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast });
+            return ok ? 'Regenerated CYOA choices.' : 'Failed to regenerate CYOA choices.';
         },
-        helpString: '<div>Swipes the latest narrator message and injects a strict CYOA choices reminder.</div>',
+        helpString: '<div>Alias for /cyoagen. Re-rolls CYOA choices for the latest narrator turn.</div>',
     }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoafix',
         callback: async () => {
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-            const chat = ctx?.chat;
-            if (!Array.isArray(chat) || chat.length === 0) {
-                showToast('warning', 'No messages in chat to repair.', 'CYOA Guardian');
-                return 'No messages in chat.';
-            }
-
-            const lastIdx = chat.length - 1;
-            const lastMsg = chat[lastIdx];
-            if (lastMsg.is_user || lastMsg.is_system) {
-                showToast('warning', 'Last message is not a narrator message.', 'CYOA Guardian');
-                return 'Last message is not from narrator.';
-            }
-
-            const repaired = tryRepairMarkdownChoices(lastMsg.mes);
-            if (repaired) {
-                await applyRepairedMessage(lastIdx, repaired);
-                showToast('success', 'Converted markdown choices into CYOA buttons! 🧭', 'CYOA Guardian');
-                return 'Successfully converted markdown choices into CYOA buttons.';
-            } else {
-                showToast('warning', 'No markdown choices found to convert. Use /cyoaretry to re-roll.', 'CYOA Guardian');
-                return 'No markdown choices found to convert.';
-            }
+            const ok = await repairOrGenerateChoicesForMessage({ isPbtaActive, showToast });
+            return ok ? 'Successfully repaired/generated CYOA choices.' : 'Could not repair/generate CYOA choices.';
         },
-        helpString: '<div>Scans the latest narrator message for plain-text numbered choices and wraps them into interactive CYOA buttons.</div>',
+        helpString: '<div>Converts plain-text numbered choices into buttons, or generates them via Stage 2 if missing.</div>',
     }));
 }

@@ -142,14 +142,14 @@
             <!-- TAB 2: STORY & AUTOMATION                                      -->
             <!-- ============================================================== -->
             <div class="mhc-tab-content" id="mhc_tab_story">
-                <!-- ── CYOA Guardian (Choice Recovery & Repair) ── -->
+                <!-- ── CYOA Engine: Decoupled Two-Stage Generation ── -->
                 <div id="mhc_cyoa_guardian_section" class="inline-drawer mhc-cyoa-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
                     <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
-                        <label class="checkbox_label" title="Enable CYOA Guardian to catch and auto-recover omitted choices for both D&amp;D and PbtA" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                        <label class="checkbox_label" title="Enable Decoupled Two-Stage CYOA to generate synchronized choices after state updates" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
                             <input id="mhc_cyoa_auto_retry_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
-                            <span style="font-size: 0.9em;"><b>🧭 CYOA Guardian:</b> Choice Recovery &amp; Repair</span>
+                            <span style="font-size: 0.9em;"><b>🧭 Decoupled Two-Stage CYOA:</b> Synchronized Choices</span>
                         </label>
-                        <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand CYOA Guardian settings">
+                        <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand CYOA settings">
                             <span id="mhc_cyoa_guardian_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); white-space: nowrap;">Active</span>
                             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
                         </div>
@@ -157,34 +157,18 @@
 
                     <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
                         <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
-                            Monitors narrator responses for both <b>D&amp;D 5e</b> and <b>PbtA</b>. If the model drops the CYOA buttons (due to attention drift or footer collision), Guardian automatically recovers them.
+                            Generates synchronized choices in a dedicated second pass after the State Tracker audits damage and conditions. Eliminates downed-state choice desyncs for both <b>D&amp;D 5e</b> and <b>PbtA</b>.
                         </p>
-
-                        <!-- Decoupled Two-Stage CYOA -->
-                        <div class="mhc-setting-row" style="margin-bottom: 6px;">
-                            <label class="checkbox_label" title="Decouple CYOA into a dedicated second pass after State Tracker audits damage and conditions. Eliminates downed-state choice desyncs for both D&amp;D and PbtA." style="display: flex; align-items: center; cursor: pointer;">
-                                <input id="mhc_cyoa_decoupled_enable" type="checkbox" style="margin-right: 8px;">
-                                <span style="font-size: 0.85em;"><b>Decoupled Two-Stage CYOA:</b> Generate synchronized choices after state updates</span>
-                            </label>
-                        </div>
-
-                        <!-- Auto-Repair Markdown Choices -->
-                        <div class="mhc-setting-row" style="margin-bottom: 6px;">
-                            <label class="checkbox_label" title="If the model outputs numbered choices in plain text or markdown without button tags, automatically convert them into interactive CYOA buttons without wasting a re-roll" style="display: flex; align-items: center; cursor: pointer;">
-                                <input id="mhc_cyoa_auto_repair_enable" type="checkbox" style="margin-right: 8px;">
-                                <span style="font-size: 0.85em;"><b>Instant Markdown Repair:</b> Auto-wrap plain text choices into buttons</span>
-                            </label>
-                        </div>
 
                         <!-- Manual Actions Sub-bar -->
                         <div style="display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
-                            <button type="button" id="mhc_cyoa_manual_repair_btn" class="menu_button interactable" style="flex: 1; font-size: 0.78em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="Scan latest narrator message and convert markdown choices to buttons (/cyoafix)">
-                                <i class="fa-solid fa-wrench"></i>
-                                <span>Repair Last Turn (/cyoafix)</span>
-                            </button>
-                            <button type="button" id="mhc_cyoa_manual_retry_btn" class="menu_button interactable" style="flex: 1; font-size: 0.78em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="Swipe latest message with CYOA steering reminder (/cyoaretry)">
+                            <button type="button" id="mhc_cyoa_regen_btn" class="menu_button interactable" style="flex: 1; font-size: 0.78em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="Generate or re-roll choices for the latest narrator message without touching the story (/cyoagen)">
                                 <i class="fa-solid fa-rotate-right"></i>
-                                <span>Re-roll with Reminder (/cyoaretry)</span>
+                                <span>Regenerate Choices (/cyoagen)</span>
+                            </button>
+                            <button type="button" id="mhc_cyoa_manual_repair_btn" class="menu_button interactable" style="flex: 1; font-size: 0.78em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="Convert plain text choices to buttons, or generate them if missing (/cyoafix)">
+                                <i class="fa-solid fa-wrench"></i>
+                                <span>Repair / Fix Choices (/cyoafix)</span>
                             </button>
                         </div>
                     </div>

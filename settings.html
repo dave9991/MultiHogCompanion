@@ -160,6 +160,14 @@
                             Monitors narrator responses for both <b>D&amp;D 5e</b> and <b>PbtA</b>. If the model drops the CYOA buttons (due to attention drift or footer collision), Guardian automatically recovers them.
                         </p>
 
+                        <!-- Decoupled Two-Stage CYOA -->
+                        <div class="mhc-setting-row" style="margin-bottom: 6px;">
+                            <label class="checkbox_label" title="Decouple CYOA into a dedicated second pass after State Tracker audits damage and conditions. Eliminates downed-state choice desyncs for both D&amp;D and PbtA." style="display: flex; align-items: center; cursor: pointer;">
+                                <input id="mhc_cyoa_decoupled_enable" type="checkbox" style="margin-right: 8px;">
+                                <span style="font-size: 0.85em;"><b>Decoupled Two-Stage CYOA:</b> Generate synchronized choices after state updates</span>
+                            </label>
+                        </div>
+
                         <!-- Auto-Repair Markdown Choices -->
                         <div class="mhc-setting-row" style="margin-bottom: 6px;">
                             <label class="checkbox_label" title="If the model outputs numbered choices in plain text or markdown without button tags, automatically convert them into interactive CYOA buttons without wasting a re-roll" style="display: flex; align-items: center; cursor: pointer;">

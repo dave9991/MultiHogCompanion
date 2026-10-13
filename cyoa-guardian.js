@@ -11,9 +11,82 @@
  * 3. Exposes /cyoaretry and /cyoafix slash commands for manual player control.
  */
 
+import {
+    runDecoupledCyoaStage2,
+    abortStage2Cyoa,
+    isStage2CyoaRunning,
+} from './cyoa-decoupled-runner.js';
+
 let _wasGenerationStopped = false;
 let _pendingSteeringReminder = null;
 let _retryTracker = { mesId: -1, count: 0 };
+
+/**
+ * Strips <CYOA_mode> prompt instructions and historical choice button markup
+ * from outgoing chat messages so the Stage 1 narrator generates pure narrative prose.
+ *
+ * @param {object[]} chat
+ * @returns {boolean} True if any message was modified
+ */
+export function stripCyoaFromOutgoingChat(chat) {
+    if (!Array.isArray(chat) || chat.length === 0) return false;
+    let didModify = false;
+
+    const cyoaModeXmlPattern = /<CYOA_mode\b[^>]*>[\s\S]*?<\/CYOA_mode\s*>/gi;
+    const choiceBlockPattern = /<choices\b[^>]*>[\s\S]*?<\/choices\s*>|<div\b[^>]*\brt-cyoa-choices\b[^>]*>[\s\S]*?<\/div\s*>|<button\b[^>]*>[\s\S]*?<\/button\s*>/gi;
+
+    for (let i = 0; i < chat.length; i++) {
+        const msg = chat[i];
+        if (!msg) continue;
+
+        if (typeof msg.mes === 'string') {
+            let updated = msg.mes;
+            if (cyoaModeXmlPattern.test(updated)) {
+                updated = updated.replace(cyoaModeXmlPattern, '').trim();
+            }
+            if (choiceBlockPattern.test(updated)) {
+                updated = updated.replace(choiceBlockPattern, '').trim();
+            }
+            if (updated !== msg.mes) {
+                msg.mes = updated;
+                didModify = true;
+            }
+        }
+
+        if (typeof msg.content === 'string') {
+            let updated = msg.content;
+            if (cyoaModeXmlPattern.test(updated)) {
+                updated = updated.replace(cyoaModeXmlPattern, '').trim();
+            }
+            if (choiceBlockPattern.test(updated)) {
+                updated = updated.replace(choiceBlockPattern, '').trim();
+            }
+            if (updated !== msg.content) {
+                msg.content = updated;
+                didModify = true;
+            }
+        }
+
+        if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+                if (part?.type === 'text' && typeof part.text === 'string') {
+                    let updated = part.text;
+                    if (cyoaModeXmlPattern.test(updated)) {
+                        updated = updated.replace(cyoaModeXmlPattern, '').trim();
+                    }
+                    if (choiceBlockPattern.test(updated)) {
+                        updated = updated.replace(choiceBlockPattern, '').trim();
+                    }
+                    if (updated !== part.text) {
+                        part.text = updated;
+                        didModify = true;
+                    }
+                }
+            }
+        }
+    }
+    return didModify;
+}
 
 /**
  * Checks whether CYOA choices are expected on the current turn.
@@ -264,6 +337,8 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     if (et.GENERATION_STARTED) {
         es.on(et.GENERATION_STARTED, () => {
             _wasGenerationStopped = false;
+            // Abort any in-flight Stage 2 pass when a new generation starts (especially swipes)
+            abortStage2Cyoa();
         });
     }
 
@@ -271,6 +346,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         es.on(et.GENERATION_STOPPED, () => {
             _wasGenerationStopped = true;
             _pendingSteeringReminder = null;
+            abortStage2Cyoa();
         });
     }
 
@@ -278,6 +354,33 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         es.on(et.CHAT_CHANGED, () => {
             _retryTracker = { mesId: -1, count: 0 };
             _pendingSteeringReminder = null;
+            abortStage2Cyoa();
+        });
+    }
+
+    // Bind document-level Stop button listener so clicking Stop square aborts Stage 2 immediately
+    if (typeof document !== 'undefined') {
+        const handleStopClick = () => {
+            if (isStage2CyoaRunning()) {
+                console.log('[MultiHog Companion] User clicked Stop. Aborting Decoupled CYOA.');
+                abortStage2Cyoa();
+            }
+        };
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            if (target && (target.closest?.('.mes_stop, #mes_stop') || target.classList?.contains('mes_stop'))) {
+                handleStopClick();
+            }
+        }, true);
+    }
+
+    // Fail-safe prompt sanitization on CHAT_COMPLETION_PROMPT_READY
+    if (et.CHAT_COMPLETION_PROMPT_READY) {
+        es.on(et.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
+            const s = getSettings();
+            if (s.enableDecoupledCyoa !== false && Array.isArray(eventData?.chat)) {
+                stripCyoaFromOutgoingChat(eventData.chat);
+            }
         });
     }
 
@@ -286,10 +389,6 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             if (_wasGenerationStopped) return;
 
             const s = getSettings();
-            if (s.enableCyoaAutoRetry === false && s.enableCyoaMarkdownAutoRepair === false) {
-                return;
-            }
-
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
             const chat = ctx?.chat;
             if (!Array.isArray(chat) || chat.length === 0) return;
@@ -302,6 +401,30 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
 
             if (!isCyoaExpected(rpgSettings, pbtaActive)) {
+                return;
+            }
+
+            // ── DECOUPLED TWO-STAGE CYOA PATH ──
+            if (s.enableDecoupledCyoa !== false) {
+                const text = String(lastMsg.mes || '');
+                // If message already has CYOA buttons (e.g. from previous edit), skip Stage 2
+                if (hasCyoaChoices(text)) {
+                    _retryTracker = { mesId: -1, count: 0 };
+                    return;
+                }
+
+                await runDecoupledCyoaStage2({
+                    messageId: lastIdx,
+                    narrative: text,
+                    isPbta: pbtaActive,
+                    rpgSettings,
+                    showToast,
+                });
+                return;
+            }
+
+            // ── LEGACY GUARDIAN PATH (when decoupled CYOA is disabled) ──
+            if (s.enableCyoaAutoRetry === false && s.enableCyoaMarkdownAutoRepair === false) {
                 return;
             }
 

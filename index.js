@@ -60,6 +60,7 @@ import {
 import {
     initCyoaGuardian,
     interceptCyoaSteering,
+    stripCyoaFromOutgoingChat,
     registerCyoaSlashCommands,
     tryRepairMarkdownChoices,
     applyRepairedMessage,
@@ -88,6 +89,7 @@ const DEFAULT_SETTINGS = {
     nameRagEnhanceConcierge: true,
     nameRagAdhocSysprompt: true,
     enableRelationshipNarrativeSync: true,
+    enableDecoupledCyoa: true,
     enableCyoaAutoRetry: true,
     cyoaMaxRetries: 1,
     enableCyoaMarkdownAutoRepair: true,
@@ -1778,14 +1780,20 @@ async function initUI() {
 
         await initRelationshipSyncUI();
 
-        // ── 7. CYOA Guardian Controls ──
+        // ── 7. CYOA Guardian & Decoupled CYOA Controls ──
+        const cyoaDecoupledCb = $('#mhc_cyoa_decoupled_enable');
         const cyoaAutoRetryCb = $('#mhc_cyoa_auto_retry_enable');
         const cyoaAutoRepairCb = $('#mhc_cyoa_auto_repair_enable');
         const cyoaAutoSwipeCb = $('#mhc_cyoa_auto_swipe_enable');
 
+        cyoaDecoupledCb.prop('checked', current.enableDecoupledCyoa !== false);
         cyoaAutoRetryCb.prop('checked', current.enableCyoaAutoRetry !== false || current.enableCyoaMarkdownAutoRepair !== false);
         cyoaAutoRepairCb.prop('checked', current.enableCyoaMarkdownAutoRepair !== false);
         cyoaAutoSwipeCb.prop('checked', current.enableCyoaAutoRetry !== false);
+
+        cyoaDecoupledCb.on('change', function () {
+            updateSettings({ enableDecoupledCyoa: $(this).is(':checked') });
+        });
 
         cyoaAutoRetryCb.on('change', function () {
             const val = $(this).is(':checked');
@@ -1890,8 +1898,15 @@ function buildPbtA2d6Block(lineCount = 12) {
 function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
     if (!Array.isArray(chat)) return;
 
-    // 1. CYOA Guardian: Inject steering reminder if armed (works for both D&D and PbtA)
-    interceptCyoaSteering(chat);
+    // 1. Decoupled Two-Stage CYOA / CYOA Guardian handling
+    const s = getSettings();
+    if (s.enableDecoupledCyoa !== false) {
+        // Strip <CYOA_mode> instructions & past choice blocks so narrator generates pure prose
+        stripCyoaFromOutgoingChat(chat);
+    } else {
+        // Legacy CYOA Guardian: Inject steering reminder if armed
+        interceptCyoaSteering(chat);
+    }
 
     // 2. PbtA RNG Queue replacement
     if (!isPbtAActive()) return;

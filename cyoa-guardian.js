@@ -434,7 +434,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 return;
             }
 
-            // 1. Try Markdown Auto-Repair first (instant, zero token re-roll)
+            // 1. Try Markdown Auto-Repair (instant, zero token re-roll)
             if (s.enableCyoaMarkdownAutoRepair !== false) {
                 const repaired = tryRepairMarkdownChoices(text);
                 if (repaired) {
@@ -445,31 +445,6 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                         return;
                     }
                 }
-            }
-
-            // 2. Auto-Swipe with Steering Reminder if choices were completely omitted
-            if (s.enableCyoaAutoRetry !== false) {
-                const maxRetries = s.cyoaMaxRetries ?? 1;
-
-                if (_retryTracker.mesId === lastIdx && _retryTracker.count >= maxRetries) {
-                    showToast('warning', 'Narrator omitted CYOA choices after retry. Consider swiping or using /cyoaretry.', 'CYOA Guardian');
-                    return;
-                }
-
-                _retryTracker = {
-                    mesId: lastIdx,
-                    count: (_retryTracker.mesId === lastIdx ? _retryTracker.count : 0) + 1,
-                };
-
-                const choiceCount = pbtaActive && (rpgSettings?.cyoaConfig?.playstyle === 'cyoa_3') ? 3 : 5;
-                armCyoaSteeringReminder({ isPbta: pbtaActive, choiceCount });
-
-                showToast('warning', 'Narrator omitted CYOA choices. Auto-swiping with steering reminder... 🎲', 'CYOA Guardian');
-
-                // Small delay to allow ST to complete generation teardown before triggering swipe
-                setTimeout(async () => {
-                    await triggerSwipeRight();
-                }, 150);
             }
         });
     }

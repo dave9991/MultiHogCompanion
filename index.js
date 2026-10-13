@@ -1784,12 +1784,10 @@ async function initUI() {
         const cyoaDecoupledCb = $('#mhc_cyoa_decoupled_enable');
         const cyoaAutoRetryCb = $('#mhc_cyoa_auto_retry_enable');
         const cyoaAutoRepairCb = $('#mhc_cyoa_auto_repair_enable');
-        const cyoaAutoSwipeCb = $('#mhc_cyoa_auto_swipe_enable');
 
         cyoaDecoupledCb.prop('checked', current.enableDecoupledCyoa !== false);
-        cyoaAutoRetryCb.prop('checked', current.enableCyoaAutoRetry !== false || current.enableCyoaMarkdownAutoRepair !== false);
+        cyoaAutoRetryCb.prop('checked', current.enableDecoupledCyoa !== false || current.enableCyoaMarkdownAutoRepair !== false);
         cyoaAutoRepairCb.prop('checked', current.enableCyoaMarkdownAutoRepair !== false);
-        cyoaAutoSwipeCb.prop('checked', current.enableCyoaAutoRetry !== false);
 
         cyoaDecoupledCb.on('change', function () {
             updateSettings({ enableDecoupledCyoa: $(this).is(':checked') });
@@ -1797,17 +1795,13 @@ async function initUI() {
 
         cyoaAutoRetryCb.on('change', function () {
             const val = $(this).is(':checked');
-            updateSettings({ enableCyoaAutoRetry: val, enableCyoaMarkdownAutoRepair: val });
+            updateSettings({ enableDecoupledCyoa: val, enableCyoaMarkdownAutoRepair: val });
+            cyoaDecoupledCb.prop('checked', val);
             cyoaAutoRepairCb.prop('checked', val);
-            cyoaAutoSwipeCb.prop('checked', val);
         });
 
         cyoaAutoRepairCb.on('change', function () {
             updateSettings({ enableCyoaMarkdownAutoRepair: $(this).is(':checked') });
-        });
-
-        cyoaAutoSwipeCb.on('change', function () {
-            updateSettings({ enableCyoaAutoRetry: $(this).is(':checked') });
         });
 
         $('#mhc_cyoa_manual_repair_btn').on('click', async function () {

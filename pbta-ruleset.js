@@ -340,31 +340,44 @@ TRI-STATE OUTCOME RESOLUTION (STRICT):
  * @param {number|object} [harmMaxOrOverrides=5] Max Harm capacity or config object
  * @returns {string} Formatted combat XML content
  */
-export function buildPbtACombatContent(harmMaxOrOverrides = 5) {
+export function buildPbtACombatContent(harmMaxOrOverrides = 5, overrides = {}) {
     let max = 5;
+    let fate = null;
     if (typeof harmMaxOrOverrides === 'number') {
         max = harmMaxOrOverrides;
+        fate = overrides.config?.maxHarmFate || overrides.maxHarmFate;
     } else if (harmMaxOrOverrides && typeof harmMaxOrOverrides === 'object') {
         max = harmMaxOrOverrides.config?.harmMax || harmMaxOrOverrides.harmMax || 5;
+        fate = harmMaxOrOverrides.config?.maxHarmFate || harmMaxOrOverrides.maxHarmFate;
+    }
+    if (!fate && overrides && typeof overrides === 'object') {
+        fate = overrides.config?.maxHarmFate || overrides.maxHarmFate;
     }
     max = Math.max(2, parseInt(max, 10) || 5);
+
+    const isCustomFate = Boolean(fate && fate.rule && !/^(?:mortal peril|last breath|dying)/i.test(fate.rule.trim()));
+    const customRule = fate?.rule?.trim();
+    const statusToken = fate?.statusToken?.trim() || '(-) Incapacitated';
+    const maxHarmTierDesc = isCustomFate
+        ? `${customRule} (Status: ${statusToken} / Defeated)`
+        : `Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest)`;
 
     const tiers = [];
     tiers.push(`  1 Harm: Scratches, bruises, wind knocked out (in slice-of-life: minor embarrassment or fluster).`);
     if (max === 2) {
-        tiers.push(`  2 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+        tiers.push(`  2 Harm (Max Harm / 0 HP): ${maxHarmTierDesc}.`);
     } else if (max === 3) {
         tiers.push(`  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).`);
-        tiers.push(`  3 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+        tiers.push(`  3 Harm (Max Harm / 0 HP): ${maxHarmTierDesc}.`);
     } else if (max === 4) {
         tiers.push(`  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).`);
         tiers.push(`  3 Harm: Critical wound, severe trauma, verge of death (in slice-of-life: near burnout, -2 forward).`);
-        tiers.push(`  4 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+        tiers.push(`  4 Harm (Max Harm / 0 HP): ${maxHarmTierDesc}.`);
     } else if (max === 5) {
         tiers.push(`  2 Harm: Deep cut, broken bone, moderate injury (in slice-of-life: notable stress or fatigue, -1 forward).`);
         tiers.push(`  3 Harm: Severe trauma, debilitating injury (in slice-of-life: acute emotional distress or social tension).`);
         tiers.push(`  4 Harm: Critical wound, organ damage, verge of death (in slice-of-life: near burnout, -2 forward).`);
-        tiers.push(`  5 Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+        tiers.push(`  5 Harm (Max Harm / 0 HP): ${maxHarmTierDesc}.`);
     } else {
         // max >= 6 (e.g. 6, 7, 8)
         tiers.push(`  2 Harm: Flesh wound, persistent pain, bruised ribs.`);
@@ -373,8 +386,17 @@ export function buildPbtACombatContent(harmMaxOrOverrides = 5) {
             tiers.push(`  ${i} Harm: Severe trauma, heavy bleeding, debilitating wound (in slice-of-life: acute emotional distress, -1 forward).`);
         }
         tiers.push(`  ${max - 1} Harm: Critical wound, organ damage, verge of collapse / death (in slice-of-life: near burnout, -2 forward).`);
-        tiers.push(`  ${max} Harm (Max Harm / 0 HP): Lethal / dying / unconscious (Status: Defeated / Incapacitated) (in slice-of-life: complete burnout / exhaustion, retreats to rest).`);
+        tiers.push(`  ${max} Harm (Max Harm / 0 HP): ${maxHarmTierDesc}.`);
     }
+
+    const maxHarmSection = isCustomFate
+        ? `- AT MAX HARM (${max} Harm, 0 HP):
+  When {{user}} reaches Max Harm (${max}/${max} Harm, 0/${max} HP), they suffer the setting's downed fate: ${customRule} (Status: ${statusToken}).
+  Adversaries reaching Max Harm are Defeated/Overcome (Status: Defeated).
+  CRITICAL: {{user}} CANNOT perform ordinary physical actions, hold normal conversation, or initiate standard combat maneuvers when downed. Immediate fictional consequences apply: ${customRule}.`
+        : `- AT MAX HARM (${max} Harm, 0 HP):
+  When {{user}} or an adversary reaches Max Harm (${max}/${max} Harm, 0/${max} HP), they are completely incapacitated, unconscious, or at death's door (Status: Defeated or (-) Incapacitated).
+  CRITICAL: {{user}} CANNOT perform ordinary physical actions, hold normal conversation, or initiate combat maneuvers when downed. Immediate fictional consequences apply (capture, desperate rescue, last breath / sacrifice, or slipping into darkness).`;
 
     return `<combat>
 NO INITIATIVE TURNS. Combat is a cinematic conversation, not round-by-round math.
@@ -383,9 +405,7 @@ NO INITIATIVE TURNS. Combat is a cinematic conversation, not round-by-round math
 - ARMOR: Armor reduces incoming Harm by its value (e.g. Armor 1 turns 3 Harm into 2 Harm).
 - HARM TIERS:
 ${tiers.join('\n')}
-- AT MAX HARM (${max} Harm, 0 HP):
-  When {{user}} or an adversary reaches Max Harm (${max}/${max} Harm, 0/${max} HP), they are completely incapacitated, unconscious, or at death's door (Status: Defeated or (-) Incapacitated).
-  CRITICAL: {{user}} CANNOT perform ordinary physical actions, hold normal conversation, or initiate combat maneuvers when downed. Immediate fictional consequences apply (capture, desperate rescue, last breath / sacrifice, or slipping into darkness).
+${maxHarmSection}
 </combat>`;
 }
 
@@ -603,6 +623,57 @@ You must generate exactly 5 choices following narrative context:
 5. DOWNTIME / ALTERNATIVE: Consulting records, resting, tending gear, regrouping, or pursuing another lead (ZERO moves or dice).
 (CRITICAL EXCEPTION: If {{user}} is downed at Max Harm / 0 HP, ignore the categories above and output 5 Downed/Crisis choices: Cling to life, Faint plea, Desperate fading gambit, Slip into darkness, Rally ally intervention).`;
 
+    const fate = config.maxHarmFate || overrides.maxHarmFate;
+    const isCustomFate = Boolean(fate && fate.rule && !/^(?:mortal peril|last breath|dying)/i.test(fate.rule.trim()));
+
+    let downedSection = '';
+    if (isCustomFate) {
+        const customRule = fate.rule.trim();
+        const statusToken = fate.statusToken?.trim() || '(-) Downed';
+        if (/respawn|graveyard|ghost|mmo|shrine/i.test(customRule) || fate.cyoaStyle === 'respawn') {
+            downedSection = `CRITICAL — DOWNED / MAX HARM (0 HP) ADAPTIVE CHOICES:
+- When {{user}} is at Max Harm / 0 HP (${statusToken} / Defeated / Downed):
+  • STRICT MANDATE: DO NOT offer standard active actions, confident dialogue, or physical combat maneuvers. The protagonist has fallen in this encounter: ${customRule}.
+  • Adapt all choices to reflect their downed condition and respawn/aftermath mechanics:
+    1. RELEASE SPIRIT / RESPAWN: Surrender physical vessel and return to the nearest graveyard, soul shrine, or bindstone.
+    2. AWAIT RESURRECTION: Send out a spirit flare, whisper through bond, or call on an ally/healer for a revival.
+    3. DESPERATE SACRIFICE / SPIRIT PULSE: A last-ditch ephemeral activation, trigger item, or parting plea.
+    4. SLIP INTO THE SHADOWS / PHANTOM FORM: Drift in ghost form, evaluate defeat, or assess threat logs.
+    5. ALLY INTERVENTION: Signal companions to fall back, secure player's remnant, or disengage.`;
+        } else if (/burnout|exhaust|faint|pass out|fatigue/i.test(customRule) || fate.cyoaStyle === 'burnout') {
+            downedSection = `CRITICAL — DOWNED / MAX HARM (0 HP) ADAPTIVE CHOICES:
+- When {{user}} is at Max Harm / 0 HP (${statusToken} / Defeated / Exhausted):
+  • STRICT MANDATE: DO NOT offer standard active actions, confident banter, or energetic maneuvers. The protagonist has reached complete burnout: ${customRule}.
+  • Adapt all choices to reflect their total emotional/physical exhaustion:
+    1. COLLAPSE / RETREAT TO REST: Surrender to exhaustion, collapse into bed, or retreat to sleep.
+    2. ACCEPT COMFORT / CARE: Allow a friend, companion, or loved one to take over and nurse you.
+    3. RAW CONFESSION / TEARS: Let tears spill out, voice unvarnished vulnerability, or vent overwhelmed feelings.
+    4. SLIP INTO SILENCE / WITHDRAW: Shut down outward communication, hide under blankets, or endure the fatigue.
+    5. ALLY INTERVENTION: Look to friends or companions to step in, protect you from scrutiny, or care for you.`;
+        } else {
+            downedSection = `CRITICAL — DOWNED / MAX HARM (0 HP) ADAPTIVE CHOICES:
+- When {{user}} is at Max Harm / 0 HP (${statusToken} / Defeated / Downed):
+  • STRICT MANDATE: DO NOT offer standard active actions, confident dialogue, or normal maneuvers. The protagonist is downed: ${customRule}.
+  • Adapt all choices to reflect their condition (${customRule}):
+    1. SUCCUMB TO THE CRISIS: Accept the immediate fictional consequence of ${customRule}.
+    2. FAINT UTTERANCE / CALL FOR AID: Whisper a desperate final word, reach out to an ally, or signal for help.
+    3. DESPERATE SACRIFICE / GAMBIT: A last-ditch, fading gesture or protective sacrifice.
+    4. SLIP INTO UNCONSCIOUSNESS: Succumb to the outcome, play dead, or fade out.
+    5. ALLY INTERVENTION: Look to an ally to step in, drag {{user}} away, or turn the tide.`;
+        }
+    } else {
+        downedSection = `CRITICAL — DOWNED / MAX HARM (0 HP) ADAPTIVE CHOICES:
+- When {{user}} is at Max Harm / 0 HP (Incapacitated / Defeated / Dying):
+  • STRICT MANDATE: DO NOT offer standard active actions, confident dialogue, or physical combat maneuvers. The protagonist is completely incapacitated or on the verge of death.
+  • Adapt all choices to reflect their desperate, helpless, or unconscious condition:
+    1. CLING TO LIFE / LAST BREATH: Fight to remain conscious or hold on to life.
+    2. FAINT UTTERANCE / CALL FOR AID: Whisper a desperate final word, reach out to an ally, or signal for help.
+    3. DESPERATE SACRIFICE / GAMBIT: A last-ditch, fading gesture or protective sacrifice.
+    4. SLIP INTO THE DARKNESS: Succumb to unconsciousness, play dead, or endure the blackness.
+    5. ALLY INTERVENTION: Look to an ally to step in, drag {{user}} to cover, or turn the tide.
+    (In slice-of-life: choices reflect total emotional/physical burnout, retreating to bed/tears, or letting friends care for them).`;
+    }
+
     return `[INTERACTIVE CHOICE BUTTONS]
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for the user. NEVER forget the choices.
 - Output sequence: (1) Scene narrative -> (2) <choices> block -> (3) Status footer.
@@ -627,16 +698,7 @@ TENSION-ADAPTIVE MOVE PACING:
     1 to 2 choices may trigger tactical Moves (e.g. melee, ranged, spells/tech), while the remaining choices provide tactical maneuvers, taking cover, positioning, or spoken commands (no move tags).
 - NEVER OVERLOAD: Never offer more than 2 choices with moves even in deadly combat. Most choices should always be narrative or conversational options.
 
-CRITICAL — DOWNED / MAX HARM (0 HP) ADAPTIVE CHOICES:
-- When {{user}} is at Max Harm / 0 HP (Incapacitated / Defeated / Dying):
-  • STRICT MANDATE: DO NOT offer standard active actions, confident dialogue, or physical combat maneuvers. The protagonist is completely incapacitated or on the verge of death.
-  • Adapt all choices to reflect their desperate, helpless, or unconscious condition:
-    1. CLING TO LIFE / LAST BREATH: Fight to remain conscious or hold on to life.
-    2. FAINT UTTERANCE / CALL FOR AID: Whisper a desperate final word, reach out to an ally, or signal for help.
-    3. DESPERATE SACRIFICE / GAMBIT: A last-ditch, fading gesture or protective sacrifice.
-    4. SLIP INTO THE DARKNESS: Succumb to unconsciousness, play dead, or endure the blackness.
-    5. ALLY INTERVENTION: Look to an ally to step in, drag {{user}} to cover, or turn the tide.
-    (In slice-of-life: choices reflect total emotional/physical burnout, retreating to bed/tears, or letting friends care for them).
+${downedSection}
 
 EXAMPLES (Formatting & Ratio Reference):
 ${examples}
@@ -656,6 +718,11 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
     const config = overrides.config || overrides || {};
     const harmMax = config.harmMax || overrides.harmMax || 5;
     const pacingXp = config.pacingXp || overrides.pacingXp || 5;
+    const fate = config.maxHarmFate || overrides.maxHarmFate;
+    const isCustomFate = Boolean(fate && fate.statusToken && !/^(-|\(\-\))\s*incapacitated/i.test(fate.statusToken.trim()));
+    const statusInstruction = isCustomFate
+        ? `When {{user}} is at Max Harm / 0 HP (${harmMax}/${harmMax} Harm, 0/${harmMax} HP), status MUST reflect condition: Status: ${fate.statusToken}, (-) Incapacitated, (-) Dying, or Defeated. Use plain "Healthy" when unaffected.`
+        : `When {{user}} is at Max Harm / 0 HP (${harmMax}/${harmMax} Harm, 0/${harmMax} HP), status MUST reflect incapacitation: Status: (-) Incapacitated, (-) Dying, or Defeated. Use plain "Healthy" when unaffected.`;
 
     const statsList = (Array.isArray(overrides.stats) && overrides.stats.length > 0)
         ? overrides.stats
@@ -683,7 +750,7 @@ PILL FORMATTING (renders as interactive badges with mouse-over tooltips):
 - Gear: Separate equipped items with commas, placing weapon tags, armor values, or uses inside trailing parentheses: Item Name (Tags, harm/armor). Use (+) for armor or protective bonuses, e.g. Static Shroud ((+) +1 Armor).
 - Conditions & Status: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward).
   NO D&D DAMAGE-OVER-TIME OR ROUND/TURN COUNTERS: NEVER output "1 damage per round", "X turns remaining", or saving throw DC tickers. PbtA conditions are fictional debilities or narrative triggers (e.g. "(-) Bleeding (Risk taking +1 Harm on strenuous physical action without medical aid)").
-  When {{user}} is at Max Harm / 0 HP (${harmMax}/${harmMax} Harm, 0/${harmMax} HP), status MUST reflect incapacitation: Status: (-) Incapacitated, (-) Dying, or Defeated. Use plain "Healthy" when unaffected.`,
+  ${statusInstruction}`,
 
         party: `Companion and party members. MECHANICS ONLY. Lean & boon-driven hirelings/allies (Dungeon World style) — no full stat arrays. Every member MUST begin with their own header line. Separate distinct members with an empty line:
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
@@ -836,7 +903,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_combat',
             tag: 'combat',
-            content: buildPbtACombatContent(harmMax),
+            content: buildPbtACombatContent(harmMax, overrides),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',

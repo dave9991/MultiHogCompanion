@@ -125,6 +125,7 @@ premise: Brief 1-2 sentence core premise of the adventure
 [CONFIG] (Optional calibration dials)
 playstyle: cyoa_5 | cyoa_3 | freeform
 harm_max: 5 (or 3 for gritty, 4 for tense, 6 for heroic)
+max_harm_fate: Mortal peril / dying (or "MMO respawn at shrine", "Emotional burnout / faint", "Arrested / captured")
 pacing_xp: 3 | 5 (XP needed to level up: 3 for short one-shots, 5 for standard campaigns)
 party_mode: squad | solo | duo
 cyoa_emojis: true | false
@@ -247,6 +248,7 @@ sample:
        * *Campaign Title:* Assign a punchy, evocative 2–3 word title using the \`title:\` tag. Suggest or derive it from the protagonist's name (e.g. *Vance: Cold Frost*) or an iconic setting feature / threat / crisis (e.g. *The Ash Wendigo*, *The Sunken Spire*). If the player asks to change or rename the title at any point, immediately emit an \`[UPDATE_DOSSIER]\` with the updated \`title:\`.
        * *Playstyle:* 5-Choice CYOA (default), 3-Choice Minimal CYOA (faster tempo), or Pure Freeform (pure descriptive roleplay without choice menus).
        * *Harm Capacity:* 5 Harm (standard), 3 Harm (lethal/gritty noir), 4 Harm (tense horror/survival), 6 Harm (heroic pulp).
+       * *Downed / Max Harm Fate:* What happens when Harm hits maximum (0 HP). Defaults to Mortal Peril ("Mortal peril / bleeding out (Last breath or dying)"). If the setting is non-lethal, video-game themed, or slice-of-life, calibrate via \`max_harm_fate:\` (e.g. MMO respawn at nearest graveyard/shrine, emotional burnout & fainting in slice-of-life/school, capture/arrest in heist/crime, broken morale/retreat in superhero).
        * *Pacing XP:* 5 XP (standard campaign progression) or 3 XP (accelerated progression for short arcs/one-shots) via \`pacing_xp: 3 | 5\`.
        * *Party Mode:* Squad (multi-companion), Duo (buddy/mentor dynamic), or Solo (lone wolf / isolated operative).
        * *Art Style:* If the pitch suggests a distinct visual mood (e.g. "gritty watercolor graphic novel", "dark 80s anime cel", "cinematic photorealism"), capture it via \`art_style:\`. MultiHog uses this style when running SillyTavern's native \`/imagine\` command and generating character portraits.
@@ -324,6 +326,7 @@ premise: Brief 1-2 sentence core premise
 [CONFIG] (Optional calibration dials)
 playstyle: cyoa_5 | cyoa_3 | freeform
 harm_max: 5 (3 for gritty, 4 for tense, 6 for heroic)
+max_harm_fate: Mortal peril / dying (or "MMO respawn at shrine", "Emotional burnout / faint", "Arrested / captured")
 pacing_xp: 3 | 5
 party_mode: squad | solo | duo
 cyoa_emojis: true | false

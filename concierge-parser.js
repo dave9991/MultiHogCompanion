@@ -56,6 +56,11 @@ export function createEmptyDossier() {
             pacingXp: 5,
             simulationDepth: 'active_fronts',
             relationships: true,
+            maxHarmFate: {
+                rule: 'Mortal Peril (Last Breath / Dying)',
+                statusToken: '(-) Incapacitated',
+                cyoaStyle: 'crisis',
+            },
         },
     };
 }
@@ -341,7 +346,8 @@ The Kick: Unset
     // Full-detail view, written in the same key: value shape as [UPDATE_DOSSIER] blocks so the
     // model can copy names/keys exactly and emit precise partial edits.
     const cfg = dossier.config || {};
-    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}`);
+    const fatePart = cfg.maxHarmFate?.rule ? `, max_harm_fate=${cfg.maxHarmFate.rule}` : '';
+    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}${fatePart}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
 
     if (p.name || p.playbook) {
@@ -1253,6 +1259,11 @@ export function applyDossierUpdates(text, dossier) {
         artStyle: '',
         pacingXp: 5,
         simulationDepth: 'active_fronts',
+        maxHarmFate: {
+            rule: 'Mortal Peril (Last Breath / Dying)',
+            statusToken: '(-) Incapacitated',
+            cyoaStyle: 'crisis',
+        },
     };
 
     const configMatch = raw.match(/\[CONFIG\]([\s\S]*?)(?:\[\/CONFIG\]|$)/i);
@@ -1353,6 +1364,49 @@ export function applyDossierUpdates(text, dossier) {
             if (nextRel !== updated.config.relationships) {
                 updated.config.relationships = nextRel;
                 changes.push(`Relationships dial set to ${nextRel ? 'On' : 'Off'}`);
+            }
+        }
+
+        // Max Harm / Downed Fate Dial
+        const fateRaw = kv.max_harm_fate || kv.downed_fate || kv.max_harm_rule || kv.death_rule;
+        if (fateRaw) {
+            let ruleStr = String(fateRaw).trim();
+            let tokenStr = kv.downed_status || kv.status_token;
+            if (ruleStr.includes('|')) {
+                const parts = ruleStr.split('|');
+                ruleStr = parts[0].trim();
+                if (!tokenStr && parts[1]) {
+                    tokenStr = parts[1].trim().replace(/^(?:status(?:\s*token)?\s*:?\s*)/i, '').trim();
+                }
+            }
+            if (tokenStr) {
+                tokenStr = tokenStr.trim().replace(/^(?:status(?:\s*token)?\s*:?\s*)/i, '').trim();
+            }
+            if (!tokenStr) {
+                if (/respawn|graveyard|ghost|mmo|shrine/i.test(ruleStr)) tokenStr = '(-) Ghost';
+                else if (/burnout|exhaust|faint|pass out|fatigue/i.test(ruleStr)) tokenStr = '(-) Burnt Out';
+                else if (/unconscious|capture|knockout|arrest|subdue/i.test(ruleStr)) tokenStr = '(-) Unconscious';
+                else tokenStr = '(-) Incapacitated';
+            }
+            if (!tokenStr.startsWith('(-)') && !tokenStr.startsWith('(+)')) {
+                tokenStr = `(-) ${tokenStr}`;
+            }
+
+            let cyoaStyle = 'crisis';
+            if (/respawn|graveyard|ghost|mmo|shrine/i.test(ruleStr)) cyoaStyle = 'respawn';
+            else if (/burnout|exhaust|faint|pass out|fatigue/i.test(ruleStr)) cyoaStyle = 'burnout';
+            else if (/unconscious|capture|knockout|arrest|subdue/i.test(ruleStr)) cyoaStyle = 'knockout';
+
+            const nextFate = {
+                rule: ruleStr,
+                statusToken: tokenStr,
+                cyoaStyle,
+            };
+
+            const prevFate = updated.config.maxHarmFate || {};
+            if (prevFate.rule !== nextFate.rule || prevFate.statusToken !== nextFate.statusToken) {
+                updated.config.maxHarmFate = nextFate;
+                changes.push(`Max Harm fate dial set to "${ruleStr}" [${tokenStr}]`);
             }
         }
     }
@@ -1533,7 +1587,7 @@ ${mapsMd}${worldRulesMd}${customModuleMd}
 * **Playstyle:** ${dossier.config.playstyle || 'cyoa_5'}
 * **Harm Capacity:** ${dossier.config.harmMax || 5}
 * **Party Mode:** ${dossier.config.partyMode || 'squad'}
-* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}` : ''}`;
+* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}${dossier.config.maxHarmFate ? `\n* **Max Harm Fate:** ${dossier.config.maxHarmFate.rule || dossier.config.maxHarmFate}${dossier.config.maxHarmFate.statusToken ? ` | **Status Token:** ${dossier.config.maxHarmFate.statusToken}` : ''}` : ''}` : ''}`;
 }
 
 /**
@@ -1609,6 +1663,37 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.config.cyoaEmojis = dossier.config.cyoaEmojis !== false;
     dossier.config.relationships = dossier.config.relationships !== false;
     dossier.config.artStyle = dossier.config.artStyle || '';
+
+    // Max Harm Fate normalization
+    if (dossier.config.maxHarmFate) {
+        if (typeof dossier.config.maxHarmFate === 'string') {
+            const str = dossier.config.maxHarmFate.trim();
+            const parts = str.split('|');
+            const rule = parts[0].trim();
+            let statusToken = parts[1] ? parts[1].replace(/^(?:status(?:\s*token)?\s*:?\s*)/i, '').trim() : '(-) Incapacitated';
+            if (!statusToken.startsWith('(-)') && !statusToken.startsWith('(+)')) statusToken = `(-) ${statusToken}`;
+            dossier.config.maxHarmFate = {
+                rule,
+                statusToken,
+                cyoaStyle: /respawn|graveyard|shrine/i.test(rule) ? 'respawn' : /burnout|exhaust|faint/i.test(rule) ? 'burnout' : 'crisis',
+            };
+        } else if (typeof dossier.config.maxHarmFate === 'object') {
+            const rule = String(dossier.config.maxHarmFate.rule || 'Mortal Peril (Last Breath / Dying)').trim();
+            let statusToken = String(dossier.config.maxHarmFate.statusToken || '(-) Incapacitated').trim();
+            if (!statusToken.startsWith('(-)') && !statusToken.startsWith('(+)')) statusToken = `(-) ${statusToken}`;
+            dossier.config.maxHarmFate = {
+                rule,
+                statusToken,
+                cyoaStyle: dossier.config.maxHarmFate.cyoaStyle || (/respawn|graveyard|shrine/i.test(rule) ? 'respawn' : /burnout|exhaust|faint/i.test(rule) ? 'burnout' : 'crisis'),
+            };
+        }
+    } else {
+        dossier.config.maxHarmFate = {
+            rule: 'Mortal Peril (Last Breath / Dying)',
+            statusToken: '(-) Incapacitated',
+            cyoaStyle: 'crisis',
+        };
+    }
 
     // 3. Protagonist
     dossier.protagonist = dossier.protagonist || {};
@@ -1948,6 +2033,7 @@ export function parseMarkdownToDossier(markdown) {
         const artM = configSection[1].match(/\*\s*\*\*Art Direction:\*\*\s*([^\n\r]+)/i);
         const xpM = configSection[1].match(/\*\s*\*\*XP Pacing:\*\*\s*([^\n\r]+)/i);
         const relM = configSection[1].match(/\*\s*\*\*Relationships:\*\*\s*([^\n\r]+)/i);
+        const fateM = configSection[1].match(/\*\s*\*\*Max Harm Fate:\*\*\s*([^\n\r|]+)(?:\s*\|\s*\*\*Status Token:\*\*\s*([^\n\r]+))?/i);
 
         dossier.config = dossier.config || {};
         if (psM) dossier.config.playstyle = psM[1].trim();
@@ -1964,6 +2050,16 @@ export function parseMarkdownToDossier(markdown) {
             if (!isNaN(xpVal)) dossier.config.pacingXp = xpVal;
         }
         if (relM) dossier.config.relationships = !/disabled|false|off/i.test(relM[1]);
+        if (fateM) {
+            const rule = fateM[1].trim();
+            let statusToken = fateM[2] ? fateM[2].trim() : '(-) Incapacitated';
+            if (!statusToken.startsWith('(-)') && !statusToken.startsWith('(+)')) statusToken = `(-) ${statusToken}`;
+            dossier.config.maxHarmFate = {
+                rule,
+                statusToken,
+                cyoaStyle: /respawn|graveyard|shrine/i.test(rule) ? 'respawn' : /burnout|exhaust|faint/i.test(rule) ? 'burnout' : 'crisis',
+            };
+        }
     }
 
     // 12. World Rules & Physical Axioms

@@ -162,6 +162,25 @@ function updateBlueprintDeck() {
     else if (harmMax === 6) harmTag = '(Pulp)';
     $('#mhc_dial_harm_btn').text(`❤️ Harm: ${harmMax} ${harmTag}`);
 
+    const maxHarmFate = cfg.maxHarmFate || { rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated' };
+    const fateRule = maxHarmFate.rule || 'Mortal Peril';
+    let fateShort = 'Mortal Peril';
+    let fateIcon = '💀';
+    if (/respawn|graveyard|ghost|mmo|shrine/i.test(fateRule)) {
+        fateShort = 'Respawn';
+        fateIcon = '🔄';
+    } else if (/burnout|exhaust|faint|pass out|fatigue/i.test(fateRule)) {
+        fateShort = 'Burnout / Faint';
+        fateIcon = '💤';
+    } else if (/unconscious|capture|knockout|arrest|subdue/i.test(fateRule)) {
+        fateShort = 'Knockout / Arrest';
+        fateIcon = '⛓️';
+    } else if (!/mortal\s*peril|last\s*breath|dying/i.test(fateRule)) {
+        fateShort = fateRule.length > 18 ? fateRule.slice(0, 16) + '...' : fateRule;
+        fateIcon = '⚡';
+    }
+    $('#mhc_dial_downed_btn').text(`${fateIcon} Downed: ${fateShort}`);
+
     const partyMode = cfg.partyMode || 'squad';
     const partyLabel = partyMode.charAt(0).toUpperCase() + partyMode.slice(1);
     $('#mhc_dial_party_btn').text(`👥 Party: ${partyLabel}`);
@@ -1323,6 +1342,32 @@ function bindModalEvents() {
             }
         }
         changelog.push(`Toggled Harm capacity to ${activeDossier.config.harmMax}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    $('#mhc_dial_downed_btn').on('click', () => {
+        activeDossier.config = activeDossier.config || {};
+        const presets = [
+            { key: 'mortal_peril', label: 'Mortal Peril', rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated', cyoaStyle: 'crisis' },
+            { key: 'burnout', label: 'Burnout / Faint', rule: 'Emotional & Physical Burnout (Faint or collapse, retreat to rest)', statusToken: '(-) Burnt Out', cyoaStyle: 'burnout' },
+            { key: 'respawn', label: 'MMO Respawn', rule: 'MMO / Soul Respawn (Return to nearest shrine or graveyard)', statusToken: '(-) Ghost', cyoaStyle: 'respawn' },
+            { key: 'knockout', label: 'Knockout / Capture', rule: 'Knocked Out / Captured (Subdued, unconscious, or taken prisoner)', statusToken: '(-) Unconscious', cyoaStyle: 'knockout' },
+        ];
+        const curRule = (activeDossier.config.maxHarmFate?.rule || '').toLowerCase();
+        let curIdx = 0;
+        if (/burnout|exhaust|faint|pass out/i.test(curRule)) curIdx = 1;
+        else if (/respawn|graveyard|ghost|mmo|shrine/i.test(curRule)) curIdx = 2;
+        else if (/unconscious|capture|knockout|arrest/i.test(curRule)) curIdx = 3;
+        else curIdx = 0;
+
+        const nextPreset = presets[(curIdx + 1) % presets.length];
+        activeDossier.config.maxHarmFate = {
+            rule: nextPreset.rule,
+            statusToken: nextPreset.statusToken,
+            cyoaStyle: nextPreset.cyoaStyle,
+        };
+        changelog.push(`Toggled Max Harm fate to "${nextPreset.label}"`);
         updateBlueprintDeck();
         saveDraft();
     });

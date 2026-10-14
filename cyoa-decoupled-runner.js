@@ -31,7 +31,12 @@ export function isStage2CyoaRunning() {
  * @param {string} [reason='unspecified']
  */
 export function abortStage2Cyoa(reason = 'unspecified') {
-    console.log('[MultiHog Companion:CYOA-DEBUG] abortStage2Cyoa called! Reason:', reason, 'Stack:', new Error().stack);
+    if (!_isStage2Running && !_activeCyoaAbortController) {
+        removeCyoaLoadingIndicator();
+        restoreSendButtonUI();
+        return;
+    }
+    console.log('[MultiHog Companion] CYOA Stage 2 aborted. Reason:', reason);
     if (_activeCyoaAbortController) {
         _activeCyoaAbortController.abort();
         _activeCyoaAbortController = null;
@@ -339,8 +344,6 @@ export async function waitForStateTracker(timeoutMs = 15000) {
     const startTime = Date.now();
     const isRunning = () => typeof globalThis._rpgStateModelRunning === 'function' && globalThis._rpgStateModelRunning();
 
-    console.log('[MultiHog Companion:CYOA-DEBUG] waitForStateTracker started. isRunning:', isRunning());
-
     // 1. Wait up to 3500ms for State Tracker to initiate (MultiHog runs keyword scans, map checks, and swiping before triggering state pass)
     const launchWaitLimit = 3500;
     while (Date.now() - startTime < launchWaitLimit) {
@@ -348,28 +351,22 @@ export async function waitForStateTracker(timeoutMs = 15000) {
         await new Promise(resolve => setTimeout(resolve, 40));
     }
 
-    const elapsedLaunch = Date.now() - startTime;
-    console.log(`[MultiHog Companion:CYOA-DEBUG] waitForStateTracker launch wait finished in ${elapsedLaunch}ms. isRunning:`, isRunning());
-
     // 2. If State Tracker did not launch (e.g. disabled, throttled turn, or non-character turn), proceed immediately
     if (!isRunning()) {
-        console.log('[MultiHog Companion:CYOA-DEBUG] waitForStateTracker: State Tracker did not launch within limit. Proceeding.');
         return true;
     }
 
     // 3. Wait for State Tracker to finish auditing narrative
-    console.log('[MultiHog Companion:CYOA-DEBUG] waitForStateTracker: State Tracker detected active. Awaiting completion...');
     while (Date.now() - startTime < timeoutMs) {
         await new Promise(resolve => setTimeout(resolve, 100));
         if (!isRunning()) {
             // Give a tiny tick for settings / currentMemo write to flush
             await new Promise(resolve => setTimeout(resolve, 80));
-            console.log(`[MultiHog Companion:CYOA-DEBUG] waitForStateTracker: State Tracker finished in ${Date.now() - startTime}ms.`);
             return true;
         }
     }
 
-    console.warn(`[MultiHog Companion:CYOA-DEBUG] State Tracker wait timed out after ${Date.now() - startTime}ms. Proceeding.`);
+    console.warn(`[MultiHog Companion] State Tracker wait timed out after ${Date.now() - startTime}ms. Proceeding.`);
     return false;
 }
 
@@ -383,18 +380,23 @@ export async function waitForStateTracker(timeoutMs = 15000) {
  */
 export function insertCyoaLoadingIndicator(messageId) {
     if (typeof document === 'undefined') return;
-    console.log('[MultiHog Companion:CYOA-DEBUG] insertCyoaLoadingIndicator called for messageId:', messageId, 'Stack:', new Error().stack);
-    removeCyoaLoadingIndicator();
 
     const mesContainer = (messageId !== undefined && messageId >= 0)
         ? document.querySelector(`#chat .mes[mesid="${messageId}"]`)
         : document.querySelector('#chat .mes:last-child');
     if (!mesContainer) {
-        console.warn('[MultiHog Companion:CYOA-DEBUG] insertCyoaLoadingIndicator: mesContainer not found for messageId:', messageId);
         return;
     }
 
     const mesBlock = mesContainer.querySelector('.mes_block') || mesContainer;
+    // If indicator already exists in this message, don't remove and re-add to avoid flicker
+    if (mesBlock.querySelector('.mhc-cyoa-loading-badge')) {
+        return;
+    }
+
+    // Remove any stale badge on other messages
+    removeCyoaLoadingIndicator();
+
     const mesText = mesBlock.querySelector('.mes_text');
 
     const loader = document.createElement('div');
@@ -415,7 +417,6 @@ export function insertCyoaLoadingIndicator(messageId) {
     if (cancelBtn) {
         cancelBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            console.log('[MultiHog Companion:CYOA-DEBUG] Cancel button clicked on loading badge!');
             abortStage2Cyoa('cancel_button');
         });
     }
@@ -425,22 +426,6 @@ export function insertCyoaLoadingIndicator(messageId) {
     } else {
         mesBlock.appendChild(loader);
     }
-
-    // Attach MutationObserver to detect if external code strips this loader
-    const parent = loader.parentNode;
-    if (parent) {
-        const obs = new MutationObserver((mutations) => {
-            for (const m of mutations) {
-                for (const r of m.removedNodes) {
-                    if (r === loader || (r instanceof Element && r.contains(loader))) {
-                        console.warn('[MultiHog Companion:CYOA-DEBUG] ALERT: Loader was REMOVED from DOM by external caller! Parent:', parent.className, 'Stack:', new Error().stack);
-                        obs.disconnect();
-                    }
-                }
-            }
-        });
-        obs.observe(parent, { childList: true });
-    }
 }
 
 /**
@@ -449,7 +434,6 @@ export function insertCyoaLoadingIndicator(messageId) {
 export function removeCyoaLoadingIndicator() {
     if (typeof document === 'undefined') return;
     const existing = document.querySelectorAll('.mhc-cyoa-loading-badge, [data-cyoa-loader]');
-    console.log('[MultiHog Companion:CYOA-DEBUG] removeCyoaLoadingIndicator called. Found', existing.length, 'badges to remove. Stack:', new Error().stack);
     existing.forEach(el => el.remove());
 }
 
@@ -517,7 +501,6 @@ export function restoreSendButtonUI() {
  * @returns {Promise<boolean>} Success status
  */
 export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpgSettings, showToast }) {
-    console.log('[MultiHog Companion:CYOA-DEBUG] runDecoupledCyoaStage2 ENTERED. messageId:', messageId, '_isStage2Running:', _isStage2Running);
     if (_isStage2Running) {
         abortStage2Cyoa('restart_stage2');
     }
@@ -532,14 +515,11 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         insertCyoaLoadingIndicator(messageId);
 
         // 2. Wait for MultiHog State Tracker to finish auditing
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2: awaiting waitForStateTracker...');
         const trackerOk = await waitForStateTracker(12000);
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2: waitForStateTracker resolved:', trackerOk, 'aborted:', signal.aborted);
         if (signal.aborted) return false;
 
         // 3. Obtain the freshly audited State Memo
         const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2: freshMemo length:', freshMemo.length);
 
         // 4. Build Stage 2 prompt
         const { systemPrompt, userPrompt } = buildStage2CyoaPrompt({
@@ -566,16 +546,13 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         ];
 
         // 6. Generate choices via routed LLM call
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2: sending routed LLM request...');
         const rawOutput = await sendRoutedLlmRequest(connSettings, messages, signal);
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2: LLM output received. Length:', rawOutput?.length, 'aborted:', signal.aborted);
         if (signal.aborted) return false;
 
         // 7. Extract valid <choices> block
         const choicesMarkup = extractCleanChoicesMarkup(rawOutput);
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2: choicesMarkup extracted:', !!choicesMarkup);
         if (!choicesMarkup) {
-            console.warn('[MultiHog Companion:CYOA-DEBUG] Decoupled CYOA did not produce valid choice markup:', rawOutput);
+            console.warn('[MultiHog Companion] Decoupled CYOA did not produce valid choice markup:', rawOutput);
             removeCyoaLoadingIndicator();
             restoreSendButtonUI();
             _isStage2Running = false;
@@ -586,7 +563,7 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         const ctx = SillyTavern.getContext?.();
         const chat = ctx?.chat;
         if (!chat || !chat[messageId]) {
-            console.warn('[MultiHog Companion:CYOA-DEBUG] Target message not found in chat!');
+            console.warn('[MultiHog Companion] Target message not found in chat!');
             removeCyoaLoadingIndicator();
             restoreSendButtonUI();
             _isStage2Running = false;
@@ -608,7 +585,6 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             currentMsg.swipes[currentMsg.swipe_id] = finalMesText;
         }
 
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2: removing loading indicator before message DOM update');
         removeCyoaLoadingIndicator();
 
         // Update message DOM
@@ -640,20 +616,19 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             showToast('info', 'Tactical CYOA choices synchronized! 🧭', 'CYOA Engine');
         }
 
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2 COMPLETED successfully!');
+        console.log('[MultiHog Companion] Decoupled CYOA Stage 2 completed successfully.');
         return true;
     } catch (err) {
         if (signal.aborted || err?.name === 'AbortError') {
-            console.log('[MultiHog Companion:CYOA-DEBUG] Decoupled CYOA generation was aborted by user/signal.');
+            console.log('[MultiHog Companion] Decoupled CYOA generation was aborted by user/signal.');
         } else {
-            console.error('[MultiHog Companion:CYOA-DEBUG] Decoupled CYOA generation failed:', err);
+            console.error('[MultiHog Companion] Decoupled CYOA generation failed:', err);
             if (showToast) {
                 showToast('warning', 'Failed to generate CYOA choices. UI restored.', 'CYOA Engine');
             }
         }
         return false;
     } finally {
-        console.log('[MultiHog Companion:CYOA-DEBUG] Stage 2 FINALLY executing. isStage2Running was:', _isStage2Running);
         removeCyoaLoadingIndicator();
         restoreSendButtonUI();
         _isStage2Running = false;

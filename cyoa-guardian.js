@@ -339,7 +339,8 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     if (!es || !et) return;
 
     if (et.GENERATION_STARTED) {
-        es.on(et.GENERATION_STARTED, () => {
+        es.on(et.GENERATION_STARTED, (...args) => {
+            console.log('[MultiHog Companion:CYOA-DEBUG] event GENERATION_STARTED received. args:', args);
             _wasGenerationStopped = false;
             _lastStage2AttemptedMessageId = -1;
             _lastStage2AttemptedSwipeId = -1;
@@ -350,6 +351,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 
     if (et.GENERATION_STOPPED) {
         es.on(et.GENERATION_STOPPED, () => {
+            console.log('[MultiHog Companion:CYOA-DEBUG] event GENERATION_STOPPED received.');
             _wasGenerationStopped = true;
             _pendingSteeringReminder = null;
             abortStage2Cyoa();
@@ -358,6 +360,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 
     if (et.CHAT_CHANGED) {
         es.on(et.CHAT_CHANGED, () => {
+            console.log('[MultiHog Companion:CYOA-DEBUG] event CHAT_CHANGED received.');
             _retryTracker = { mesId: -1, count: 0 };
             _pendingSteeringReminder = null;
             _lastStage2AttemptedMessageId = -1;
@@ -370,7 +373,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     if (typeof document !== 'undefined') {
         const handleStopClick = () => {
             if (isStage2CyoaRunning()) {
-                console.log('[MultiHog Companion] User clicked Stop. Aborting Decoupled CYOA.');
+                console.log('[MultiHog Companion:CYOA-DEBUG] User clicked Stop. Aborting Decoupled CYOA.');
                 abortStage2Cyoa();
             }
         };
@@ -395,8 +398,12 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     // Show loading badge, lock send button, and launch Stage 2 in background the instant the narrator message renders
     if (et.CHARACTER_MESSAGE_RENDERED) {
         es.on(et.CHARACTER_MESSAGE_RENDERED, (messageId) => {
+            console.log('[MultiHog Companion:CYOA-DEBUG] event CHARACTER_MESSAGE_RENDERED received for messageId:', messageId, 'isStage2Running:', isStage2CyoaRunning());
             const s = getSettings();
-            if (s.enableDecoupledCyoa === false) return;
+            if (s.enableDecoupledCyoa === false) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] CHARACTER_MESSAGE_RENDERED ignored: enableDecoupledCyoa is false');
+                return;
+            }
 
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
             const chat = ctx?.chat;
@@ -404,16 +411,26 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 
             const idx = messageId >= 0 ? messageId : chat.length - 1;
             const msg = chat[idx];
-            if (!msg || msg.is_user || msg.is_system) return;
+            if (!msg || msg.is_user || msg.is_system) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] CHARACTER_MESSAGE_RENDERED ignored: message is user/system or missing');
+                return;
+            }
 
             const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
             const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
 
-            if (!isCyoaExpected(rpgSettings, pbtaActive)) return;
-            if (hasCyoaChoices(msg.mes)) return;
+            if (!isCyoaExpected(rpgSettings, pbtaActive)) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] CHARACTER_MESSAGE_RENDERED ignored: isCyoaExpected returned false');
+                return;
+            }
+            if (hasCyoaChoices(msg.mes)) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] CHARACTER_MESSAGE_RENDERED ignored: msg already has choices');
+                return;
+            }
 
             const currentSwipeId = msg.swipe_id ?? 0;
             if (_lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] CHARACTER_MESSAGE_RENDERED: already attempted for idx/swipe:', idx, currentSwipeId);
                 if (isStage2CyoaRunning()) {
                     lockSendButtonUI();
                     insertCyoaLoadingIndicator(idx);
@@ -422,6 +439,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             }
 
             if (isStage2CyoaRunning()) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] CHARACTER_MESSAGE_RENDERED: Stage 2 already running, re-ensuring UI');
                 lockSendButtonUI();
                 insertCyoaLoadingIndicator(idx);
                 return;
@@ -430,6 +448,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             _lastStage2AttemptedMessageId = idx;
             _lastStage2AttemptedSwipeId = currentSwipeId;
 
+            console.log('[MultiHog Companion:CYOA-DEBUG] CHARACTER_MESSAGE_RENDERED: triggering Stage 2 for idx:', idx);
             // Immediately display the formulating badge and lock the send button so the turn never looks ready
             lockSendButtonUI();
             insertCyoaLoadingIndicator(idx);
@@ -444,18 +463,17 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 rpgSettings,
                 showToast,
             }).catch(err => {
-                console.error('[MultiHog Companion] Decoupled CYOA Stage 2 error:', err);
+                console.error('[MultiHog Companion:CYOA-DEBUG] Decoupled CYOA Stage 2 error:', err);
             });
         });
     }
 
     if (et.GENERATION_ENDED) {
         es.on(et.GENERATION_ENDED, async () => {
+            console.log('[MultiHog Companion:CYOA-DEBUG] event GENERATION_ENDED received. isStage2Running:', isStage2CyoaRunning(), '_wasGenerationStopped:', _wasGenerationStopped);
             if (_wasGenerationStopped) return;
             if (isStage2CyoaRunning()) {
-                // Stage 2 is already in flight (either waiting for State Tracker or generating choices).
-                // SillyTavern's unblockGeneration/activateSendButtons ran at generation end,
-                // so re-ensure the send button remains locked.
+                console.log('[MultiHog Companion:CYOA-DEBUG] GENERATION_ENDED: Stage 2 already in flight. Re-locking send button.');
                 lockSendButtonUI();
                 return;
             }
@@ -471,7 +489,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 
             const currentSwipeId = lastMsg.swipe_id ?? 0;
             if (_lastStage2AttemptedMessageId === lastIdx && _lastStage2AttemptedSwipeId === currentSwipeId) {
-                // Prevent duplicate attempts on the same message and swipe (breaks any potential event feedback loops)
+                console.log('[MultiHog Companion:CYOA-DEBUG] GENERATION_ENDED: already attempted for lastIdx/swipe:', lastIdx, currentSwipeId);
                 return;
             }
 
@@ -484,6 +502,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 
             // ── DECOUPLED TWO-STAGE CYOA PATH (Fail-safe backup if not triggered by CHARACTER_MESSAGE_RENDERED) ──
             if (s.enableDecoupledCyoa !== false) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] GENERATION_ENDED: fail-safe trigger for Stage 2 on lastIdx:', lastIdx);
                 const text = String(lastMsg.mes || '');
                 // If message already has CYOA buttons (e.g. from previous edit), skip Stage 2
                 if (hasCyoaChoices(text)) {

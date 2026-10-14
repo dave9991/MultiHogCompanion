@@ -354,10 +354,18 @@ export function insertCyoaLoadingIndicator(messageId) {
     if (!mesEl) return;
 
     const loader = document.createElement('div');
-    loader.className = 'rt-cyoa-choices rt-cyoa-loading';
+    loader.className = 'mhc-cyoa-loading-badge';
     loader.setAttribute('data-cyoa-loader', 'true');
-    loader.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;margin-top:10px;background:rgba(0,0,0,0.22);border-radius:6px;font-style:italic;opacity:0.85;border-left:3px solid var(--SmartThemeQuoteColor, #00ffaa);';
-    loader.innerHTML = '<i class="fa-solid fa-dice-d20 fa-spin" style="color:var(--SmartThemeQuoteColor, #00ffaa);"></i> <span>Formulating tactical choices...</span> <button type="button" class="menu_button rt-cyoa-cancel-btn" style="margin-left:auto;font-size:0.75em;padding:2px 8px;cursor:pointer;opacity:0.8;" title="Abort choice generation">Cancel</button>';
+    loader.style.cssText = 'display:flex !important;flex-direction:row !important;align-items:center !important;justify-content:space-between !important;gap:10px !important;padding:6px 12px !important;margin-top:10px !important;background:rgba(20,20,30,0.65) !important;border-radius:6px !important;font-style:italic !important;opacity:0.9 !important;border-left:3px solid var(--SmartThemeQuoteColor, #00ffaa) !important;';
+    loader.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;font-size:0.88em;color:var(--SmartThemeBodyColor, #e0e0e0);">
+            <i class="fa-solid fa-dice-d20 fa-spin" style="color:var(--SmartThemeQuoteColor, #00ffaa);font-size:1.1em;"></i>
+            <span>Formulating tactical choices...</span>
+        </div>
+        <button type="button" class="rt-cyoa-cancel-btn" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75em;padding:2px 8px;border-radius:4px;background:rgba(255,80,80,0.2);border:1px solid rgba(255,80,80,0.4);color:#ff9999;cursor:pointer;flex-shrink:0;line-height:1.2;font-style:normal;" title="Abort choice generation">
+            <i class="fa-solid fa-xmark"></i> Cancel
+        </button>
+    `;
 
     const cancelBtn = loader.querySelector('.rt-cyoa-cancel-btn');
     if (cancelBtn) {
@@ -375,7 +383,7 @@ export function insertCyoaLoadingIndicator(messageId) {
  */
 export function removeCyoaLoadingIndicator() {
     if (typeof document === 'undefined') return;
-    document.querySelectorAll('.rt-cyoa-loading, [data-cyoa-loader]').forEach(el => el.remove());
+    document.querySelectorAll('.mhc-cyoa-loading-badge, [data-cyoa-loader]').forEach(el => el.remove());
 }
 
 /**
@@ -495,7 +503,7 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         // Strip any residual footer if needed and append choices
         const cleanBaseText = String(currentMsg.mes || '')
             .replace(/<choices\b[^>]*>[\s\S]*?<\/choices\s*>/gi, '')
-            .replace(/<div\b[^>]*\brt-cyoa-choices\b[^>]*>[\s\S]*?<\/div\s*>/gi, '')
+            .replace(/<div\b[^>]*\b(?:rt-cyoa-choices|mhc-cyoa-loading-badge)\b[^>]*>[\s\S]*?<\/div\s*>/gi, '')
             .trim();
 
         const finalMesText = `${cleanBaseText}\n\n${choicesMarkup}`;

@@ -503,7 +503,7 @@ export async function regenerateCyoaChoicesForMessage({ messageId = -1, isPbtaAc
     // Strip any existing choices from this message before re-rolling
     const cleanNarrative = String(msg.mes || '')
         .replace(/<choices\b[^>]*>[\s\S]*?<\/choices\s*>/gi, '')
-        .replace(/<div\b[^>]*\brt-cyoa-choices\b[^>]*>[\s\S]*?<\/div\s*>/gi, '')
+        .replace(/<div\b[^>]*\b(?:rt-cyoa-choices|mhc-cyoa-loading-badge)\b[^>]*>[\s\S]*?<\/div\s*>/gi, '')
         .trim();
 
     msg.mes = cleanNarrative;

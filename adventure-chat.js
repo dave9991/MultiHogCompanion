@@ -260,17 +260,27 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
 
         // Crucial: doNewChat switched away from wipeOldTitle, which caused MultiHog's
         // onChatChanged to save the departing chat's state into chatStates[wipeOldTitle].
-        // We must remove wipeOldTitle from chatStates and local map caches so that
-        // when renameChat runs, MultiHog does not see an existing partition collision.
+        // We must purge wipeOldTitle using removeDeletedChatData and saveSettings so that
+        // when renameChat runs, MultiHog has a completely clean destination.
         try {
+            const { removeDeletedChatData } = await import(
+                '../SillyTavern-MultihogDnDFramework/src/features/chat/deleted-chat-data.js'
+            );
+            const { saveSettings } = await import(
+                '../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js'
+            );
             const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
             const s = stateMgr.getSettings();
+            if (typeof removeDeletedChatData === 'function') {
+                removeDeletedChatData(s, wipeOldTitle);
+                removeDeletedChatData(s, wipeOldTitle.replace(/\s+/g, '_'));
+            }
             if (s?.chatStates) {
                 delete s.chatStates[wipeOldTitle];
                 delete s.chatStates[wipeOldTitle.replace(/\s+/g, '_')];
-                if (typeof stateMgr.saveSettings === 'function') {
-                    await stateMgr.saveSettings(true);
-                }
+            }
+            if (typeof saveSettings === 'function') {
+                await saveSettings(true);
             }
         } catch (_) {}
 
@@ -316,6 +326,19 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
         if (safeTitle && currentChatId && (isDefaultChatName(currentChatId) || currentChatId !== safeTitle)) {
             console.log(`[MultiHog Companion] Renaming adventure chat "${currentChatId}" -> "${safeTitle}"`);
             try {
+                // Arm MultiHog's pendingUnseenChatReset proof marker so MultiHog's onChatRenamedMigrate
+                // recognizes the rename as an intentional transition from the timestamp shell to safeTitle.
+                try {
+                    const { runtimeState } = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-state.js');
+                    if (runtimeState) {
+                        runtimeState.pendingUnseenChatReset = {
+                            oldId: currentChatId,
+                            newId: safeTitle,
+                            preexistingLocalMapKeys: [],
+                        };
+                    }
+                } catch (_) {}
+
                 if (typeof scriptModule?.renameChat === 'function') {
                     await scriptModule.renameChat(currentChatId, safeTitle);
                 } else if (typeof ctx?.executeSlashCommandsWithOptions === 'function') {

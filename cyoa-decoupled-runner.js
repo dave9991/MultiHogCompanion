@@ -364,26 +364,34 @@ export async function waitForStateTracker(timeoutMs = 15000) {
 
 /**
  * Injects a temporary visual loading indicator into the active message's DOM.
- * Includes an inline Cancel button so the user can abort Stage 2 directly.
+ * Anchored to `.mes_block` directly adjacent to `.mes_text` so that re-renders of `.mes_text`
+ * (e.g. by reasoningHandler, auto-translate, or code block highlighters) do not erase it.
+ * Includes an inline Cancel button with Chrome button markers so Framework never hijacks it.
  *
- * @param {number} messageId
+ * @param {number} [messageId]
  */
 export function insertCyoaLoadingIndicator(messageId) {
     if (typeof document === 'undefined') return;
     removeCyoaLoadingIndicator();
-    const mesEl = document.querySelector(`#chat .mes[mesid="${messageId}"] .mes_text`);
-    if (!mesEl) return;
+
+    const mesContainer = (messageId !== undefined && messageId >= 0)
+        ? document.querySelector(`#chat .mes[mesid="${messageId}"]`)
+        : document.querySelector('#chat .mes:last-child');
+    if (!mesContainer) return;
+
+    const mesBlock = mesContainer.querySelector('.mes_block') || mesContainer;
+    const mesText = mesBlock.querySelector('.mes_text');
 
     const loader = document.createElement('div');
     loader.className = 'mhc-cyoa-loading-badge';
     loader.setAttribute('data-cyoa-loader', 'true');
-    loader.style.cssText = 'display:flex !important;flex-direction:row !important;align-items:center !important;justify-content:space-between !important;gap:10px !important;padding:6px 12px !important;margin-top:10px !important;background:rgba(20,20,30,0.65) !important;border-radius:6px !important;font-style:italic !important;opacity:0.9 !important;border-left:3px solid var(--SmartThemeQuoteColor, #00ffaa) !important;';
+    loader.style.cssText = 'display:flex !important;flex-direction:row !important;align-items:center !important;justify-content:space-between !important;gap:10px !important;padding:6px 12px !important;margin:8px 0 !important;background:rgba(20,20,30,0.65) !important;border-radius:6px !important;font-style:italic !important;opacity:0.9 !important;border-left:3px solid var(--SmartThemeQuoteColor, #00ffaa) !important;box-sizing:border-box !important;width:100% !important;';
     loader.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px;font-size:0.88em;color:var(--SmartThemeBodyColor, #e0e0e0);">
             <i class="fa-solid fa-dice-d20 fa-spin" style="color:var(--SmartThemeQuoteColor, #00ffaa);font-size:1.1em;"></i>
             <span>Formulating tactical choices...</span>
         </div>
-        <button type="button" class="rt-cyoa-cancel-btn" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75em;padding:2px 8px;border-radius:4px;background:rgba(255,80,80,0.2);border:1px solid rgba(255,80,80,0.4);color:#ff9999;cursor:pointer;flex-shrink:0;line-height:1.2;font-style:normal;" title="Abort choice generation">
+        <button type="button" class="rt-cyoa-cancel-btn menu_button" data-target="mhc-cancel" style="display:inline-flex !important;align-items:center !important;gap:4px !important;font-size:0.75em !important;padding:2px 8px !important;border-radius:4px !important;background:rgba(255,80,80,0.2) !important;border:1px solid rgba(255,80,80,0.4) !important;color:#ff9999 !important;cursor:pointer !important;flex-shrink:0 !important;line-height:1.2 !important;font-style:normal !important;width:auto !important;max-width:max-content !important;" title="Abort choice generation">
             <i class="fa-solid fa-xmark"></i> Cancel
         </button>
     `;
@@ -396,7 +404,11 @@ export function insertCyoaLoadingIndicator(messageId) {
         });
     }
 
-    mesEl.appendChild(loader);
+    if (mesText && mesText.parentNode === mesBlock) {
+        mesText.insertAdjacentElement('afterend', loader);
+    } else {
+        mesBlock.appendChild(loader);
+    }
 }
 
 /**
@@ -409,16 +421,30 @@ export function removeCyoaLoadingIndicator() {
 
 /**
  * Locks the SillyTavern send UI during Stage 2 generation.
- * Operates purely via DOM attributes and styling to avoid calling SillyTavern's
- * deactivateSendButtons/activateSendButtons (which trigger hideStopButton and spurious GENERATION_ENDED events).
+ * Uses both scoped CSS and DOM attributes so neither SillyTavern unblockGeneration nor
+ * activateSendButtons can prematurely unlock the send button while choices formulate.
  */
 export function lockSendButtonUI() {
     if (typeof document === 'undefined') return;
+    document.body.setAttribute('data-mhc-cyoa-generating', 'true');
+
+    if (!document.getElementById('mhc-cyoa-lock-style')) {
+        const style = document.createElement('style');
+        style.id = 'mhc-cyoa-lock-style';
+        style.textContent = `
+            body[data-mhc-cyoa-generating="true"] #send_but {
+                pointer-events: none !important;
+                opacity: 0.45 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
     const sendBtn = document.getElementById('send_but');
     if (sendBtn) {
         sendBtn.setAttribute('data-mhc-locked', 'true');
         sendBtn.style.pointerEvents = 'none';
-        sendBtn.style.opacity = '0.5';
+        sendBtn.style.opacity = '0.45';
     }
     const sendText = document.getElementById('send_textarea');
     if (sendText) {
@@ -428,10 +454,11 @@ export function lockSendButtonUI() {
 
 /**
  * Restores the SillyTavern send UI after Stage 2 generation completes or aborts.
- * Restores DOM attributes directly without emitting spurious events.
+ * Restores DOM attributes and cleans up generating attribute directly without emitting spurious events.
  */
 export function restoreSendButtonUI() {
     if (typeof document === 'undefined') return;
+    document.body.removeAttribute('data-mhc-cyoa-generating');
     const sendBtn = document.getElementById('send_but');
     if (sendBtn && sendBtn.getAttribute('data-mhc-locked')) {
         sendBtn.removeAttribute('data-mhc-locked');

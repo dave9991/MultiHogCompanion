@@ -392,7 +392,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         });
     }
 
-    // Show loading badge and lock send button the instant the narrator message renders
+    // Show loading badge, lock send button, and launch Stage 2 in background the instant the narrator message renders
     if (et.CHARACTER_MESSAGE_RENDERED) {
         es.on(et.CHARACTER_MESSAGE_RENDERED, (messageId) => {
             const s = getSettings();
@@ -412,9 +412,40 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             if (!isCyoaExpected(rpgSettings, pbtaActive)) return;
             if (hasCyoaChoices(msg.mes)) return;
 
+            const currentSwipeId = msg.swipe_id ?? 0;
+            if (_lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
+                if (isStage2CyoaRunning()) {
+                    lockSendButtonUI();
+                    insertCyoaLoadingIndicator(idx);
+                }
+                return;
+            }
+
+            if (isStage2CyoaRunning()) {
+                lockSendButtonUI();
+                insertCyoaLoadingIndicator(idx);
+                return;
+            }
+
+            _lastStage2AttemptedMessageId = idx;
+            _lastStage2AttemptedSwipeId = currentSwipeId;
+
             // Immediately display the formulating badge and lock the send button so the turn never looks ready
             lockSendButtonUI();
             insertCyoaLoadingIndicator(idx);
+
+            // Launch Stage 2 as an unawaited background task: it displays the indicator immediately,
+            // waits for the State Tracker model pass, and then produces choices without blocking ST message rendering
+            const text = String(msg.mes || '');
+            runDecoupledCyoaStage2({
+                messageId: idx,
+                narrative: text,
+                isPbta: pbtaActive,
+                rpgSettings,
+                showToast,
+            }).catch(err => {
+                console.error('[MultiHog Companion] Decoupled CYOA Stage 2 error:', err);
+            });
         });
     }
 
@@ -422,7 +453,10 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         es.on(et.GENERATION_ENDED, async () => {
             if (_wasGenerationStopped) return;
             if (isStage2CyoaRunning()) {
-                // Ignore any internal/quiet generation completion while Stage 2 is already in flight
+                // Stage 2 is already in flight (either waiting for State Tracker or generating choices).
+                // SillyTavern's unblockGeneration/activateSendButtons ran at generation end,
+                // so re-ensure the send button remains locked.
+                lockSendButtonUI();
                 return;
             }
 
@@ -448,7 +482,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 return;
             }
 
-            // ── DECOUPLED TWO-STAGE CYOA PATH ──
+            // ── DECOUPLED TWO-STAGE CYOA PATH (Fail-safe backup if not triggered by CHARACTER_MESSAGE_RENDERED) ──
             if (s.enableDecoupledCyoa !== false) {
                 const text = String(lastMsg.mes || '');
                 // If message already has CYOA buttons (e.g. from previous edit), skip Stage 2

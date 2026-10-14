@@ -55,6 +55,161 @@ export function isDefaultChatName(name) {
 }
 
 /**
+ * Escapes characters with special meaning in regular expressions.
+ * @param {string} str
+ * @returns {string}
+ */
+export function escapeRegex(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Checks if a proposed adventure title already exists in the character's chat list.
+ * @param {string} proposedTitle
+ * @param {string[]} existingNames
+ * @returns {boolean}
+ */
+export function checkAdventureNameExists(proposedTitle, existingNames = []) {
+    if (!proposedTitle || typeof proposedTitle !== 'string') return false;
+    const cleanProposed = proposedTitle.trim().toLowerCase();
+    if (!cleanProposed) return false;
+    return existingNames.some(name => typeof name === 'string' && name.trim().toLowerCase() === cleanProposed);
+}
+
+/**
+ * Finds the next available incremented version name for an adventure.
+ * e.g. "Shadows of the Citadel" -> "Shadows of the Citadel v2"
+ * If "Shadows of the Citadel v2" already exists -> "Shadows of the Citadel v3"
+ *
+ * @param {string} baseTitle The current adventure title
+ * @param {string[]} existingNames List of existing chat names
+ * @returns {string} The next available incremented name
+ */
+export function findNextAdventureVersionName(baseTitle, existingNames = []) {
+    const cleanBase = (baseTitle || 'Adventure').trim();
+    if (!cleanBase) return 'Adventure v2';
+
+    // Strip any existing trailing " v<number>" to extract root title
+    const rootMatch = cleanBase.match(/^(.*?)(?:\s+v(\d+))?$/i);
+    const rootTitle = (rootMatch && rootMatch[1]) ? rootMatch[1].trim() : cleanBase;
+
+    const lowerRoot = rootTitle.toLowerCase();
+    const versionPattern = new RegExp(`^${escapeRegex(lowerRoot)}(?:\\s+v(\\d+))?$`, 'i');
+
+    let highestVersion = 1;
+
+    for (const rawName of existingNames) {
+        if (!rawName || typeof rawName !== 'string') continue;
+        const name = rawName.trim();
+        const match = name.toLowerCase().match(versionPattern);
+        if (match) {
+            if (match[1]) {
+                const verNum = parseInt(match[1], 10);
+                if (!isNaN(verNum) && verNum > highestVersion) {
+                    highestVersion = verNum;
+                }
+            } else {
+                if (highestVersion < 1) highestVersion = 1;
+            }
+        }
+    }
+
+    const nextVer = highestVersion + 1;
+    return `${rootTitle} v${nextVer}`;
+}
+
+/**
+ * Queries all existing chat names for the active character.
+ * @param {string|number} [characterId]
+ * @returns {Promise<string[]>} List of chat base names (without .jsonl)
+ */
+export async function getExistingAdventureNames(characterId = null) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    let chid = characterId;
+    if (chid === null || chid === undefined) {
+        chid = typeof this_chid !== 'undefined' ? this_chid : ctx?.characterId;
+    }
+    const charactersList = typeof characters !== 'undefined' ? characters : (ctx?.characters || []);
+    const character = (chid !== null && chid !== undefined) ? charactersList[chid] : null;
+    if (!character?.avatar) return [];
+
+    let scriptModule = null;
+    try {
+        scriptModule = await import('../../../../script.js');
+    } catch (_) {}
+
+    const getHeaders = scriptModule?.getRequestHeaders || ctx?.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
+
+    try {
+        const response = await fetch('/api/characters/chats', {
+            method: 'POST',
+            body: JSON.stringify({ avatar_url: character.avatar, simple: true }),
+            headers: getHeaders(),
+        });
+        if (!response.ok) return [];
+        const data = await response.json();
+        if (!Array.isArray(data)) return [];
+        return data
+            .map(item => item?.file_id || item?.file_name?.replace(/\.jsonl$/i, '') || '')
+            .filter(Boolean);
+    } catch (err) {
+        console.warn('[MultiHog Companion] Could not query existing chat names:', err);
+        return [];
+    }
+}
+
+/**
+ * Deletes an existing adventure chat file (.jsonl) for a character.
+ * @param {string|number} [characterId]
+ * @param {string} chatTitle Title of the chat to delete
+ * @returns {Promise<boolean>}
+ */
+export async function deleteAdventureChat(characterId = null, chatTitle = '') {
+    if (!chatTitle) return false;
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    let chid = characterId;
+    if (chid === null || chid === undefined) {
+        chid = typeof this_chid !== 'undefined' ? this_chid : ctx?.characterId;
+    }
+    const charactersList = typeof characters !== 'undefined' ? characters : (ctx?.characters || []);
+    const character = (chid !== null && chid !== undefined) ? charactersList[chid] : null;
+    if (!character?.avatar) return false;
+
+    let scriptModule = null;
+    try {
+        scriptModule = await import('../../../../script.js');
+    } catch (_) {}
+
+    const getHeaders = scriptModule?.getRequestHeaders || ctx?.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
+    const cleanTitle = chatTitle.replace(/\.jsonl$/i, '').trim();
+
+    try {
+        const response = await fetch('/api/chats/delete', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({
+                chatfile: `${cleanTitle}.jsonl`,
+                avatar_url: character.avatar,
+            }),
+        });
+
+        if (response.ok) {
+            console.log(`[MultiHog Companion] Safely deleted previous adventure chat: "${cleanTitle}"`);
+            try {
+                if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
+                    await eventSource.emit(event_types.CHAT_DELETED, cleanTitle);
+                }
+            } catch (_) {}
+            return true;
+        }
+    } catch (err) {
+        console.warn(`[MultiHog Companion] Failed to delete chat "${cleanTitle}":`, err);
+    }
+    return false;
+}
+
+/**
  * Helper delay
  * @param {number} ms
  */
@@ -68,9 +223,10 @@ function sleep(ms) {
  * @param {object} [options]
  * @param {string} [options.adventureTitle] Title of the adventure or campaign
  * @param {string} [options.fallbackLabel] Fallback label (e.g. "PbtA Fantasy Adventure")
+ * @param {string} [options.wipeOldTitle] If set, purges the previous chat with this title first
  * @returns {Promise<string>} The active chatId
  */
-export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLabel = 'PbtA Adventure' } = {}) {
+export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLabel = 'PbtA Adventure', wipeOldTitle = null } = {}) {
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     let scriptModule = null;
     try {
@@ -79,6 +235,57 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
 
     const getCurrentId = scriptModule?.getCurrentChatId || ctx?.getCurrentChatId;
     let currentChatId = getCurrentId ? getCurrentId() : (ctx?.chatId || null);
+
+    // ── 0. Handle Fresh Wipe / Restart if requested ───────────────────────────
+    if (wipeOldTitle) {
+        console.log(`[MultiHog Companion] Fresh restart requested for "${wipeOldTitle}". Preparing clean slate...`);
+        // If the current chat is not clean or IS the old title, create a clean session first
+        if (ctx && (!isChatClean(ctx) || currentChatId === wipeOldTitle)) {
+            try {
+                if (typeof scriptModule?.doNewChat === 'function') {
+                    await scriptModule.doNewChat({ deleteCurrentChat: false });
+                } else if (typeof ctx?.executeSlashCommandsWithOptions === 'function') {
+                    await ctx.executeSlashCommandsWithOptions('/newchat delete=false');
+                }
+            } catch (err) {
+                console.warn('[MultiHog Companion] Could not auto-create new chat during wipe:', err);
+            }
+            await sleep(450);
+            currentChatId = getCurrentId ? getCurrentId() : (ctx?.chatId || null);
+        }
+
+        // Delete the previous chat file so destination filename is free
+        await deleteAdventureChat(null, wipeOldTitle);
+        await sleep(250);
+
+        // Crucial: doNewChat switched away from wipeOldTitle, which caused MultiHog's
+        // onChatChanged to save the departing chat's state into chatStates[wipeOldTitle].
+        // We must remove wipeOldTitle from chatStates and local map caches so that
+        // when renameChat runs, MultiHog does not see an existing partition collision.
+        try {
+            const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+            const s = stateMgr.getSettings();
+            if (s?.chatStates) {
+                delete s.chatStates[wipeOldTitle];
+                delete s.chatStates[wipeOldTitle.replace(/\s+/g, '_')];
+                if (typeof stateMgr.saveSettings === 'function') {
+                    await stateMgr.saveSettings(true);
+                }
+            }
+        } catch (_) {}
+
+        try {
+            const { removeLocalChatMapEntry, COMPANION_BY_CHAT_KEY, MEMO_RECOVERY_KEY } = await import(
+                '../SillyTavern-MultihogDnDFramework/src/features/chat/local-chat-map.js'
+            );
+            if (typeof removeLocalChatMapEntry === 'function') {
+                removeLocalChatMapEntry(COMPANION_BY_CHAT_KEY, wipeOldTitle);
+                removeLocalChatMapEntry(MEMO_RECOVERY_KEY, wipeOldTitle);
+                removeLocalChatMapEntry(COMPANION_BY_CHAT_KEY, wipeOldTitle.replace(/\s+/g, '_'));
+                removeLocalChatMapEntry(MEMO_RECOVERY_KEY, wipeOldTitle.replace(/\s+/g, '_'));
+            }
+        } catch (_) {}
+    }
 
     // ── 1. Auto-create new chat if active chat is not clean ────────────────────
     if (ctx && !isChatClean(ctx)) {
@@ -106,8 +313,8 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
         // Limit to reasonable display length
         const safeTitle = cleanTitle.length > 60 ? cleanTitle.slice(0, 60).trim() : cleanTitle;
 
-        if (safeTitle && currentChatId && isDefaultChatName(currentChatId)) {
-            console.log(`[MultiHog Companion] Renaming default chat "${currentChatId}" -> "${safeTitle}"`);
+        if (safeTitle && currentChatId && (isDefaultChatName(currentChatId) || currentChatId !== safeTitle)) {
+            console.log(`[MultiHog Companion] Renaming adventure chat "${currentChatId}" -> "${safeTitle}"`);
             try {
                 if (typeof scriptModule?.renameChat === 'function') {
                     await scriptModule.renameChat(currentChatId, safeTitle);

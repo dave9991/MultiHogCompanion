@@ -364,9 +364,12 @@ async function injectWorldSkeleton(chatId, dossier) {
  *
  * @param {object} dossier The completed PbtaCampaignDossier
  * @param {(stepText: string, pct: number) => void} [onProgress] Progress callback
+ * @param {object} [options]
+ * @param {string} [options.wipeOldTitle] If set, completely purges previous chat and lorebooks for this title
  * @returns {Promise<{ success: boolean, message: string }>}
  */
-export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
+export async function launchPbtaCampaign(dossier, onProgress = () => {}, options = {}) {
+    const { wipeOldTitle = null } = options;
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     const { applyPbtACartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
@@ -375,11 +378,31 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}) {
     const adventureTitle = (dossier.meta?.title || '').trim();
 
     try {
-        // ── 0. Ensure Clean Chat & Auto-Rename ──────────────────────────────────
+        // ── 0. Optional Fresh Wipe / Lorebook Purge ────────────────────────────
+        if (wipeOldTitle) {
+            onProgress(`🧹 Purging previous campaign lorebooks for "${wipeOldTitle}"...`, 3);
+            try {
+                const { purgeCampaignLorebooks } = await import('./campaign-lore-sync.js');
+                await purgeCampaignLorebooks(wipeOldTitle, ctx);
+            } catch (purgeErr) {
+                console.warn('[PbtA Concierge] Lorebook purge encountered non-fatal error:', purgeErr);
+            }
+
+            // Clean out old MultiHog chatState for the wiped title
+            const effectiveCtxEarly = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+            const rpgEarly = effectiveCtxEarly?.extensionSettings?.rpg_tracker;
+            if (rpgEarly?.chatStates) {
+                delete rpgEarly.chatStates[wipeOldTitle];
+                delete rpgEarly.chatStates[wipeOldTitle.replace(/\s+/g, '_')];
+            }
+        }
+
+        // ── 0b. Ensure Clean Chat & Auto-Rename ────────────────────────────────
         onProgress('🛡️ Preparing clean adventure session...', 5);
         const chatId = await ensureCleanAdventureChat({
             adventureTitle,
             fallbackLabel: `PbtA ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`,
+            wipeOldTitle,
         });
         // ── 1. Apply PbtA Ruleset Cartridge with Dynamic Overrides ─────────────
         onProgress('🎲 Installing PbtA ruleset and 2d6 engine...', 15);

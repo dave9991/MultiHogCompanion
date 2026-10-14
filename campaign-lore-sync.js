@@ -12,7 +12,18 @@
  * 4. Updates MultiHog partition pins, active keys, and ST /world activation.
  */
 
-import { getRequestHeaders } from '../../../../script.js';
+async function getSafeHeaders(ctx = null) {
+    if (typeof ctx?.getRequestHeaders === 'function') {
+        return ctx.getRequestHeaders();
+    }
+    try {
+        const scriptModule = await import('../../../../script.js');
+        if (typeof scriptModule?.getRequestHeaders === 'function') {
+            return scriptModule.getRequestHeaders();
+        }
+    } catch (_) {}
+    return { 'Content-Type': 'application/json' };
+}
 
 /**
  * Returns current MultiHogCompanion settings or defaults.
@@ -71,7 +82,7 @@ export async function listAllWorldNames(ctx) {
     try {
         const r = await fetch('/api/settings/get', {
             method: 'POST',
-            headers: getRequestHeaders(),
+            headers: await getSafeHeaders(ctx),
             body: JSON.stringify({}),
         });
         if (r.ok) {
@@ -250,7 +261,7 @@ export async function verifyClonedLorebooks(bookRenameMap, ctx) {
             try {
                 const res = await fetch('/api/worldinfo/get', {
                     method: 'POST',
-                    headers: getRequestHeaders(),
+                    headers: await getSafeHeaders(ctx),
                     body: JSON.stringify({ name: newName }),
                 });
                 if (res.ok) newBook = await res.json();
@@ -297,7 +308,7 @@ export async function deleteOldLorebooks(bookNames, ctx) {
         try {
             const res = await fetch('/api/worldinfo/delete', {
                 method: 'POST',
-                headers: getRequestHeaders(),
+                headers: await getSafeHeaders(ctx),
                 body: JSON.stringify({ name }),
             });
             if (res.ok) {
@@ -314,6 +325,67 @@ export async function deleteOldLorebooks(bookNames, ctx) {
     }
 
     return deletedCount;
+}
+
+/**
+ * Completely purges all campaign lorebooks associated with a campaign prefix.
+ * Used during a fresh restart (Delete Old & Start Fresh) to ensure zero stale
+ * entities, battle states, or mutations from a prior playthrough bleed through.
+ *
+ * @param {string} prefix Campaign prefix (e.g. "Shadows_of_the_Citadel" or "Shadows of the Citadel")
+ * @param {any} [ctx] SillyTavern context
+ * @returns {Promise<number>} Number of purged lorebooks
+ */
+export async function purgeCampaignLorebooks(prefix, ctx = null) {
+    if (!prefix || typeof prefix !== 'string') return 0;
+    const cleanPrefix = prefix.trim();
+    if (!cleanPrefix) return 0;
+
+    let bookBelongsToPrefix = null;
+    try {
+        const utils = await import('../SillyTavern-MultihogDnDFramework/src/features/chat/clone-campaign-stack-utils.js');
+        bookBelongsToPrefix = utils.bookBelongsToPrefix;
+    } catch (_) {}
+
+    const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+    const allNames = await listAllWorldNames(effectiveCtx);
+    const targetSet = new Set();
+
+    // Standard 6 campaign lorebook names with both spaces and underscores
+    const sanitizedPrefix = cleanPrefix.replace(/\s+/g, '_');
+    const standardBooks = [
+        `${sanitizedPrefix}_NPCs`,
+        `${sanitizedPrefix}_Factions`,
+        `${sanitizedPrefix}_Locations`,
+        `${sanitizedPrefix}_Quests`,
+        `${sanitizedPrefix}_Rules`,
+        `${sanitizedPrefix}_Skeleton`,
+        `${cleanPrefix}_NPCs`,
+        `${cleanPrefix}_Factions`,
+        `${cleanPrefix}_Locations`,
+        `${cleanPrefix}_Quests`,
+        `${cleanPrefix}_Rules`,
+        `${cleanPrefix}_Skeleton`,
+    ];
+
+    standardBooks.forEach(b => {
+        if (allNames.includes(b)) targetSet.add(b);
+    });
+
+    // Also include any dynamic books belonging to this prefix
+    if (typeof bookBelongsToPrefix === 'function') {
+        allNames.forEach(name => {
+            if (bookBelongsToPrefix(name, cleanPrefix) || bookBelongsToPrefix(name, sanitizedPrefix)) {
+                targetSet.add(name);
+            }
+        });
+    }
+
+    const booksToDelete = Array.from(targetSet);
+    if (booksToDelete.length === 0) return 0;
+
+    console.log(`[MultiHog Companion] Purging ${booksToDelete.length} campaign lorebook(s) for fresh restart:`, booksToDelete);
+    return await deleteOldLorebooks(booksToDelete, effectiveCtx);
 }
 
 /**

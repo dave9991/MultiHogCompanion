@@ -48,6 +48,11 @@ import {
     parseMarkdownToDossier,
 } from './concierge-parser.js';
 import { launchPbtaCampaign, syncPbtaCampaignUpdates, reconstituteDossierWithAi } from './concierge-runner.js';
+import {
+    getExistingAdventureNames,
+    checkAdventureNameExists,
+    findNextAdventureVersionName,
+} from './adventure-chat.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
 import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders } from './namerag-hooks.js';
 import { extension_settings } from '../../../extensions.js';
@@ -1504,13 +1509,8 @@ function bindModalEvents() {
         appendChatBubble('assistant', "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?");
     });
 
-    // Finalize & Launch Campaign
-    $('#mhc_launch_campaign_btn').on('click', async () => {
-        const castEmpty = !(activeDossier?.npcs?.length) && !(activeDossier?.monsters?.length);
-        if (castEmpty && !confirm('No NPCs or monsters have been staged for this campaign. Launch anyway?\n\n(Tip: ask the Concierge to propose a cast based on your outline.)')) {
-            return;
-        }
-
+    // Helper to execute campaign launch with progress overlay
+    async function executeCampaignLaunch({ wipeOldTitle = null } = {}) {
         const overlay = $('#mhc_launch_progress_overlay');
         const label = $('#mhc_launch_progress_label');
         const bar = $('#mhc_launch_progress_bar');
@@ -1521,7 +1521,7 @@ function bindModalEvents() {
             bar.css('width', `${pct}%`);
         };
 
-        const res = await launchPbtaCampaign(activeDossier, progressCb);
+        const res = await launchPbtaCampaign(activeDossier, progressCb, { wipeOldTitle });
         setTimeout(() => {
             overlay.hide();
             if (res.success) {
@@ -1532,6 +1532,86 @@ function bindModalEvents() {
                 toastr?.error(`Launch error: ${res.message}`, 'Launch Failed');
             }
         }, 600);
+    }
+
+    // Helper to display adventure name conflict dialog
+    function showAdventureConflictDialog(title, existingNames) {
+        const conflictOverlay = $('#mhc_launch_conflict_overlay');
+        const titleLabel = $('#mhc_conflict_adventure_title');
+        const renameInput = $('#mhc_conflict_rename_input');
+        const renameBtn = $('#mhc_conflict_rename_btn');
+        const wipeBtn = $('#mhc_conflict_wipe_btn');
+        const cancelBtn = $('#mhc_conflict_cancel_btn');
+        const feedback = $('#mhc_conflict_rename_feedback');
+
+        const nextVersion = findNextAdventureVersionName(title, existingNames);
+        titleLabel.text(`"${title}"`);
+        renameInput.val(nextVersion);
+        feedback.hide().text('');
+        renameBtn.prop('disabled', false).css('opacity', '1');
+
+        function validateRenameInput() {
+            const val = renameInput.val().trim();
+            if (!val) {
+                feedback.text('Please enter an adventure name.').show();
+                renameBtn.prop('disabled', true).css('opacity', '0.5');
+                return false;
+            }
+            if (checkAdventureNameExists(val, existingNames)) {
+                feedback.text(`An adventure named "${val}" also already exists.`).show();
+                renameBtn.prop('disabled', true).css('opacity', '0.5');
+                return false;
+            }
+            feedback.hide().text('');
+            renameBtn.prop('disabled', false).css('opacity', '1');
+            return true;
+        }
+
+        renameInput.off('input').on('input', validateRenameInput);
+
+        wipeBtn.off('click').on('click', async () => {
+            conflictOverlay.hide();
+            await executeCampaignLaunch({ wipeOldTitle: title });
+        });
+
+        renameBtn.off('click').on('click', async () => {
+            if (!validateRenameInput()) return;
+            const newTitle = renameInput.val().trim();
+            conflictOverlay.hide();
+            activeDossier.meta.title = newTitle;
+            updateBlueprintDeck();
+            saveDraft();
+            await executeCampaignLaunch();
+        });
+
+        cancelBtn.off('click').on('click', () => {
+            conflictOverlay.hide();
+        });
+
+        conflictOverlay.fadeIn(150);
+    }
+
+    // Finalize & Launch Campaign
+    $('#mhc_launch_campaign_btn').on('click', async () => {
+        const castEmpty = !(activeDossier?.npcs?.length) && !(activeDossier?.monsters?.length);
+        if (castEmpty && !confirm('No NPCs or monsters have been staged for this campaign. Launch anyway?\n\n(Tip: ask the Concierge to propose a cast based on your outline.)')) {
+            return;
+        }
+
+        const candidateTitle = (activeDossier?.meta?.title || '').trim();
+        if (candidateTitle) {
+            try {
+                const existingNames = await getExistingAdventureNames();
+                if (checkAdventureNameExists(candidateTitle, existingNames)) {
+                    showAdventureConflictDialog(candidateTitle, existingNames);
+                    return;
+                }
+            } catch (err) {
+                console.warn('[MultiHog Companion] Pre-flight conflict check encountered error:', err);
+            }
+        }
+
+        await executeCampaignLaunch();
     });
 
     // Sync Active Campaign (in-place update without resetting chat)

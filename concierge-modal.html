@@ -347,5 +347,57 @@
                 </div>
             </div>
         </div>
+
+        <!-- Adventure Name Conflict Overlay -->
+        <div id="mhc_launch_conflict_overlay" class="mhc-launch-overlay" style="display: none; z-index: 105;">
+            <div class="mhc-launch-card mhc-conflict-card" style="width: 520px; max-width: 92%; text-align: left;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                    <span style="font-size: 1.6em;">⚠️</span>
+                    <h3 style="margin: 0; font-size: 1.25em; color: #f59e0b;">Adventure Name Conflict</h3>
+                </div>
+                <p style="font-size: 0.9em; line-height: 1.4; opacity: 0.9; margin: 0 0 16px 0;">
+                    An adventure named <strong id="mhc_conflict_adventure_title" style="color: #60a5fa;"></strong> already exists in your character history. How would you like to proceed?
+                </p>
+
+                <!-- Option 1: Start Fresh (Wipe) -->
+                <div class="mhc-conflict-option-box" style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 6px; padding: 12px; margin-bottom: 14px;">
+                    <div style="font-weight: bold; color: #f87171; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>1. Delete Old &amp; Start Fresh</span>
+                        <span style="font-size: 0.75em; text-transform: uppercase; background: rgba(239, 68, 68, 0.2); padding: 2px 6px; border-radius: 4px;">Complete Wipe</span>
+                    </div>
+                    <div style="font-size: 0.82em; opacity: 0.85; margin-bottom: 10px; line-height: 1.35;">
+                        Deletes the old chat session and completely wipes all campaign lorebooks (<code>_NPCs</code>, <code>_Locations</code>, etc.). Starts a fresh playthrough from Turn 0 using your edited blueprint.
+                    </div>
+                    <button type="button" id="mhc_conflict_wipe_btn" class="menu_button" style="background: #dc2626; color: white; width: 100%; font-weight: bold; padding: 6px 12px;">
+                        🗑️ Delete Old &amp; Start Fresh
+                    </button>
+                </div>
+
+                <!-- Option 2: Rename & Launch -->
+                <div class="mhc-conflict-option-box" style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                    <div style="font-weight: bold; color: #60a5fa; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>2. Rename Adventure &amp; Launch</span>
+                        <span style="font-size: 0.75em; text-transform: uppercase; background: rgba(59, 130, 246, 0.2); padding: 2px 6px; border-radius: 4px;">Leaves Original Intact</span>
+                    </div>
+                    <div style="font-size: 0.82em; opacity: 0.85; margin-bottom: 10px; line-height: 1.35;">
+                        Leaves your previous adventure and lorebooks completely untouched. Launches a new campaign under this updated title:
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="mhc_conflict_rename_input" class="text_pole" style="flex: 1; padding: 6px 10px; font-size: 0.95em;" placeholder="New adventure name...">
+                        <button type="button" id="mhc_conflict_rename_btn" class="menu_button" style="background: #2563eb; color: white; font-weight: bold; white-space: nowrap; padding: 6px 14px;">
+                            🚀 Launch New
+                        </button>
+                    </div>
+                    <div id="mhc_conflict_rename_feedback" style="font-size: 0.75em; color: #f87171; margin-top: 4px; display: none;"></div>
+                </div>
+
+                <!-- Footer / Cancel -->
+                <div style="display: flex; justify-content: flex-end;">
+                    <button type="button" id="mhc_conflict_cancel_btn" class="menu_button" style="padding: 5px 14px; font-size: 0.85em;">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>

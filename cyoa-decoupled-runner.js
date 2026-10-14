@@ -341,8 +341,8 @@ export async function waitForStateTracker(timeoutMs = 15000) {
 
     console.log('[MultiHog Companion:CYOA-DEBUG] waitForStateTracker started. isRunning:', isRunning());
 
-    // 1. Wait up to 1200ms for State Tracker to initiate (MultiHog runs keyword scans and map checks before triggering state pass)
-    const launchWaitLimit = 1200;
+    // 1. Wait up to 3500ms for State Tracker to initiate (MultiHog runs keyword scans, map checks, and swiping before triggering state pass)
+    const launchWaitLimit = 3500;
     while (Date.now() - startTime < launchWaitLimit) {
         if (isRunning()) break;
         await new Promise(resolve => setTimeout(resolve, 40));

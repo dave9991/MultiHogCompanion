@@ -340,12 +340,17 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 
     if (et.GENERATION_STARTED) {
         es.on(et.GENERATION_STARTED, (...args) => {
-            console.log('[MultiHog Companion:CYOA-DEBUG] event GENERATION_STARTED received. args:', args);
+            const dryRun = args.length ? args[args.length - 1] : false;
+            if (dryRun === true) {
+                console.log('[MultiHog Companion:CYOA-DEBUG] GENERATION_STARTED ignored: dryRun === true');
+                return;
+            }
+            console.log('[MultiHog Companion:CYOA-DEBUG] event GENERATION_STARTED received (live generation). args:', args);
             _wasGenerationStopped = false;
             _lastStage2AttemptedMessageId = -1;
             _lastStage2AttemptedSwipeId = -1;
-            // Abort any in-flight Stage 2 pass when a new generation starts (especially swipes)
-            abortStage2Cyoa();
+            // Abort any in-flight Stage 2 pass when a new live generation starts (especially swipes)
+            abortStage2Cyoa('new_generation_started');
         });
     }
 

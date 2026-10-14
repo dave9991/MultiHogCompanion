@@ -15,6 +15,8 @@ import {
     runDecoupledCyoaStage2,
     abortStage2Cyoa,
     isStage2CyoaRunning,
+    insertCyoaLoadingIndicator,
+    lockSendButtonUI,
 } from './cyoa-decoupled-runner.js';
 
 let _wasGenerationStopped = false;
@@ -387,6 +389,32 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             if (s.enableDecoupledCyoa !== false && Array.isArray(eventData?.chat)) {
                 stripCyoaFromOutgoingChat(eventData.chat);
             }
+        });
+    }
+
+    // Show loading badge and lock send button the instant the narrator message renders
+    if (et.CHARACTER_MESSAGE_RENDERED) {
+        es.on(et.CHARACTER_MESSAGE_RENDERED, (messageId) => {
+            const s = getSettings();
+            if (s.enableDecoupledCyoa === false) return;
+
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+            const chat = ctx?.chat;
+            if (!Array.isArray(chat) || chat.length === 0) return;
+
+            const idx = messageId >= 0 ? messageId : chat.length - 1;
+            const msg = chat[idx];
+            if (!msg || msg.is_user || msg.is_system) return;
+
+            const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+            const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
+
+            if (!isCyoaExpected(rpgSettings, pbtaActive)) return;
+            if (hasCyoaChoices(msg.mes)) return;
+
+            // Immediately display the formulating badge and lock the send button so the turn never looks ready
+            lockSendButtonUI();
+            insertCyoaLoadingIndicator(idx);
         });
     }
 

@@ -325,14 +325,24 @@ export async function waitForStateTracker(timeoutMs = 15000) {
     const startTime = Date.now();
     const isRunning = () => typeof globalThis._rpgStateModelRunning === 'function' && globalThis._rpgStateModelRunning();
 
-    // Check immediately
-    if (!isRunning()) return true;
+    // 1. Wait up to 1200ms for State Tracker to initiate (MultiHog runs keyword scans and map checks before triggering state pass)
+    const launchWaitLimit = 1200;
+    while (Date.now() - startTime < launchWaitLimit) {
+        if (isRunning()) break;
+        await new Promise(resolve => setTimeout(resolve, 40));
+    }
 
+    // 2. If State Tracker did not launch (e.g. disabled, throttled turn, or non-character turn), proceed immediately
+    if (!isRunning()) {
+        return true;
+    }
+
+    // 3. Wait for State Tracker to finish auditing narrative
     while (Date.now() - startTime < timeoutMs) {
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise(resolve => setTimeout(resolve, 100));
         if (!isRunning()) {
             // Give a tiny tick for settings / currentMemo write to flush
-            await new Promise(resolve => setTimeout(resolve, 50));
+            await new Promise(resolve => setTimeout(resolve, 80));
             return true;
         }
     }

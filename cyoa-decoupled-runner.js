@@ -621,8 +621,14 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             }
         }
 
-        if (typeof ctx.saveChatDebounced === 'function') {
+        if (typeof ctx.saveChat === 'function') {
+            ctx.saveChat();
+        } else if (typeof ctx.saveChatDebounced === 'function') {
             ctx.saveChatDebounced();
+        } else if (typeof globalThis.saveChatConditional === 'function') {
+            globalThis.saveChatConditional();
+        } else if (typeof globalThis.saveChatDebounced === 'function') {
+            globalThis.saveChatDebounced();
         }
 
         // 9. Re-bind CYOA buttons and finalize styling via MultiHog's native DOM binder

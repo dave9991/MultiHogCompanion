@@ -310,8 +310,14 @@ export async function applyRepairedMessage(messageId, repairedText) {
             }
         }
 
-        if (typeof ctx.saveChatDebounced === 'function') {
+        if (typeof ctx.saveChat === 'function') {
+            ctx.saveChat();
+        } else if (typeof ctx.saveChatDebounced === 'function') {
             ctx.saveChatDebounced();
+        } else if (typeof globalThis.saveChatConditional === 'function') {
+            globalThis.saveChatConditional();
+        } else if (typeof globalThis.saveChatDebounced === 'function') {
+            globalThis.saveChatDebounced();
         }
 
         // Trigger MultiHog's DOM binder to immediately style and bind the buttons

@@ -260,13 +260,59 @@ const raw9 = `\`\`\`xml
 const ext9 = extractCleanChoicesMarkup(raw9);
 assert.strictEqual(ext9, `<choices>\n<button>1. Option Alpha</button>\n<button>2. Option Beta</button>\n</choices>`);
 
+// 4j. Reasoning model with unclosed <think> tag
+const raw10 = `<think>
+Formulating tactical options...
+<choices>
+<button>1. ⚔️ Option 1</button>
+<button>2. 🛡️ Option 2</button>
+</choices>`;
+const ext10 = extractCleanChoicesMarkup(raw10);
+assert.ok(ext10.includes('<button>1. ⚔️ Option 1</button>'));
+assert.ok(ext10.includes('<button>2. 🛡️ Option 2</button>'));
+
 console.log('✓ extractCleanChoicesMarkup extracts and repairs all choice formats (including unclosed, bullets, thinking tokens, and XML fences)');
 
-// ── 5. Abort Lifecycle ──
-console.log('5. Testing abortStage2Cyoa...');
+// ── 5. extractTextFromApiResponse (Reasoning Model & Multi-Provider Support) ──
+console.log('5. Testing extractTextFromApiResponse...');
+const { extractTextFromApiResponse } = await import('../concierge-connection.js');
+
+// Standard OpenAI format
+const standardResp = {
+    choices: [{ message: { content: '<choices><button>1. Test</button></choices>' } }]
+};
+assert.strictEqual(extractTextFromApiResponse(standardResp), '<choices><button>1. Test</button></choices>');
+
+// Reasoning model where content is empty and choices are in reasoning_content
+const reasoningOnlyResp = {
+    choices: [{
+        message: {
+            content: '',
+            reasoning_content: '<think>Let me formulate choices</think><choices><button>1. Sneak past</button></choices>'
+        }
+    }]
+};
+assert.ok(extractTextFromApiResponse(reasoningOnlyResp).includes('<button>1. Sneak past</button>'));
+
+// Reasoning model where content has choices and reasoning has thoughts
+const bothResp = {
+    choices: [{
+        message: {
+            content: '<choices><button>1. Action A</button></choices>',
+            reasoning_content: 'Analyzing scene context...'
+        }
+    }]
+};
+assert.strictEqual(extractTextFromApiResponse(bothResp), '<choices><button>1. Action A</button></choices>');
+
+console.log('✓ extractTextFromApiResponse cleanly handles standard, reasoning-only, and hybrid responses');
+
+// ── 6. Abort Lifecycle ──
+console.log('6. Testing abortStage2Cyoa...');
 assert.strictEqual(isStage2CyoaRunning(), false, 'Should be idle initially');
 abortStage2Cyoa();
 assert.strictEqual(isStage2CyoaRunning(), false, 'Should remain idle after abort');
 console.log('✓ abortStage2Cyoa executes safely');
 
 console.log('\n--- All Decoupled CYOA Engine tests PASSED! 🧭 ---');
+

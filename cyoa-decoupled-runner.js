@@ -205,9 +205,20 @@ export function extractCleanChoicesMarkup(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
 
     // 0. Strip reasoning/thinking tokens (<think>...</think>, <thought>...</thought>)
+    // If choices were output inside an unclosed think block, preserve the choices
     let text = rawText
-        .replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, '')
-        .replace(/<thought\b[^>]*>[\s\S]*?<\/thought\s*>/gi, '')
+        .replace(/<think\b[^>]*>[\s\S]*?(?:<\/think\s*>|$)/gi, (m) => {
+            if (/<(?:choices|button)\b/i.test(m)) {
+                return m.replace(/^<think\b[^>]*>/i, '');
+            }
+            return '';
+        })
+        .replace(/<thought\b[^>]*>[\s\S]*?(?:<\/thought\s*>|$)/gi, (m) => {
+            if (/<(?:choices|button)\b/i.test(m)) {
+                return m.replace(/^<thought\b[^>]*>/i, '');
+            }
+            return '';
+        })
         .trim();
 
     // Strip markdown code block wrappers (e.g. ```xml ... ``` or ```html ... ``` or ``` ... ```)
@@ -476,9 +487,18 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         // 5. Connection settings: reuse concierge/router settings or fallback to default
         const { sendRoutedLlmRequest, getConciergeConnectionSettings } = await import('./concierge-connection.js');
         const connSettings = getConciergeConnectionSettings();
-        // Allocate ample token budget so reasoning models (which generate 500-1200+ tokens of internal thinking)
-        // do not exhaust the response budget before outputting the actual <choices> block.
-        connSettings.maxTokens = Math.max(2048, rpgSettings?.cyoaMaxTokens || 2048);
+        // If the user explicitly configured cyoaMaxTokens in companion settings, honor it.
+        // Otherwise:
+        // - For default connection: leave maxTokens null/undefined so SillyTavern uses
+        //   the user's existing model token/context settings without artificially overriding them.
+        // - For direct/profile connections: provide a generous 4096 token limit for reasoning models.
+        if (rpgSettings?.cyoaMaxTokens && Number(rpgSettings.cyoaMaxTokens) > 0) {
+            connSettings.maxTokens = Number(rpgSettings.cyoaMaxTokens);
+        } else if (connSettings.connectionSource === 'default') {
+            connSettings.maxTokens = null;
+        } else {
+            connSettings.maxTokens = 4096;
+        }
 
         const messages = [
             { role: 'system', content: systemPrompt },

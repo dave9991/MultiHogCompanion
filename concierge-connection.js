@@ -12,14 +12,17 @@
  * string coercion.
  */
 
-import { extension_settings } from '../../../extensions.js';
-import { saveSettingsDebounced } from '../../../../script.js';
 import { stripSillyTavernMacros } from './concierge-card-reader.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 
+function getContext() {
+    return globalThis.SillyTavern?.getContext?.() || {};
+}
+
 export function getConciergeConnectionSettings() {
-    const s = extension_settings[EXTENSION_NAME] || {};
+    const ctx = getContext();
+    const s = ctx.extensionSettings?.[EXTENSION_NAME] || globalThis.extension_settings?.[EXTENSION_NAME] || {};
     return {
         connectionSource: s.conciergeConnectionSource || 'default',
         connectionProfileId: s.conciergeConnectionProfileId || '',
@@ -34,9 +37,15 @@ export function getConciergeConnectionSettings() {
 }
 
 export function updateConciergeConnectionSettings(patch) {
-    extension_settings[EXTENSION_NAME] = extension_settings[EXTENSION_NAME] || {};
-    Object.assign(extension_settings[EXTENSION_NAME], patch);
-    saveSettingsDebounced();
+    const ctx = getContext();
+    const settings = ctx.extensionSettings || globalThis.extension_settings || {};
+    settings[EXTENSION_NAME] = settings[EXTENSION_NAME] || {};
+    Object.assign(settings[EXTENSION_NAME], patch);
+    if (typeof ctx.saveSettingsDebounced === 'function') {
+        ctx.saveSettingsDebounced();
+    } else if (typeof globalThis.saveSettingsDebounced === 'function') {
+        globalThis.saveSettingsDebounced();
+    }
 }
 
 /**
@@ -112,11 +121,7 @@ async function sendViaProfile(context, settings, messages, { signal = null, stre
     );
 
     // Extract text from result
-    if (typeof raw === 'string') return raw;
-    if (raw?.text) return raw.text;
-    if (raw?.content) return raw.content;
-    if (raw?.choices?.[0]?.message?.content) return raw.choices[0].message.content;
-    return String(raw || '');
+    return extractTextFromApiResponse(raw);
 }
 
 /**
@@ -134,7 +139,7 @@ async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
     const body = {
         model: settings.openaiModel || 'gpt-4o-mini',
         messages,
-        max_tokens: settings.maxTokens > 0 ? settings.maxTokens : 2048,
+        max_tokens: settings.maxTokens > 0 ? settings.maxTokens : 4096,
         temperature: 0.7,
     };
 
@@ -151,7 +156,7 @@ async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
     }
 
     const data = await res.json();
-    return data.choices?.[0]?.message?.content || '';
+    return extractTextFromApiResponse(data);
 }
 
 /**
@@ -205,6 +210,69 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
 }
 
 /**
+ * Robust text extractor for API response objects across OpenAI, Anthropic, Ollama, and Kobold.
+ * Inspects both standard message content and reasoning_content (for thinking/reasoning models like
+ * DeepSeek R1, Gemma 4, Qwen 2.5 thinking variants).
+ *
+ * @param {object|string} data Raw API response
+ * @returns {string}
+ */
+export function extractTextFromApiResponse(data) {
+    if (!data) return '';
+    if (typeof data === 'string') return data;
+
+    // Check chat completion choices (OpenAI-compatible)
+    const choice = data.choices?.[0];
+    if (choice) {
+        const msg = choice.message;
+        const content = typeof msg?.content === 'string' ? msg.content : (choice.text || '');
+        const reasoning = typeof msg?.reasoning_content === 'string'
+            ? msg.reasoning_content
+            : (typeof msg?.reasoning === 'string' ? msg.reasoning : '');
+
+        if (content && reasoning) {
+            // If content contains choice tags, it is the clean answer
+            if (/<(?:choices|button)\b/i.test(content)) {
+                return content;
+            }
+            // If reasoning contains choice tags while content does not, include reasoning
+            if (/<(?:choices|button)\b/i.test(reasoning)) {
+                return `${reasoning}\n${content}`;
+            }
+            return content;
+        }
+        if (content) return content;
+        if (reasoning) return reasoning;
+    }
+
+    // Direct Ollama format
+    if (data.message?.content) {
+        return data.message.content;
+    }
+
+    // Direct Anthropic / generic content array
+    if (Array.isArray(data.content)) {
+        return data.content
+            .filter(p => p && (p.type === 'text' || typeof p.text === 'string'))
+            .map(p => p.text || '')
+            .join('\n\n');
+    }
+    if (typeof data.content === 'string') {
+        return data.content;
+    }
+
+    // Kobold format
+    if (Array.isArray(data.results) && data.results[0]?.text) {
+        return data.results[0].text;
+    }
+
+    if (data.text) return data.text;
+    if (data.response) return data.response;
+
+    return '';
+}
+
+/**
  * Send a request via SillyTavern default active connection.
  */
 async function sendViaDefault(context, settings, messages, { signal = null } = {}) {
@@ -225,21 +293,50 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
     if (hasImage) {
         if (typeof context.sendOpenAIRequest === 'function' && context.main_api === 'openai') {
             const data = await context.sendOpenAIRequest('quiet', isolatedMessages, signal);
-            return data.choices?.[0]?.message?.content || '';
+            return extractTextFromApiResponse(data);
         }
         console.warn('[PbtA Concierge] Images attached but main API may not support multimodal payloads. Attempting chat completion.');
     }
 
-    // Default to generateRaw / generateRawData with pure quiet mode
-    if (typeof context.generateRaw === 'function') {
-        return await context.generateRaw({
+    // Only set responseLength if explicitly specified by user settings.
+    // If null/undefined, SillyTavern preserves the user's active preset token limits and context budget.
+    const responseLength = (settings?.maxTokens && Number(settings.maxTokens) > 0)
+        ? Number(settings.maxTokens)
+        : null;
+
+    // 1. Prefer generateRawData: returns raw API response without throwing 'Error: No message generated'
+    // and allows extracting from reasoning_content when models output thoughts
+    if (typeof context.generateRawData === 'function') {
+        const rawData = await context.generateRawData({
             prompt: isolatedMessages,
             quietToLoud: false,
             quietName: 'PbtA Concierge',
             instructOverride: false,
-            trimNames: false,
-            responseLength: settings?.maxTokens || 2048,
+            responseLength: responseLength,
         });
+        const extracted = extractTextFromApiResponse(rawData);
+        if (extracted) {
+            return extracted;
+        }
+        console.warn('[PbtA Concierge] generateRawData returned empty content. Raw data:', rawData);
+    }
+
+    // 2. Fallback to generateRaw
+    if (typeof context.generateRaw === 'function') {
+        try {
+            return await context.generateRaw({
+                prompt: isolatedMessages,
+                quietToLoud: false,
+                quietName: 'PbtA Concierge',
+                instructOverride: false,
+                trimNames: false,
+                responseLength: responseLength,
+            });
+        } catch (err) {
+            console.warn('[PbtA Concierge] generateRaw failed:', err?.message || err);
+            // If generateRaw throws 'No message generated', return empty string instead of crashing
+            return '';
+        }
     }
 
     throw new Error('No suitable SillyTavern generation function available.');

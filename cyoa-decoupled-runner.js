@@ -402,7 +402,7 @@ export function insertCyoaLoadingIndicator(messageId) {
     const loader = document.createElement('div');
     loader.className = 'mhc-cyoa-loading-badge';
     loader.setAttribute('data-cyoa-loader', 'true');
-    loader.style.cssText = 'display:flex !important;flex-direction:row !important;align-items:center !important;justify-content:space-between !important;gap:10px !important;padding:6px 12px !important;margin:8px 0 !important;background:rgba(20,20,30,0.65) !important;border-radius:6px !important;font-style:italic !important;opacity:0.9 !important;border-left:3px solid var(--SmartThemeQuoteColor, #00ffaa) !important;box-sizing:border-box !important;width:100% !important;';
+    loader.style.cssText = 'display:flex !important;flex-direction:row !important;align-items:center !important;justify-content:space-between !important;gap:10px !important;padding:6px 32px 6px 12px !important;margin:8px 0 !important;background:rgba(20,20,30,0.65) !important;border-radius:6px !important;font-style:italic !important;opacity:0.9 !important;border-left:3px solid var(--SmartThemeQuoteColor, #00ffaa) !important;box-sizing:border-box !important;width:100% !important;';
     loader.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px;font-size:0.88em;color:var(--SmartThemeBodyColor, #e0e0e0);">
             <i class="fa-solid fa-dice-d20 fa-spin" style="color:var(--SmartThemeQuoteColor, #00ffaa);font-size:1.1em;"></i>

@@ -458,7 +458,9 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         // 5. Connection settings: reuse concierge/router settings or fallback to default
         const { sendRoutedLlmRequest, getConciergeConnectionSettings } = await import('./concierge-connection.js');
         const connSettings = getConciergeConnectionSettings();
-        connSettings.maxTokens = 600; // CYOA choices + reasoning headroom
+        // Allocate ample token budget so reasoning models (which generate 500-1200+ tokens of internal thinking)
+        // do not exhaust the response budget before outputting the actual <choices> block.
+        connSettings.maxTokens = Math.max(2048, rpgSettings?.cyoaMaxTokens || 2048);
 
         const messages = [
             { role: 'system', content: systemPrompt },

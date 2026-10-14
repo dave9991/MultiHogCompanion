@@ -238,7 +238,7 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
             quietName: 'PbtA Concierge',
             instructOverride: false,
             trimNames: false,
-            responseLength: settings?.maxTokens || 600,
+            responseLength: settings?.maxTokens || 2048,
         });
     }
 

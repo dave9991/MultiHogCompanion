@@ -457,7 +457,10 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 messageId: idx,
                 narrative: text,
                 isPbta: pbtaActive,
-                rpgSettings,
+                rpgSettings: {
+                    ...rpgSettings,
+                    enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
+                },
                 showToast,
             }).catch(err => {
                 console.error('[MultiHog Companion] Decoupled CYOA Stage 2 error:', err);
@@ -510,7 +513,10 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                     messageId: lastIdx,
                     narrative: text,
                     isPbta: pbtaActive,
-                    rpgSettings,
+                    rpgSettings: {
+                        ...rpgSettings,
+                        enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
+                    },
                     showToast,
                 });
                 return;

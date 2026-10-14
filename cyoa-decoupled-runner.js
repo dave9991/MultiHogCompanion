@@ -47,14 +47,30 @@ export function abortStage2Cyoa(reason = 'unspecified') {
 }
 
 /**
- * Checks whether the protagonist is downed/incapacitated in the State Memo.
+ * Detects whether the narrative text describes the protagonist collapsing,
+ * falling unconscious, or being incapacitated.
+ *
+ * @param {string} narrativeText
+ * @returns {boolean}
+ */
+export function isNarrativeDowned(narrativeText) {
+    if (!narrativeText || typeof narrativeText !== 'string') return false;
+    return /\b(?:collapse(?:s|d)?\s+(?:to\s+the\s+(?:floor|ground)|unconscious|senseless)|fall(?:s|en)?\s+unconscious|slip(?:s|ped)?\s+into\s+unconsciousness|vision\s+fades\s+to\s+black|rendered\s+unconscious|knocked\s+unconscious|mortally\s+wounded|succumb(?:s|ed)?\s+to\s+(?:the\s+wounds|death)|bleeding\s+out)\b/i.test(narrativeText);
+}
+
+/**
+ * Checks whether the protagonist is downed/incapacitated in the State Memo or latest narrative.
  * Handles both PbtA (Max Harm / 0 HP) and D&D (0 HP / Dying / Unconscious).
  *
  * @param {string} memoText
  * @param {boolean} [isPbta=false]
+ * @param {string} [narrativeText='']
  * @returns {boolean}
  */
-export function isProtagonistDowned(memoText, isPbta = false) {
+export function isProtagonistDowned(memoText, isPbta = false, narrativeText = '') {
+    if (narrativeText && isNarrativeDowned(narrativeText)) {
+        return true;
+    }
     if (!memoText || typeof memoText !== 'string') return false;
 
     // Check [CHARACTER] section first if present
@@ -101,11 +117,12 @@ export function isProtagonistDowned(memoText, isPbta = false) {
  * @returns {{ systemPrompt: string, userPrompt: string }}
  */
 export function buildStage2CyoaPrompt({ narrative, memo, isPbta, rpgSettings }) {
-    const isDowned = isProtagonistDowned(memo, isPbta);
+    const isDowned = isProtagonistDowned(memo, isPbta, narrative);
     const cyoaConfig = rpgSettings?.cyoaConfig || {};
     const playstyle = cyoaConfig.playstyle || 'cyoa_5';
     const choiceCount = playstyle === 'cyoa_3' ? 3 : 5;
     const cyoaEmojis = cyoaConfig.cyoaEmojis !== false;
+    const fastPipeline = rpgSettings?.enableFastPipeline !== false;
 
     let systemPrompt = '';
     let guidelines = '';
@@ -185,11 +202,21 @@ Do NOT include any commentary or extra text outside the <choices>...</choices> b
     const cleanNarrative = String(narrative || '').slice(-2500).trim();
     const cleanMemo = String(memo || '').trim();
 
+    const tacticalContext = fastPipeline
+        ? `### CURRENT CHARACTER & COMBAT STATE (Turn-Start Baseline):
+${cleanMemo}
+
+### IMMEDIATE TACTICAL SITUATION & NARRATIVE DELTA:
+The character sheet above reflects state at the start of this turn.
+The narrative scene contains the most recent actions, damage, and situational shifts.
+Synthesize both: if the character was injured, disarmed, restrained, downed, or shifted into danger during the narrative, generate options strictly reflecting their immediate physical reality.`
+        : `### CURRENT CHARACTER & COMBAT STATE:
+${cleanMemo}`;
+
     const userPrompt = `### LATEST NARRATIVE SCENE:
 ${cleanNarrative}
 
-### CURRENT CHARACTER & COMBAT STATE:
-${cleanMemo}
+${tacticalContext}
 
 Generate the ${choiceCount} choices now inside <choices>...</choices>:`;
 
@@ -337,10 +364,10 @@ export function extractCleanChoicesMarkup(rawText) {
 /**
  * Polls for the MultiHog State Tracker model pass to finish.
  *
- * @param {number} [timeoutMs=15000]
+ * @param {number} [timeoutMs=120000]
  * @returns {Promise<boolean>} True if State Tracker is idle, false if timed out.
  */
-export async function waitForStateTracker(timeoutMs = 15000) {
+export async function waitForStateTracker(timeoutMs = 120000) {
     const startTime = Date.now();
     const isRunning = () => typeof globalThis._rpgStateModelRunning === 'function' && globalThis._rpgStateModelRunning();
 
@@ -514,11 +541,17 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         lockSendButtonUI();
         insertCyoaLoadingIndicator(messageId);
 
-        // 2. Wait for MultiHog State Tracker to finish auditing
-        const trackerOk = await waitForStateTracker(12000);
-        if (signal.aborted) return false;
+        // 2. Determine pipeline mode: Fast Pipelined vs. Sequential
+        const fastPipeline = rpgSettings?.enableFastPipeline !== false;
+        if (!fastPipeline) {
+            const maxWait = Number(rpgSettings?.stateTrackerTimeoutMs) || 120000;
+            const trackerOk = await waitForStateTracker(maxWait);
+            if (signal.aborted) return false;
+        } else {
+            console.log('[MultiHog Companion] Fast Pipelined CYOA active. Formulating choices concurrently with background agents.');
+        }
 
-        // 3. Obtain the freshly audited State Memo
+        // 3. Obtain State Memo baseline (active/turn-start memo)
         const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
 
         // 4. Build Stage 2 prompt

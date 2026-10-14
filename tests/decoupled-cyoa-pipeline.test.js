@@ -314,5 +314,49 @@ abortStage2Cyoa();
 assert.strictEqual(isStage2CyoaRunning(), false, 'Should remain idle after abort');
 console.log('✓ abortStage2Cyoa executes safely');
 
+// ── 7. Fast Pipelined CYOA & Narrative Downed Detection ──
+console.log('7. Testing Fast Pipelined CYOA & Narrative Downed Detection...');
+const { isNarrativeDowned } = await import('../cyoa-decoupled-runner.js');
+
+// Narrative Downed
+assert.strictEqual(isNarrativeDowned('The troll strikes you hard. You collapse to the floor unconscious.'), true);
+assert.strictEqual(isNarrativeDowned('The blast hits you, and your vision fades to black as you hit the wall.'), true);
+assert.strictEqual(isNarrativeDowned('The enemy slashes your shield, leaving a deep gouge.'), false);
+
+// isProtagonistDowned with narrative integration
+const healthyMemo = `[CHARACTER]\nName: Silas\nHP: 24/24\n[/CHARACTER]`;
+assert.strictEqual(isProtagonistDowned(healthyMemo, false, 'You collapse to the ground senseless.'), true, 'Narrative downed must override healthy memo');
+assert.strictEqual(isProtagonistDowned(healthyMemo, false, 'You parry the blow and step back.'), false, 'Healthy memo + healthy narrative must remain not downed');
+
+// Fast Pipelined Prompt Synthesis
+const fastPrompt = buildStage2CyoaPrompt({
+    narrative: 'The archers fire a volley. You dive behind a cart for cover.',
+    memo: healthyMemo,
+    isPbta: false,
+    rpgSettings: { enableFastPipeline: true },
+});
+assert.ok(fastPrompt.userPrompt.includes('### IMMEDIATE TACTICAL SITUATION & NARRATIVE DELTA:'), 'Fast mode prompt must include narrative delta instructions');
+assert.ok(fastPrompt.userPrompt.includes('Turn-Start Baseline'), 'Fast mode prompt must designate baseline memo');
+
+// Legacy Sequential Prompt (when fast pipeline is explicitly disabled)
+const legacyPrompt = buildStage2CyoaPrompt({
+    narrative: 'The archers fire a volley.',
+    memo: healthyMemo,
+    isPbta: false,
+    rpgSettings: { enableFastPipeline: false },
+});
+assert.ok(!legacyPrompt.userPrompt.includes('IMMEDIATE TACTICAL SITUATION & NARRATIVE DELTA'), 'Legacy mode must not include delta instructions');
+
+// Narrative Downed prompts generate Downed mandate even with healthy memo
+const downedPrompt = buildStage2CyoaPrompt({
+    narrative: 'The blow is fatal. You fall unconscious onto the stone floor.',
+    memo: healthyMemo,
+    isPbta: false,
+    rpgSettings: { enableFastPipeline: true },
+});
+assert.ok(downedPrompt.systemPrompt.includes('CRITICAL MANDATE — THE PROTAGONIST IS DOWNED'), 'Narrative downed must mandate survival choices');
+console.log('✓ Fast Pipelined prompt synthesis and narrative downed detection verified');
+
 console.log('\n--- All Decoupled CYOA Engine tests PASSED! 🧭 ---');
+
 

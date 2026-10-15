@@ -18,12 +18,34 @@ import {
     insertCyoaLoadingIndicator,
     lockSendButtonUI,
 } from './cyoa-decoupled-runner.js';
+import { isPbtAActive } from './pbta-ruleset-persistence.js';
 
 let _wasGenerationStopped = false;
 let _pendingSteeringReminder = null;
 let _retryTracker = { mesId: -1, count: 0 };
 let _lastStage2AttemptedMessageId = -1;
 let _lastStage2AttemptedSwipeId = -1;
+
+/**
+ * Checks if the narrator / SillyTavern is currently generating or streaming text.
+ * @returns {boolean}
+ */
+export function isNarratorGenerating() {
+    if (typeof document !== 'undefined') {
+        const stopBtn = document.querySelector('#mes_stop, .mes_stop');
+        if (stopBtn && stopBtn.style.display !== 'none' && stopBtn.offsetParent !== null) {
+            return true;
+        }
+    }
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    if (typeof ctx?.isGenerating === 'function' && ctx.isGenerating()) {
+        return true;
+    }
+    if (typeof globalThis.is_send_press !== 'undefined' && globalThis.is_send_press) {
+        return true;
+    }
+    return false;
+}
 
 /**
  * Strips <CYOA_mode> prompt instructions and historical choice button markup
@@ -410,6 +432,13 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 return;
             }
 
+            if (isNarratorGenerating()) {
+                // Narrator is still actively generating/streaming.
+                // Do not launch Stage 2 prematurely with partial narrative text.
+                // GENERATION_ENDED will run Stage 2 with the complete narrative prose.
+                return;
+            }
+
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
             const chat = ctx?.chat;
             if (!Array.isArray(chat) || chat.length === 0) return;
@@ -462,7 +491,14 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                     enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
                 },
                 showToast,
+            }).then(ok => {
+                if (!ok) {
+                    _lastStage2AttemptedMessageId = -1;
+                    _lastStage2AttemptedSwipeId = -1;
+                }
             }).catch(err => {
+                _lastStage2AttemptedMessageId = -1;
+                _lastStage2AttemptedSwipeId = -1;
                 console.error('[MultiHog Companion] Decoupled CYOA Stage 2 error:', err);
             });
         });
@@ -509,7 +545,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 _lastStage2AttemptedMessageId = lastIdx;
                 _lastStage2AttemptedSwipeId = currentSwipeId;
 
-                await runDecoupledCyoaStage2({
+                const ok = await runDecoupledCyoaStage2({
                     messageId: lastIdx,
                     narrative: text,
                     isPbta: pbtaActive,
@@ -519,6 +555,10 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                     },
                     showToast,
                 });
+                if (!ok) {
+                    _lastStage2AttemptedMessageId = -1;
+                    _lastStage2AttemptedSwipeId = -1;
+                }
                 return;
             }
 
@@ -551,14 +591,26 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 
 /**
  * Regenerates CYOA choices for a given message using Stage 2 without touching the narrative prose.
+ * Supports both options object { messageId, isPbtaActive, showToast } and positional arguments (messageId, isPbtaActive, showToast).
  *
- * @param {object} opts
- * @param {number} [opts.messageId=-1]
- * @param {boolean|Function} [opts.isPbtaActive=false]
- * @param {Function} [opts.showToast]
+ * @param {object|number} [optsOrMessageId={}]
+ * @param {boolean|Function} [maybeIsPbta]
+ * @param {Function} [maybeShowToast]
  * @returns {Promise<boolean>}
  */
-export async function regenerateCyoaChoicesForMessage({ messageId = -1, isPbtaActive, showToast } = {}) {
+export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, maybeIsPbta, maybeShowToast) {
+    let messageId = -1;
+    let isPbtaActive = maybeIsPbta;
+    let showToast = maybeShowToast;
+
+    if (typeof optsOrMessageId === 'number') {
+        messageId = optsOrMessageId;
+    } else if (optsOrMessageId && typeof optsOrMessageId === 'object') {
+        messageId = optsOrMessageId.messageId ?? -1;
+        if (optsOrMessageId.isPbtaActive !== undefined) isPbtaActive = optsOrMessageId.isPbtaActive;
+        if (optsOrMessageId.showToast !== undefined) showToast = optsOrMessageId.showToast;
+    }
+
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
     const chat = ctx?.chat;
     if (!Array.isArray(chat) || chat.length === 0) {
@@ -574,7 +626,9 @@ export async function regenerateCyoaChoicesForMessage({ messageId = -1, isPbtaAc
     }
 
     const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
-    const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : (isPbtaActive === true);
+    const pbtaActive = typeof isPbtaActive === 'function'
+        ? isPbtaActive()
+        : (isPbtaActive !== undefined ? Boolean(isPbtaActive) : (typeof isPbtAActive === 'function' ? isPbtAActive() : false));
 
     // Reset loop guard so manual re-roll on the same message is permitted
     _lastStage2AttemptedMessageId = -1;
@@ -605,14 +659,26 @@ export async function regenerateCyoaChoicesForMessage({ messageId = -1, isPbtaAc
 /**
  * Repairs existing plain-text markdown choices into buttons, or generates
  * fresh choices via Stage 2 if no choices exist at all.
+ * Supports both options object { messageId, isPbtaActive, showToast } and positional arguments (messageId, isPbtaActive, showToast).
  *
- * @param {object} opts
- * @param {number} [opts.messageId=-1]
- * @param {boolean|Function} [opts.isPbtaActive=false]
- * @param {Function} [opts.showToast]
+ * @param {object|number} [optsOrMessageId={}]
+ * @param {boolean|Function} [maybeIsPbta]
+ * @param {Function} [maybeShowToast]
  * @returns {Promise<boolean>}
  */
-export async function repairOrGenerateChoicesForMessage({ messageId = -1, isPbtaActive, showToast } = {}) {
+export async function repairOrGenerateChoicesForMessage(optsOrMessageId = {}, maybeIsPbta, maybeShowToast) {
+    let messageId = -1;
+    let isPbtaActive = maybeIsPbta;
+    let showToast = maybeShowToast;
+
+    if (typeof optsOrMessageId === 'number') {
+        messageId = optsOrMessageId;
+    } else if (optsOrMessageId && typeof optsOrMessageId === 'object') {
+        messageId = optsOrMessageId.messageId ?? -1;
+        if (optsOrMessageId.isPbtaActive !== undefined) isPbtaActive = optsOrMessageId.isPbtaActive;
+        if (optsOrMessageId.showToast !== undefined) showToast = optsOrMessageId.showToast;
+    }
+
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
     const chat = ctx?.chat;
     if (!Array.isArray(chat) || chat.length === 0) {

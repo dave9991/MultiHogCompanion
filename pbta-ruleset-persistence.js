@@ -298,6 +298,12 @@ export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre 
     };
 }
 
+let _isPersistingPbtaChatState = false;
+
+export function isPersistingPbtaChatState() {
+    return _isPersistingPbtaChatState;
+}
+
 /**
  * Persists the current chat's PbtA configuration into MultiHog's per-chat setup snapshot
  * and global snippet database, ensuring it survives F5 page reloads and chat switches.
@@ -307,17 +313,20 @@ export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre 
  */
 export async function persistPbtaChatState(chatId, rpgSettings = null) {
     if (!chatId) return;
+    if (_isPersistingPbtaChatState) return;
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return;
 
-    let snapshot = null;
-
+    _isPersistingPbtaChatState = true;
     try {
-        const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
-        if (typeof setupMod.syncChatSetupCatalogs === 'function') {
-            setupMod.syncChatSetupCatalogs(s);
-        }
-        if (typeof setupMod.snapshotChatSetup === 'function') {
+        let snapshot = null;
+
+        try {
+            const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
+            if (typeof setupMod.syncChatSetupCatalogs === 'function') {
+                setupMod.syncChatSetupCatalogs(s);
+            }
+            if (typeof setupMod.snapshotChatSetup === 'function') {
             snapshot = setupMod.snapshotChatSetup(s);
         }
     } catch (_) {
@@ -400,6 +409,9 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
     if (typeof ctx?.saveSettingsDebounced === 'function') {
         ctx.saveSettingsDebounced();
+    }
+    } finally {
+        _isPersistingPbtaChatState = false;
     }
 }
 
@@ -517,7 +529,11 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
 
     // Overrides are live; make sure setup snapshot is current in the partition
     if (resolvedChatId) {
-        await persistPbtaChatState(resolvedChatId, s);
+        const existingSetup = s.chatStates?.[resolvedChatId]?.setup;
+        const hasPbtaSnippets = existingSetup?.customSyspromptLibrary?.some(p => p.id?.startsWith('pbta_'));
+        if (!existingSetup || !hasPbtaSnippets) {
+            await persistPbtaChatState(resolvedChatId, s);
+        }
     }
     return true;
 }

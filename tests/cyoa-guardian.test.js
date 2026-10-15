@@ -206,4 +206,53 @@ assert.ok(chatDnd[0].mes.includes('exactly 5 choices'), 'D&D specifies 5 choices
 assert.ok(chatDnd[0].mes.includes('[Attack (+5) vs AC 14]'), 'D&D includes DC/AC example');
 
 console.log('✓ Ephemeral steering reminder arming and prompt injection verified');
+
+// ── 5. Generation Active Guard & Flexible Repair/Regenerate Parameters ──────────
+console.log('5. Testing isNarratorGenerating & argument normalization...');
+const { isNarratorGenerating, repairOrGenerateChoicesForMessage, regenerateCyoaChoicesForMessage } = await import('../cyoa-guardian.js');
+
+// In node environment without DOM, isNarratorGenerating() should evaluate to false
+assert.strictEqual(isNarratorGenerating(), false, 'isNarratorGenerating must return false when no DOM/stop button is active');
+
+// Mock DOM with active Stop button
+globalThis.document = {
+    querySelector: (sel) => {
+        if (sel === '#mes_stop, .mes_stop') {
+            return { style: { display: 'flex' }, offsetParent: {} };
+        }
+        return null;
+    },
+};
+assert.strictEqual(isNarratorGenerating(), true, 'isNarratorGenerating must detect visible stop button');
+
+// Mock DOM with hidden Stop button
+globalThis.document = {
+    querySelector: (sel) => {
+        if (sel === '#mes_stop, .mes_stop') {
+            return { style: { display: 'none' }, offsetParent: null };
+        }
+        return null;
+    },
+};
+assert.strictEqual(isNarratorGenerating(), false, 'isNarratorGenerating must return false when stop button is display: none');
+delete globalThis.document;
+
+// Test repairOrGenerateChoicesForMessage argument normalization
+// Pass empty chat
+globalThis.SillyTavern = { getContext: () => ({ chat: [] }) };
+const repairEmptyResObj = await repairOrGenerateChoicesForMessage({ messageId: 0 });
+assert.strictEqual(repairEmptyResObj, false, 'repairOrGenerateChoicesForMessage handles options object with empty chat');
+
+const repairEmptyResNum = await repairOrGenerateChoicesForMessage(0);
+assert.strictEqual(repairEmptyResNum, false, 'repairOrGenerateChoicesForMessage handles positional number argument with empty chat');
+
+const regenEmptyResObj = await regenerateCyoaChoicesForMessage({ messageId: 0 });
+assert.strictEqual(regenEmptyResObj, false, 'regenerateCyoaChoicesForMessage handles options object with empty chat');
+
+const regenEmptyResNum = await regenerateCyoaChoicesForMessage(0);
+assert.strictEqual(regenEmptyResNum, false, 'regenerateCyoaChoicesForMessage handles positional number argument with empty chat');
+delete globalThis.SillyTavern;
+
+console.log('✓ isNarratorGenerating and parameter normalization verified');
 console.log('--- ALL CYOA GUARDIAN TESTS PASSED CLEANLY! ---');
+

@@ -46,6 +46,7 @@ import {
     isPbtaChat,
     formatRulesetBadge,
     persistPbtaChatState,
+    isPersistingPbtaChatState,
     ensureActiveChatRulesetConsistency,
     logRulesetEvent,
     collectRulesetDiagnostics,
@@ -2083,6 +2084,9 @@ jQuery(async () => {
         }, 600);
     });
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
+        if (isPersistingPbtaChatState()) {
+            return;
+        }
         logRulesetEvent('SETTINGS_UPDATED', { activeChatId: getActiveChatId() });
         scheduleSync('SETTINGS_UPDATED', 600);
         setTimeout(async () => {

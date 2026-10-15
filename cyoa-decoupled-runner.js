@@ -567,10 +567,10 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         const connSettings = getConciergeConnectionSettings();
         if (rpgSettings?.cyoaMaxTokens && Number(rpgSettings.cyoaMaxTokens) > 0) {
             connSettings.maxTokens = Number(rpgSettings.cyoaMaxTokens);
-        } else if (connSettings.connectionSource === 'default') {
-            connSettings.maxTokens = null;
+        } else if (connSettings.maxTokens && Number(connSettings.maxTokens) > 0) {
+            connSettings.maxTokens = Number(connSettings.maxTokens);
         } else {
-            connSettings.maxTokens = 4096;
+            connSettings.maxTokens = 2048;
         }
 
         const messages = [
@@ -589,6 +589,9 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             removeCyoaLoadingIndicator();
             restoreSendButtonUI();
             _isStage2Running = false;
+            if (showToast) {
+                showToast('warning', 'Decoupled CYOA did not produce valid choice buttons. Use /cyoagen to retry.', 'CYOA Engine');
+            }
             return false;
         }
 

@@ -24,6 +24,10 @@ import {
     prepareCampaignLorebookDistributions,
     buildWorldSkeletonEntries,
 } from './concierge-lore-distributor.js';
+import {
+    loadMainPcSectionNames,
+    buildPlayerCardBio,
+} from './concierge-pc-format.js';
 
 /**
  * Send an outgoing user chat message into SillyTavern.
@@ -450,9 +454,10 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}, options
                     avatarId = await charCreator.activateSillyTavernPersona(charName, { chatId });
                 }
 
-                // Add to Lorebook Agent
+                // Add to Lorebook Agent with structured sections matching DEFAULT_PC_SECTIONS
                 if (typeof charCreator.addPlayerCardToLorebookAgent === 'function') {
-                    const bio = dossier.protagonist.bio || `${charName}, a ${dossier.protagonist.playbook || 'wanderer'}.`;
+                    const pcSectionNames = await loadMainPcSectionNames();
+                    const bio = buildPlayerCardBio(dossier.protagonist, pcSectionNames);
                     await charCreator.addPlayerCardToLorebookAgent(charName, bio, 150, { chatId });
                 }
 

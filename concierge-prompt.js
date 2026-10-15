@@ -135,6 +135,12 @@ art_style: Visual aesthetic used for SillyTavern's /imagine portrait & scene gen
 [PROTAGONIST]
 name: Silas Vance
 playbook: The Professional
+species: Human, male, early 40s
+appearance: Lean, weathered build, tired eyes, perpetual stubble, wears a rumpled charcoal trench coat
+equipment: 9mm service pistol (2-Harm, close), tactical vest (1-Armor), badge, leather notebook
+personality: Cynical, dry-witted, fiercely protective of innocents, obsessive when digging into a case
+background: Former homicide detective turned freelance paranormal investigator in the Narrows.
+habits: Habitually checks cylinder of his revolver; taps lighter against the table when thinking.
 stats: Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1
 moves:
 - Investigate a Mystery (+Sharp) (When reading a crime scene, ask 1 question from the GM list)
@@ -143,8 +149,6 @@ harm: 5 (or harm: 2/5 if starting wounded)
 armor: 1
 conditions: (-) Broken Rib (-1 Hard), (-) Concussed (Optional starting injuries)
 status: (-) Wounded (Optional starting status — defaults to Healthy or (-) Wounded)
-gear: 9mm service pistol (2-Harm, close), tactical vest (1-Armor), badge
-bio: Former detective turned freelance paranormal investigator.
 [/PROTAGONIST]
 
 [FACTION]
@@ -338,14 +342,20 @@ relationships: on | off
 [PROTAGONIST]
 name: [[NAME:protagonist]]
 playbook: The Sleuth
+species: Human, gender/subtype
+appearance: Physical features, build, hair, eyes, scars (do not put clothing/armor here)
+equipment: Worn weapons, armor, visible clothing and carried essentials
+personality: Stable temperament and traits
+background: Brief backstory and origin grounded in the premise
+habits: Mannerisms, behavioral quirks, and recurring habits
 stats: Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1
 moves:
 - Move Name (+Stat) (Description of move trigger and outcome)
 - Second Move (+Stat) (Description)
 harm: 5
 armor: 1
-gear: Item 1, Item 2
-bio: Brief character backstory
+conditions: (-) Starting injury or weakness
+status: Healthy
 [/PROTAGONIST]
 
 [FACTION]

@@ -24,6 +24,12 @@ export function createEmptyDossier() {
         protagonist: {
             name: '',
             playbook: '',
+            species: '',
+            appearance: '',
+            equipment: '',
+            personality: '',
+            background: '',
+            habits: '',
             stats: {},
             startingMoves: [],
             harm: { max: 5, current: 0, armor: 0 },
@@ -354,6 +360,12 @@ The Kick: Unset
         lines.push('[PROTAGONIST]');
         lines.push(`name: ${p.name || 'Unnamed Adventurer'}`);
         lines.push(`playbook: ${p.playbook || 'In Development'}`);
+        if (p.species) lines.push(`species: ${p.species}`);
+        if (p.appearance) lines.push(`appearance: ${p.appearance}`);
+        if (p.equipment) lines.push(`equipment: ${p.equipment}`);
+        if (p.personality) lines.push(`personality: ${p.personality}`);
+        if (p.background) lines.push(`background: ${p.background}`);
+        if (p.habits) lines.push(`habits: ${p.habits}`);
         if (p.stats && Object.keys(p.stats).length) {
             lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}`);
         }
@@ -685,6 +697,34 @@ export function applyDossierUpdates(text, dossier) {
         if (kv.bio && updated.protagonist.bio !== kv.bio) {
             updated.protagonist.bio = kv.bio;
             changes.push(`Protagonist bio updated`);
+        }
+        if (kv.species && updated.protagonist.species !== kv.species.trim()) {
+            updated.protagonist.species = kv.species.trim();
+            changes.push(`Protagonist species: "${updated.protagonist.species}"`);
+        }
+        const app = (kv.appearance || kv.body || '').trim();
+        if (app && updated.protagonist.appearance !== app) {
+            updated.protagonist.appearance = app;
+            changes.push(`Protagonist appearance updated`);
+        }
+        const equip = (kv.equipment || '').trim();
+        if (equip && updated.protagonist.equipment !== equip) {
+            updated.protagonist.equipment = equip;
+            changes.push(`Protagonist equipment updated`);
+        }
+        const pers = (kv.personality || kv.demeanor || '').trim();
+        if (pers && updated.protagonist.personality !== pers) {
+            updated.protagonist.personality = pers;
+            changes.push(`Protagonist personality updated`);
+        }
+        const bg = (kv.background || '').trim();
+        if (bg && updated.protagonist.background !== bg) {
+            updated.protagonist.background = bg;
+            changes.push(`Protagonist background updated`);
+        }
+        if (kv.habits && updated.protagonist.habits !== kv.habits.trim()) {
+            updated.protagonist.habits = kv.habits.trim();
+            changes.push(`Protagonist habits updated`);
         }
         if (kv.stats) {
             const parsedStats = parseStatsString(kv.stats);
@@ -1547,7 +1587,7 @@ export function serializeDossierToMarkdown(dossier) {
 ---
 
 ## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
-* **Playbook:** ${p.playbook || 'Wanderer'}
+* **Playbook:** ${p.playbook || 'Wanderer'}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}${p.habits ? `\n* **Habits:** ${p.habits}` : ''}
 * **Stats:** ${statString || 'Not assigned'}
 * **Harm Capacity:** ${(p.harm?.current > 0) ? `${p.harm.current}/${p.harm.max || 5} (Wounded)` : (p.harm?.max || 5)} | **Armor:** ${p.harm?.armor || 0}${(p.status || (p.harm?.current > 0 ? '(-) Wounded' : '')) ? `\n* **Status:** ${p.status || '(-) Wounded'}` : ''}${(p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) ? `\n* **Conditions:** ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}` : ''}
 * **Background Bio:** ${p.bio || 'None'}
@@ -1856,6 +1896,21 @@ export function parseMarkdownToDossier(markdown) {
 
     const bioMatch = markdown.match(/\*\s*\*\*Background Bio:\*\*\s*([^\n\r]+)/i);
     if (bioMatch) dossier.protagonist.bio = bioMatch[1].trim();
+
+    const speciesMatch = markdown.match(/\*\s*\*\*Species:\*\*\s*([^\n\r]+)/i);
+    if (speciesMatch) dossier.protagonist.species = speciesMatch[1].trim();
+
+    const appMatch = markdown.match(/\*\s*\*\*Appearance:\*\*\s*([^\n\r]+)/i);
+    if (appMatch) dossier.protagonist.appearance = appMatch[1].trim();
+
+    const equipMatch = markdown.match(/\*\s*\*\*Equipment:\*\*\s*([^\n\r]+)/i);
+    if (equipMatch) dossier.protagonist.equipment = equipMatch[1].trim();
+
+    const persMatch = markdown.match(/\*\s*\*\*Personality:\*\*\s*([^\n\r]+)/i);
+    if (persMatch) dossier.protagonist.personality = persMatch[1].trim();
+
+    const habitsMatch = markdown.match(/\*\s*\*\*Habits:\*\*\s*([^\n\r]+)/i);
+    if (habitsMatch) dossier.protagonist.habits = habitsMatch[1].trim();
 
     // 5. Moves
     const movesMatch = markdown.match(/###\s*(?:⚡\s*)?Key Moves:\s*([\s\S]*?)(?=###|##|---|$)/i);

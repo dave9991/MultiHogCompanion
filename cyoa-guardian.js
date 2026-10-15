@@ -164,8 +164,8 @@ export function tryRepairMarkdownChoices(text) {
     for (let i = lastIdx + 1; i < lines.length; i++) {
         const trailingLine = lines[i].trim();
         if (!trailingLine) continue;
-        const isFooter = /^\s*[\*\_]?\(?(?:Harm|HP|XP|Hold|Location|Spell|Turn|Round|State)/i.test(trailingLine)
-            || /^\s*\[(?:Harm|HP|XP|Hold|Location)/i.test(trailingLine);
+        const isFooter = /^\s*[\*\_]?\(?(?:Harm|HP|XP|Hold|Location|Spell|Turn|Round|State|Level|Time|Day|HH:MM|\d{1,2}:\d{2})/i.test(trailingLine)
+            || /^\s*[\*\_]?\[?(?:Harm|HP|XP|Hold|Location|Time|Day|HH:MM|\d{1,2}:\d{2})/i.test(trailingLine);
         if (!isFooter) {
             return null; // Normal narrative prose follows the list; this was not a choices block
         }

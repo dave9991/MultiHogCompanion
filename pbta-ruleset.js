@@ -443,12 +443,26 @@ PbtA reminder: 2d6 + Stat, resolved per <rng_system> (10+ / 7–9 / 6-). Only tr
 
 /**
  * Builds the PbtA output footer.
+ *
+ * @param {number} [harmMax=5]
+ * @param {number} [pacingXp=5]
+ * @param {object} [options={}]
+ * @returns {string}
  */
-export function buildPbtAFooterContent(harmMax = 5, pacingXp = 5) {
+export function buildPbtAFooterContent(harmMax = 5, pacingXp = 5, options = {}) {
+    let timeFmt = '[HH:MM AM/PM], Day [X]';
+    if (options.use24hTime) {
+        timeFmt = timeFmt.replace(/\[HH:MM AM\/PM\]/g, '[HH:MM] (24-hour clock, NO AM/PM)');
+    }
+    if (options.useDdMmYyFormat) {
+        timeFmt = timeFmt.replace(/Day\s+\[X\]/g, '[DD/MM/YYYY]');
+    }
+
     return `<end_of_output_footer>
 ALWAYS end every narrative output with:
 *(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*
-Footer shows ONLY {{user}}'s Harm/XP/Hold/location — never party or NPC status.
+*${timeFmt}*
+Footer shows ONLY {{user}}'s Harm/XP/Hold/location/time — never party or NPC status.
 </end_of_output_footer>`;
 }
 
@@ -892,6 +906,10 @@ export function buildPbtAWorldRulesContent(worldRules) {
  * @returns {object} Game cartridge definition
  */
 export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
+    if (typeof genreKey === 'object' && genreKey !== null) {
+        overrides = genreKey;
+        genreKey = overrides.genreKey || overrides.genre || 'fantasy';
+    }
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
     const config = overrides.config || overrides || {};
     const harmMax = config.harmMax || overrides.harmMax || 5;
@@ -899,6 +917,18 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     const partyMode = config.partyMode || overrides.partyMode || 'squad';
     const playstyle = config.playstyle || overrides.playstyle || 'cyoa_5';
     const isFreeform = playstyle === 'freeform';
+    const use24hTime = Boolean(
+        config.use24hTime ?? overrides.use24hTime ?? (
+            typeof globalThis !== 'undefined' &&
+            globalThis.SillyTavern?.getContext?.()?.extensionSettings?.rpg_tracker?.use24hTime
+        )
+    );
+    const useDdMmYyFormat = Boolean(
+        config.useDdMmYyFormat ?? overrides.useDdMmYyFormat ?? (
+            typeof globalThis !== 'undefined' &&
+            globalThis.SillyTavern?.getContext?.()?.extensionSettings?.rpg_tracker?.useDdMmYyFormat
+        )
+    );
 
     const customSyspromptLibrary = [
         {
@@ -948,11 +978,11 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_footer',
             tag: 'end_of_output_footer',
-            content: `<end_of_output_footer>\nOutput immediately after the narrative prose and choices:\n*(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*\nFooter shows ONLY {{user}}'s Harm/XP/Hold/location — never party or NPC status.\n</end_of_output_footer>`,
+            content: buildPbtAFooterContent(harmMax, pacingXp, { use24hTime, useDdMmYyFormat }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',
-            description: 'PbtA Harm, XP, and Hold footer',
+            description: 'PbtA Harm, XP, Hold, and Location/Time footer',
             origin: 'unlocked_base',
             baseTag: 'end_of_output_footer',
         },

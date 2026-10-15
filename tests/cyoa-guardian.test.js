@@ -106,7 +106,8 @@ const rawPbta = `The shadows lengthen along the cavern walls as the troll bellow
 1. ⚔️ Charge with your spear — [Hack & Slash (+Might)]
 2. 🗣️ Try to distract the beast with your torch — [Defy Danger (+Agility)]
 3. 🏃 Back out of the chamber toward the tunnel
-*(Harm: 1/5) | (XP: 2/5) | (Hold: 0) | (Location: Sunken Caves)*`;
+*(Harm: 1/5) | (XP: 2/5) | (Hold: 0) | (Location: Sunken Caves)*
+*[08:00 AM], Day 1*`;
 
 const repairedPbta = tryRepairMarkdownChoices(rawPbta);
 assert.ok(repairedPbta, 'Should successfully repair raw markdown choices with trailing footer');
@@ -114,7 +115,8 @@ assert.ok(repairedPbta.includes('<choices>'), 'Repaired text must contain <choic
 assert.ok(repairedPbta.includes('<button>1. ⚔️ Charge with your spear — [Hack & Slash (+Might)]</button>'), 'Choice 1 wrapped');
 assert.ok(repairedPbta.includes('<button>2. 🗣️ Try to distract the beast with your torch — [Defy Danger (+Agility)]</button>'), 'Choice 2 wrapped');
 assert.ok(repairedPbta.includes('<button>3. 🏃 Back out of the chamber toward the tunnel</button>'), 'Choice 3 wrapped');
-assert.ok(repairedPbta.includes('*(Harm: 1/5) | (XP: 2/5) | (Hold: 0) | (Location: Sunken Caves)*'), 'Preserves footer');
+assert.ok(repairedPbta.includes('*(Harm: 1/5) | (XP: 2/5) | (Hold: 0) | (Location: Sunken Caves)*'), 'Preserves footer line 1');
+assert.ok(repairedPbta.includes('*[08:00 AM], Day 1*'), 'Preserves footer line 2');
 assert.ok(repairedPbta.startsWith('The shadows lengthen along the cavern walls'), 'Preserves initial narrative prose');
 
 // Case B: 5 D&D choices with "Choices:" header

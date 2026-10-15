@@ -517,6 +517,120 @@ export function restoreSendButtonUI() {
 }
 
 /**
+ * Resolves the token budget for Stage 2 CYOA choice generation.
+ * Supports:
+ * 1. Explicit user override in MultiHog / Companion settings (cyoaMaxTokens > 0).
+ * 2. Dedicated connection (e.g. secondary Ollama/OpenAI profile).
+ * 3. Default connection: Dynamically derives token budget from configured Main API
+ *    context window (e.g. openai_max_context, max_context) minus estimated prompt size,
+ *    providing full headroom for models requiring 4k-8k+ reasoning tokens (DeepSeek R1,
+ *    Gemma 4, Qwen thinking variants).
+ *
+ * @param {object} [opts]
+ * @param {object} [opts.rpgSettings] MultiHog / companion settings
+ * @param {object} [opts.connSettings] Connection settings from concierge-connection
+ * @param {Array<{role: string, content: string|Array}>} [opts.messages] Prompt messages
+ * @param {object} [opts.context] Optional SillyTavern context override (for testing)
+ * @returns {number} Token limit for the generation request
+ */
+export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, context } = {}) {
+    const ctx = context || (typeof globalThis.SillyTavern !== 'undefined' ? globalThis.SillyTavern.getContext?.() : null) || {};
+    const companionSettings = ctx.extensionSettings?.multihog_companion || globalThis.extension_settings?.multihog_companion || {};
+
+    // 1. Explicit user override takes top priority (MultiHog settings or Companion settings)
+    const explicitOverride = Number(rpgSettings?.cyoaMaxTokens || companionSettings?.cyoaMaxTokens);
+    if (!isNaN(explicitOverride) && explicitOverride > 0) {
+        return Math.floor(explicitOverride);
+    }
+
+    // 2. Dedicated connection (profile, direct ollama, direct openai)
+    if (connSettings && connSettings.connectionSource && connSettings.connectionSource !== 'default') {
+        const dedicatedTokens = Number(connSettings.maxTokens);
+        if (!isNaN(dedicatedTokens) && dedicatedTokens > 0) {
+            return Math.floor(dedicatedTokens);
+        }
+    }
+
+    // 3. Main API (default connection): dynamically derive from context window
+    const mainApi = ctx.mainApi || globalThis.main_api || 'openai';
+
+    let contextLimit = 0;
+
+    // Check SillyTavern's global getMaxContextTokens helper if available
+    if (typeof globalThis.getMaxContextTokens === 'function') {
+        try {
+            const raw = Number(globalThis.getMaxContextTokens());
+            if (!isNaN(raw) && raw > 0) {
+                contextLimit = raw;
+            }
+        } catch (_) {}
+    }
+
+    // Check OpenAI specific context size if mainApi is openai
+    if (!contextLimit && mainApi === 'openai') {
+        const oaiContext = Number(
+            ctx.chatCompletionSettings?.openai_max_context ||
+            globalThis.oai_settings?.openai_max_context
+        );
+        if (!isNaN(oaiContext) && oaiContext > 0) {
+            contextLimit = oaiContext;
+        }
+    }
+
+    // Check generic maxContext (context.maxContext or globalThis.max_context)
+    if (!contextLimit) {
+        const genContext = Number(ctx.maxContext || globalThis.max_context);
+        if (!isNaN(genContext) && genContext > 0) {
+            contextLimit = genContext;
+        }
+    }
+
+    // Baseline fallback if context size cannot be determined: 8192
+    if (!contextLimit || isNaN(contextLimit) || contextLimit <= 0) {
+        contextLimit = 8192;
+    }
+
+    // Estimate prompt tokens (~3.2 chars/token for english/markdown, with a 250-token safety buffer for wrapper tags/role delimiters)
+    let promptChars = 0;
+    if (Array.isArray(messages)) {
+        for (const msg of messages) {
+            if (typeof msg?.content === 'string') {
+                promptChars += msg.content.length;
+            } else if (Array.isArray(msg?.content)) {
+                for (const part of msg.content) {
+                    if (part && typeof part.text === 'string') {
+                        promptChars += part.text.length;
+                    }
+                }
+            }
+        }
+    }
+    const estimatedPromptTokens = Math.max(Math.ceil(promptChars / 3.2) + 250, 400);
+
+    // Leave a 256-token headroom buffer
+    const safetyBuffer = 256;
+    let availableBudget = contextLimit - estimatedPromptTokens - safetyBuffer;
+
+    // Minimum floor: at least 4096 if contextLimit >= 8192, else at least 2048 (or available remaining)
+    const minFloor = contextLimit >= 8192 ? 4096 : Math.min(2048, contextLimit - estimatedPromptTokens);
+    if (availableBudget < minFloor) {
+        availableBudget = minFloor;
+    }
+
+    // If openai_max_tokens is configured on the main API and is >= 4096, clamp if availableBudget exceeds it
+    const configuredMaxTokens = Number(
+        ctx.chatCompletionSettings?.openai_max_tokens ||
+        globalThis.oai_settings?.openai_max_tokens ||
+        0
+    );
+    if (configuredMaxTokens >= 4096 && availableBudget > configuredMaxTokens) {
+        availableBudget = configuredMaxTokens;
+    }
+
+    return Math.floor(availableBudget);
+}
+
+/**
  * Executes the complete Stage 2 Decoupled CYOA pass.
  *
  * @param {object} params
@@ -562,21 +676,21 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             rpgSettings,
         });
 
-        // 5. Connection settings: reuse concierge/router settings or fallback to default
-        const { sendRoutedLlmRequest, getConciergeConnectionSettings } = await import('./concierge-connection.js');
-        const connSettings = getConciergeConnectionSettings();
-        if (rpgSettings?.cyoaMaxTokens && Number(rpgSettings.cyoaMaxTokens) > 0) {
-            connSettings.maxTokens = Number(rpgSettings.cyoaMaxTokens);
-        } else if (connSettings.maxTokens && Number(connSettings.maxTokens) > 0) {
-            connSettings.maxTokens = Number(connSettings.maxTokens);
-        } else {
-            connSettings.maxTokens = 2048;
-        }
-
         const messages = [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
         ];
+
+        // 5. Connection settings: reuse concierge/router settings or fallback to default
+        const { sendRoutedLlmRequest, getConciergeConnectionSettings } = await import('./concierge-connection.js');
+        const connSettings = getConciergeConnectionSettings();
+        connSettings.maxTokens = resolveCyoaMaxTokens({
+            rpgSettings,
+            connSettings,
+            messages,
+        });
+
+        console.log(`[MultiHog Companion] Decoupled CYOA Stage 2 token budget: ${connSettings.maxTokens}`);
 
         // 6. Generate choices via routed LLM call
         const rawOutput = await sendRoutedLlmRequest(connSettings, messages, signal);

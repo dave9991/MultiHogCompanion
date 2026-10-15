@@ -19,6 +19,7 @@ import {
     extractCleanChoicesMarkup,
     abortStage2Cyoa,
     isStage2CyoaRunning,
+    resolveCyoaMaxTokens,
 } from '../cyoa-decoupled-runner.js';
 
 console.log('--- Testing Decoupled CYOA Engine ---');
@@ -357,6 +358,114 @@ const downedPrompt = buildStage2CyoaPrompt({
 assert.ok(downedPrompt.systemPrompt.includes('CRITICAL MANDATE — THE PROTAGONIST IS DOWNED'), 'Narrative downed must mandate survival choices');
 console.log('✓ Fast Pipelined prompt synthesis and narrative downed detection verified');
 
+// ── 8. Dynamic Context Budget (resolveCyoaMaxTokens) ──
+console.log('8. Testing resolveCyoaMaxTokens Dynamic Context Headroom...');
+
+const sampleMessages = [
+    { role: 'system', content: 'You are the tactical CYOA engine. Generate choices.' },
+    { role: 'user', content: 'The dragon breathes fire across the courtyard. What do you do?' },
+];
+
+// 8a. User configuration matching current setup: 128k context with 100k response token limit
+const user128kContext = {
+    mainApi: 'openai',
+    chatCompletionSettings: {
+        openai_max_context: 131072,
+        openai_max_tokens: 100000,
+    },
+};
+const user128kTokens = resolveCyoaMaxTokens({
+    messages: sampleMessages,
+    context: user128kContext,
+});
+assert.strictEqual(user128kTokens, 100000, 'Must provide full 100k response headroom when configured in OpenAI settings');
+
+// 8b. 128k context without response token clamp (dynamic context calculation)
+const raw128kContext = {
+    mainApi: 'openai',
+    chatCompletionSettings: {
+        openai_max_context: 131072,
+    },
+};
+const raw128kTokens = resolveCyoaMaxTokens({
+    messages: sampleMessages,
+    context: raw128kContext,
+});
+assert.ok(raw128kTokens > 125000, `Expected > 125,000 tokens for 128k context, got ${raw128kTokens}`);
+
+// 8c. 32k context model (e.g. Qwen 2.5 32k, Command-R)
+const context32k = {
+    mainApi: 'textgenerationwebui',
+    maxContext: 32768,
+};
+const tokens32k = resolveCyoaMaxTokens({
+    messages: sampleMessages,
+    context: context32k,
+});
+assert.ok(tokens32k > 30000 && tokens32k < 32768, `Expected ~31,000 tokens for 32k context, got ${tokens32k}`);
+
+// 8d. 8k context model (standard 8192 context window)
+const context8k = {
+    mainApi: 'kobold',
+    maxContext: 8192,
+};
+const tokens8k = resolveCyoaMaxTokens({
+    messages: sampleMessages,
+    context: context8k,
+});
+assert.ok(tokens8k >= 4096 && tokens8k < 8192, `Expected 4k-8k tokens for 8k context, got ${tokens8k}`);
+
+// 8e. Small response length on main chat (e.g. amount_gen = 350 or openai_max_tokens = 400)
+// Must NOT choke the reasoning headroom for Stage 2 CYOA
+const shortTurnContext = {
+    mainApi: 'openai',
+    chatCompletionSettings: {
+        openai_max_context: 8192,
+        openai_max_tokens: 350, // Short chat reply setting
+    },
+};
+const tokensWithShortChat = resolveCyoaMaxTokens({
+    messages: sampleMessages,
+    context: shortTurnContext,
+});
+assert.ok(tokensWithShortChat >= 4096, `CYOA budget (${tokensWithShortChat}) must preserve full reasoning headroom even if chat reply is 350`);
+
+// 8f. Explicit user override in rpgSettings
+const explicitOverrideTokens = resolveCyoaMaxTokens({
+    rpgSettings: { cyoaMaxTokens: 16384 },
+    messages: sampleMessages,
+    context: context8k,
+});
+assert.strictEqual(explicitOverrideTokens, 16384, 'Explicit user override in rpgSettings must take precedence');
+
+// 8g. Explicit user override in Companion extension settings
+const companionOverrideContext = {
+    mainApi: 'openai',
+    extensionSettings: {
+        multihog_companion: { cyoaMaxTokens: 12000 },
+    },
+};
+const companionOverrideTokens = resolveCyoaMaxTokens({
+    messages: sampleMessages,
+    context: companionOverrideContext,
+});
+assert.strictEqual(companionOverrideTokens, 12000, 'Explicit user override in companionSettings must be honored');
+
+// 8h. Dedicated non-default connection endpoint (e.g. secondary Ollama profile with explicit maxTokens)
+const dedicatedConn = {
+    connectionSource: 'ollama',
+    maxTokens: 6000,
+};
+const dedicatedTokens = resolveCyoaMaxTokens({
+    connSettings: dedicatedConn,
+    messages: sampleMessages,
+    context: context8k,
+});
+assert.strictEqual(dedicatedTokens, 6000, 'Dedicated endpoint maxTokens must be respected');
+
+console.log('✓ resolveCyoaMaxTokens dynamically scales context headroom for 4k/8k+ reasoning models and honors user overrides');
+
 console.log('\n--- All Decoupled CYOA Engine tests PASSED! 🧭 ---');
+
 
 

@@ -160,6 +160,15 @@
                             Generates synchronized choices in a dedicated second pass after the State Tracker audits damage and conditions. Eliminates downed-state choice desyncs for both <b>D&amp;D 5e</b> and <b>PbtA</b>.
                         </p>
 
+                        <!-- Token Budget Configuration -->
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                            <div style="flex: 1; padding-right: 12px;">
+                                <label for="mhc_cyoa_max_tokens" style="font-size: 0.85em; font-weight: bold; cursor: pointer;">CYOA Token Budget:</label>
+                                <div style="font-size: 0.75em; opacity: 0.7; line-height: 1.2;">0 = Auto-derived from Main API Context Window (recommended for reasoning models)</div>
+                            </div>
+                            <input type="number" id="mhc_cyoa_max_tokens" min="0" max="131072" step="256" style="width: 85px; text-align: right;" placeholder="0" title="Token limit for Stage 2 CYOA generation. Set to 0 to dynamically use available context headroom.">
+                        </div>
+
                         <!-- Manual Actions Sub-bar -->
                         <div style="display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
                             <button type="button" id="mhc_cyoa_regen_btn" class="menu_button interactable" style="flex: 1; font-size: 0.78em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;" title="Generate or re-roll choices for the latest narrator message without touching the story (/cyoagen)">

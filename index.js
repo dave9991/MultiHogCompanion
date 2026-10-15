@@ -97,6 +97,7 @@ const DEFAULT_SETTINGS = {
     enableCyoaAutoRetry: true,
     cyoaMaxRetries: 1,
     enableCyoaMarkdownAutoRepair: true,
+    cyoaMaxTokens: 0,
 };
 
 function getSettings() {
@@ -1790,6 +1791,13 @@ async function initUI() {
 
         cyoaEnableCb.on('change', function () {
             updateSettings({ enableDecoupledCyoa: $(this).is(':checked') });
+        });
+
+        const cyoaTokensInput = $('#mhc_cyoa_max_tokens');
+        cyoaTokensInput.val(current.cyoaMaxTokens || 0);
+        cyoaTokensInput.on('change', function () {
+            const val = parseInt($(this).val(), 10) || 0;
+            updateSettings({ cyoaMaxTokens: val });
         });
 
         $('#mhc_cyoa_regen_btn').on('click', async function () {

@@ -488,6 +488,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 isPbta: pbtaActive,
                 rpgSettings: {
                     ...rpgSettings,
+                    cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
                     enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
                 },
                 showToast,
@@ -551,6 +552,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                     isPbta: pbtaActive,
                     rpgSettings: {
                         ...rpgSettings,
+                        cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
                         enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
                     },
                     showToast,
@@ -647,11 +649,15 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
 
     if (showToast) showToast('info', 'Formulating fresh choices... 🎲', 'CYOA Engine');
 
+    const s = getSettings();
     return await runDecoupledCyoaStage2({
         messageId: idx,
         narrative: cleanNarrative,
         isPbta: pbtaActive,
-        rpgSettings,
+        rpgSettings: {
+            ...rpgSettings,
+            cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
+        },
         showToast,
     });
 }

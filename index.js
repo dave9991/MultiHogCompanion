@@ -67,6 +67,9 @@ import {
     tryRepairMarkdownChoices,
     applyRepairedMessage,
 } from './cyoa-guardian.js';
+import {
+    initAdventureChatRenameGuard,
+} from './adventure-chat.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -2025,6 +2028,7 @@ jQuery(async () => {
     }
 
     // 4. Register Event Listeners
+    initAdventureChatRenameGuard();
     initCyoaGuardian({ getSettings, isPbtaActive: isPbtAActive, showToast, eventSource, event_types });
 
     if (event_types.APP_READY) {

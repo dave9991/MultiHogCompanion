@@ -173,4 +173,64 @@ try {
     globalThis.fetch = originalFetch;
 }
 
+// ── 4. initAdventureChatRenameGuard Tests ─────────────────────────────────────
+console.log('Testing initAdventureChatRenameGuard...');
+
+const { initAdventureChatRenameGuard } = await import('../adventure-chat.js');
+const { runtimeState } = await import(
+    '../../SillyTavern-MultihogDnDFramework/src/app/runtime-state.js'
+);
+
+// Mock eventSource and event_types
+const registeredListeners = [];
+globalThis.eventSource = {
+    makeFirst: (event, handler) => {
+        registeredListeners.unshift({ event, handler });
+    },
+    on: (event, handler) => {
+        registeredListeners.push({ event, handler });
+    },
+};
+globalThis.event_types = {
+    CHAT_RENAMED: 'chat_renamed',
+};
+globalThis.window = {
+    _mhcPendingFreshRestart: {
+        oldId: 'Game Master - 2026-10-14@15h20m',
+        newId: 'Concrete & Case Files',
+    },
+};
+
+runtimeState.pendingUnseenChatReset = null;
+
+initAdventureChatRenameGuard();
+
+assert.strictEqual(registeredListeners.length, 1, 'Rename guard must register listener');
+assert.strictEqual(registeredListeners[0].event, 'chat_renamed', 'Must listen to CHAT_RENAMED');
+
+// Trigger CHAT_RENAMED event
+await registeredListeners[0].handler({
+    oldFileName: 'Game Master - 2026-10-14@15h20m.jsonl',
+    newFileName: 'Concrete & Case Files.jsonl',
+});
+
+assert.ok(runtimeState.pendingUnseenChatReset, 'pendingUnseenChatReset must be armed');
+assert.strictEqual(
+    runtimeState.pendingUnseenChatReset.oldId,
+    'Game Master - 2026-10-14@15h20m',
+    'Must record matching oldId'
+);
+assert.strictEqual(
+    runtimeState.pendingUnseenChatReset.newId,
+    'Concrete & Case Files',
+    'Must record matching newId'
+);
+assert.strictEqual(
+    globalThis.window._mhcPendingFreshRestart,
+    null,
+    'Must clear _mhcPendingFreshRestart marker after arming'
+);
+
+console.log('✓ initAdventureChatRenameGuard cleanly armed pendingUnseenChatReset proof marker');
+
 console.log('--- ALL ADVENTURE LAUNCH CONFLICT TESTS PASSED CLEANLY! ---');

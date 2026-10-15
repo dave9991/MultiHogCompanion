@@ -163,9 +163,11 @@ export async function getExistingAdventureNames(characterId = null) {
  * Deletes an existing adventure chat file (.jsonl) for a character.
  * @param {string|number} [characterId]
  * @param {string} chatTitle Title of the chat to delete
+ * @param {object} [options]
+ * @param {boolean} [options.emitEvent=true] Whether to emit CHAT_DELETED event
  * @returns {Promise<boolean>}
  */
-export async function deleteAdventureChat(characterId = null, chatTitle = '') {
+export async function deleteAdventureChat(characterId = null, chatTitle = '', { emitEvent = true } = {}) {
     if (!chatTitle) return false;
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     let chid = characterId;
@@ -196,11 +198,13 @@ export async function deleteAdventureChat(characterId = null, chatTitle = '') {
 
         if (response.ok) {
             console.log(`[MultiHog Companion] Safely deleted previous adventure chat: "${cleanTitle}"`);
-            try {
-                if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
-                    await eventSource.emit(event_types.CHAT_DELETED, cleanTitle);
-                }
-            } catch (_) {}
+            if (emitEvent) {
+                try {
+                    if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
+                        await eventSource.emit(event_types.CHAT_DELETED, cleanTitle);
+                    }
+                } catch (_) {}
+            }
             return true;
         }
     } catch (err) {
@@ -255,7 +259,7 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
         }
 
         // Delete the previous chat file so destination filename is free
-        await deleteAdventureChat(null, wipeOldTitle);
+        await deleteAdventureChat(null, wipeOldTitle, { emitEvent: false });
         await sleep(250);
 
         // Crucial: doNewChat switched away from wipeOldTitle, which caused MultiHog's
@@ -326,6 +330,13 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
         if (safeTitle && currentChatId && (isDefaultChatName(currentChatId) || currentChatId !== safeTitle)) {
             console.log(`[MultiHog Companion] Renaming adventure chat "${currentChatId}" -> "${safeTitle}"`);
             try {
+                if (typeof window !== 'undefined') {
+                    window._mhcPendingFreshRestart = {
+                        oldId: currentChatId,
+                        newId: safeTitle,
+                    };
+                }
+
                 // Arm MultiHog's pendingUnseenChatReset proof marker so MultiHog's onChatRenamedMigrate
                 // recognizes the rename as an intentional transition from the timestamp shell to safeTitle.
                 try {
@@ -348,6 +359,12 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
                 currentChatId = getCurrentId ? getCurrentId() : (ctx?.chatId || null);
             } catch (renameErr) {
                 console.warn('[MultiHog Companion] Non-fatal error while renaming adventure chat:', renameErr);
+            } finally {
+                setTimeout(() => {
+                    if (typeof window !== 'undefined' && window._mhcPendingFreshRestart) {
+                        window._mhcPendingFreshRestart = null;
+                    }
+                }, 3000);
             }
         }
     }
@@ -365,4 +382,60 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
     }
 
     return effectiveChatId;
+}
+
+let _renameGuardInitialized = false;
+
+/**
+ * Initializes an early CHAT_RENAMED listener using eventSource.makeFirst.
+ * This guarantees that when SillyTavern fires CHAT_RENAMED during an adventure launch
+ * or restart, MultiHog's pendingUnseenChatReset proof marker is armed BEFORE
+ * MultiHog's onChatRenamedMigrate listener executes.
+ *
+ * This completely prevents the race condition where SillyTavern's reloadCurrentChat()
+ * fires CHAT_CHANGED (which clears pendingUnseenChatReset) right before CHAT_RENAMED.
+ */
+export function initAdventureChatRenameGuard() {
+    if (_renameGuardInitialized) return;
+    if (typeof eventSource === 'undefined' || typeof event_types === 'undefined' || !event_types.CHAT_RENAMED) {
+        return;
+    }
+    _renameGuardInitialized = true;
+
+    const register = typeof eventSource.makeFirst === 'function'
+        ? eventSource.makeFirst.bind(eventSource)
+        : eventSource.on.bind(eventSource);
+
+    register(event_types.CHAT_RENAMED, async (detail) => {
+        const oldId = String(detail?.oldFileName || '').replace(/\.jsonl$/i, '').trim();
+        const newId = String(detail?.newFileName || '').replace(/\.jsonl$/i, '').trim();
+        if (!oldId || !newId) return;
+
+        const pending = typeof window !== 'undefined' ? window._mhcPendingFreshRestart : null;
+        if (!pending) return;
+
+        const targetName = typeof pending === 'string' ? pending : pending.newId;
+        const matchesTarget = (targetName && (newId === targetName || newId.startsWith(targetName) || targetName.startsWith(newId)))
+            || (pending?.oldId && (oldId === pending.oldId || pending.oldId.startsWith(oldId)));
+
+        if (matchesTarget) {
+            console.log(`[MultiHog Companion] Adventure rename detected ("${oldId}" -> "${newId}"). Synchronizing MultiHog rename shell proof.`);
+            try {
+                const { runtimeState } = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-state.js');
+                if (runtimeState) {
+                    runtimeState.pendingUnseenChatReset = {
+                        oldId: oldId,
+                        newId: newId,
+                        preexistingLocalMapKeys: [],
+                    };
+                }
+            } catch (err) {
+                console.warn('[MultiHog Companion] Could not arm pendingUnseenChatReset on rename guard:', err);
+            }
+
+            if (typeof window !== 'undefined') {
+                window._mhcPendingFreshRestart = null;
+            }
+        }
+    });
 }

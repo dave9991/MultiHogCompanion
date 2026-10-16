@@ -959,12 +959,14 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     saveSettingsDebounced();
 
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
+    const activeDossierSnapshot = overrides.dossier || s.chatStates?.[activeChatId]?.pbtaCampaignDossier || null;
     if (activeChatId) {
         await setCompanionActiveCartridge(activeChatId, {
             cartridgeId: 'pbta',
             genre: genreKey,
             systemLabel: activeLabel,
             title: overrides.campaignTitle || overrides.name || null,
+            ...(activeDossierSnapshot ? { dossier: JSON.parse(JSON.stringify(activeDossierSnapshot)) } : {}),
         });
     }
     logRulesetEvent('applyPbtACartridge', {

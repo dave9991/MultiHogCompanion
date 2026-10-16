@@ -242,10 +242,10 @@ function parseKeyValueLines(block) {
  * @param {string} line
  * @returns {Record<string, number>}
  */
-function parseStatsString(line) {
+export function parseStatsString(line) {
     const stats = {};
     if (!line) return stats;
-    const parts = line.split(/[,|;]/);
+    const parts = line.split(/[,|;·•\u00B7]/);
     for (const part of parts) {
         const clean = part.replace(/[*_()]/g, '').trim();
         // Pattern A: Cool +2 or Cool: +2
@@ -1678,9 +1678,11 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     // 2. Config & Dials
     dossier.config = dossier.config || {};
     let harmMaxVal = parseInt(dossier.config.harmMax, 10);
-    if (isNaN(harmMaxVal) || harmMaxVal < 2 || harmMaxVal > 8) {
+    if (!isNaN(harmMaxVal)) {
+        harmMaxVal = Math.max(2, Math.min(8, harmMaxVal));
+    } else {
         const protoHarmMax = parseInt(dossier.protagonist?.harm?.max ?? (typeof dossier.protagonist?.harm === 'number' ? dossier.protagonist?.harm : null), 10);
-        harmMaxVal = (!isNaN(protoHarmMax) && protoHarmMax >= 2 && protoHarmMax <= 8) ? protoHarmMax : 5;
+        harmMaxVal = !isNaN(protoHarmMax) ? Math.max(2, Math.min(8, protoHarmMax)) : 5;
     }
     dossier.config.harmMax = harmMaxVal;
 
@@ -1746,17 +1748,17 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     // Harm normalization
     let protoHarmObj = { max: harmMaxVal, current: 0, armor: 0 };
     if (typeof dossier.protagonist.harm === 'number') {
-        protoHarmObj.max = Math.max(2, Math.min(8, dossier.protagonist.harm));
+        protoHarmObj.max = harmMaxVal;
     } else if (typeof dossier.protagonist.harm === 'string') {
         const parts = dossier.protagonist.harm.split('/');
         if (parts.length === 2) {
             protoHarmObj.current = parseInt(parts[0], 10) || 0;
-            protoHarmObj.max = parseInt(parts[1], 10) || harmMaxVal;
+            protoHarmObj.max = harmMaxVal;
         } else {
-            protoHarmObj.max = parseInt(dossier.protagonist.harm, 10) || harmMaxVal;
+            protoHarmObj.max = harmMaxVal;
         }
     } else if (dossier.protagonist.harm && typeof dossier.protagonist.harm === 'object') {
-        protoHarmObj.max = parseInt(dossier.protagonist.harm.max, 10) || harmMaxVal;
+        protoHarmObj.max = harmMaxVal;
         protoHarmObj.current = parseInt(dossier.protagonist.harm.current, 10) || 0;
         protoHarmObj.armor = parseInt(dossier.protagonist.harm.armor, 10) || 0;
     }

@@ -55,6 +55,10 @@ import {
 } from './adventure-chat.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
 import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders } from './namerag-hooks.js';
+import {
+    getCompanionActiveCartridge,
+    getCandidateChatIds,
+} from './pbta-ruleset-persistence.js';
 import { extension_settings } from '../../../extensions.js';
 
 const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
@@ -1149,18 +1153,32 @@ function bindModalEvents() {
     // Helper: Find and heal active campaign dossier from memory or World Info
     async function loadActiveCampaignDossier() {
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-        const chatId = ctx?.chatId || ctx?.chatMetadata?.chat_id || '';
+        const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+            || ctx?.getCurrentChatId?.()
+            || ctx?.chatId
+            || ctx?.chatMetadata?.chat_id
+            || '';
         const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+        const candidateIds = getCandidateChatIds(currentChatId, rpgSettings);
 
-        // 1. Check memory first
-        if (chatId && rpgSettings?.chatStates?.[chatId]?.pbtaCampaignDossier) {
-            return healAndNormalizeDossier(rpgSettings.chatStates[chatId].pbtaCampaignDossier);
+        // 1. Primary Source: Check explicit CompanionActiveCartridge record (persisted in line 1 of chat .jsonl)
+        const activeCart = getCompanionActiveCartridge(currentChatId, rpgSettings);
+        if (activeCart?.dossier) {
+            return healAndNormalizeDossier(activeCart.dossier);
         }
 
-        // 2. Check World Info
+        // 2. Check candidate chatStates partitions in memory
+        for (const cid of candidateIds) {
+            if (rpgSettings?.chatStates?.[cid]?.pbtaCampaignDossier) {
+                return healAndNormalizeDossier(rpgSettings.chatStates[cid].pbtaCampaignDossier);
+            }
+        }
+
+        // 3. Fallback: Check World Info books
+        const cleanId = currentChatId ? currentChatId.replace(/\.jsonl$/i, '').trim() : '';
         const bookCandidates = [
             ctx?.chatMetadata?.world_info,
-            chatId ? `Campaign_${chatId}` : null,
+            cleanId ? `Campaign_${cleanId}` : null,
             'Campaign_PbtA',
         ].filter(Boolean);
 

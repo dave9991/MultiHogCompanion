@@ -125,11 +125,22 @@ export async function setCompanionActiveCartridge(chatId = null, cartridgeData =
         }
     }
 
+    // Synchronize dossier into in-memory chatStates partition if present
+    const s = rpgSettings || ctx?.extensionSettings?.rpg_tracker;
+    if (s?.chatStates && record.dossier) {
+        for (const cid of candidateIds) {
+            if (s.chatStates[cid]) {
+                s.chatStates[cid].pbtaCampaignDossier = record.dossier;
+            }
+        }
+    }
+
     logRulesetEvent('setCompanionActiveCartridge', {
         chatId: primaryId,
         cartridgeId: record.cartridgeId,
         genre: record.genre,
         systemLabel: record.systemLabel,
+        hasDossier: !!record.dossier,
         chatMetaSaved,
     });
 
@@ -442,6 +453,12 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     }
 
     const activeCart = getCompanionActiveCartridge(chatId, s, companionSettings);
+    if (!dossier && activeCart?.dossier) {
+        dossier = activeCart.dossier;
+        if (resolvedChatId && s.chatStates?.[resolvedChatId]) {
+            s.chatStates[resolvedChatId].pbtaCampaignDossier = dossier;
+        }
+    }
     const isPbta = activeCart?.cartridgeId === 'pbta' || (!activeCart && (!!dossier || isPbtAActive(chatId, s, companionSettings)));
     const hasLiveOverrides = Array.isArray(s.customSyspromptLibrary)
         && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled);
@@ -477,6 +494,7 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
             startingMoves: dossier.protagonist?.startingMoves,
             cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
             config: dossier.config || {},
+            dossier,
         } : (activeCart ? {
             id: `pbta_${safeId}`,
             campaignTitle: activeCart.title,

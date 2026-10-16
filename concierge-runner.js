@@ -59,7 +59,8 @@ async function sendOutgoingChatMessage(text) {
  */
 async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
     const ctx = SillyTavern.getContext();
-    const effectiveBook = bookName || (ctx.chatMetadata?.world_info || `Campaign_${chatId || 'PbtA'}`);
+    const cleanChatId = chatId ? String(chatId).replace(/\.jsonl$/i, '').trim() : '';
+    const effectiveBook = bookName || (ctx.chatMetadata?.world_info || `Campaign_${cleanChatId || 'PbtA'}`);
 
     try {
         const getHeaders = ctx.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
@@ -96,6 +97,14 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
             headers: getHeaders(),
             body: JSON.stringify({ name: effectiveBook, data: bookData }),
         });
+
+        // Invalidate or update SillyTavern's frontend worldInfoCache
+        try {
+            const wiMod = await import('../../../public/scripts/world-info.js');
+            if (wiMod?.worldInfoCache && typeof wiMod.worldInfoCache.set === 'function') {
+                wiMod.worldInfoCache.set(effectiveBook, bookData);
+            }
+        } catch (_) {}
 
         // Ensure chat binds this world info book if not already bound
         if (ctx.chatMetadata && !ctx.chatMetadata.world_info) {
@@ -399,6 +408,20 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}, options
                 delete rpgEarly.chatStates[wipeOldTitle];
                 delete rpgEarly.chatStates[wipeOldTitle.replace(/\s+/g, '_')];
             }
+
+            // Also clean out previous Campaign_${wipeOldTitle} world info book
+            try {
+                const getHeaders = ctx?.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
+                await fetch('/api/worldinfo/delete', {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ name: `Campaign_${wipeOldTitle}` }),
+                });
+                const wiMod = await import('../../../public/scripts/world-info.js');
+                if (wiMod?.worldInfoCache && typeof wiMod.worldInfoCache.delete === 'function') {
+                    wiMod.worldInfoCache.delete(`Campaign_${wipeOldTitle}`);
+                }
+            } catch (_) {}
         }
 
         // ── 0b. Ensure Clean Chat & Auto-Rename ────────────────────────────────
@@ -752,7 +775,16 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}, options
         }
 
         try {
-            const { persistPbtaChatState } = await import('./pbta-ruleset-persistence.js');
+            const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
+            if (typeof setCompanionActiveCartridge === 'function' && chatId) {
+                await setCompanionActiveCartridge(chatId, {
+                    cartridgeId: 'pbta',
+                    genre: systemKey,
+                    systemLabel: dossier.meta?.systemLabel || 'PbtA',
+                    title: adventureTitle,
+                    dossier: JSON.parse(JSON.stringify(dossier)),
+                });
+            }
             if (typeof persistPbtaChatState === 'function' && chatId) {
                 await persistPbtaChatState(chatId);
             }
@@ -904,6 +936,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                         genre: systemKey,
                         systemLabel: dossier.meta?.systemLabel || 'PbtA',
                         title: dossier.meta?.title || null,
+                        dossier: JSON.parse(JSON.stringify(dossier)),
                     });
                 }
                 if (typeof persistPbtaChatState === 'function' && chatId) {

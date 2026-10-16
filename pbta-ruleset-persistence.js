@@ -7,6 +7,7 @@
  */
 
 import { PBTA_GENRES, buildPbtACartridge } from './pbta-ruleset.js';
+import { isAdventureActive } from './adventure-chat.js';
 
 /**
  * Helper to gather candidate chat IDs across SillyTavern and MultiHog context,
@@ -18,17 +19,21 @@ import { PBTA_GENRES, buildPbtACartridge } from './pbta-ruleset.js';
  */
 export function getCandidateChatIds(chatId, rpgSettings = null) {
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-    const raw = [
-        chatId,
-        (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
-        ctx?.getCurrentChatId?.(),
-        ctx?.chatId,
-        ctx?.chatMetadata?.chat_id,
-        rpgSettings?.chatStateProjectionOwner,
-    ].filter(Boolean).map(String);
-
+    let raw = [];
+    if (chatId) {
+        raw = [chatId];
+    } else {
+        raw = [
+            (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+            ctx?.getCurrentChatId?.(),
+            ctx?.chatId,
+            ctx?.chatMetadata?.chat_id,
+            rpgSettings?.chatStateProjectionOwner,
+        ];
+    }
+    const filtered = raw.filter(Boolean).map(String);
     const expanded = [];
-    for (const id of raw) {
+    for (const id of filtered) {
         expanded.push(id);
         if (id.endsWith('.jsonl')) {
             expanded.push(id.slice(0, -6));
@@ -186,20 +191,15 @@ export function isPbtAActive(chatId = null, rpgSettings = null, companionSetting
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
 
-    // 1. Check live customSyspromptLibrary
-    if (Array.isArray(s.customSyspromptLibrary) && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled)) {
-        return true;
-    }
-
     const candidateIds = getCandidateChatIds(chatId, s);
     for (const cid of candidateIds) {
         if (s.chatStates?.[cid]) {
-            // 2. Chat partition contains a PbtA campaign dossier
+            // 1. Chat partition contains a PbtA campaign dossier
             if (s.chatStates[cid].pbtaCampaignDossier) {
                 return true;
             }
 
-            // 3. Chat setup states have enabled pbta snippets
+            // 2. Chat setup states have enabled pbta snippets
             const snippetStates = s.chatStates[cid].setup?.syspromptSnippetStates;
             if (snippetStates && typeof snippetStates === 'object') {
                 if (Object.keys(snippetStates).some(k => k.startsWith('pbta_') && snippetStates[k])) {
@@ -207,7 +207,7 @@ export function isPbtAActive(chatId = null, rpgSettings = null, companionSetting
                 }
             }
 
-            // 4. Chat memo contains PbtA markers
+            // 3. Chat memo contains PbtA markers
             const partitionMemo = s.chatStates[cid].currentMemo || '';
             if (typeof partitionMemo === 'string' && partitionMemo) {
                 if (/Harm:\s*\d+/i.test(partitionMemo) || /\[PBTA_/i.test(partitionMemo) || /Hack & Slash/i.test(partitionMemo)) {
@@ -217,10 +217,18 @@ export function isPbtAActive(chatId = null, rpgSettings = null, companionSetting
         }
     }
 
-    // 5. Live memo contains PbtA markers
-    if (typeof s.currentMemo === 'string' && s.currentMemo) {
-        if (/Harm:\s*\d+/i.test(s.currentMemo) || /\[PBTA_/i.test(s.currentMemo) || /Hack & Slash/i.test(s.currentMemo)) {
+    // 4. Live settings / memo check (only if live settings belong to this chat)
+    const owner = String(s.chatStateProjectionOwner || '').trim();
+    const isOwnerMatch = !owner || candidateIds.some(cid => cid === owner);
+    if (isOwnerMatch) {
+        if (Array.isArray(s.customSyspromptLibrary) && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled)) {
             return true;
+        }
+
+        if (typeof s.currentMemo === 'string' && s.currentMemo) {
+            if (/Harm:\s*\d+/i.test(s.currentMemo) || /\[PBTA_/i.test(s.currentMemo) || /Hack & Slash/i.test(s.currentMemo)) {
+                return true;
+            }
         }
     }
 
@@ -473,6 +481,11 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     });
 
     if (!isPbta) {
+        return false;
+    }
+
+    // Never rehydrate or force PbtA onto an unstarted chat unless it has an explicit cartridge or dossier
+    if (!activeCart && !dossier && !isAdventureActive(chatId)) {
         return false;
     }
 

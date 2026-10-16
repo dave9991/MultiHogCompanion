@@ -17,6 +17,8 @@
  * STRICT CONSTRAINT: Does not modify any upstream MultiHog files.
  */
 
+import { isAdventureActive } from './adventure-chat.js';
+
 const EXTENSION_NAME = 'multihog_companion';
 
 function getExtSettings() {
@@ -362,6 +364,10 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
             || ctx.chatId
             || '';
 
+        if (!forceAll && !isAdventureActive(activeChatId, ctx)) {
+            return { scanned: 0, initialized: 0, skipped: 0 };
+        }
+
         const partitionRelValues = (activeChatId && rpg.chatStates?.[activeChatId]?.npcRelationshipValues) || null;
 
         const ledger = getRelationshipSyncLedger(activeChatId);
@@ -369,7 +375,8 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
         const connSettings = getStateTrackerConnectionSettings();
 
         // 1. Identify active NPC lorebook
-        let npcBookName = rpg.campaignBooks?.npcs || '';
+        let npcBookName = (activeChatId && rpg.chatStates?.[activeChatId]?.campaignBooks?.npcs)
+            || rpg.campaignBooks?.npcs || '';
         if (!npcBookName) {
             try {
                 const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
@@ -526,18 +533,38 @@ export async function checkAndSyncTierCrossovers() {
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
         if (!ctx) return { checked: 0, updated: 0 };
 
-        const extSettings = getExtSettings();
-        const rpg = getMultiHogSettings();
         const activeChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
             || ctx.getCurrentChatId?.()
             || ctx.chatId
             || '';
 
-        const relValues = rpg.npcRelationshipValues || {};
-        const relLogs = rpg.npcRelationshipLog || {};
+        if (!isAdventureActive(activeChatId, ctx)) {
+            return { checked: 0, updated: 0 };
+        }
+
+        const extSettings = getExtSettings();
+        const rpg = getMultiHogSettings();
+
+        const partitionRelValues = (activeChatId && rpg.chatStates?.[activeChatId]?.npcRelationshipValues) || null;
+        const isProjectionOwner = rpg.chatStateProjectionOwner && rpg.chatStateProjectionOwner === activeChatId;
+        const relValues = partitionRelValues || (isProjectionOwner ? (rpg.npcRelationshipValues || {}) : {});
+        const relLogs = (activeChatId && rpg.chatStates?.[activeChatId]?.npcRelationshipLog)
+            || (isProjectionOwner ? (rpg.npcRelationshipLog || {}) : {});
         const ledger = getRelationshipSyncLedger(activeChatId);
         const pcName = resolveActiveProtagonistName();
         const connSettings = getStateTrackerConnectionSettings();
+
+        // Resolve active campaign prefix to prevent cross-pollinating foreign campaign books
+        let activePrefix = (activeChatId && rpg.chatStates?.[activeChatId]?.routerCampaignPrefix) || '';
+        if (!activePrefix) {
+            try {
+                const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+                activePrefix = stateMgr.getEffectiveRouterCampaignPrefix?.(activeChatId) || '';
+            } catch (_) {}
+        }
+        if (!activePrefix && isProjectionOwner) {
+            activePrefix = rpg.routerCampaignPrefix || '';
+        }
 
         for (const [fullId, vals] of Object.entries(relValues)) {
             checked++;
@@ -550,6 +577,25 @@ export async function checkAndSyncTierCrossovers() {
             const lastFTierLabel = lastRec?.lastSyncedTier?.friendship;
             const lastATierLabel = lastRec?.lastSyncedTier?.affection;
 
+            // Tier boundary check: If NPC has never been initialized in this chat's ledger,
+            // this is NOT a tier crossover. Record baseline tier without triggering rewrite/toast.
+            if (!lastRec?.initialized || !lastFTierLabel) {
+                if (vals && (vals.friendship !== 0 || vals.affection !== 0)) {
+                    updateRelationshipSyncLedger(fullId, {
+                        initialized: true,
+                        lastSyncedTier: {
+                            friendship: curFTier.label,
+                            affection: curATier.label,
+                        },
+                        lastFriendshipScore: fVal,
+                        lastAffectionScore: aVal,
+                        lastSyncedAt: Date.now(),
+                        initialSource: 'baseline_catchup',
+                    }, activeChatId);
+                }
+                continue;
+            }
+
             // Tier boundary check: If tiers haven't changed, NO-OP!
             if (lastFTierLabel === curFTier.label && lastATierLabel === curATier.label) {
                 continue;
@@ -559,6 +605,10 @@ export async function checkAndSyncTierCrossovers() {
             const [bookName, uidStr] = fullId.split('::');
             const uid = parseInt(uidStr, 10);
             if (!bookName || isNaN(uid)) continue;
+
+            if (activePrefix && !bookName.toLowerCase().startsWith(activePrefix.toLowerCase())) {
+                continue;
+            }
 
             const getHeaders = ctx.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
             let bookData = null;

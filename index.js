@@ -70,6 +70,7 @@ import {
 } from './cyoa-guardian.js';
 import {
     initAdventureChatRenameGuard,
+    isAdventureActive,
 } from './adventure-chat.js';
 
 const EXTENSION_NAME = 'multihog_companion';
@@ -202,15 +203,20 @@ function extractNameFromMemo(memo) {
  */
 function getCandidateChatIds(chatId) {
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-    const raw = [
-        chatId,
-        getActiveChatId(),
-        ctx?.getCurrentChatId?.(),
-        ctx?.chatId,
-        (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
-    ].filter(Boolean).map(String);
+    let raw = [];
+    if (chatId) {
+        raw = [chatId];
+    } else {
+        raw = [
+            getActiveChatId(),
+            ctx?.getCurrentChatId?.(),
+            ctx?.chatId,
+            (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+        ];
+    }
+    const filtered = raw.filter(Boolean).map(String);
     const expanded = [];
-    for (const id of raw) {
+    for (const id of filtered) {
         expanded.push(id);
         if (id.endsWith('.jsonl')) {
             expanded.push(id.slice(0, -6));
@@ -259,8 +265,8 @@ function getMultihogPlayerName(chatId) {
         if (name) return name;
     }
 
-    // 4. Top-level playerCharacter (if live)
-    if (s.playerCharacter?.name) {
+    // 4. Top-level playerCharacter (if live and belongs to this chat)
+    if ((isOwnerMatch || isOwnerUnset) && s.playerCharacter?.name) {
         return s.playerCharacter.name.trim();
     }
 
@@ -788,6 +794,11 @@ export async function runSync(reason = '') {
     try {
         const chatId = getActiveChatId();
         if (!chatId) return false;
+
+        // If adventure is unstarted or in onboarding screen, skip runtime persona/portrait/vitality sync
+        if (!isAdventureActive(chatId)) {
+            return false;
+        }
 
         let didWork = false;
 
@@ -2076,10 +2087,13 @@ jQuery(async () => {
         }, 700);
         setTimeout(() => {
             updateRelationshipSyncUI();
-            scanAndInitUnsyncedNpcs().then(updateRelationshipSyncUI);
+            if (isAdventureActive()) {
+                scanAndInitUnsyncedNpcs().then(updateRelationshipSyncUI);
+            }
         }, 800);
     });
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
+        if (!isAdventureActive()) return;
         scheduleSync('CHARACTER_MESSAGE_RENDERED', 400);
         setTimeout(async () => {
             await checkAndSyncTierCrossovers();
@@ -2087,6 +2101,7 @@ jQuery(async () => {
         }, 600);
     });
     eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+        if (!isAdventureActive()) return;
         scheduleSync('MESSAGE_RECEIVED', 400);
         setTimeout(async () => {
             await checkAndSyncTierCrossovers();

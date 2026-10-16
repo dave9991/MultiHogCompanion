@@ -28,6 +28,61 @@ export function isChatClean(ctx) {
 }
 
 /**
+ * Determines if the current chat has an actively running adventure.
+ * Returns false if the chat is unstarted (0 messages or only initial greeting),
+ * or if MultiHog is currently displaying the empty onboarding / "create an adventure" screen.
+ *
+ * @param {string} [chatId]
+ * @param {object} [ctx]
+ * @returns {boolean}
+ */
+export function isAdventureActive(chatId = null, ctx = null) {
+    const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null);
+
+    // 1. If SillyTavern chat is explicitly clean (unstarted / greeting only), no adventure is running
+    if (effectiveCtx && Array.isArray(effectiveCtx.chat) && isChatClean(effectiveCtx)) {
+        return false;
+    }
+
+    // 2. Check MultiHog settings / state
+    const s = effectiveCtx?.extensionSettings?.rpg_tracker
+        || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
+    if (!s) return false;
+
+    // 3. Check if the DOM tracker is explicitly displaying the empty onboarding screen
+    if (typeof document !== 'undefined') {
+        const trackerEl = document.getElementById('rpg-tracker-render');
+        if (trackerEl && (trackerEl.querySelector('.rt-empty') !== null || !trackerEl.children.length)) {
+            const memo = String(s.currentMemo || '').trim();
+            if (!memo || !/\[CHARACTER\]/i.test(memo)) {
+                return false;
+            }
+        }
+    }
+
+    // 4. Check if live memo or partitioned state has any character/story data
+    const liveMemo = String(s.currentMemo || '').trim();
+    if (liveMemo && /\[CHARACTER\]/i.test(liveMemo)) {
+        return true;
+    }
+
+    const cid = chatId || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || effectiveCtx?.getCurrentChatId?.() || effectiveCtx?.chatId || '';
+    if (cid && s.chatStates?.[cid]) {
+        const part = s.chatStates[cid];
+        if (part.pbtaCampaignDossier || part.playerCharacter?.name) return true;
+        if (part.currentMemo && /\[CHARACTER\]/i.test(part.currentMemo)) return true;
+        if (part.npcRelationshipValues && Object.keys(part.npcRelationshipValues).length > 0) return true;
+    }
+
+    if (effectiveCtx?.chat_metadata?.character_name) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
  * Detects if a chat identifier or session name matches SillyTavern's default timestamp patterns.
  * e.g. "Game Master - 2026-10-04@09h15m30s123ms", "2026-10-04@12h00m", unix epochs, etc.
  * @param {string} name

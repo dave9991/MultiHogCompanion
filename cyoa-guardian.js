@@ -19,6 +19,7 @@ import {
     lockSendButtonUI,
 } from './cyoa-decoupled-runner.js';
 import { isPbtAActive } from './pbta-ruleset-persistence.js';
+import { isAdventureActive } from './adventure-chat.js';
 
 let _wasGenerationStopped = false;
 let _pendingSteeringReminder = null;
@@ -444,6 +445,10 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             if (!Array.isArray(chat) || chat.length === 0) return;
 
             const idx = messageId >= 0 ? messageId : chat.length - 1;
+            // Never trigger Stage 2 CYOA generation on Message 0 (character card greeting) or unstarted chats
+            if (idx === 0 || !isAdventureActive()) {
+                return;
+            }
             const msg = chat[idx];
             if (!msg || msg.is_user || msg.is_system) {
                 return;
@@ -519,6 +524,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             if (!Array.isArray(chat) || chat.length === 0) return;
 
             const lastIdx = chat.length - 1;
+            if (lastIdx <= 0 || !isAdventureActive()) return;
             const lastMsg = chat[lastIdx];
             if (!lastMsg || lastMsg.is_user || lastMsg.is_system) return;
 

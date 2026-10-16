@@ -12,6 +12,8 @@
  * 4. Updates MultiHog partition pins, active keys, and ST /world activation.
  */
 
+import { isAdventureActive } from './adventure-chat.js';
+
 async function getSafeHeaders(ctx = null) {
     if (typeof ctx?.getRequestHeaders === 'function') {
         return ctx.getRequestHeaders();
@@ -451,6 +453,15 @@ export async function syncCampaignLorebooks(options = {}) {
         const matchingBooks = currentPrefix
             ? allNames.filter((name) => bookBelongsToPrefix(name, currentPrefix))
             : [];
+
+        // If no campaign lorebooks exist and chat is unstarted, no-op to prevent pre-emptive partition seeding
+        if (matchingBooks.length === 0 && isAuto && !isAdventureActive(id, ctx)) {
+            return {
+                ok: true,
+                changed: false,
+                message: 'No campaign lorebooks found to sync for unstarted chat.',
+            };
+        }
 
         let clonedCount = 0;
         let deletedCount = 0;

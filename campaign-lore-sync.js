@@ -65,8 +65,8 @@ function showToast(type, message, title = 'Campaign Lorebooks') {
 export async function listAllWorldNames(ctx) {
     const namesSet = new Set();
 
-    if (typeof ctx?.updateWorldInfoList === 'function') {
-        try { await ctx.updateWorldInfoList(); } catch (_) { /* non-fatal */ }
+    if (Array.isArray(ctx?.world_names)) {
+        ctx.world_names.forEach((name) => namesSet.add(name));
     }
 
     if (typeof ctx?.getWorldInfoNames === 'function') {
@@ -81,19 +81,21 @@ export async function listAllWorldNames(ctx) {
         } catch (_) { /* fall through */ }
     }
 
-    try {
-        const r = await fetch('/api/settings/get', {
-            method: 'POST',
-            headers: await getSafeHeaders(ctx),
-            body: JSON.stringify({}),
-        });
-        if (r.ok) {
-            const j = await r.json();
-            if (Array.isArray(j?.world_names)) {
-                j.world_names.forEach((name) => namesSet.add(name));
+    if (namesSet.size === 0) {
+        try {
+            const r = await fetch('/api/settings/get', {
+                method: 'POST',
+                headers: await getSafeHeaders(ctx),
+                body: JSON.stringify({}),
+            });
+            if (r.ok) {
+                const j = await r.json();
+                if (Array.isArray(j?.world_names)) {
+                    j.world_names.forEach((name) => namesSet.add(name));
+                }
             }
-        }
-    } catch (_) { /* non-fatal */ }
+        } catch (_) { /* non-fatal */ }
+    }
 
     return Array.from(namesSet);
 }

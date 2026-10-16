@@ -47,6 +47,7 @@ import {
     formatRulesetBadge,
     persistPbtaChatState,
     isPersistingPbtaChatState,
+    clearPersistingPbtaChatState,
     ensureActiveChatRulesetConsistency,
     logRulesetEvent,
     collectRulesetDiagnostics,
@@ -2110,6 +2111,7 @@ jQuery(async () => {
     });
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
         if (isPersistingPbtaChatState()) {
+            clearPersistingPbtaChatState();
             return;
         }
         logRulesetEvent('SETTINGS_UPDATED', { activeChatId: getActiveChatId() });
@@ -2123,11 +2125,6 @@ jQuery(async () => {
         setTimeout(() => {
             updateRelationshipSyncUI();
         }, 800);
-        setTimeout(async () => {
-            const s = getSettings();
-            const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
-            await syncNameRagAdhocSysprompt(adhocActive);
-        }, 850);
     });
 
     // Initial check on load

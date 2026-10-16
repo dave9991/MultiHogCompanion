@@ -319,6 +319,7 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
     const settings = ctx?.extensionSettings?.rpg_tracker;
     if (!settings) return;
 
+    let hasChanged = false;
     settings.customSyspromptLibrary = settings.customSyspromptLibrary || [];
     const existingIndex = settings.customSyspromptLibrary.findIndex((p) => p.id === NAMERAG_SYSPROMPT_ID);
 
@@ -328,10 +329,14 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
 
     if (enabled) {
         if (existingIndex >= 0) {
-            settings.customSyspromptLibrary[existingIndex].enabled = true;
-            settings.customSyspromptLibrary[existingIndex].scope = 'global';
-            settings.customSyspromptLibrary[existingIndex].globalEnabled = true;
-            settings.customSyspromptLibrary[existingIndex].content = promptContent;
+            const item = settings.customSyspromptLibrary[existingIndex];
+            if (!item.enabled || item.scope !== 'global' || !item.globalEnabled || item.content !== promptContent) {
+                item.enabled = true;
+                item.scope = 'global';
+                item.globalEnabled = true;
+                item.content = promptContent;
+                hasChanged = true;
+            }
         } else {
             settings.customSyspromptLibrary.push({
                 id: NAMERAG_SYSPROMPT_ID,
@@ -344,12 +349,17 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
                 globalEnabled: true,
                 origin: 'companion',
             });
+            hasChanged = true;
         }
     } else {
         if (existingIndex >= 0) {
-            settings.customSyspromptLibrary[existingIndex].enabled = false;
-            settings.customSyspromptLibrary[existingIndex].scope = 'global';
-            settings.customSyspromptLibrary[existingIndex].globalEnabled = false;
+            const item = settings.customSyspromptLibrary[existingIndex];
+            if (item.enabled || item.globalEnabled) {
+                item.enabled = false;
+                item.scope = 'global';
+                item.globalEnabled = false;
+                hasChanged = true;
+            }
         }
     }
 
@@ -357,9 +367,13 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
         const dbIndex = settings.syspromptSnippetDatabase.findIndex((p) => p.id === NAMERAG_SYSPROMPT_ID);
         if (enabled) {
             if (dbIndex >= 0) {
-                settings.syspromptSnippetDatabase[dbIndex].scope = 'global';
-                settings.syspromptSnippetDatabase[dbIndex].globalEnabled = true;
-                settings.syspromptSnippetDatabase[dbIndex].content = promptContent;
+                const item = settings.syspromptSnippetDatabase[dbIndex];
+                if (item.scope !== 'global' || !item.globalEnabled || item.content !== promptContent) {
+                    item.scope = 'global';
+                    item.globalEnabled = true;
+                    item.content = promptContent;
+                    hasChanged = true;
+                }
             } else {
                 settings.syspromptSnippetDatabase.push({
                     id: NAMERAG_SYSPROMPT_ID,
@@ -371,20 +385,27 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
                     globalEnabled: true,
                     origin: 'companion',
                 });
+                hasChanged = true;
             }
         } else {
             if (dbIndex >= 0) {
-                settings.syspromptSnippetDatabase[dbIndex].scope = 'global';
-                settings.syspromptSnippetDatabase[dbIndex].globalEnabled = false;
+                const item = settings.syspromptSnippetDatabase[dbIndex];
+                if (item.globalEnabled) {
+                    item.scope = 'global';
+                    item.globalEnabled = false;
+                    hasChanged = true;
+                }
             }
         }
     }
 
-    try {
-        if (typeof ctx?.saveSettingsDebounced === 'function') {
-            ctx.saveSettingsDebounced();
-        }
-    } catch (_) {}
+    if (hasChanged) {
+        try {
+            if (typeof ctx?.saveSettingsDebounced === 'function') {
+                ctx.saveSettingsDebounced();
+            }
+        } catch (_) {}
+    }
 
     if (typeof onRefresh === 'function') {
         await onRefresh();

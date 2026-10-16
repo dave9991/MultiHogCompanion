@@ -318,9 +318,18 @@ export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre 
 }
 
 let _isPersistingPbtaChatState = false;
+let _persistResetTimer = null;
 
 export function isPersistingPbtaChatState() {
     return _isPersistingPbtaChatState;
+}
+
+export function clearPersistingPbtaChatState() {
+    _isPersistingPbtaChatState = false;
+    if (_persistResetTimer) {
+        clearTimeout(_persistResetTimer);
+        _persistResetTimer = null;
+    }
 }
 
 /**
@@ -337,6 +346,11 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     if (!s) return;
 
     _isPersistingPbtaChatState = true;
+    if (_persistResetTimer) clearTimeout(_persistResetTimer);
+    _persistResetTimer = setTimeout(() => {
+        _isPersistingPbtaChatState = false;
+        _persistResetTimer = null;
+    }, 2500);
     try {
         let snapshot = null;
 
@@ -429,6 +443,8 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     if (typeof ctx?.saveSettingsDebounced === 'function') {
         ctx.saveSettingsDebounced();
     }
+    } catch (err) {
+        console.warn('[MultiHog Companion] Error during persistPbtaChatState:', err);
     } finally {
         _isPersistingPbtaChatState = false;
     }
@@ -561,7 +577,8 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     // Overrides are live; make sure setup snapshot is current in the partition
     if (resolvedChatId) {
         const existingSetup = s.chatStates?.[resolvedChatId]?.setup;
-        const hasPbtaSnippets = existingSetup?.customSyspromptLibrary?.some(p => p.id?.startsWith('pbta_'));
+        const hasPbtaSnippets = existingSetup?.customSyspromptLibrary?.some(p => p.id?.startsWith('pbta_'))
+            || Object.keys(existingSetup?.syspromptSnippetStates || {}).some(k => k.startsWith('pbta_') && existingSetup.syspromptSnippetStates[k]);
         if (!existingSetup || !hasPbtaSnippets) {
             await persistPbtaChatState(resolvedChatId, s);
         }

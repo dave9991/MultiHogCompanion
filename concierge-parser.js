@@ -71,6 +71,92 @@ export function createEmptyDossier() {
     };
 }
 
+/**
+ * Determines whether a Campaign Dossier is in an untouched/empty default state.
+ * @param {object} dossier
+ * @returns {boolean}
+ */
+export function isDossierEmptyOrUntouched(dossier) {
+    if (!dossier || typeof dossier !== 'object') return true;
+    const meta = dossier.meta || {};
+    const proto = dossier.protagonist || {};
+    const npcs = dossier.npcs || [];
+    const monsters = dossier.monsters || [];
+    const maps = dossier.maps || [];
+    const factions = dossier.factions || [];
+    const kick = dossier.theKick || {};
+    const worldRules = dossier.worldRules || {};
+
+    const hasTitle = Boolean(meta.title && meta.title.trim() !== '' && meta.title.trim() !== 'Untitled PbtA Campaign');
+    const hasPremise = Boolean(meta.premise && meta.premise.trim() !== '');
+    const hasProto = Boolean(proto.name && proto.name.trim() !== '');
+    const hasNpcs = Array.isArray(npcs) && npcs.length > 0;
+    const hasMonsters = Array.isArray(monsters) && monsters.length > 0;
+    const hasMaps = Array.isArray(maps) && maps.length > 0;
+    const hasFactions = Array.isArray(factions) && factions.length > 0;
+    const hasKick = Boolean(
+        (kick.startingLocation && kick.startingLocation.trim() !== '') ||
+        (kick.crisis && kick.crisis.trim() !== '') ||
+        (kick.openingPrompt && kick.openingPrompt.trim() !== '')
+    );
+    const hasCustomRules = Boolean(
+        (worldRules.axioms && worldRules.axioms.length > 0) ||
+        worldRules.customModule
+    );
+
+    return !hasTitle && !hasPremise && !hasProto && !hasNpcs && !hasMonsters && !hasMaps && !hasFactions && !hasKick && !hasCustomRules;
+}
+
+/**
+ * Validates whether a Session Zero draft payload can be fully and safely restored.
+ * Returns the healed and normalized draft object if valid, or null if incomplete/corrupted.
+ *
+ * Requirements for valid restoration:
+ * 1. draft must be a non-null object.
+ * 2. draft.chatHistory must be a non-empty Array containing valid message objects with a role.
+ * 3. draft.dossier must be a valid object with at least meta and protagonist.
+ * 4. draft.dossier must pass schema normalization via healAndNormalizeDossier.
+ *
+ * @param {object} draft
+ * @returns {object|null} Validated and healed draft, or null if invalid/corrupt
+ */
+export function validateDraft(draft) {
+    if (!draft || typeof draft !== 'object') return null;
+
+    // 1. Must have valid non-empty chat history
+    if (!Array.isArray(draft.chatHistory) || draft.chatHistory.length === 0) {
+        return null;
+    }
+
+    // Every item in chatHistory must be an object with a role string
+    const allMessagesValid = draft.chatHistory.every(m => m && typeof m === 'object' && typeof m.role === 'string');
+    if (!allMessagesValid) {
+        return null;
+    }
+
+    // 2. Must have valid dossier structure with meta and protagonist
+    if (!draft.dossier || typeof draft.dossier !== 'object' || !draft.dossier.meta || !draft.dossier.protagonist) {
+        return null;
+    }
+
+    // 3. Must be healable without error
+    try {
+        const healedDossier = healAndNormalizeDossier(draft.dossier);
+        if (!healedDossier || !healedDossier.meta || !healedDossier.protagonist) {
+            return null;
+        }
+
+        return {
+            dossier: healedDossier,
+            chatHistory: draft.chatHistory,
+            changelog: Array.isArray(draft.changelog) ? draft.changelog : [],
+            timestamp: typeof draft.timestamp === 'number' ? draft.timestamp : Date.now(),
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
 export const SYSTEM_ALIASES = {
     modern: 'horror',
     'monster of the week': 'horror',

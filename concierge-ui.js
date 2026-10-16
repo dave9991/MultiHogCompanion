@@ -46,6 +46,8 @@ import {
     formatDiagnosticTrace as formatDiagnosticTraceParser,
     healAndNormalizeDossier,
     parseMarkdownToDossier,
+    validateDraft,
+    isDossierEmptyOrUntouched,
 } from './concierge-parser.js';
 import { launchPbtaCampaign, syncPbtaCampaignUpdates, reconstituteDossierWithAi } from './concierge-runner.js';
 import {
@@ -61,7 +63,7 @@ import {
 } from './pbta-ruleset-persistence.js';
 import { extension_settings } from '../../../extensions.js';
 
-const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
+export const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
 
 let modalInitialized = false;
 let activeDossier = createEmptyDossier();
@@ -105,9 +107,17 @@ async function ensureModalMounted() {
 
 /**
  * Save current session draft to localStorage.
+ * Only saves if there is active progress (chat messages or modified blueprint).
+ * Untouched sessions do not pollute storage.
  */
 function saveDraft() {
     try {
+        const hasChat = Array.isArray(chatHistory) && chatHistory.length > 0;
+        const isUntouched = !hasChat && isDossierEmptyOrUntouched(activeDossier);
+        if (isUntouched) {
+            localStorage.removeItem(STORAGE_DRAFT_KEY);
+            return;
+        }
         const payload = {
             dossier: activeDossier,
             chatHistory,
@@ -119,15 +129,62 @@ function saveDraft() {
 }
 
 /**
- * Load draft from localStorage.
+ * Load and strictly validate draft from localStorage.
+ * Returns { draft } if valid, { corrupted: true } if invalid/partial, or null if empty.
  */
-function loadDraft() {
+export function loadValidatedDraft() {
     try {
         const raw = localStorage.getItem(STORAGE_DRAFT_KEY);
         if (!raw) return null;
-        return JSON.parse(raw);
-    } catch (_) {
-        return null;
+        let parsed = null;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (parseErr) {
+            console.warn('[PbtA Concierge] Corrupted JSON in draft storage; purging:', parseErr);
+            localStorage.removeItem(STORAGE_DRAFT_KEY);
+            return { corrupted: true };
+        }
+        const validated = validateDraft(parsed);
+        if (!validated) {
+            console.warn('[PbtA Concierge] Incomplete draft detected; purging for clean start.');
+            localStorage.removeItem(STORAGE_DRAFT_KEY);
+            return { corrupted: true };
+        }
+        return { draft: validated };
+    } catch (err) {
+        console.warn('[PbtA Concierge] Unexpected error reading draft; purging:', err);
+        try { localStorage.removeItem(STORAGE_DRAFT_KEY); } catch (_) {}
+        return { corrupted: true };
+    }
+}
+
+/**
+ * Completely resets in-memory Session Zero state, blueprint, and UI.
+ * Cleans out any saved draft from localStorage.
+ */
+export function resetConciergeState({ showGreeting = true } = {}) {
+    try {
+        localStorage.removeItem(STORAGE_DRAFT_KEY);
+    } catch (_) {}
+
+    activeDossier = createEmptyDossier();
+    chatHistory = [];
+    changelog = [];
+    pendingAttachments = [];
+    activeNameRagSeeds = '';
+    window._mhcLastBuilderTransaction = null;
+    window._lastConciergeBuilderDiagnostic = null;
+
+    renderDebugInspectorView(null);
+    $('#mhc_chat_messages').empty();
+    renderAttachmentTray();
+    updateBlueprintDeck();
+
+    if (showGreeting) {
+        appendChatBubble(
+            'assistant',
+            "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?",
+        );
     }
 }
 
@@ -1512,19 +1569,8 @@ function bindModalEvents() {
     // Reset Session
     $('#mhc_reset_session_btn').on('click', () => {
         if (!confirm('Reset current Session Zero and start fresh? All unlaunched progress will be lost.')) return;
-        localStorage.removeItem(STORAGE_DRAFT_KEY);
-        activeDossier = createEmptyDossier();
-        chatHistory = [];
-        changelog = [];
-        pendingAttachments = [];
-        activeNameRagSeeds = '';
-        window._mhcLastBuilderTransaction = null;
-        window._lastConciergeBuilderDiagnostic = null;
-        renderDebugInspectorView(null);
-        $('#mhc_chat_messages').empty();
-        renderAttachmentTray();
-        updateBlueprintDeck();
-        appendChatBubble('assistant', "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?");
+        resetConciergeState({ showGreeting: true });
+        toastr?.info('Session Zero reset to fresh start.', 'Reset');
     });
 
     // Helper to execute campaign launch with progress overlay
@@ -1543,7 +1589,7 @@ function bindModalEvents() {
         setTimeout(() => {
             overlay.hide();
             if (res.success) {
-                localStorage.removeItem(STORAGE_DRAFT_KEY);
+                resetConciergeState({ showGreeting: true });
                 $('#mhc_concierge_modal').fadeOut(250);
                 toastr?.success('PbtA Campaign ready! The game is now beginning.', 'Adventure Launched');
             } else {
@@ -1648,7 +1694,7 @@ function bindModalEvents() {
         setTimeout(() => {
             overlay.hide();
             if (res.success) {
-                localStorage.removeItem(STORAGE_DRAFT_KEY);
+                resetConciergeState({ showGreeting: true });
                 $('#mhc_concierge_modal').fadeOut(250);
                 toastr?.success(res.message, 'Campaign Synchronized');
             } else {
@@ -1814,34 +1860,47 @@ export async function openConciergeModal() {
     populateInspirationDropdowns();
 
     // Check for existing draft or initialize greeting
-    const draft = loadDraft();
-    if (draft && draft.chatHistory?.length && !chatHistory.length) {
-        activeDossier = draft.dossier || activeDossier;
-        chatHistory = draft.chatHistory || [];
-        changelog = draft.changelog || [];
-        $('#mhc_chat_messages').empty();
-        chatHistory.forEach(msg => {
-            const displayStr = msg.displayContent || (typeof msg.content === 'string' ? msg.content : '');
-            if (displayStr) {
-                const isAssistant = msg.role === 'assistant';
-                const text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
-                appendChatBubble(msg.role, text, msg.imageSrc || null);
-            } else if (Array.isArray(msg.content)) {
-                let text = '';
-                let imgSrc = null;
-                msg.content.forEach(p => {
-                    if (p.type === 'text') text += p.text;
-                    if (p.type === 'image_url') imgSrc = p.image_url?.url;
-                });
-                appendChatBubble(msg.role, text, imgSrc || msg.imageSrc || null);
-            }
-        });
-    } else if (!chatHistory.length) {
-        $('#mhc_chat_messages').empty();
-        appendChatBubble(
-            'assistant',
-            "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?",
-        );
+    const draftResult = loadValidatedDraft();
+
+    if (draftResult?.corrupted) {
+        // Corrupted or incomplete draft in storage: discard and reset cleanly
+        resetConciergeState({ showGreeting: true });
+        toastr?.info('Previous uncompleted draft could not be fully loaded and was reset to a fresh Session Zero.', 'Session Zero');
+    } else if (draftResult?.draft) {
+        // Valid draft found: restore it if in-memory history isn't already active
+        const { draft } = draftResult;
+        if (!chatHistory.length) {
+            activeDossier = draft.dossier;
+            chatHistory = draft.chatHistory;
+            changelog = draft.changelog || [];
+            $('#mhc_chat_messages').empty();
+            chatHistory.forEach(msg => {
+                const displayStr = msg.displayContent || (typeof msg.content === 'string' ? msg.content : '');
+                if (displayStr) {
+                    const isAssistant = msg.role === 'assistant';
+                    const text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
+                    appendChatBubble(msg.role, text, msg.imageSrc || null);
+                } else if (Array.isArray(msg.content)) {
+                    let text = '';
+                    let imgSrc = null;
+                    msg.content.forEach(p => {
+                        if (p.type === 'text') text += p.text;
+                        if (p.type === 'image_url') imgSrc = p.image_url?.url;
+                    });
+                    appendChatBubble(msg.role, text, imgSrc || msg.imageSrc || null);
+                }
+            });
+            toastr?.info('Resumed previous Session Zero draft in progress.', 'Session Zero');
+        }
+    } else {
+        // No draft exists in storage
+        if (chatHistory.length > 0) {
+            // Storage was cleared or campaign was previously built; reset in-memory state cleanly
+            resetConciergeState({ showGreeting: true });
+        } else if (!$('#mhc_chat_messages').children().length) {
+            // Pristine first open: show greeting
+            resetConciergeState({ showGreeting: true });
+        }
     }
 
     // Check if active chat has a running campaign dossier

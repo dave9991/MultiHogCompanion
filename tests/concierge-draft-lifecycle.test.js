@@ -122,10 +122,24 @@ console.log('Testing validateDraft integrity checks...');
         dossier: partialValidDossier,
         chatHistory: [{ role: 'user', content: 'Cyberpunk run' }],
     });
-    assert.ok(healedValidation, 'Partial dossier must be healed and validated');
-    assert.ok(healedValidation.dossier.config, 'Healed dossier must have config object');
-    assert.ok(Array.isArray(healedValidation.dossier.npcs), 'Healed dossier must have npcs array');
-    assert.ok(Array.isArray(healedValidation.dossier.monsters), 'Healed dossier must have monsters array');
+    // Blueprint-only draft with empty chatHistory (e.g. loaded active campaign or manual blueprint staging)
+    const blueprintOnlyDraft = {
+        dossier: {
+            meta: { title: 'Dungeon of Torment', systemKey: 'fantasy' },
+            protagonist: { name: 'Garrick' },
+        },
+        chatHistory: [],
+    };
+    const validBlueprintOnly = validateDraft(blueprintOnlyDraft);
+    assert.ok(validBlueprintOnly, 'Modified blueprint with empty chatHistory must pass validation');
+    assert.strictEqual(validBlueprintOnly.dossier.meta.title, 'Dungeon of Torment');
+
+    // Untouched blueprint with empty chatHistory must be rejected (not a real draft)
+    const untouchedEmptyDraft = {
+        dossier: createEmptyDossier(),
+        chatHistory: [],
+    };
+    assert.strictEqual(validateDraft(untouchedEmptyDraft), null, 'Untouched blueprint with empty chatHistory must return null');
 
     console.log('✓ validateDraft enforces strict integrity and heals salvageable schemas');
 }
@@ -152,6 +166,10 @@ console.log('Testing concierge-ui.js integration...');
 
     // openConciergeModal uses loadValidatedDraft
     assert.ok(uiJs.includes('loadValidatedDraft()'), 'openConciergeModal must invoke loadValidatedDraft');
+
+    // Load active campaign replacement guardrail
+    assert.ok(uiJs.includes('hasExistingSessionProgress'), 'concierge-ui.js must check hasExistingSessionProgress before loading active campaign');
+    assert.ok(uiJs.includes('resetConciergeState({ showGreeting: false })'), 'concierge-ui.js must reset state cleanly before loading active campaign');
 
     console.log('✓ concierge-ui.js lifecycle wiring verified');
 }

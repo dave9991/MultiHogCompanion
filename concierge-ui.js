@@ -1288,15 +1288,33 @@ function bindModalEvents() {
                 return;
             }
 
+            const candidateTitle = (dossier.meta?.title || '').trim() || 'Active Adventure';
+            const hasExistingSessionProgress = (Array.isArray(chatHistory) && chatHistory.length > 0) || !isDossierEmptyOrUntouched(activeDossier);
+
+            if (hasExistingSessionProgress) {
+                const proceed = confirm(
+                    `An in-progress Session Zero draft is currently open.\n\nLoading "${candidateTitle}" will discard your unlaunched draft and restart the conversation for this campaign.\n\nProceed?`
+                );
+                if (!proceed) {
+                    toastr?.info('Load cancelled. Current Session Zero draft retained.');
+                    return;
+                }
+            }
+
+            // Cleanly reset Session Zero state without default welcome bubble
+            resetConciergeState({ showGreeting: false });
+
+            // Install active campaign into live dossier & deck
             activeDossier = healAndNormalizeDossier(dossier);
             updateBlueprintDeck();
-            saveDraft();
             $('#mhc_sync_active_campaign_btn').show();
-            toastr?.success(`Loaded active campaign: "${activeDossier.meta?.title || 'Active Adventure'}"! Dials and cards are now editable.`);
-            appendChatBubble(
-                'assistant',
-                `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust Harm capacity, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`
-            );
+
+            const loadNotice = `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust Harm capacity, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`;
+            appendChatBubble('assistant', loadNotice);
+            chatHistory.push({ role: 'assistant', content: loadNotice });
+
+            saveDraft();
+            toastr?.success(`Loaded active campaign: "${candidateTitle}"! Dials and cards are now editable.`);
         } catch (err) {
             toastr?.error(`Failed to load active campaign: ${err.message}`);
         } finally {

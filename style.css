@@ -140,6 +140,15 @@
     font-family: var(--rt-font, var(--primaryFontFamily, system-ui, sans-serif));
 }
 
+/* ── Reset SillyTavern's global menu_button min-content constraint ── */
+.mhc-concierge-window .menu_button,
+.mhc-concierge-window .mhc-bar-btn {
+    width: auto !important;
+    white-space: nowrap !important;
+    margin: 0 !important;
+    height: auto;
+}
+
 .mhc-concierge-header {
     display: flex;
     align-items: center;
@@ -171,10 +180,20 @@
     gap: 8px;
 }
 
+.mhc-header-controls .mhc-system-badge,
+.mhc-header-controls select.text_pole,
+.mhc-header-controls #mhc_concierge_close {
+    height: 28px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+}
+
 .mhc-system-badge {
     font-size: 0.8em;
     font-weight: bold;
-    padding: 4px 9px;
+    padding: 0 9px;
     border-radius: 5px;
     background: var(--mhc-accent-bg);
     border: 1px solid var(--mhc-accent);
@@ -194,6 +213,9 @@
     color: var(--mhc-fg) !important;
     cursor: pointer;
     transition: all 0.15s ease;
+    justify-content: center;
+    width: 28px !important;
+    padding: 0 !important;
 }
 .mhc-concierge-header #mhc_concierge_close:hover {
     background: rgba(239, 68, 68, 0.18) !important;
@@ -244,10 +266,10 @@
 
 .mhc-bubble-user {
     align-self: flex-end;
-    background: var(--mhc-user-bubble-bg);
-    border: 1px solid transparent;
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    border: 1px solid rgba(56, 189, 248, 0.4);
     color: #ffffff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .mhc-bubble img.mhc-thumb-preview {
@@ -269,6 +291,8 @@
     background: var(--mhc-header-bg);
     border-top: 1px solid var(--mhc-border);
     flex-wrap: wrap;
+    min-height: 40px;
+    box-sizing: border-box;
 }
 
 .mhc-bar-btn {
@@ -280,11 +304,22 @@
     color: var(--mhc-fg) !important;
     cursor: pointer;
     transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    box-sizing: border-box;
 }
 .mhc-bar-btn:hover {
     background: var(--mhc-accent-bg) !important;
     border-color: var(--mhc-accent) !important;
     color: var(--mhc-accent) !important;
+}
+
+.mhc-inspiration-bar select.text_pole {
+    height: 26px;
+    box-sizing: border-box;
+    margin: 0;
 }
 
 /* Attachment Tray */
@@ -684,14 +719,17 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
+    padding: 8px 16px;
     background: var(--mhc-header-bg);
     border-top: 1px solid var(--mhc-border);
     flex-shrink: 0;
+    min-height: 48px;
+    box-sizing: border-box;
 }
 
 .mhc-footer-left {
     display: flex;
+    align-items: center;
     gap: 8px;
 }
 
@@ -699,9 +737,15 @@
     background: var(--mhc-card-bg);
     border: 1px solid var(--mhc-border);
     color: var(--mhc-fg);
-    padding: 5px 10px;
+    padding: 5px 12px;
     border-radius: 6px;
     transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85em;
+    height: 32px;
+    box-sizing: border-box;
 }
 .mhc-concierge-footer .menu_button:hover {
     background: var(--mhc-accent-bg);
@@ -713,12 +757,17 @@
     background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
     color: #ffffff !important;
     font-weight: bold !important;
-    padding: 7px 18px !important;
+    padding: 6px 16px !important;
     border-radius: 6px !important;
     border: 1px solid rgba(255, 255, 255, 0.25) !important;
     box-shadow: 0 2px 10px rgba(37, 99, 235, 0.45);
     cursor: pointer;
     transition: filter 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    box-sizing: border-box;
 }
 .mhc-launch-btn:hover {
     filter: brightness(1.15);
@@ -762,4 +811,19 @@
     height: 100%;
     background: linear-gradient(90deg, #2563eb, #60a5fa);
     transition: width 0.3s ease;
+}
+
+/* ── Responsive Enhancements for Narrow Displays ── */
+@media (max-width: 1024px) {
+    .mhc-header-title small {
+        display: none;
+    }
+    .mhc-tab-btn {
+        padding: 6px 4px;
+        font-size: 0.8em;
+    }
+    .mhc-inspiration-bar {
+        gap: 6px;
+        padding: 4px 10px;
+    }
 }

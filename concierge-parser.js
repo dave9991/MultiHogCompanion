@@ -123,8 +123,8 @@ export function isDossierEmptyOrUntouched(dossier) {
 export function validateDraft(draft) {
     if (!draft || typeof draft !== 'object') return null;
 
-    // 1. Must have valid non-empty chat history
-    if (!Array.isArray(draft.chatHistory) || draft.chatHistory.length === 0) {
+    // 1. Must have valid chatHistory array
+    if (!Array.isArray(draft.chatHistory)) {
         return null;
     }
 
@@ -136,6 +136,11 @@ export function validateDraft(draft) {
 
     // 2. Must have valid dossier structure with meta and protagonist
     if (!draft.dossier || typeof draft.dossier !== 'object' || !draft.dossier.meta || !draft.dossier.protagonist) {
+        return null;
+    }
+
+    // 3. If chatHistory is empty AND dossier is untouched, there is no meaningful draft
+    if (draft.chatHistory.length === 0 && isDossierEmptyOrUntouched(draft.dossier)) {
         return null;
     }
 

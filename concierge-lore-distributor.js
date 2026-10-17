@@ -322,10 +322,10 @@ export function buildWorldRuleEntry(axiom) {
  */
 export function buildCustomModuleLoreEntry(customModule) {
     if (!customModule || typeof customModule !== 'object') return null;
-    const fieldKey = (customModule.fieldKey || 'custom').trim();
+    const fieldKey = (customModule.tag || customModule.fieldKey || 'custom').trim();
     const label = (customModule.label || fieldKey).trim();
     const instruction = (customModule.instruction || '').trim();
-    const sample = (customModule.sample || '').trim();
+    const sample = (customModule.sampleContent || customModule.sample || '').trim();
 
     if (!fieldKey && !instruction) return null;
 

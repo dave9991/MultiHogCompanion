@@ -1088,8 +1088,8 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME']
         : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
     const customMod = worldRules?.customModule;
-    if (customMod && (customMod.fieldKey || customMod.label)) {
-        const cTag = (customMod.fieldKey || customMod.label).replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
+    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+        const cTag = (customMod.tag || customMod.fieldKey || customMod.label).replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
         if (!baseBlockOrder.includes(cTag)) {
             baseBlockOrder.push(cTag);
         }
@@ -1360,12 +1360,12 @@ export function formatInitialPbtaMemo(dossier) {
 
     // 6. If Custom HUD Module exists, add initial custom module block
     const customMod = dossier?.worldRules?.customModule;
-    if (customMod && (customMod.fieldKey || customMod.label)) {
-        const rawTag = (customMod.fieldKey || customMod.label || 'CUSTOM')
+    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+        const rawTag = (customMod.tag || customMod.fieldKey || customMod.label || 'CUSTOM')
             .replace(/[^a-zA-Z0-9_]/g, '_')
             .toUpperCase();
-        const label = customMod.label || customMod.fieldKey || 'Custom Tracker';
-        const sampleContent = (customMod.sample || `${label}: Initialized`).trim();
+        const label = customMod.label || customMod.tag || customMod.fieldKey || 'Custom Tracker';
+        const sampleContent = (customMod.sampleContent || customMod.sample || `${label}: Initialized`).trim();
         blocks.push(`[${rawTag}]\n${sampleContent}\n[/${rawTag}]`);
     }
 

@@ -53,6 +53,12 @@ export function createEmptyDossier() {
             axioms: [],
             customModule: null,
         },
+        contemplation: {
+            coreTension: '',
+            worldConsequences: '',
+            webOfEntanglement: '',
+            kickPressure: '',
+        },
         config: {
             playstyle: 'cyoa_5',
             cyoaEmojis: true,
@@ -281,6 +287,8 @@ export function stripConciergeStateBlocks(text) {
     return text
         .replace(/\[UPDATE_DOSSIER\][\s\S]*?(?:\[\/UPDATE_DOSSIER\]|$)/gi, '')
         .replace(/\[CONCIERGE_STATE\][\s\S]*?(?:\[\/CONCIERGE_STATE\]|$)/gi, '')
+        .replace(/\[CONTEMPLATION\][\s\S]*?(?:\[\/CONTEMPLATION\]|$)/gi, '')
+        .replace(/\[DOSSIER_CRITIQUE\][\s\S]*?(?:\[\/DOSSIER_CRITIQUE\]|$)/gi, '')
         .replace(/\[PROTAGONIST(?::[^\n\]]+)?\][\s\S]*?(?:\[\/PROTAGONIST\]|$)/gi, '')
         .replace(/\[NPC(?::[^\n\]]+)?\][\s\S]*?(?:\[\/NPC\]|$)/gi, '')
         .replace(/\[MONSTER(?::[^\n\]]+)?\][\s\S]*?(?:\[\/MONSTER\]|$)/gi, '')
@@ -660,6 +668,7 @@ export function applyDossierUpdates(text, dossier) {
         hasMutations: false,
         isNoop: false,
         builderSummary: 'No blueprint mutations detected',
+        contemplation: null,
     };
 
     if (!text || typeof text !== 'string') return fallbackResult;
@@ -686,6 +695,7 @@ export function applyDossierUpdates(text, dossier) {
             hasMutations: false,
             isNoop: true,
             builderSummary: noopSummary || 'No blueprint changes requested',
+            contemplation: null,
         };
     }
 
@@ -700,7 +710,7 @@ export function applyDossierUpdates(text, dossier) {
         raw = stateMatch[1];
     } else {
         // Fallback: check if text contains standalone blocks directly
-        const hasDirectBlocks = /\[(?:CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)\]/i.test(text);
+        const hasDirectBlocks = /\[(?:CONTEMPLATION|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)\]/i.test(text);
         if (hasDirectBlocks) {
             raw = text;
         }
@@ -711,6 +721,27 @@ export function applyDossierUpdates(text, dossier) {
     const updated = JSON.parse(JSON.stringify(dossier));
     const changes = [];
     const errors = [];
+
+    // 0b. Extract [CONTEMPLATION] architectural reasoning scratchpad (inside or alongside [UPDATE_DOSSIER])
+    let extractedContemplation = null;
+    const contempMatch = raw.match(/\[CONTEMPLATION\]([\s\S]*?)(?:\[\/CONTEMPLATION\]|(?=\n\s*(?:summary|system|title|premise|tone)\s*:)|(?=\[(?:CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE)\])|$)/i)
+        || text.match(/\[CONTEMPLATION\]([\s\S]*?)\[\/CONTEMPLATION\]/i);
+    if (contempMatch) {
+        const cKv = parseKeyValueLines(contempMatch[1]);
+        const coreTension = (cKv.core_tension || cKv.coretension || cKv.tension || '').trim();
+        const worldConsequences = (cKv.world_consequences || cKv.worldconsequences || cKv.consequences || '').trim();
+        const webOfEntanglement = (cKv.web_of_entanglement || cKv.webofentanglement || cKv.entanglement || cKv.connections || '').trim();
+        const kickPressure = (cKv.kick_pressure || cKv.kickpressure || cKv.pressure || '').trim();
+        if (coreTension || worldConsequences || webOfEntanglement || kickPressure) {
+            extractedContemplation = {
+                coreTension: coreTension || updated.contemplation?.coreTension || '',
+                worldConsequences: worldConsequences || updated.contemplation?.worldConsequences || '',
+                webOfEntanglement: webOfEntanglement || updated.contemplation?.webOfEntanglement || '',
+                kickPressure: kickPressure || updated.contemplation?.kickPressure || '',
+            };
+            updated.contemplation = extractedContemplation;
+        }
+    }
 
     // Extract builder summary if emitted
     let builderSummary = null;
@@ -1148,8 +1179,8 @@ export function applyDossierUpdates(text, dossier) {
 
         const mapObj = {
             site: kv.site,
-            kind: ['DUNGEON', 'SETTLEMENT', 'INTERIOR'].includes(kindUpper) ? kindUpper : 'INTERIOR',
-            threat: ['NONE', 'LOW', 'MODERATE', 'HIGH', 'DEADLY'].includes(threatUpper) ? threatUpper : 'MODERATE',
+            kind: ['DUNGEON', 'SETTLEMENT', 'INTERIOR', 'WILDERNESS'].includes(kindUpper) ? kindUpper : 'INTERIOR',
+            threat: ['NONE', 'SAFE', 'LOW', 'MODERATE', 'HIGH', 'DANGEROUS', 'DEADLY'].includes(threatUpper) ? threatUpper : 'MODERATE',
             entrance: kv.entrance || 'Main Entrance',
             prompt: kv.prompt || '',
             briefDescription: kv.brief_description || kv.prompt || '',
@@ -1341,7 +1372,8 @@ export function applyDossierUpdates(text, dossier) {
     // ── 7c. Custom Tracker Module ──────────────────────────────────────────────
     if (/\[REMOVE_CUSTOM_MODULE\]/i.test(raw) || /remove_custom_module\s*:\s*true/i.test(raw)) {
         if (updated.worldRules.customModule) {
-            changes.push(`Removed Custom Tracker Module [${updated.worldRules.customModule.tag}]`);
+            const existingTag = updated.worldRules.customModule.tag || updated.worldRules.customModule.fieldKey || 'CUSTOM';
+            changes.push(`Removed Custom Tracker Module [${existingTag}]`);
             updated.worldRules.customModule = null;
         }
     }
@@ -1350,7 +1382,7 @@ export function applyDossierUpdates(text, dossier) {
     if (customModuleMatch) {
         const cmBlock = customModuleMatch[1];
         const kv = parseKeyValueLines(cmBlock);
-        const tag = (kv.tag || kv.name || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '');
+        const tag = (kv.tag || kv.fieldkey || kv.field_key || kv.name || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '');
         if (tag) {
             const label = cleanTargetName(kv.label || kv.title || tag);
             const icon = (kv.icon || '📦').trim();
@@ -1370,10 +1402,12 @@ export function applyDossierUpdates(text, dossier) {
 
             const moduleObj = {
                 tag,
+                fieldKey: tag,
                 label: label || tag,
                 icon,
                 instruction,
                 sampleContent,
+                sample: sampleContent,
             };
 
             updated.worldRules.customModule = moduleObj;
@@ -1550,6 +1584,7 @@ export function applyDossierUpdates(text, dossier) {
         hasMutations: changes.length > 0,
         isNoop: false,
         builderSummary: builderSummary || (changes.length ? changes.join('; ') : 'Blueprint in sync'),
+        contemplation: extractedContemplation,
     };
 }
 
@@ -1662,8 +1697,10 @@ export function serializeDossierToMarkdown(dossier) {
     let customModuleMd = '';
     if (dossier.worldRules?.customModule) {
         const cm = dossier.worldRules.customModule;
-        const sampleBlock = cm.sampleContent ? `\n\n\`\`\`text\n${cm.sampleContent}\n\`\`\`` : '';
-        customModuleMd = `\n\n---\n\n## 📊 Custom Tracker Module:\n* **Tag:** [${cm.tag}]\n* **Label:** ${cm.label}\n* **Icon:** ${cm.icon || '📦'}\n* **State Model Instruction:** ${cm.instruction || 'None'}${sampleBlock}`;
+        const cmTag = cm.tag || cm.fieldKey || 'CUSTOM';
+        const cmSample = cm.sampleContent || cm.sample || '';
+        const sampleBlock = cmSample ? `\n\n\`\`\`text\n${cmSample}\n\`\`\`` : '';
+        customModuleMd = `\n\n---\n\n## 📊 Custom Tracker Module:\n* **Tag:** [${cmTag}]\n* **Label:** ${cm.label || cmTag}\n* **Icon:** ${cm.icon || '📦'}\n* **State Model Instruction:** ${cm.instruction || 'None'}${sampleBlock}`;
     }
 
     const toneLine = meta.tone
@@ -1681,7 +1718,7 @@ export function serializeDossierToMarkdown(dossier) {
 * **Playbook:** ${p.playbook || 'Wanderer'}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}${p.habits ? `\n* **Habits:** ${p.habits}` : ''}
 * **Stats:** ${statString || 'Not assigned'}
 * **Harm Capacity:** ${(p.harm?.current > 0) ? `${p.harm.current}/${p.harm.max || 5} (Wounded)` : (p.harm?.max || 5)} | **Armor:** ${p.harm?.armor || 0}${(p.status || (p.harm?.current > 0 ? '(-) Wounded' : '')) ? `\n* **Status:** ${p.status || '(-) Wounded'}` : ''}${(p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) ? `\n* **Conditions:** ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}` : ''}
-* **Background Bio:** ${p.bio || 'None'}
+* **Background Bio:** ${p.bio || p.background || 'None'}
 
 ### ⚡ Key Moves:
 ${movesMd}
@@ -1721,12 +1758,6 @@ ${mapsMd}${worldRulesMd}${customModuleMd}
 * **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}${dossier.config.maxHarmFate ? `\n* **Max Harm Fate:** ${dossier.config.maxHarmFate.rule || dossier.config.maxHarmFate}${dossier.config.maxHarmFate.statusToken ? ` | **Status Token:** ${dossier.config.maxHarmFate.statusToken}` : ''}` : ''}` : ''}`;
 }
 
-/**
- * Reconstitutes a Campaign Dossier object from serialized Markdown.
- * Used for auto-recovery and fallback hydration from World Info or lorebooks.
- *
- * @param {string} markdown
- * @returns {object|null}
 /**
  * Normalizes, repairs, and heals a PbtA Campaign Dossier object to guarantee
  * full compliance with the active runtime schema. Resilient against missing
@@ -1832,7 +1863,8 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.protagonist = dossier.protagonist || {};
     dossier.protagonist.name = (dossier.protagonist.name || '').trim();
     dossier.protagonist.playbook = (dossier.protagonist.playbook || '').trim();
-    dossier.protagonist.bio = dossier.protagonist.bio || '';
+    dossier.protagonist.bio = dossier.protagonist.bio || dossier.protagonist.background || '';
+    dossier.protagonist.background = dossier.protagonist.background || dossier.protagonist.bio || '';
     dossier.protagonist.portraitSrc = dossier.protagonist.portraitSrc || null;
     dossier.protagonist.conditions = Array.isArray(dossier.protagonist.conditions) ? dossier.protagonist.conditions : [];
 
@@ -1891,14 +1923,15 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.npcs.forEach(n => {
         n.name = (n.name || 'Unnamed NPC').trim();
         n.role = (n.role || 'Ally').trim();
-        n.friendship = typeof n.friendship === 'number' ? Math.max(-100, Math.min(100, n.friendship)) : 0;
-        n.affection = typeof n.affection === 'number' ? Math.max(-100, Math.min(100, n.affection)) : 0;
+        n.friendship = clampRelationshipScore(n.friendship);
+        n.affection = clampRelationshipScore(n.affection);
     });
 
     dossier.monsters = Array.isArray(dossier.monsters) ? dossier.monsters : [];
     dossier.monsters.forEach(m => {
         m.name = (m.name || 'Threat').trim();
         m.harm = parseInt(m.harm, 10) || 3;
+        m.currentHarm = parseInt(m.currentHarm, 10) || 0;
         m.armor = parseInt(m.armor, 10) || 0;
         m.attacks = Array.isArray(m.attacks) ? m.attacks : (m.attacks ? [String(m.attacks)] : ['Claw/Strike (2 Harm)']);
         m.impendingDoom = Array.isArray(m.impendingDoom) ? m.impendingDoom : [];
@@ -1923,7 +1956,38 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     // 6. worldRules
     dossier.worldRules = dossier.worldRules || {};
     dossier.worldRules.axioms = Array.isArray(dossier.worldRules.axioms) ? dossier.worldRules.axioms : [];
-    dossier.worldRules.customModule = (dossier.worldRules.customModule && typeof dossier.worldRules.customModule === 'object') ? dossier.worldRules.customModule : null;
+    if (dossier.worldRules.customModule && typeof dossier.worldRules.customModule === 'object') {
+        const cm = dossier.worldRules.customModule;
+        const normalizedTag = (cm.tag || cm.fieldKey || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '') || 'CUSTOM';
+        const normalizedSample = cm.sampleContent ?? cm.sample ?? '';
+        dossier.worldRules.customModule = {
+            ...cm,
+            tag: normalizedTag,
+            fieldKey: normalizedTag,
+            label: cm.label || normalizedTag,
+            icon: cm.icon || '📦',
+            instruction: cm.instruction || '',
+            sampleContent: normalizedSample,
+            sample: normalizedSample,
+        };
+    } else {
+        dossier.worldRules.customModule = null;
+    }
+
+    // 7. contemplation
+    dossier.contemplation = dossier.contemplation && typeof dossier.contemplation === 'object'
+        ? {
+            coreTension: dossier.contemplation.coreTension || '',
+            worldConsequences: dossier.contemplation.worldConsequences || '',
+            webOfEntanglement: dossier.contemplation.webOfEntanglement || '',
+            kickPressure: dossier.contemplation.kickPressure || '',
+        }
+        : {
+            coreTension: '',
+            worldConsequences: '',
+            webOfEntanglement: '',
+            kickPressure: '',
+        };
 
     return dossier;
 }
@@ -1978,17 +2042,25 @@ export function parseMarkdownToDossier(markdown) {
         }
     }
 
-    const harmMatch = markdown.match(/\*\s*\*\*Harm Capacity:\*\*\s*(\d+)(?:\s*\|\s*\*\*Armor:\*\*\s*(\d+))?/i);
+    const harmMatch = markdown.match(/\*\s*\*\*Harm Capacity:\*\*\s*(?:(\d+)\s*\/\s*(\d+)(?:\s*\([^)]*\))?|(\d+))(?:\s*\|\s*\*\*Armor:\*\*\s*(\d+))?/i);
     if (harmMatch) {
+        const curHarm = harmMatch[1] !== undefined ? (parseInt(harmMatch[1], 10) || 0) : 0;
+        const maxHarm = harmMatch[2] !== undefined ? (parseInt(harmMatch[2], 10) || 5) : (parseInt(harmMatch[3], 10) || 5);
         dossier.protagonist.harm = {
-            max: parseInt(harmMatch[1], 10) || 5,
-            current: 0,
-            armor: parseInt(harmMatch[2], 10) || 0,
+            max: maxHarm,
+            current: curHarm,
+            armor: parseInt(harmMatch[4], 10) || 0,
         };
     }
 
     const bioMatch = markdown.match(/\*\s*\*\*Background Bio:\*\*\s*([^\n\r]+)/i);
-    if (bioMatch) dossier.protagonist.bio = bioMatch[1].trim();
+    if (bioMatch) {
+        const bioVal = bioMatch[1].trim();
+        if (bioVal && bioVal !== 'None') {
+            dossier.protagonist.bio = bioVal;
+            dossier.protagonist.background = bioVal;
+        }
+    }
 
     const speciesMatch = markdown.match(/\*\s*\*\*Species:\*\*\s*([^\n\r]+)/i);
     if (speciesMatch) dossier.protagonist.species = speciesMatch[1].trim();
@@ -2086,7 +2158,7 @@ export function parseMarkdownToDossier(markdown) {
             const name = lines[0]?.trim();
             if (!name || name.startsWith('_No')) continue;
 
-            const harmArmorM = block.match(/\*\s*\*\*Harm:\*\*\s*(\d+)(?:\s*\|\s*\*\*Armor:\*\*\s*(\d+))?/i);
+            const harmArmorM = block.match(/\*\s*\*\*Harm:\*\*\s*(?:(\d+)\s*\/\s*(\d+)(?:\s*\([^)]*\))?|(\d+))(?:\s*\|\s*\*\*Armor:\*\*\s*(\d+))?/i);
             const attacksM = block.match(/\*\s*\*\*Attacks:\*\*\s*([^\n\r]+)/i);
             const weaknessM = block.match(/\*\s*\*\*Weakness:\*\*\s*([^\n\r]+)/i);
             const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
@@ -2100,10 +2172,16 @@ export function parseMarkdownToDossier(markdown) {
                 impendingDoom.push(...dLines);
             }
 
+            const curHarm = harmArmorM && harmArmorM[1] !== undefined ? (parseInt(harmArmorM[1], 10) || 0) : 0;
+            const maxHarm = harmArmorM
+                ? (harmArmorM[2] !== undefined ? (parseInt(harmArmorM[2], 10) || 3) : (parseInt(harmArmorM[3], 10) || 3))
+                : 3;
+
             dossier.monsters.push({
                 name,
-                harm: harmArmorM ? parseInt(harmArmorM[1], 10) : 3,
-                armor: harmArmorM ? (parseInt(harmArmorM[2], 10) || 0) : 0,
+                harm: maxHarm,
+                currentHarm: curHarm,
+                armor: harmArmorM ? (parseInt(harmArmorM[4], 10) || 0) : 0,
                 attacks: attacksM ? attacksM[1].split(',').map(s => s.trim()) : [],
                 weakness: weaknessM ? weaknessM[1].trim() : '',
                 notes: notesM ? notesM[1].trim() : '',
@@ -2268,19 +2346,150 @@ export function parseMarkdownToDossier(markdown) {
         const sampleM = customModSection[1].match(/```(?:text)?\s*([\s\S]*?)```/i);
 
         if (tagM) {
+            const parsedTag = tagM[1].trim().toUpperCase();
+            const parsedSample = sampleM ? sampleM[1].trim() : '';
             dossier.worldRules = dossier.worldRules || { axioms: [], customModule: null };
             dossier.worldRules.customModule = {
-                tag: tagM[1].trim().toUpperCase(),
-                label: labelM ? labelM[1].trim() : tagM[1].trim(),
+                tag: parsedTag,
+                fieldKey: parsedTag,
+                label: labelM ? labelM[1].trim() : parsedTag,
                 icon: iconM ? iconM[1].trim() : '📦',
                 instruction: instM ? instM[1].trim() : '',
-                sampleContent: sampleM ? sampleM[1].trim() : '',
+                sampleContent: parsedSample,
+                sample: parsedSample,
             };
         }
     }
 
     const isValid = Boolean(dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign' || (dossier.worldRules?.axioms && dossier.worldRules.axioms.length > 0));
     return isValid ? healAndNormalizeDossier(dossier, markdown) : null;
+}
+
+/**
+ * Parses a [DOSSIER_CRITIQUE] block emitted by the Contemplative Blueprint Judge / Critic.
+ *
+ * @param {string} rawText
+ * @returns {{
+ *   verdict: 'PASS'|'REVISE',
+ *   score: number,
+ *   grade: string,
+ *   strengths: string[],
+ *   weaknesses: string[],
+ *   directives: string[],
+ *   shouldRevise: boolean,
+ *   rawText: string
+ * }}
+ */
+export function parseDossierCritique(rawText) {
+    const defaultCritique = {
+        verdict: 'PASS',
+        score: 85,
+        grade: 'B+',
+        strengths: [],
+        weaknesses: [],
+        directives: [],
+        shouldRevise: false,
+        rawText: rawText || '',
+    };
+
+    if (!rawText || typeof rawText !== 'string') return defaultCritique;
+
+    const blockMatch = rawText.match(/\[DOSSIER_CRITIQUE\]([\s\S]*?)(?:\[\/DOSSIER_CRITIQUE\]|$)/i);
+    const body = blockMatch ? blockMatch[1] : rawText;
+    const kv = parseKeyValueLines(body);
+
+    const rawVerdict = String(kv.verdict || '').toUpperCase().trim();
+    let score = parseInt(kv.score, 10);
+    if (isNaN(score)) score = 85;
+    score = Math.max(0, Math.min(100, score));
+
+    const grade = (kv.grade || (score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : 'D')).trim();
+    const strengths = parseBulletOrListItems(body, 'strengths');
+    const weaknesses = parseBulletOrListItems(body, 'weaknesses');
+    const directives = parseBulletOrListItems(body, 'directives');
+
+    const verdict = (rawVerdict === 'REVISE' || (rawVerdict !== 'PASS' && score < 82 && directives.length > 0))
+        ? 'REVISE'
+        : 'PASS';
+
+    const shouldRevise = (verdict === 'REVISE' || score < 82) && directives.length > 0;
+
+    return {
+        verdict,
+        score,
+        grade,
+        strengths,
+        weaknesses,
+        directives,
+        shouldRevise,
+        rawText,
+    };
+}
+
+/**
+ * Determines whether the Smart-Gated Contemplative Judge Pass should run after Builder Pass 1.
+ * Triggers on:
+ *  - Initial campaign scaffolding (previously untitled/empty dossier that now has a premise/protagonist/entities)
+ *  - Turn with uploaded lore/card attachments
+ *  - Major structural updates touching 3+ distinct blueprint categories in a single turn
+ * Bypasses on NOOP, syntax error fallbacks, or minor 1-2 field tweaks.
+ *
+ * @param {object} params
+ * @param {object} [params.prevDossier] Dossier state before Pass 1
+ * @param {object} [params.updatedDossier] Dossier state after Pass 1
+ * @param {object} [params.builderReport] Report returned by applyDossierUpdates
+ * @param {boolean} [params.hasAttachments] Whether attachments were processed this turn
+ * @returns {boolean}
+ */
+export function shouldRunContemplativeJudgePass({
+    prevDossier,
+    updatedDossier,
+    builderReport,
+    hasAttachments = false,
+} = {}) {
+    if (!builderReport || !builderReport.hasMutations || builderReport.isNoop) {
+        return false;
+    }
+
+    if (hasAttachments) {
+        return true;
+    }
+
+    // Check if this turn transitioned the blueprint from blank/untitled to initial scaffold
+    const wasBlank = !prevDossier || (
+        (!prevDossier.meta?.premise) &&
+        (!prevDossier.protagonist?.name) &&
+        (!prevDossier.npcs || prevDossier.npcs.length === 0) &&
+        (!prevDossier.monsters || prevDossier.monsters.length === 0)
+    );
+    const hasCoreNow = Boolean(
+        updatedDossier?.meta?.premise ||
+        updatedDossier?.protagonist?.name ||
+        (updatedDossier?.npcs && updatedDossier.npcs.length > 0) ||
+        (updatedDossier?.monsters && updatedDossier.monsters.length > 0)
+    );
+    if (wasBlank && hasCoreNow) {
+        return true;
+    }
+
+    // Count distinct blueprint categories touched in builderReport.changes
+    const changes = builderReport.changes || [];
+    const categories = new Set();
+    for (const ch of changes) {
+        if (/^(?:PbtA Engine|Campaign title|Premise|Campaign tone)/i.test(ch)) categories.add('meta');
+        else if (/^Protagonist/i.test(ch)) categories.add('protagonist');
+        else if (/NPC/i.test(ch)) categories.add('npcs');
+        else if (/Adversary|monsters/i.test(ch)) categories.add('monsters');
+        else if (/Location|maps/i.test(ch)) categories.add('maps');
+        else if (/Faction/i.test(ch)) categories.add('factions');
+        else if (/The Kick/i.test(ch)) categories.add('kick');
+        else if (/CYOA choices/i.test(ch)) categories.add('cyoa');
+        else if (/World Rule|world rules/i.test(ch)) categories.add('worldRules');
+        else if (/Custom Tracker Module/i.test(ch)) categories.add('customModule');
+        else if (/dial set to/i.test(ch)) categories.add('config');
+    }
+
+    return categories.size >= 3;
 }
 
 /**
@@ -2322,6 +2531,38 @@ export function buildTalkerInstructionNotice(status, summaryText = '', errors = 
 export function formatDiagnosticTrace(tx) {
     if (!tx) return 'No diagnostic trace recorded.';
     const attempts = tx.attempts || [];
+    const contempSection = tx.contemplation && (tx.contemplation.coreTension || tx.contemplation.worldConsequences || tx.contemplation.webOfEntanglement || tx.contemplation.kickPressure)
+        ? [
+            '',
+            '#### 🧠 Architectural Contemplation (Pass 1 Scratchpad):',
+            `- **Core Tension:** ${tx.contemplation.coreTension || '(none)'}`,
+            `- **World Consequences:** ${tx.contemplation.worldConsequences || '(none)'}`,
+            `- **Web of Entanglement:** ${tx.contemplation.webOfEntanglement || '(none)'}`,
+            `- **Kick Pressure:** ${tx.contemplation.kickPressure || '(none)'}`,
+        ]
+        : [];
+
+    const critiqueSection = tx.critique
+        ? [
+            '',
+            '#### ⚖️ Blueprint Judge / Critic Pass:',
+            `- **Verdict:** ${tx.critique.verdict} (Score: ${tx.critique.score}/100 · Grade: ${tx.critique.grade})`,
+            `- **Triggered Second Pass:** ${Boolean(tx.critique.shouldRevise)}`,
+            ...(tx.critique.strengths?.length ? [`- **Strengths:** ${tx.critique.strengths.join(' | ')}`] : []),
+            ...(tx.critique.weaknesses?.length ? [`- **Weaknesses:** ${tx.critique.weaknesses.join(' | ')}`] : []),
+            ...(tx.critique.directives?.length ? [`- **Directives:** ${tx.critique.directives.join(' | ')}`] : []),
+        ]
+        : [];
+
+    const refinerSection = tx.refinerPass
+        ? [
+            '',
+            '#### 🔨 Second-Pass Refiner:',
+            `- **Summary:** ${tx.refinerPass.builderSummary || '(none)'}`,
+            `- **Refinements Applied:** ${(tx.refinerPass.changes && tx.refinerPass.changes.length) ? tx.refinerPass.changes.join('; ') : 'None'}`,
+        ]
+        : [];
+
     const md = [
         '### 🎩 MultiHog Concierge Builder Diagnostic Trace',
         `- **Timestamp:** ${tx.timestamp || new Date().toISOString()}`,
@@ -2329,6 +2570,9 @@ export function formatDiagnosticTrace(tx) {
         `- **System Engine:** ${tx.systemEngine || 'fantasy'}`,
         `- **User Prompt:** ${tx.userPrompt || tx.userMessage || '(none)'}`,
         `- **Extracted Summary:** ${tx.builderSummary || '(none)'}`,
+        ...contempSection,
+        ...critiqueSection,
+        ...refinerSection,
         '',
         '#### Execution Attempts:',
         ...attempts.map((a, i) => {
@@ -2372,3 +2616,4 @@ export function formatDiagnosticTrace(tx) {
     ].join('\n');
     return md;
 }
+

@@ -710,18 +710,18 @@ export async function launchPbtaCampaign(dossier, onProgress = () => {}, options
 
                     // Register Custom HUD Tracker Module in MultiHog Settings if defined
                     const customMod = dossier.worldRules?.customModule;
-                    if (customMod && (customMod.fieldKey || customMod.label)) {
-                        const customTag = (customMod.fieldKey || customMod.label)
+                    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+                        const customTag = (customMod.tag || customMod.fieldKey || customMod.label)
                             .replace(/[^a-zA-Z0-9_]/g, '_')
                             .toUpperCase();
                         rpgSettings.customFields = rpgSettings.customFields || [];
                         const existingIdx = rpgSettings.customFields.findIndex(f => f.tag?.toUpperCase() === customTag);
                         const fieldDef = {
                             tag: customTag,
-                            label: customMod.label || customMod.fieldKey || customTag,
-                            icon: '📟',
+                            label: customMod.label || customMod.tag || customMod.fieldKey || customTag,
+                            icon: customMod.icon || '📟',
                             prompt: customMod.instruction || '',
-                            template: customMod.sample || '',
+                            template: customMod.sampleContent || customMod.sample || '',
                             enabled: true,
                             scope: 'chat',
                         };
@@ -914,6 +914,34 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 rpgSettings.currentMemo = formatInitialPbtaMemo(dossier);
             }
 
+            // Register/update Custom HUD Tracker Module in MultiHog Settings if defined
+            const customMod = dossier.worldRules?.customModule;
+            if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+                const customTag = (customMod.tag || customMod.fieldKey || customMod.label)
+                    .replace(/[^a-zA-Z0-9_]/g, '_')
+                    .toUpperCase();
+                rpgSettings.customFields = rpgSettings.customFields || [];
+                const existingIdx = rpgSettings.customFields.findIndex(f => f.tag?.toUpperCase() === customTag);
+                const fieldDef = {
+                    tag: customTag,
+                    label: customMod.label || customMod.tag || customMod.fieldKey || customTag,
+                    icon: customMod.icon || '📟',
+                    prompt: customMod.instruction || '',
+                    template: customMod.sampleContent || customMod.sample || '',
+                    enabled: true,
+                    scope: 'chat',
+                };
+                if (existingIdx >= 0) {
+                    rpgSettings.customFields[existingIdx] = fieldDef;
+                } else {
+                    rpgSettings.customFields.push(fieldDef);
+                }
+
+                if (Array.isArray(rpgSettings.blockOrder) && !rpgSettings.blockOrder.includes(customTag)) {
+                    rpgSettings.blockOrder.push(customTag);
+                }
+            }
+
             if (chatId) {
                 rpgSettings.chatStateProjectionOwner = chatId;
                 rpgSettings.chatStates = rpgSettings.chatStates || {};
@@ -921,6 +949,9 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
                 rpgSettings.chatStates[chatId].currentMemo = rpgSettings.currentMemo;
                 rpgSettings.chatStates[chatId].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
+                if (rpgSettings.customFields) {
+                    rpgSettings.chatStates[chatId].customFields = [...rpgSettings.customFields];
+                }
                 syncLivePbtaMemoVitality(rpgSettings, chatId);
             }
 
@@ -964,7 +995,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
 export async function reconstituteDossierWithAi(rawMarkdown, onProgress = () => {}) {
     onProgress('Consulting the AI Campaign Architect to heal dossier...');
     const { sendConciergeRequest } = await import('./concierge-connection.js');
-    const { createEmptyDossier, parseConciergeStateBlock, applyDossierUpdates, healAndNormalizeDossier } = await import('./concierge-parser.js');
+    const { createEmptyDossier, applyDossierUpdates, healAndNormalizeDossier } = await import('./concierge-parser.js');
 
     const prompt = `[TASK: RECONSTITUTE_CAMPAIGN_DOSSIER]
 You are the PbtA Campaign Architect. The following text contains an unstructured, corrupted, or legacy campaign outline.
@@ -987,12 +1018,9 @@ Output the [UPDATE_DOSSIER] ... [/UPDATE_DOSSIER] block now.`;
         { role: 'user', content: prompt },
     ]);
 
-    const stateBlock = parseConciergeStateBlock(response || '');
     let dossier = createEmptyDossier();
-    if (stateBlock) {
-        const updateResult = applyDossierUpdates(dossier, stateBlock);
-        dossier = updateResult.updatedDossier || dossier;
-    }
+    const updateResult = applyDossierUpdates(response || '', dossier);
+    dossier = updateResult.updatedDossier || dossier;
 
     return healAndNormalizeDossier(dossier, rawMarkdown);
 }

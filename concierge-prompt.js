@@ -322,6 +322,14 @@ ${genreSummaries}
 \`\`\`text
 [UPDATE_DOSSIER]
 summary: Evocative 1-sentence summary of changes made
+
+[CONTEMPLATION] (Include on initial scaffolding or major world/cast updates to reason through cohesion before emitting entities)
+core_tension: Central dramatic conflict & thematic tension of the campaign
+world_consequences: How setting laws/tone concretely reshape daily life, gear, and infrastructure
+web_of_entanglement: How the Protagonist, Faction, NPC, and Adversary are personally bound by history, debts, or rivalry
+kick_pressure: Why the crisis at the starting location demands immediate action on Turn 1
+[/CONTEMPLATION]
+
 title: Punchy 2-3 word campaign title
 system: fantasy | scifi | anime | horror | western | pirate | mecha | cosmic_horror | survival_horror | post_apocalyptic | gothic_heist
 tone: Evocative tone & atmospheric style
@@ -443,12 +451,134 @@ sample:
   The downstream Name Diversity Engine (NameRAG) will automatically resolve each placeholder into an authentic, culturally evocative name tailored to that character's specific demeanor and backstory before updating the live campaign.
 
 ### 🏗️ Proactive Scaffolding & Delta Rules:
-1. **Turn 1 / Initial Scaffolding:** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:
-   Proactively scaffold a complete, coherent starting draft into [UPDATE_DOSSIER]: summary: ..., title, engine, tone, premise, [CONFIG] dials, [PROTAGONIST] (+2, +1, +1, 0, -1 with 2 signature moves), 1 [FACTION], 1 world [NPC], 1 [MONSTER] with countdown doom track, 1 starting [MAP], and [KICK].
-   * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include [WORLD_RULES]. Only include a [CUSTOM_MODULE] if this rule requires a bespoke physical resource gauge (e.g. symbiote hunger, wing stamina); NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking").
+1. **Turn 1 / Initial Scaffolding (Contemplative Architecture):** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:
+   First emit \`[CONTEMPLATION]\` inside \`[UPDATE_DOSSIER]\` to map out the central tension, world consequences, character entanglement, and starting crucible. Then proactively scaffold a complete, coherent starting draft into \`[UPDATE_DOSSIER]\`: \`summary: ...\`, \`title\`, \`system\`, \`tone\`, \`premise\`, \`[CONFIG]\` dials, \`[PROTAGONIST]\` (+2, +1, +1, 0, -1 with 2 signature moves), 1 \`[FACTION]\`, 1 world \`[NPC]\`, 1 \`[MONSTER]\` with countdown doom track, 1 starting \`[MAP]\`, and \`[KICK]\`.
+   * Ensure the Protagonist, Faction, NPC, and Monster are **entangled** (shared history, debts, conflicting agendas) rather than isolated tropes.
+   * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include \`[WORLD_RULES]\` and propagate those laws into the Protagonist's equipment, NPC roles, and \`[MAP]\` architecture. Only include a \`[CUSTOM_MODULE]\` if this rule requires a bespoke physical resource gauge (e.g. symbiote hunger, wing stamina); NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking").
 2. **Follow-Up Edits (Partial Patches):** When modifying an existing blueprint, emit ONLY the tags being added, edited, or removed. Unchanged entities and fields are preserved automatically.
 3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
 4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.`;
+}
+
+/**
+ * Builds the specialized system prompt for the Blueprint Judge / Critic agent.
+ * Evaluates a drafted PbtA Campaign Dossier against a 5-point narrative & mechanical rubric.
+ * @returns {string}
+ */
+export function buildConciergeCriticPrompt() {
+    return `You are the **PbtA Blueprint Judge & Story Editor**, a senior Tabletop RPG designer who evaluates Powered by the Apocalypse (PbtA) campaign blueprints for narrative depth, entity interconnectivity, and mechanical bite.
+
+Your ONLY job is to audit the candidate **[CURRENT_LIVE_BLUEPRINT]** against the player's request and the 5-Point PbtA Campaign Rubric, and output a structured **[DOSSIER_CRITIQUE]** block.
+
+### 🚫 STRICT OUTPUT PROTOCOL:
+* Output ONLY a \`[DOSSIER_CRITIQUE] ... [/DOSSIER_CRITIQUE]\` block.
+* NEVER output conversational prose, greetings, or explanations outside the block.
+
+### ⚖️ 5-Point PbtA Campaign Design Rubric (20 points each = 100 total):
+1. **Premise & Tone Cohesion (0–20):** Does the blueprint faithfully capture the player's pitch, inspiration material, tone, and genre without generic filler?
+2. **Web of Entanglement / Anti-Silo Check (0–20):** Are the Protagonist, Faction(s), NPC(s), and Adversary/Monster actively entangled with one another (shared history, debts, rivalries, conflicting agendas, or personal stakes in the crisis), rather than existing as disconnected generic tropes?
+3. **World Law & Setting Propagation (0–20):** If the premise or \`[WORLD_RULES]\` establish distinct setting rules, technology, biology, or cultural norms, do those rules visibly propagate into the Protagonist's equipment/moves, NPC roles/gear, and \`[MAP]\` architecture? (And if \`[CUSTOM_MODULE]\` is present, is it a genuine setting-specific resource gauge rather than a redundant generic health/combat tracker?)
+4. **PbtA Mechanical Bite (0–20):**
+   - Protagonist has the standard stat array (+2, +1, +1, 0, -1), vivid appearance/equipment/background/habits, and 2 bespoke moves with clear fictional triggers and 2d6 outcomes.
+   - Each Monster has a concrete exploitable \`weakness\` and a 3-step escalating \`countdown\` Impending Doom clock.
+   - Each NPC has concrete fictional leverage or support in \`moves_or_boons\` and a clear \`relationship\` bond.
+5. **The Kick's Immediate Crucible (0–20):** Does \`[KICK]\` place the protagonist directly at the starting \`[MAP]\` site *in media res* with an urgent crisis that connects to the staged cast/threats on Turn 1?
+
+### 📋 Critique Directive Syntax:
+\`\`\`text
+[DOSSIER_CRITIQUE]
+verdict: PASS | REVISE
+score: <integer 0 to 100>
+grade: A | B | C | D
+strengths: <1 concise sentence highlighting what already works well>
+weaknesses:
+- <Specific narrative disconnection, shallow trope, or mechanical gap #1>
+- <Specific gap #2>
+directives:
+- <Concrete, surgical instruction for the Builder's Second Pass to deepen or connect specific entities/fields>
+- <Concrete instruction #2 (e.g. "Update [NPC] Name's relationship and notes to tie them directly to [FACTION] and [MONSTER]")>
+- <Concrete instruction #3 (e.g. "Enrich [KICK] opening_prompt and crisis so the starting map and adversary's first omen collide immediately")>
+[/DOSSIER_CRITIQUE]
+\`\`\`
+
+### 🎯 Grading & Verdict Rules:
+* Be a discerning, constructive story editor. First-pass drafts often leave NPCs, Factions, and Monsters in separate silos or miss opportunities to weave setting laws into equipment and architecture.
+* If \`score < 85\` or if you spot any siloed entities, thin backgrounds, missing countdown clocks, or unpropagated world rules, set \`verdict: REVISE\` and provide 2–4 surgical, high-impact \`directives:\` that tell the Builder exactly which blocks and fields to enrich.
+* Only set \`verdict: PASS\` (and leave \`directives:\` empty) if \`score >= 85\` and all entities are tightly interwoven, mechanically complete, and vivid.`;
+}
+
+/**
+ * Builds the full system context payload for the Blueprint Judge / Critic pass.
+ * @param {object} activeDossier
+ * @param {string} [userPromptText]
+ * @param {string} [builderSummary]
+ * @param {object} [contemplation]
+ * @returns {string}
+ */
+export function buildConciergeCriticContext(activeDossier, userPromptText = '', builderSummary = '', contemplation = null) {
+    const basePrompt = buildConciergeCriticPrompt();
+    const formattedBlueprint = formatDossierForContext(activeDossier);
+
+    const contLines = [];
+    if (contemplation && typeof contemplation === 'object') {
+        if (contemplation.coreTension) contLines.push(`- Core Tension: ${contemplation.coreTension}`);
+        if (contemplation.worldConsequences) contLines.push(`- World Consequences: ${contemplation.worldConsequences}`);
+        if (contemplation.webOfEntanglement) contLines.push(`- Web of Entanglement: ${contemplation.webOfEntanglement}`);
+        if (contemplation.kickPressure) contLines.push(`- Kick Pressure: ${contemplation.kickPressure}`);
+    }
+    const contemplationSection = contLines.length
+        ? `\n======================================================================\n🧠 [ARCHITECT_CONTEMPLATION_NOTES] (PASS 1 INTENT)\n======================================================================\n${contLines.join('\n')}\n`
+        : '';
+
+    return `${basePrompt}
+${contemplationSection}
+======================================================================
+💬 [PLAYER_REQUEST_CONTEXT]
+======================================================================
+Player Input: ${userPromptText || '(Session Zero campaign scaffolding)'}
+Pass 1 Builder Summary: ${builderSummary || 'Initial blueprint draft'}
+
+======================================================================
+📋 [CURRENT_LIVE_BLUEPRINT] (CANDIDATE DRAFT TO AUDIT)
+======================================================================
+${formattedBlueprint}`;
+}
+
+/**
+ * Builds the full system context payload for Builder Pass 2: The Contemplative Refiner.
+ * Injects the Judge's [DOSSIER_CRITIQUE] directives so the Builder executes a targeted
+ * second pass to deepen entity connections, mechanical bite, and narrative cohesion.
+ *
+ * @param {object} activeDossier
+ * @param {string[]} changelog
+ * @param {object} critique Parsed critique object from parseDossierCritique
+ * @param {string} [activeNameRagSeeds]
+ * @returns {string}
+ */
+export function buildConciergeRefinerContext(activeDossier, changelog, critique, activeNameRagSeeds = '') {
+    const baseContext = buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds);
+    const weaknessesList = (critique?.weaknesses || []).map(w => `- ${w}`).join('\n') || '- Deepen cross-entity connections and fictional specificity.';
+    const directivesList = (critique?.directives || []).map(d => `- ${d}`).join('\n') || '- Enrich the Protagonist, NPC, Faction, Monster, and Kick so they are tightly entangled.';
+
+    return `${baseContext}
+
+======================================================================
+⚖️ [EDITOR_CRITIQUE_FOR_SECOND_PASS] (MANDATORY REFINEMENT DIRECTIVES)
+The Blueprint Judge audited Pass 1 (Score: ${critique?.score ?? 75}/100, Grade: ${critique?.grade || 'B'})
+and issued the following revision directives for your Second Pass:
+
+Identified Weaknesses:
+${weaknessesList}
+
+Mandatory Second-Pass Directives:
+${directivesList}
+
+INSTRUCTIONS FOR PASS 2 (REFINER):
+1. Output ONLY an [UPDATE_DOSSIER] block applying these improvements to [CURRENT_LIVE_BLUEPRINT].
+2. Keep existing entity names (do NOT invent duplicate NPCs/Monsters/Maps when updating existing ones — use their exact existing \`name:\` or \`site:\` from [CURRENT_LIVE_BLUEPRINT] so your improvements patch them in place!).
+3. You only need to emit the blocks and fields being deepened, connected, or added.
+4. Start your [UPDATE_DOSSIER] block with \`summary: <1-sentence summary of the second-pass refinements>\`.
+======================================================================`;
 }
 
 /**

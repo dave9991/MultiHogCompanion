@@ -31,6 +31,8 @@ import {
 import {
     buildConciergeSystemPrompt,
     buildConciergeBuilderContext,
+    buildConciergeCriticContext,
+    buildConciergeRefinerContext,
     buildConciergeTalkerContext,
 } from './concierge-prompt.js';
 import {
@@ -38,6 +40,8 @@ import {
     stripConciergeStateBlocks,
     parseConciergeStateBlock,
     applyDossierUpdates,
+    parseDossierCritique,
+    shouldRunContemplativeJudgePass,
     formatDossierForContext,
     formatChangelogForContext,
     serializeDossierToMarkdown,
@@ -73,6 +77,7 @@ let pendingAttachments = [];
 let isGenerating = false;
 let activeImports = [];
 let activeNameRagSeeds = '';
+let activeNameRagKey = '';
 
 function startImportProgress(label) {
     if (!label) return;
@@ -172,6 +177,7 @@ export function resetConciergeState({ showGreeting = true } = {}) {
     changelog = [];
     pendingAttachments = [];
     activeNameRagSeeds = '';
+    activeNameRagKey = '';
     window._mhcLastBuilderTransaction = null;
     window._lastConciergeBuilderDiagnostic = null;
 
@@ -318,12 +324,14 @@ function updateBlueprintDeck() {
 
     // Custom HUD Tracker Module Card
     const customMod = worldRules.customModule;
-    if (customMod && (customMod.fieldKey || customMod.label)) {
-        $('#mhc_deck_custom_module_tag').text((customMod.fieldKey || 'CUSTOM').toUpperCase());
-        $('#mhc_deck_custom_module_label').text(customMod.label || customMod.fieldKey);
+    const customModTag = customMod ? (customMod.tag || customMod.fieldKey || '') : '';
+    const customModSample = customMod ? (customMod.sampleContent || customMod.sample || '') : '';
+    if (customMod && (customModTag || customMod.label)) {
+        $('#mhc_deck_custom_module_tag').text((customModTag || 'CUSTOM').toUpperCase());
+        $('#mhc_deck_custom_module_label').text(customMod.label || customModTag);
         $('#mhc_deck_custom_module_instruction').text(customMod.instruction || '');
-        if (customMod.sample) {
-            $('#mhc_deck_custom_module_sample').text(customMod.sample).show();
+        if (customModSample) {
+            $('#mhc_deck_custom_module_sample').text(customModSample).show();
         } else {
             $('#mhc_deck_custom_module_sample').hide();
         }
@@ -801,15 +809,31 @@ async function handleUserSend() {
     $('#mhc_send_btn').prop('disabled', true);
 
     try {
-        if (!activeNameRagSeeds && extension_settings?.multihog_companion?.nameRagEnhanceConcierge !== false && extension_settings?.multihog_companion?.enableNameRag !== false) {
-            try {
-                activeNameRagSeeds = await buildNameRagSeedsForConcierge({
-                    genre: activeDossier?.meta?.systemKey || activeDossier?.meta?.system || 'fantasy',
-                    premise: activeDossier?.meta?.premise || '',
-                    limit: 8,
-                });
-            } catch (_) {}
-        }
+        const refreshNameRagSeedsIfNeeded = async () => {
+            if (extension_settings?.multihog_companion?.nameRagEnhanceConcierge === false || extension_settings?.multihog_companion?.enableNameRag === false) {
+                return;
+            }
+            const genreKey = activeDossier?.meta?.systemKey || activeDossier?.meta?.system || 'fantasy';
+            const premiseKey = (activeDossier?.meta?.premise || '').trim().slice(0, 80);
+            const nextKey = `${genreKey}|${premiseKey}`;
+            if (!activeNameRagSeeds || activeNameRagKey !== nextKey) {
+                try {
+                    const seeds = await buildNameRagSeedsForConcierge({
+                        genre: genreKey,
+                        premise: activeDossier?.meta?.premise || '',
+                        limit: 8,
+                    });
+                    if (seeds) {
+                        activeNameRagSeeds = seeds;
+                        activeNameRagKey = nextKey;
+                    }
+                } catch (_) {}
+            }
+        };
+
+        await refreshNameRagSeedsIfNeeded();
+
+        const preTurnDossier = JSON.parse(JSON.stringify(activeDossier));
 
         const formatHistoryMessage = (m) => {
             if (m.role === 'assistant') {
@@ -830,9 +854,9 @@ async function handleUserSend() {
 
         const typingEl = document.getElementById('mhc_typing_indicator');
 
-        // ── Stage 1: The Builder (State Machine / Extractor) ───────────────
+        // ── Stage 1: The Builder (Pass 1 — Contemplation & Extraction) ─────
         if (typingEl) {
-            typingEl.innerHTML = '<i>🎩 The Concierge is inspecting the blueprint...</i>';
+            typingEl.innerHTML = '<i>🎩 The Concierge is contemplating &amp; scaffolding the blueprint...</i>';
         }
 
         const builderMessages = [
@@ -926,6 +950,9 @@ async function handleUserSend() {
         builderFailed = (finalStatus === 'SYNTAX_ERROR' || finalStatus === 'UNRECOGNIZED_OUTPUT');
 
         let builderSummaryText = '';
+        let critiqueResult = null;
+        let refinerReportResult = null;
+
         if (finalStatus === 'MUTATED') {
             activeDossier = builderReport.updatedDossier;
             const now = new Date();
@@ -934,6 +961,102 @@ async function handleUserSend() {
             updateBlueprintDeck();
             saveDraft();
             builderSummaryText = builderReport.builderSummary || builderReport.changes.join('; ') || 'Blueprint updated';
+
+            // Refresh NameRAG seeds if genre or premise changed during Pass 1
+            await refreshNameRagSeedsIfNeeded();
+
+            // ── Stage 1b: Smart-Gated Blueprint Judge / Critic Pass & Second-Pass Refiner ──
+            const shouldJudge = shouldRunContemplativeJudgePass({
+                prevDossier: preTurnDossier,
+                updatedDossier: activeDossier,
+                builderReport,
+                hasAttachments: attachmentsToProcess.length > 0,
+            });
+
+            if (shouldJudge) {
+                try {
+                    if (typingEl) {
+                        typingEl.innerHTML = '<i>⚖️ The Concierge is grading blueprint depth &amp; entanglement...</i>';
+                    }
+                    const criticMessages = [
+                        {
+                            role: 'system',
+                            name: 'System',
+                            content: buildConciergeCriticContext(
+                                activeDossier,
+                                displayUserText,
+                                builderSummaryText,
+                                builderReport.contemplation || activeDossier.contemplation,
+                            ),
+                        },
+                        {
+                            role: 'user',
+                            name: 'Player',
+                            content: 'Audit the current Campaign Blueprint against the 5-point PbtA design rubric and emit your [DOSSIER_CRITIQUE] block.',
+                        },
+                    ];
+
+                    const criticRawResponse = await sendConciergeRequest(criticMessages);
+                    critiqueResult = parseDossierCritique(criticRawResponse);
+
+                    if (critiqueResult.shouldRevise) {
+                        if (typingEl) {
+                            typingEl.innerHTML = `<i>🔨 The Concierge is executing a second architectural pass (${critiqueResult.grade} · ${critiqueResult.score}/100)...</i>`;
+                        }
+                        const refinerMessages = [
+                            {
+                                role: 'system',
+                                name: 'System',
+                                content: buildConciergeRefinerContext(activeDossier, changelog, critiqueResult, activeNameRagSeeds),
+                            },
+                            ...chatHistory.map(formatHistoryMessage),
+                            {
+                                role: 'user',
+                                name: 'System',
+                                content: `Execute the Blueprint Judge's refinement directives now (${critiqueResult.directives.join('; ')}). Emit only the delta [UPDATE_DOSSIER] block.`,
+                            },
+                        ];
+
+                        let refinerRawResponse = await sendConciergeRequest(refinerMessages);
+                        let refinerNameRagResolutions = [];
+                        if (extension_settings?.multihog_companion?.enableNameRag !== false) {
+                            try {
+                                const resolvedRefiner = await resolveDossierNamePlaceholders(refinerRawResponse, activeDossier, { returnDetails: true });
+                                refinerRawResponse = resolvedRefiner.text;
+                                refinerNameRagResolutions = resolvedRefiner.resolutions || [];
+                                if (refinerNameRagResolutions.length > 0) {
+                                    latestNameRagResolutions = [...latestNameRagResolutions, ...refinerNameRagResolutions];
+                                }
+                            } catch (_) {}
+                        }
+
+                        const refinerReport = applyDossierUpdates(refinerRawResponse, activeDossier);
+                        refinerReportResult = refinerReport;
+
+                        diagnosticAttempts.push({
+                            attempt: `${builderAttempts}b (Refiner)`,
+                            rawResponse: refinerRawResponse,
+                            nameRagResolutions: refinerNameRagResolutions,
+                            errors: refinerReport.errors,
+                            hasMutations: refinerReport.hasMutations,
+                            isNoop: refinerReport.isNoop,
+                            builderSummary: refinerReport.builderSummary,
+                            report: refinerReport,
+                        });
+
+                        if (refinerReport.hasMutations) {
+                            activeDossier = refinerReport.updatedDossier;
+                            refinerReport.changes.forEach(c => changelog.push(`[${timeStr} · Pass 2] ${c}`));
+                            updateBlueprintDeck();
+                            saveDraft();
+                            const refinerSummaryPart = refinerReport.builderSummary || refinerReport.changes.join('; ');
+                            builderSummaryText = `${builderSummaryText} [Refined in Pass 2 (${critiqueResult.grade}): ${refinerSummaryPart}]`;
+                        }
+                    }
+                } catch (judgeErr) {
+                    console.warn('[PbtA Concierge] Contemplative Judge/Refiner pass skipped due to error:', judgeErr);
+                }
+            }
         } else if (finalStatus === 'NOOP') {
             builderSummaryText = `NOOP (${builderReport.builderSummary || 'No blueprint changes requested'})`;
         } else if (finalStatus === 'SYNTAX_ERROR') {
@@ -952,6 +1075,9 @@ async function handleUserSend() {
             attempts: diagnosticAttempts,
             finalStatus,
             builderSummary: builderSummaryText,
+            contemplation: builderReport?.contemplation || activeDossier?.contemplation || null,
+            critique: critiqueResult,
+            refinerPass: refinerReportResult,
             nameRagResolutions: latestNameRagResolutions,
             activeDossierSnapshot: JSON.parse(JSON.stringify(activeDossier)),
         };
@@ -1771,6 +1897,8 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     const modalSummary = $('#mhc_debug_summary_text');
     const modalChanges = $('#mhc_debug_changes_list');
     const modalErrors = $('#mhc_debug_errors_list');
+    const modalCritiqueBadge = $('#mhc_debug_critique_badge');
+    const modalContempBox = $('#mhc_debug_contemplation_box');
     const modalRaw = $('#mhc_debug_raw_output');
     const modalAttempts = $('#mhc_debug_attempt_count');
     const modalPrompt = $('#mhc_debug_prompt_input');
@@ -1784,6 +1912,8 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
         modalSummary.text('No build transactions recorded yet.');
         modalChanges.empty();
         modalErrors.empty();
+        modalCritiqueBadge.text('Not Evaluated').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc' });
+        modalContempBox.html('<div style="opacity: 0.6; font-style: italic;">No architectural contemplation or judge critique recorded yet.</div>');
         modalNameRagCount.text('0 resolved').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc' });
         modalNameRagList.html('<div style="opacity: 0.6; font-style: italic;">No name placeholders resolved in this transaction.</div>');
         modalRaw.text('(No raw Builder response captured yet)');
@@ -1835,6 +1965,48 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     const errors = lastAttempt?.report?.errors || lastAttempt?.errors || [];
     if (errors.length) {
         modalErrors.html(`<b>Errors:</b> ${errors.map(e => `⚠️ ${escapeHtml(e)}`).join('; ')}`);
+    }
+
+    // Contemplation & Blueprint Judge Critique
+    const contemp = tx.contemplation || tx.activeDossierSnapshot?.contemplation;
+    const critique = tx.critique;
+    const contempParts = [];
+    if (contemp && (contemp.coreTension || contemp.worldConsequences || contemp.webOfEntanglement || contemp.kickPressure)) {
+        contempParts.push(`
+            <div style="background: rgba(0,0,0,0.28); border: 1px solid rgba(192, 132, 252, 0.25); border-radius: 4px; padding: 6px 8px;">
+                <div style="font-weight: 600; color: #e9d5ff; margin-bottom: 3px;">🧠 Pass 1 Architectural Scratchpad</div>
+                ${contemp.coreTension ? `<div><b>Core Tension:</b> ${escapeHtml(contemp.coreTension)}</div>` : ''}
+                ${contemp.worldConsequences ? `<div><b>World Consequences:</b> ${escapeHtml(contemp.worldConsequences)}</div>` : ''}
+                ${contemp.webOfEntanglement ? `<div><b>Web of Entanglement:</b> ${escapeHtml(contemp.webOfEntanglement)}</div>` : ''}
+                ${contemp.kickPressure ? `<div><b>Kick Pressure:</b> ${escapeHtml(contemp.kickPressure)}</div>` : ''}
+            </div>
+        `);
+    }
+    if (critique) {
+        const isRevise = Boolean(critique.shouldRevise);
+        modalCritiqueBadge.text(`${critique.grade || 'B'} (${critique.score}/100 · ${critique.verdict})`).css({
+            background: isRevise ? 'rgba(251, 191, 36, 0.2)' : 'rgba(74, 222, 128, 0.2)',
+            color: isRevise ? '#fbbf24' : '#4ade80',
+        });
+        contempParts.push(`
+            <div style="background: rgba(0,0,0,0.28); border: 1px solid rgba(250, 204, 21, 0.25); border-radius: 4px; padding: 6px 8px;">
+                <div style="font-weight: 600; color: #fde047; margin-bottom: 3px;">⚖️ Judge Verdict: ${escapeHtml(critique.verdict)} (${critique.score}/100 · ${escapeHtml(critique.grade)})</div>
+                ${critique.strengths?.length ? `<div style="color: #86efac;"><b>Strengths:</b> ${critique.strengths.map(s => escapeHtml(s)).join(' · ')}</div>` : ''}
+                ${critique.weaknesses?.length ? `<div style="color: #fca5a5;"><b>Weaknesses:</b> ${critique.weaknesses.map(w => escapeHtml(w)).join(' · ')}</div>` : ''}
+                ${critique.directives?.length ? `<div style="color: #93c5fd;"><b>Directives:</b> ${critique.directives.map(d => escapeHtml(d)).join(' · ')}</div>` : ''}
+                ${tx.refinerPass?.hasMutations ? `<div style="color: #c4b5fd; margin-top: 3px;"><b>🔨 Pass 2 Refiner Applied:</b> ${tx.refinerPass.changes.map(c => escapeHtml(c)).join('; ')}</div>` : ''}
+            </div>
+        `);
+    } else if (contempParts.length > 0) {
+        modalCritiqueBadge.text('Scratchpad Active').css({ background: 'rgba(192, 132, 252, 0.2)', color: '#c084fc' });
+    } else {
+        modalCritiqueBadge.text('Bypassed / Minor Turn').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc' });
+    }
+
+    if (contempParts.length > 0) {
+        modalContempBox.html(contempParts.join(''));
+    } else {
+        modalContempBox.html('<div style="opacity: 0.6; font-style: italic;">No architectural contemplation or judge critique recorded in this turn.</div>');
     }
 
     // Name Diversity Engine (NameRAG) Resolutions

@@ -49,6 +49,8 @@ import {
     isPersistingPbtaChatState,
     clearPersistingPbtaChatState,
     ensureActiveChatRulesetConsistency,
+    isLiveSettingsPollutedWithPbtA,
+    cleanseStockDndSettings,
     logRulesetEvent,
     collectRulesetDiagnostics,
     getCompanionActiveCartridge,
@@ -1002,79 +1004,12 @@ export async function restoreStockDnd() {
     const s = ctx.extensionSettings?.rpg_tracker;
     if (!s) return false;
 
-    // 1. Remove PbtA overrides from the custom sysprompt library
-    if (s.customSyspromptLibrary) {
-        s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_'));
-    }
-
-    // 2. Pull factory defaults from MultiHog (graceful fallback)
-    let factory;
-    try {
-        const defs = await import('../SillyTavern-MultihogDnDFramework/src/state/defaults.js');
-        factory = defs.buildDefaultSettings();
-    } catch (_) {
-        factory = null;
-    }
-
-    // 3. Restore sysprompt modules from factory (or hardcoded fallback)
-    const factoryModules = factory?.syspromptModules ?? {
-        role: true, rng_system: true, combat: true, ruleset_note: true,
-        end_of_output_footer: true, xp_system: true,
-        '[PARTY]_mechanics': true,
-        weapon_proficiencies: true, attacks_per_round: true, saving_throws: true,
-        level_up_protocol: true, homebrew_and_custom_classes: true,
-        resting: true, loot: true, random_events: true,
-    };
-    if (s.syspromptModules) {
-        Object.assign(s.syspromptModules, factoryModules);
-    }
-
-    // 4. Restore stock prompts (delete allows MultiHog to fall back to its own factory constants)
-    if (factory?.stockPrompts) {
-        s.stockPrompts = { ...factory.stockPrompts };
-    } else {
-        delete s.stockPrompts;
-    }
-
-    // 4b. Restore CYOA prompt
-    if (factory?.cyoaConfig) {
-        s.cyoaConfig = JSON.parse(JSON.stringify(factory.cyoaConfig));
-    } else if (s.cyoaConfig) {
-        s.cyoaConfig.useCustomPrompt = false;
-        s.cyoaConfig.customPromptText = '';
-    }
-
-    // 5. Restore block order and modules
-    s.blockOrder = factory?.blockOrder
-        ?? ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'SPELLS', 'XP', 'TIME'];
-    if (factory?.modules && s.modules) {
-        Object.assign(s.modules, factory.modules);
-    } else if (s.modules) {
-        s.modules.spells = true;
-    }
-
-    // 6. Restore RNG defaults
-    s.rngEnabled = factory?.rngEnabled ?? true;
-    s.rngQueueD20 = factory?.rngQueueD20 ?? true;
-    s.rngQueueD100 = factory?.rngQueueD100 ?? false;
-    s.diceFunctionTool = factory?.diceFunctionTool ?? false;
-
-    saveSettingsDebounced();
     const activeChatId = getActiveChatId();
+    await cleanseStockDndSettings(s, { chatId: activeChatId, syncSetup: true });
+
     if (activeChatId && s.chatStates?.[activeChatId]) {
         delete s.chatStates[activeChatId].pbtaCampaignDossier;
-        try {
-            const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
-            if (typeof setupMod.snapshotChatSetup === 'function') {
-                s.chatStates[activeChatId].setup = setupMod.snapshotChatSetup(s);
-            }
-            const persMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-persistence.js');
-            if (typeof persMod.saveChatState === 'function') {
-                persMod.saveChatState(activeChatId);
-            }
-        } catch (_) {}
     }
-    await refreshMultihogRuntime();
 
     if (activeChatId) {
         await setCompanionActiveCartridge(activeChatId, {
@@ -1833,6 +1768,8 @@ export {
     formatRulesetBadge,
     persistPbtaChatState,
     ensureActiveChatRulesetConsistency,
+    isLiveSettingsPollutedWithPbtA,
+    cleanseStockDndSettings,
     logRulesetEvent,
     collectRulesetDiagnostics,
     getCompanionActiveCartridge,
@@ -2061,6 +1998,21 @@ jQuery(async () => {
         const s = getSettings();
         return s.enableNameRag !== false && s.nameRagEnhanceMultiHog !== false;
     });
+
+    // Pre-flight sanitizer for MultiHog Character Creation and Instant Action
+    $(document).off('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn');
+    $(document).on('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn', async function () {
+        const activeChatId = getActiveChatId();
+        if (!isPbtAActive(activeChatId)) {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+            const s = ctx?.extensionSettings?.rpg_tracker;
+            if (s && isLiveSettingsPollutedWithPbtA(s)) {
+                console.log('[MultiHog Companion] Sanitizing stale PbtA stock prompts before character generation...');
+                await cleanseStockDndSettings(s, { chatId: activeChatId, syncSetup: true });
+            }
+        }
+    });
+
     if (event_types.CHAT_RENAMED) {
         eventSource.on(event_types.CHAT_RENAMED, async (detail) => {
             const s = getSettings();

@@ -451,9 +451,192 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
 }
 
 /**
+ * Detects if the live MultiHog settings object contains residual PbtA or Dungeon World
+ * instructions in stockPrompts, disabled core D&D syspromptModules, or active pbta_ snippets.
+ *
+ * @param {object|null} s
+ * @returns {boolean}
+ */
+export function isLiveSettingsPollutedWithPbtA(s) {
+    if (!s || typeof s !== 'object') return false;
+
+    // 1. Check stockPrompts for PbtA / Dungeon World markers
+    const charPrompt = String(s.stockPrompts?.character || '');
+    if (/NO D&D MECHANICS/i.test(charPrompt)
+        || (/Harm:\s*\d+/i.test(charPrompt) && !/AC CALCULATION/i.test(charPrompt))
+        || (/Might.*Agility.*Wits.*Heart/i.test(charPrompt) && !/Attr:\s*STR/i.test(charPrompt))) {
+        return true;
+    }
+
+    const partyPrompt = String(s.stockPrompts?.party || '');
+    if (/Dungeon World style/i.test(partyPrompt) || /moves_or_boons/i.test(partyPrompt) || /boon-driven hirelings/i.test(partyPrompt)) {
+        return true;
+    }
+
+    const combatPrompt = String(s.stockPrompts?.combat || '');
+    if (/Harm clock/i.test(combatPrompt) || /Tier 1: 1-2 Harm/i.test(combatPrompt)) {
+        return true;
+    }
+
+    // 2. Check if core D&D modules were disabled by PbtA cartridge
+    const mods = s.syspromptModules;
+    if (mods && typeof mods === 'object') {
+        if (mods.role === false && mods.combat === false && mods.rng_system === false) {
+            return true;
+        }
+    }
+
+    // 3. Check for enabled pbta_ snippets in customSyspromptLibrary
+    if (Array.isArray(s.customSyspromptLibrary) && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled)) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Restores MultiHog live settings to pure factory D&D 5e configuration,
+ * cleansing contaminated stockPrompts, syspromptModules, and blockOrder.
+ * Safe and non-destructive: updates live memory and setup snapshot without popup/toast spam.
+ *
+ * @param {object|null} [s=null]
+ * @param {object} [options={}]
+ * @returns {Promise<boolean>}
+ */
+export async function cleanseStockDndSettings(s = null, options = {}) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const settings = s
+        || ctx?.extensionSettings?.rpg_tracker
+        || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
+    if (!settings || typeof settings !== 'object') return false;
+
+    // 1. Remove or disable PbtA overrides from customSyspromptLibrary
+    if (Array.isArray(settings.customSyspromptLibrary)) {
+        settings.customSyspromptLibrary = settings.customSyspromptLibrary.filter(p => !p.id?.startsWith('pbta_'));
+    }
+
+    // 2. Pull factory defaults from MultiHog defaults.js (with resilient fallback)
+    let factory = null;
+    try {
+        const defs = await import('../SillyTavern-MultihogDnDFramework/src/state/defaults.js');
+        if (typeof defs.buildDefaultSettings === 'function') {
+            factory = defs.buildDefaultSettings();
+        }
+    } catch (_) {
+        factory = null;
+    }
+
+    // 3. Restore syspromptModules
+    const dndBaseModules = {
+        role: true,
+        rng_system: true,
+        combat: true,
+        ruleset_note: true,
+        end_of_output_footer: true,
+        xp_system: true,
+        '[PARTY]_mechanics': true,
+        weapon_proficiencies: true,
+        attacks_per_round: true,
+        saving_throws: true,
+        level_up_protocol: true,
+        homebrew_and_custom_classes: true,
+        resting: true,
+        loot: true,
+        random_events: true,
+    };
+    const factoryModules = {
+        ...dndBaseModules,
+        ...(factory?.syspromptModules || {}),
+    };
+    if (settings.syspromptModules && typeof settings.syspromptModules === 'object') {
+        Object.assign(settings.syspromptModules, factoryModules);
+    } else {
+        settings.syspromptModules = { ...factoryModules };
+    }
+
+    // 4. Restore stockPrompts
+    if (factory?.stockPrompts) {
+        settings.stockPrompts = { ...factory.stockPrompts };
+    } else {
+        try {
+            const consts = await import('../SillyTavern-MultihogDnDFramework/constants.js');
+            if (consts.DEFAULT_STOCK_PROMPTS) {
+                settings.stockPrompts = { ...consts.DEFAULT_STOCK_PROMPTS };
+            } else {
+                delete settings.stockPrompts;
+            }
+        } catch (_) {
+            delete settings.stockPrompts;
+        }
+    }
+
+    // 5. Restore cyoaConfig
+    if (factory?.cyoaConfig) {
+        settings.cyoaConfig = JSON.parse(JSON.stringify(factory.cyoaConfig));
+    } else if (settings.cyoaConfig) {
+        settings.cyoaConfig.useCustomPrompt = false;
+        settings.cyoaConfig.customPromptText = '';
+    }
+
+    // 6. Restore block order and modules
+    settings.blockOrder = factory?.blockOrder
+        ?? ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'SPELLS', 'XP', 'TIME'];
+    if (factory?.modules && settings.modules) {
+        Object.assign(settings.modules, factory.modules);
+    } else if (settings.modules) {
+        settings.modules.spells = true;
+    }
+
+    // 7. Restore RNG defaults
+    settings.rngEnabled = factory?.rngEnabled ?? true;
+    settings.rngQueueD20 = factory?.rngQueueD20 ?? true;
+    settings.rngQueueD100 = factory?.rngQueueD100 ?? false;
+    settings.diceFunctionTool = factory?.diceFunctionTool ?? false;
+
+    // 8. Synchronize chat setup snapshot if requested and chat partition exists
+    const targetChatId = options.chatId
+        || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || ctx?.getCurrentChatId?.() || ctx?.chatId || null;
+
+    if (options.syncSetup && targetChatId && settings.chatStates?.[targetChatId]) {
+        try {
+            const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
+            if (typeof setupMod.snapshotChatSetup === 'function') {
+                settings.chatStates[targetChatId].setup = setupMod.snapshotChatSetup(settings);
+            }
+            const persMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-persistence.js');
+            if (typeof persMod.saveChatState === 'function') {
+                persMod.saveChatState(targetChatId);
+            }
+        } catch (_) {}
+    }
+
+    // 9. Save settings debounced & re-apply sysprompt in live runtime
+    if (typeof SillyTavern !== 'undefined') {
+        if (typeof ctx?.saveSettingsDebounced === 'function') {
+            ctx.saveSettingsDebounced();
+        }
+        try {
+            const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+            if (typeof bridge.autoApplySysprompt === 'function') {
+                await bridge.autoApplySysprompt(true);
+            }
+        } catch (_) {}
+    }
+
+    logRulesetEvent('cleanseStockDndSettings', {
+        chatId: targetChatId,
+        syncSetup: !!options.syncSetup,
+    });
+
+    return true;
+}
+
+/**
  * Ensures that if the active chat is a PbtA campaign, the cartridge, catalog definitions,
  * and setup snapshot are fully hydrated and active in MultiHog settings.
  * Prevents MultiHog's Chat Setup Link or F5 reloads from silently reverting to stock D&D.
+ * Conversely, ensures that non-PbtA / unstarted chats are cleansed of any lingering PbtA stock prompts.
  *
  * @param {string|null} [chatId=null]
  * @param {object|null} [rpgSettings=null]
@@ -497,11 +680,17 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     });
 
     if (!isPbta) {
+        if (isLiveSettingsPollutedWithPbtA(s)) {
+            await cleanseStockDndSettings(s, { chatId: resolvedChatId || chatId, syncSetup: true });
+        }
         return false;
     }
 
     // Never rehydrate or force PbtA onto an unstarted chat unless it has an explicit cartridge or dossier
     if (!activeCart && !dossier && !isAdventureActive(chatId)) {
+        if (isLiveSettingsPollutedWithPbtA(s)) {
+            await cleanseStockDndSettings(s, { chatId: resolvedChatId || chatId, syncSetup: true });
+        }
         return false;
     }
 

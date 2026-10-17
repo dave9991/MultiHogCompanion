@@ -13,7 +13,13 @@
 import assert from 'node:assert';
 import { listAllWorldNames } from '../campaign-lore-sync.js';
 import { syncNameRagAdhocSysprompt } from '../namerag-hooks.js';
-import { ensureActiveChatRulesetConsistency } from '../pbta-ruleset-persistence.js';
+import {
+    ensureActiveChatRulesetConsistency,
+    persistPbtaChatState,
+    isPersistingPbtaChatState,
+    clearPersistingPbtaChatState,
+} from '../pbta-ruleset-persistence.js';
+import { forceRenderTrackerView } from '../pbta-vitality-sync.js';
 
 console.log('--- Running Lorebook Selection & Cascade Guard Test Suite ---');
 
@@ -103,5 +109,64 @@ globalThis.SillyTavern = {
 await ensureActiveChatRulesetConsistency(chatId, mockRpgSettings);
 assert.strictEqual(persistCalled, false, 'ensureActiveChatRulesetConsistency must not persist when setup already contains PbtA snippet states');
 console.log('✓ ensureActiveChatRulesetConsistency recognizes existing syspromptSnippetStates and avoids save cascades');
+
+// ── 4. isPersistingPbtaChatState lifecycle & re-entrancy shield ──────────────
+console.log('Testing isPersistingPbtaChatState lifecycle shield...');
+clearPersistingPbtaChatState();
+assert.strictEqual(isPersistingPbtaChatState(), false, 'Must start cleared');
+
+let saveDebouncedCalled = false;
+globalThis.SillyTavern = {
+    getContext: () => ({
+        saveSettingsDebounced: () => {
+            saveDebouncedCalled = true;
+        },
+        extensionSettings: {
+            rpg_tracker: {
+                customSyspromptLibrary: [
+                    { id: 'pbta_base_override_combat', enabled: true, scope: 'chat', _chatSetupMember: true },
+                ],
+                chatStates: {},
+            },
+        },
+    }),
+};
+
+await persistPbtaChatState('chat_shield_test');
+assert.strictEqual(saveDebouncedCalled, true, 'persistPbtaChatState must schedule saveSettingsDebounced');
+assert.strictEqual(isPersistingPbtaChatState(), true, 'isPersistingPbtaChatState must remain true after persistPbtaChatState resolves to shield SETTINGS_UPDATED');
+
+clearPersistingPbtaChatState();
+assert.strictEqual(isPersistingPbtaChatState(), false, 'clearPersistingPbtaChatState must cleanly reset shield');
+console.log('✓ isPersistingPbtaChatState reliably shields against debounced SETTINGS_UPDATED feedback');
+
+// ── 5. forceRenderTrackerView pure DOM rendering vs persist flag ─────────────
+console.log('Testing forceRenderTrackerView persist controls...');
+let forceRenderSaveCount = 0;
+globalThis.SillyTavern = {
+    getContext: () => ({
+        saveSettingsDebounced: () => {
+            forceRenderSaveCount++;
+        },
+    }),
+};
+globalThis.document = {
+    getElementById: () => null,
+};
+
+// Pure DOM re-poke (default persist: false) must NEVER invoke saveSettingsDebounced
+await forceRenderTrackerView({}, 'chat_render_test', '[CHARACTER]\nName: Test', { persist: false });
+assert.strictEqual(forceRenderSaveCount, 0, 'forceRenderTrackerView must not call saveSettingsDebounced when persist is false');
+
+await forceRenderTrackerView({}, 'chat_render_test', '[CHARACTER]\nName: Test');
+assert.strictEqual(forceRenderSaveCount, 0, 'forceRenderTrackerView must not call saveSettingsDebounced by default');
+
+// Explicit persist: true must invoke saveSettingsDebounced
+await forceRenderTrackerView({}, 'chat_render_test', '[CHARACTER]\nName: Test', { persist: true });
+assert.strictEqual(forceRenderSaveCount, 1, 'forceRenderTrackerView must call saveSettingsDebounced when persist: true');
+
+delete globalThis.document;
+delete globalThis.SillyTavern;
+console.log('✓ forceRenderTrackerView safely performs pure DOM renders without triggering disk save loops');
 
 console.log('--- ALL LOREBOOK SELECTION CASCADE GUARD TESTS PASSED CLEANLY! ---');

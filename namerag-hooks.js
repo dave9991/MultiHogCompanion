@@ -314,8 +314,11 @@ export async function buildNameRagSeedsForConcierge({ genre = 'fantasy', premise
  * @param {boolean} enabled Whether the ad-hoc guidance should be active
  * @param {function} [onRefresh] Callback to trigger MultiHog sysprompt recompilation
  */
-export async function syncNameRagAdhocSysprompt(enabled, onRefresh) {
-    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+export async function syncNameRagAdhocSysprompt(enabled, onRefreshOrCtx, maybeCtx = null) {
+    const onRefresh = typeof onRefreshOrCtx === 'function' ? onRefreshOrCtx : null;
+    const ctx = (onRefreshOrCtx && typeof onRefreshOrCtx === 'object' && !Array.isArray(onRefreshOrCtx))
+        ? onRefreshOrCtx
+        : (maybeCtx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null));
     const settings = ctx?.extensionSettings?.rpg_tracker;
     if (!settings) return;
 

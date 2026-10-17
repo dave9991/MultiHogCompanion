@@ -362,3 +362,76 @@ export function mergeDossierIntoLiveMemo(liveMemo, dossier, charName = null) {
 
     return updatedLines.join('\n');
 }
+
+/**
+ * Force-renders Multihog tracker cards and optionally updates persistence layers.
+ * Safe for pure DOM updates without triggering disk saves or SETTINGS_UPDATED loops.
+ *
+ * @param {object} s Multihog tracker settings
+ * @param {string} chatId
+ * @param {string} memo
+ * @param {object} [options={}]
+ * @param {boolean} [options.persist=false]
+ * @returns {Promise<boolean>}
+ */
+export async function forceRenderTrackerView(s, chatId, memo, { persist = false } = {}) {
+    if (!memo) return false;
+
+    // 1. Textarea
+    const textarea = typeof document !== 'undefined' ? document.getElementById('rpg-tracker-memo') : null;
+    if (textarea) textarea.value = memo;
+
+    // 2. Multihog global helper
+    if (typeof globalThis._rpgUpdateUIMemo === 'function') {
+        globalThis._rpgUpdateUIMemo(memo);
+    }
+
+    // 3. Runtime bridge
+    try {
+        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+        if (typeof bridge.syncMemoView === 'function') bridge.syncMemoView();
+        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+        if (persist && typeof bridge.saveSettings === 'function') bridge.saveSettings();
+    } catch (_) {}
+
+    // 4. Force direct DOM card render if #rpg-tracker-render still shows .rt-empty
+    const renderEl = typeof document !== 'undefined' ? document.getElementById('rpg-tracker-render') : null;
+    if (renderEl) {
+        try {
+            const renderer = await import('../SillyTavern-MultihogDnDFramework/renderer.js');
+            if (typeof renderer.renderMemoAsCards === 'function') {
+                const cardsHtml = renderer.renderMemoAsCards(memo, null, {});
+                if (cardsHtml && !cardsHtml.includes('rt-empty')) {
+                    renderEl.innerHTML = cardsHtml;
+                    if (typeof renderer.bindRenderedCardEvents === 'function') {
+                        renderer.bindRenderedCardEvents(renderEl, memo, false);
+                    }
+                }
+            }
+        } catch (domErr) {
+            console.warn('[MultiHog Companion] Direct card render fallback error:', domErr);
+        }
+    }
+
+    if (persist) {
+        // 5. State manager
+        try {
+            const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+            if (typeof stateMgr.saveChatState === 'function' && chatId) {
+                stateMgr.saveChatState(chatId);
+            }
+        } catch (_) {}
+
+        // 6. SillyTavern settings persistence
+        try {
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+            if (typeof ctx?.saveSettingsDebounced === 'function') {
+                ctx.saveSettingsDebounced();
+            }
+        } catch (_) {}
+    }
+
+    console.log(`[MultiHog Companion] Rendered Multihog game state memo for PbtA campaign in chat "${chatId}".`);
+    return true;
+}
+

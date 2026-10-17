@@ -28,7 +28,9 @@ import {
 import {
     syncLivePbtaMemoVitality,
     normalizePbtaMemo,
+    forceRenderTrackerView,
 } from './pbta-vitality-sync.js';
+export { forceRenderTrackerView };
 import {
     discoverNameRagServer,
     testNameRagConnection,
@@ -641,72 +643,6 @@ async function tryRecoverDossierFromWorldInfo(ctx, candidateChatIds) {
 }
 
 /**
- * Force-renders Multihog tracker cards and updates all persistence layers.
- * @param {object} s Multihog tracker settings
- * @param {string} chatId
- * @param {string} memo
- * @returns {Promise<boolean>}
- */
-export async function forceRenderTrackerView(s, chatId, memo) {
-    if (!memo) return false;
-
-    // 1. Textarea
-    const textarea = document.getElementById('rpg-tracker-memo');
-    if (textarea) textarea.value = memo;
-
-    // 2. Multihog global helper
-    if (typeof globalThis._rpgUpdateUIMemo === 'function') {
-        globalThis._rpgUpdateUIMemo(memo);
-    }
-
-    // 3. Runtime bridge
-    try {
-        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
-        if (typeof bridge.syncMemoView === 'function') bridge.syncMemoView();
-        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
-        if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
-    } catch (_) {}
-
-    // 4. Force direct DOM card render if #rpg-tracker-render still shows .rt-empty
-    const renderEl = document.getElementById('rpg-tracker-render');
-    if (renderEl) {
-        try {
-            const renderer = await import('../SillyTavern-MultihogDnDFramework/renderer.js');
-            if (typeof renderer.renderMemoAsCards === 'function') {
-                const cardsHtml = renderer.renderMemoAsCards(memo, null, {});
-                if (cardsHtml && !cardsHtml.includes('rt-empty')) {
-                    renderEl.innerHTML = cardsHtml;
-                    if (typeof renderer.bindRenderedCardEvents === 'function') {
-                        renderer.bindRenderedCardEvents(renderEl, memo, false);
-                    }
-                }
-            }
-        } catch (domErr) {
-            console.warn('[MultiHog Companion] Direct card render fallback error:', domErr);
-        }
-    }
-
-    // 5. State manager
-    try {
-        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
-        if (typeof stateMgr.saveChatState === 'function' && chatId) {
-            stateMgr.saveChatState(chatId);
-        }
-    } catch (_) {}
-
-    // 6. SillyTavern settings persistence
-    try {
-        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-        if (typeof ctx?.saveSettingsDebounced === 'function') {
-            ctx.saveSettingsDebounced();
-        }
-    } catch (_) {}
-
-    console.log(`[MultiHog Companion] Hydrated Multihog game state memo for PbtA campaign in chat "${chatId}".`);
-    return true;
-}
-
-/**
  * Auto-hydrates the Multihog D&D tracker memo with initial PbtA game state
  * from an existing PbtA Campaign Dossier or Lorebook Player Card if the tracker
  * is currently showing the empty onboarding / "create an adventure" screen.
@@ -740,9 +676,9 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         return false;
     }
 
-    // If liveMemo already has [CHARACTER] but DOM IS empty, re-poke and force-render!
+    // If liveMemo already has [CHARACTER] but DOM IS empty, re-poke and force-render (pure DOM render, no persist)!
     if (hasCharBlock && isDomEmpty) {
-        return await forceRenderTrackerView(s, effectiveChatId, liveMemo);
+        return await forceRenderTrackerView(s, effectiveChatId, liveMemo, { persist: false });
     }
 
     let dossier = null;
@@ -782,7 +718,7 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         s.chatStates[cid].pbtaCampaignDossier = dossier;
     }
 
-    return await forceRenderTrackerView(s, effectiveChatId, initialMemo);
+    return await forceRenderTrackerView(s, effectiveChatId, initialMemo, { persist: true });
 }
 
 /**

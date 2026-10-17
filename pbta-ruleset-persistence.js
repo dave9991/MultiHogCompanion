@@ -319,6 +319,7 @@ export function formatRulesetBadge(chatId = null, rpgSettings = null, lastGenre 
 
 let _isPersistingPbtaChatState = false;
 let _persistResetTimer = null;
+let _inFlightPersist = false;
 
 export function isPersistingPbtaChatState() {
     return _isPersistingPbtaChatState;
@@ -341,10 +342,11 @@ export function clearPersistingPbtaChatState() {
  */
 export async function persistPbtaChatState(chatId, rpgSettings = null) {
     if (!chatId) return;
-    if (_isPersistingPbtaChatState) return;
+    if (_inFlightPersist) return;
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return;
 
+    _inFlightPersist = true;
     _isPersistingPbtaChatState = true;
     if (_persistResetTimer) clearTimeout(_persistResetTimer);
     _persistResetTimer = setTimeout(() => {
@@ -445,8 +447,9 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     }
     } catch (err) {
         console.warn('[MultiHog Companion] Error during persistPbtaChatState:', err);
+        clearPersistingPbtaChatState();
     } finally {
-        _isPersistingPbtaChatState = false;
+        _inFlightPersist = false;
     }
 }
 

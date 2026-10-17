@@ -359,9 +359,9 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
         rpg.npcRelationshipValues = rpg.npcRelationshipValues || {};
         rpg.npcRelationshipLog = rpg.npcRelationshipLog || {};
 
-        const activeChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-            || ctx.getCurrentChatId?.()
+        const activeChatId = ctx.getCurrentChatId?.()
             || ctx.chatId
+            || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
             || '';
 
         if (!forceAll && !isAdventureActive(activeChatId, ctx)) {
@@ -533,9 +533,9 @@ export async function checkAndSyncTierCrossovers() {
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
         if (!ctx) return { checked: 0, updated: 0 };
 
-        const activeChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-            || ctx.getCurrentChatId?.()
+        const activeChatId = ctx.getCurrentChatId?.()
             || ctx.chatId
+            || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
             || '';
 
         if (!isAdventureActive(activeChatId, ctx)) {

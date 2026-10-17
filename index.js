@@ -77,6 +77,15 @@ import {
     initAdventureChatRenameGuard,
     isAdventureActive,
 } from './adventure-chat.js';
+import {
+    resolveAuthoritativeChatId,
+    isSameChatId,
+    checkHistoryPersistenceBlocked,
+    checkTrackerProjectionIntegrity,
+    renderTrackerQuarantineBanner,
+    scanAllChatHistories,
+    formatHistoryDiagnosticReport,
+} from './history-integrity-guard.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -151,15 +160,10 @@ async function refreshMultihogRuntime() {
 }
 
 /**
- * Get active chat ID from SillyTavern or Multihog tracker.
+ * Get active chat ID from SillyTavern (authoritative) or Multihog tracker fallback.
  */
 function getActiveChatId() {
-    const ctx = SillyTavern.getContext();
-    if (typeof globalThis._rpgCurrentChatId === 'function') {
-        const id = globalThis._rpgCurrentChatId();
-        if (id) return String(id);
-    }
-    return ctx.getCurrentChatId?.() || ctx.chatId || null;
+    return resolveAuthoritativeChatId();
 }
 
 /**
@@ -212,12 +216,18 @@ function getCandidateChatIds(chatId) {
     if (chatId) {
         raw = [chatId];
     } else {
-        raw = [
-            getActiveChatId(),
-            ctx?.getCurrentChatId?.(),
-            ctx?.chatId,
-            (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
-        ];
+        const stChatId = ctx?.getCurrentChatId?.() || ctx?.chatId || ctx?.chatMetadata?.chat_id || null;
+        if (stChatId) {
+            raw = [
+                ctx?.getCurrentChatId?.(),
+                ctx?.chatId,
+                ctx?.chatMetadata?.chat_id,
+            ];
+        } else {
+            raw = [
+                (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+            ];
+        }
     }
     const filtered = raw.filter(Boolean).map(String);
     const expanded = [];
@@ -655,30 +665,43 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
     if (!s) return false;
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
 
-    const candidateIds = [
-        chatId,
-        getActiveChatId(),
-        ctx?.getCurrentChatId?.(),
-        ctx?.chatId,
-        (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
-    ].filter(Boolean).map(String);
+    const integrity = await checkTrackerProjectionIntegrity({ chatId, rpgSettings: s, ctx });
+    if (!integrity.healthy) {
+        renderTrackerQuarantineBanner(integrity);
+        return false;
+    }
+
+    const candidateIds = getCandidateChatIds(chatId);
     const uniqueIds = [...new Set(candidateIds)];
     const effectiveChatId = uniqueIds[0] || 'active';
 
     const liveMemo = String(s.currentMemo || '').trim();
     const hasCharBlock = liveMemo && /\[CHARACTER\]/i.test(liveMemo);
+    const owner = String(s.chatStateProjectionOwner || '').trim();
+    const isOwnerMatch = !owner || uniqueIds.some(cid => isSameChatId(cid, owner));
 
-    const trackerEl = document.getElementById('rpg-tracker-render');
+    const trackerEl = typeof document !== 'undefined' ? document.getElementById('rpg-tracker-render') : null;
     const isDomEmpty = trackerEl ? (trackerEl.querySelector('.rt-empty') !== null || !trackerEl.children.length) : false;
 
-    // If liveMemo already has [CHARACTER] and the DOM is NOT empty, nothing to do
-    if (hasCharBlock && !isDomEmpty) {
+    // If liveMemo belongs to this chat, has [CHARACTER], and the DOM is NOT empty, nothing to do
+    if (isOwnerMatch && hasCharBlock && !isDomEmpty) {
         return false;
     }
 
-    // If liveMemo already has [CHARACTER] but DOM IS empty, re-poke and force-render (pure DOM render, no persist)!
-    if (hasCharBlock && isDomEmpty) {
+    // If liveMemo belongs to this chat and has [CHARACTER] but DOM IS empty, re-poke and force-render (pure DOM render, no persist)!
+    if (isOwnerMatch && hasCharBlock && isDomEmpty) {
         return await forceRenderTrackerView(s, effectiveChatId, liveMemo, { persist: false });
+    }
+
+    // If the chat partition itself already has a valid currentMemo with [CHARACTER] (e.g. liveMemo was stale),
+    // restore it to the view without fabricating a fresh Session Zero memo!
+    for (const cid of uniqueIds) {
+        const partMemo = String(s.chatStates?.[cid]?.currentMemo || '').trim();
+        if (partMemo && /\[CHARACTER\]/i.test(partMemo)) {
+            s.currentMemo = partMemo;
+            s.chatStateProjectionOwner = cid;
+            return await forceRenderTrackerView(s, cid, partMemo, { persist: false });
+        }
     }
 
     let dossier = null;
@@ -733,6 +756,22 @@ export async function runSync(reason = '') {
     try {
         const chatId = getActiveChatId();
         if (!chatId) return false;
+
+        // First: verify that MultiHog's history loader and projection owner are healthy for this chat.
+        // If history persistence is blocked or the projection owner is stuck on a departing chat,
+        // quarantine the tracker view and abort all cross-chat sync operations immediately.
+        const integrity = await checkTrackerProjectionIntegrity({ chatId });
+        if (!integrity.healthy) {
+            logRulesetEvent('runSync:quarantined', {
+                reason,
+                chatId,
+                projectionOwner: integrity.projectionOwner,
+                rpgRuntimeChatId: integrity.rpgRuntimeChatId,
+                persistenceBlocked: integrity.persistenceBlocked,
+            });
+            renderTrackerQuarantineBanner(integrity);
+            return false;
+        }
 
         // If adventure is unstarted or in onboarding screen, skip runtime persona/portrait/vitality sync
         if (!isAdventureActive(chatId)) {
@@ -1920,6 +1959,31 @@ jQuery(async () => {
             helpString: '<div>Synchronizes MultiHog NPC relationships and campaign lorebooks.</div>',
         }));
 
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-history-check',
+            aliases: ['history-check'],
+            callback: async () => {
+                const scan = await scanAllChatHistories();
+                const report = formatHistoryDiagnosticReport(scan);
+                console.log('[MultiHog Companion] /mhc-history-check Report:\n' + report);
+                if (scan.brokenCount > 0 || !scan.integrity.healthy) {
+                    showToast(
+                        'warning',
+                        `Found ${scan.brokenCount} broken history file(s)${scan.integrity.persistenceBlocked ? ' (Persistence LOCKED)' : ''}. Full report logged to console (F12).`,
+                        'History Diagnostic'
+                    );
+                } else {
+                    showToast(
+                        'success',
+                        `All ${scan.fileBackedCount} file-backed chat history pointer(s) verified OK!`,
+                        'History Diagnostic'
+                    );
+                }
+                return report;
+            },
+            helpString: '<div>Scans all MultiHog chat partitions, verifies offloaded <code>multihog_history_*.json.gz</code> files and SHA-256 checksums, and reports any broken pointers or projection locks.</div>',
+        }));
+
         registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive: isPbtAActive, showToast });
     }
 
@@ -1964,18 +2028,26 @@ jQuery(async () => {
         logRulesetEvent('CHAT_CHANGED', { activeChatId: getActiveChatId() });
         scheduleSync('CHAT_CHANGED', 500);
         setTimeout(async () => {
+            const integrity = await checkTrackerProjectionIntegrity();
+            if (!integrity.healthy) {
+                renderTrackerQuarantineBanner(integrity);
+                updateRulesetBadge();
+                return;
+            }
             await ensureActiveChatRulesetConsistency();
             updateRulesetBadge();
         }, 550);
         setTimeout(updateRulesetBadge, 600);
         setTimeout(updateLorebookSyncUI, 650);
         setTimeout(async () => {
+            if (await checkHistoryPersistenceBlocked()) return;
             const s = getSettings();
             const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
             await syncNameRagAdhocSysprompt(adhocActive);
         }, 700);
-        setTimeout(() => {
+        setTimeout(async () => {
             updateRelationshipSyncUI();
+            if (await checkHistoryPersistenceBlocked()) return;
             if (isAdventureActive()) {
                 scanAndInitUnsyncedNpcs().then(updateRelationshipSyncUI);
             }

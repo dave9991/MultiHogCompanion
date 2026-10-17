@@ -23,13 +23,19 @@ export function getCandidateChatIds(chatId, rpgSettings = null) {
     if (chatId) {
         raw = [chatId];
     } else {
-        raw = [
-            (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
-            ctx?.getCurrentChatId?.(),
-            ctx?.chatId,
-            ctx?.chatMetadata?.chat_id,
-            rpgSettings?.chatStateProjectionOwner,
-        ];
+        const stChatId = ctx?.getCurrentChatId?.() || ctx?.chatId || ctx?.chatMetadata?.chat_id || null;
+        if (stChatId) {
+            raw = [
+                ctx?.getCurrentChatId?.(),
+                ctx?.chatId,
+                ctx?.chatMetadata?.chat_id,
+            ];
+        } else {
+            raw = [
+                (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+                rpgSettings?.chatStateProjectionOwner,
+            ];
+        }
     }
     const filtered = raw.filter(Boolean).map(String);
     const expanded = [];
@@ -354,6 +360,18 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
         _persistResetTimer = null;
     }, 2500);
     try {
+        try {
+            const { checkHistoryPersistenceBlocked, isSameChatId } = await import('./history-integrity-guard.js');
+            if (await checkHistoryPersistenceBlocked()) {
+                console.warn(`[MultiHog Companion] Skipping persistPbtaChatState("${chatId}") because MultiHog history persistence is blocked.`);
+                return;
+            }
+            if (s.chatStateProjectionOwner && !isSameChatId(chatId, s.chatStateProjectionOwner)) {
+                console.warn(`[MultiHog Companion] Skipping persistPbtaChatState("${chatId}") because projectionOwner="${s.chatStateProjectionOwner}" does not match.`);
+                return;
+            }
+        } catch (_) {}
+
         let snapshot = null;
 
         try {
@@ -598,18 +616,24 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
 
     // 8. Synchronize chat setup snapshot if requested and chat partition exists
     const targetChatId = options.chatId
+        || ctx?.getCurrentChatId?.() || ctx?.chatId
         || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-        || ctx?.getCurrentChatId?.() || ctx?.chatId || null;
+        || null;
 
     if (options.syncSetup && targetChatId && settings.chatStates?.[targetChatId]) {
         try {
-            const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
-            if (typeof setupMod.snapshotChatSetup === 'function') {
-                settings.chatStates[targetChatId].setup = setupMod.snapshotChatSetup(settings);
-            }
-            const persMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-persistence.js');
-            if (typeof persMod.saveChatState === 'function') {
-                persMod.saveChatState(targetChatId);
+            const { checkHistoryPersistenceBlocked, isSameChatId } = await import('./history-integrity-guard.js');
+            const blocked = await checkHistoryPersistenceBlocked();
+            const ownerOk = !settings.chatStateProjectionOwner || isSameChatId(targetChatId, settings.chatStateProjectionOwner);
+            if (!blocked && ownerOk) {
+                const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
+                if (typeof setupMod.snapshotChatSetup === 'function') {
+                    settings.chatStates[targetChatId].setup = setupMod.snapshotChatSetup(settings);
+                }
+                const persMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-persistence.js');
+                if (typeof persMod.saveChatState === 'function') {
+                    persMod.saveChatState(targetChatId);
+                }
             }
         } catch (_) {}
     }
@@ -649,6 +673,14 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
 export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSettings = null, applyCartridgeFn = null, companionSettings = null) {
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
+
+    try {
+        const { checkHistoryPersistenceBlocked } = await import('./history-integrity-guard.js');
+        if (await checkHistoryPersistenceBlocked()) {
+            logRulesetEvent('ensureActiveChatRulesetConsistency:blocked_skip', { chatId });
+            return false;
+        }
+    } catch (_) {}
 
     const candidateIds = getCandidateChatIds(chatId, s);
     let resolvedChatId = candidateIds[0] || null;

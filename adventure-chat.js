@@ -66,8 +66,10 @@ export function isAdventureActive(chatId = null, ctx = null) {
         return true;
     }
 
-    const cid = chatId || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-        || effectiveCtx?.getCurrentChatId?.() || effectiveCtx?.chatId || '';
+    const cid = chatId
+        || effectiveCtx?.getCurrentChatId?.() || effectiveCtx?.chatId
+        || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || '';
     if (cid && s.chatStates?.[cid]) {
         const part = s.chatStates[cid];
         if (part.pbtaCampaignDossier || part.playerCharacter?.name) return true;

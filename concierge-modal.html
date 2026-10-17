@@ -410,5 +410,26 @@
                 </div>
             </div>
         </div>
+
+        <!-- Generic In-Modal Confirmation Overlay (Replaces native window.confirm) -->
+        <div id="mhc_confirm_overlay" class="mhc-launch-overlay" style="display: none; z-index: 110;">
+            <div class="mhc-launch-card" style="width: 440px; max-width: 92%; text-align: left;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <span id="mhc_confirm_icon" style="font-size: 1.4em;">↺</span>
+                    <h3 id="mhc_confirm_title" style="margin: 0; font-size: 1.15em; color: #f87171;">Reset Session Zero?</h3>
+                </div>
+                <p id="mhc_confirm_message" style="font-size: 0.9em; line-height: 1.45; opacity: 0.9; margin: 0 0 18px 0; white-space: pre-line;">
+                    Reset current Session Zero and start fresh? All unlaunched progress will be lost.
+                </p>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" id="mhc_confirm_cancel_btn" class="menu_button" style="padding: 6px 14px; font-size: 0.88em;">
+                        Cancel
+                    </button>
+                    <button type="button" id="mhc_confirm_ok_btn" class="menu_button" style="background: #dc2626; border: 1px solid #ef4444; color: white; font-weight: bold; padding: 6px 16px; font-size: 0.88em;">
+                        ↺ Reset Session
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>

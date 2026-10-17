@@ -164,6 +164,78 @@ export function loadValidatedDraft() {
 }
 
 /**
+ * Displays an in-modal confirmation overlay inside #mhc_concierge_modal instead of native window.confirm()
+ * (which is silently auto-cancelled when browser automation/CDP sessions or popup blockers are active).
+ * Dynamically mounts the overlay if cached HTML did not include it.
+ *
+ * @param {object} opts
+ * @param {string} [opts.icon='↺']
+ * @param {string} [opts.title='Confirm Action']
+ * @param {string} opts.message
+ * @param {string} [opts.confirmLabel='Confirm']
+ * @param {string} [opts.confirmColor='#dc2626']
+ * @returns {Promise<boolean>}
+ */
+function showConciergeConfirm({
+    icon = '↺',
+    title = 'Confirm Action',
+    message = 'Are you sure?',
+    confirmLabel = 'Confirm',
+    confirmColor = '#dc2626',
+} = {}) {
+    if (typeof document === 'undefined') {
+        return Promise.resolve(true);
+    }
+    const modalRoot = document.getElementById('mhc_concierge_modal');
+    if (!modalRoot) {
+        return Promise.resolve(true);
+    }
+
+    let overlay = document.getElementById('mhc_confirm_overlay');
+    if (!overlay) {
+        const cardContainer = modalRoot.querySelector('.mhc-concierge-window') || modalRoot;
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+            <div id="mhc_confirm_overlay" class="mhc-launch-overlay" style="display: none; z-index: 110;">
+                <div class="mhc-launch-card" style="width: 440px; max-width: 92%; text-align: left;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <span id="mhc_confirm_icon" style="font-size: 1.4em;"></span>
+                        <h3 id="mhc_confirm_title" style="margin: 0; font-size: 1.15em; color: #f87171;"></h3>
+                    </div>
+                    <p id="mhc_confirm_message" style="font-size: 0.9em; line-height: 1.45; opacity: 0.9; margin: 0 0 18px 0; white-space: pre-line;"></p>
+                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="button" id="mhc_confirm_cancel_btn" class="menu_button" style="padding: 6px 14px; font-size: 0.88em;">Cancel</button>
+                        <button type="button" id="mhc_confirm_ok_btn" class="menu_button" style="background: #dc2626; border: 1px solid #ef4444; color: white; font-weight: bold; padding: 6px 16px; font-size: 0.88em;"></button>
+                    </div>
+                </div>
+            </div>
+        `;
+        cardContainer.appendChild(wrapper.firstElementChild);
+        overlay = document.getElementById('mhc_confirm_overlay');
+    }
+
+    $('#mhc_confirm_icon').text(icon);
+    $('#mhc_confirm_title').text(title);
+    $('#mhc_confirm_message').text(message);
+    $('#mhc_confirm_ok_btn').text(confirmLabel).css({
+        background: confirmColor,
+        borderColor: confirmColor,
+    });
+
+    return new Promise(resolve => {
+        const cleanup = (result) => {
+            $('#mhc_confirm_ok_btn').off('click.mhcConfirm');
+            $('#mhc_confirm_cancel_btn').off('click.mhcConfirm');
+            $('#mhc_confirm_overlay').fadeOut(120);
+            resolve(result);
+        };
+        $('#mhc_confirm_ok_btn').off('click.mhcConfirm').on('click.mhcConfirm', () => cleanup(true));
+        $('#mhc_confirm_cancel_btn').off('click.mhcConfirm').on('click.mhcConfirm', () => cleanup(false));
+        $('#mhc_confirm_overlay').fadeIn(120);
+    });
+}
+
+/**
  * Completely resets in-memory Session Zero state, blueprint, and UI.
  * Cleans out any saved draft from localStorage.
  */
@@ -176,6 +248,7 @@ export function resetConciergeState({ showGreeting = true } = {}) {
     chatHistory = [];
     changelog = [];
     pendingAttachments = [];
+    isGenerating = false;
     activeNameRagSeeds = '';
     activeNameRagKey = '';
     window._mhcLastBuilderTransaction = null;
@@ -183,6 +256,9 @@ export function resetConciergeState({ showGreeting = true } = {}) {
 
     renderDebugInspectorView(null);
     $('#mhc_chat_messages').empty();
+    $('#mhc_chat_input').val('');
+    $('#mhc_sync_active_campaign_btn').hide();
+    $('#mhc_confirm_overlay').hide();
     renderAttachmentTray();
     updateBlueprintDeck();
 
@@ -1404,8 +1480,17 @@ function bindModalEvents() {
                     } catch (_) {}
                 }
 
-                if (rawEntryText && confirm('A legacy or unparsed campaign entry was found. Would you like the AI Campaign Architect to rehydrate and heal it?')) {
-                    dossier = await reconstituteDossierWithAi(rawEntryText, msg => toastr?.info(msg));
+                if (rawEntryText) {
+                    const rehydrateOk = await showConciergeConfirm({
+                        icon: '🧙‍♂️',
+                        title: 'Rehydrate Legacy Campaign?',
+                        message: 'A legacy or unparsed campaign entry was found. Would you like the AI Campaign Architect to rehydrate and heal it?',
+                        confirmLabel: '✨ Rehydrate Dossier',
+                        confirmColor: '#2563eb',
+                    });
+                    if (rehydrateOk) {
+                        dossier = await reconstituteDossierWithAi(rawEntryText, msg => toastr?.info(msg));
+                    }
                 }
             }
 
@@ -1418,9 +1503,13 @@ function bindModalEvents() {
             const hasExistingSessionProgress = (Array.isArray(chatHistory) && chatHistory.length > 0) || !isDossierEmptyOrUntouched(activeDossier);
 
             if (hasExistingSessionProgress) {
-                const proceed = confirm(
-                    `An in-progress Session Zero draft is currently open.\n\nLoading "${candidateTitle}" will discard your unlaunched draft and restart the conversation for this campaign.\n\nProceed?`
-                );
+                const proceed = await showConciergeConfirm({
+                    icon: '📂',
+                    title: 'Overwrite Unlaunched Draft?',
+                    message: `An in-progress Session Zero draft is currently open.\n\nLoading "${candidateTitle}" will discard your unlaunched draft and restart the conversation for this campaign.\n\nProceed?`,
+                    confirmLabel: '📂 Load Active Campaign',
+                    confirmColor: '#2563eb',
+                });
                 if (!proceed) {
                     toastr?.info('Load cancelled. Current Session Zero draft retained.');
                     return;
@@ -1711,8 +1800,18 @@ function bindModalEvents() {
     });
 
     // Reset Session
-    $('#mhc_reset_session_btn').on('click', () => {
-        if (!confirm('Reset current Session Zero and start fresh? All unlaunched progress will be lost.')) return;
+    $('#mhc_reset_session_btn').on('click', async (e) => {
+        const hasProgress = (Array.isArray(chatHistory) && chatHistory.length > 0) || !isDossierEmptyOrUntouched(activeDossier);
+        if (hasProgress && !e?.shiftKey) {
+            const ok = await showConciergeConfirm({
+                icon: '↺',
+                title: 'Reset Session Zero?',
+                message: 'Reset current Session Zero and start fresh? All unlaunched progress will be lost.',
+                confirmLabel: '↺ Reset Session',
+                confirmColor: '#dc2626',
+            });
+            if (!ok) return;
+        }
         resetConciergeState({ showGreeting: true });
         toastr?.info('Session Zero reset to fresh start.', 'Reset');
     });
@@ -1802,8 +1901,15 @@ function bindModalEvents() {
     // Finalize & Launch Campaign
     $('#mhc_launch_campaign_btn').on('click', async () => {
         const castEmpty = !(activeDossier?.npcs?.length) && !(activeDossier?.monsters?.length);
-        if (castEmpty && !confirm('No NPCs or monsters have been staged for this campaign. Launch anyway?\n\n(Tip: ask the Concierge to propose a cast based on your outline.)')) {
-            return;
+        if (castEmpty) {
+            const launchOk = await showConciergeConfirm({
+                icon: '🚀',
+                title: 'Launch Without Staged Cast?',
+                message: 'No NPCs or monsters have been staged for this campaign. Launch anyway?\n\n(Tip: ask the Concierge to propose a cast based on your outline.)',
+                confirmLabel: '🚀 Launch Anyway',
+                confirmColor: '#2563eb',
+            });
+            if (!launchOk) return;
         }
 
         const candidateTitle = (activeDossier?.meta?.title || '').trim();

@@ -302,6 +302,7 @@ Your ONLY job is to extract setting details, protagonist stats, factions, NPCs, 
 ### 🚫 STRICT OUTPUT PROTOCOL:
 * Output ONLY an [UPDATE_DOSSIER] block (or [NOOP]) wrapped in code fences or plain text.
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
+* NEVER write a "Thinking Process", numbered analysis, or chain-of-thought outline outside [UPDATE_DOSSIER]. Perform ALL architectural reasoning strictly inside the 4-line [CONTEMPLATION] block (1 concise sentence per key) so you never exhaust output tokens.
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary of changes:
   summary: <One concise sentence summarizing the changes made>
 * If the player is only asking a conversational question, brainstorming without asking for blueprint changes, or general chat:
@@ -574,10 +575,11 @@ Mandatory Second-Pass Directives:
 ${directivesList}
 
 INSTRUCTIONS FOR PASS 2 (REFINER):
-1. Output ONLY an [UPDATE_DOSSIER] block applying these improvements to [CURRENT_LIVE_BLUEPRINT].
-2. Keep existing entity names (do NOT invent duplicate NPCs/Monsters/Maps when updating existing ones — use their exact existing \`name:\` or \`site:\` from [CURRENT_LIVE_BLUEPRINT] so your improvements patch them in place!).
-3. You only need to emit the blocks and fields being deepened, connected, or added.
-4. Start your [UPDATE_DOSSIER] block with \`summary: <1-sentence summary of the second-pass refinements>\`.
+1. Output ONLY an [UPDATE_DOSSIER] block applying these improvements to [CURRENT_LIVE_BLUEPRINT]. Do NOT write any thinking process outside [UPDATE_DOSSIER], and do NOT re-emit [CONTEMPLATION] in Pass 2.
+2. Keep existing entity names when enriching valid entities in-place (do NOT invent duplicate NPCs/Monsters/Maps when updating existing ones — use their exact existing \`name:\` or \`site:\` from [CURRENT_LIVE_BLUEPRINT] so your improvements patch them in place!).
+3. If the Judge flagged a naming collision, duplicate entity, or unnecessary block (such as an unwanted [WORLD_RULES] or [CUSTOM_MODULE]), use \`[REMOVE_NPC: Name]\`, \`[REMOVE_MONSTER: Name]\`, \`[REMOVE_FACTION: Name]\`, \`[REMOVE_MAP: Site]\`, \`[REMOVE_WORLD_RULE: Title]\`, or \`[REMOVE_CUSTOM_MODULE]\` to remove the collided/unwanted entry before emitting the corrected entity.
+4. You only need to emit the blocks and fields being deepened, connected, removed, or added.
+5. Start your [UPDATE_DOSSIER] block with \`summary: <1-sentence summary of the second-pass refinements>\`.
 ======================================================================`;
 }
 

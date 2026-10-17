@@ -285,6 +285,7 @@ export function inferStartingNpcRelationships(roleOrNpc = '', relText = '') {
 export function stripConciergeStateBlocks(text) {
     if (!text) return '';
     return text
+        .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
         .replace(/\[UPDATE_DOSSIER\][\s\S]*?(?:\[\/UPDATE_DOSSIER\]|$)/gi, '')
         .replace(/\[CONCIERGE_STATE\][\s\S]*?(?:\[\/CONCIERGE_STATE\]|$)/gi, '')
         .replace(/\[CONTEMPLATION\][\s\S]*?(?:\[\/CONTEMPLATION\]|$)/gi, '')
@@ -297,8 +298,11 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[KICK\][\s\S]*?(?:\[\/KICK\]|$)/gi, '')
         .replace(/\[CYOA\][\s\S]*?(?:\[\/CYOA\]|$)/gi, '')
         .replace(/\[CONFIG\][\s\S]*?(?:\[\/CONFIG\]|$)/gi, '')
-        .replace(/\[REMOVE_(?:NPC|MONSTER|MAP|FACTION):[^\n\]]+\]/gi, '')
-        .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS)\]/gi, '')
+        .replace(/\[WORLD_RULES?\][\s\S]*?(?:\[\/WORLD_RULES?\]|$)/gi, '')
+        .replace(/\[CUSTOM_MODULE\][\s\S]*?(?:\[\/CUSTOM_MODULE\]|$)/gi, '')
+        .replace(/\[REMOVE_(?:NPC|MONSTER|MAP|FACTION|WORLD_RULE):[^\n\]]+\]/gi, '')
+        .replace(/\[REMOVE_CUSTOM_MODULE\]/gi, '')
+        .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)\]/gi, '')
         .replace(/\[NOOP\][\s\S]*?(?:\[\/NOOP\]|$)/gi, '')
         .replace(/\[BUILDER_REPORT:[^\n\]]+\]/gi, '')
         .replace(/```(?:text|markdown)?\s*```/gi, '')
@@ -383,17 +387,24 @@ function parseBulletList(block, sectionKey) {
 
 /**
  * Resilient list item parser for bullet lines or inline comma/semicolon-separated values.
+ * Ignores delimiters inside parentheses like "(+2, +1, +1, 0, -1)".
  * @param {string} block
  * @param {string} sectionKey
+ * @param {{ splitCommas?: boolean }} [opts]
  * @returns {string[]}
  */
-function parseBulletOrListItems(block, sectionKey) {
+function parseBulletOrListItems(block, sectionKey, { splitCommas = true } = {}) {
     const fromBullets = parseBulletList(block, sectionKey);
     if (fromBullets.length > 0) return fromBullets;
     const kv = parseKeyValueLines(block);
     const rawVal = kv[sectionKey.toLowerCase()];
     if (rawVal) {
-        return rawVal.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+        const cleaned = rawVal.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
+        if (!cleaned || /^(?:none|n\/a|null)$/i.test(cleaned)) return [];
+        const splitter = splitCommas
+            ? /(?:[;|](?![^()]*\))|,(?![^()]*\)))/
+            : /[;|](?![^()]*\))/;
+        return cleaned.split(splitter).map(s => s.trim()).filter(Boolean);
     }
     return [];
 }
@@ -659,6 +670,53 @@ export function formatChangelogForContext(changelog, maxEntries = 8) {
  *   hasMutations: boolean
  * }}
  */
+const NEXT_DOSSIER_BLOCK_LOOKAHEAD = String.raw`(?=\n[ \t]*\[(?:\/?(?:UPDATE_DOSSIER|CONCIERGE_STATE|CONTEMPLATION|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE))(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$))`;
+
+/**
+ * Matches all occurrences of a section block (e.g., PROTAGONIST, NPC, MONSTER, MAP, FACTION, KICK, WORLD_RULES, CUSTOM_MODULE, CONFIG, CYOA).
+ * Requires EITHER:
+ *  - A standalone line-start opening tag `[TAG]` (stopping at `[/TAG]`, the next standalone `[BLOCK]` header, or `$`), OR
+ *  - An explicit closing tag `[/TAG]`.
+ * Never matches unclosed inline mentions inside conversational or chain-of-thought prose.
+ *
+ * @param {string} raw
+ * @param {string} tagRegexStr
+ * @param {string} closeTagRegexStr
+ * @returns {Array<{ inlineArg: string|undefined, content: string, fullMatch: string }>}
+ */
+function matchDossierSectionBlocks(raw, tagRegexStr, closeTagRegexStr) {
+    if (!raw) return [];
+    const results = [];
+    const lineStartRe = new RegExp(
+        `(?:^|\\n)[ \\t]*\\[${tagRegexStr}\\][ \\t]*(?:\\r?\\n|$)([\\s\\S]*?)(?:\\[\\/${closeTagRegexStr}\\]|${NEXT_DOSSIER_BLOCK_LOOKAHEAD}|$)`,
+        'gi',
+    );
+    let m;
+    while ((m = lineStartRe.exec(raw)) !== null) {
+        const hasInlineGroup = m.length > 2;
+        results.push({
+            inlineArg: hasInlineGroup ? m[1] : undefined,
+            content: hasInlineGroup ? m[2] : m[1],
+            fullMatch: m[0],
+        });
+    }
+    if (results.length > 0) return results;
+
+    const closedInlineRe = new RegExp(
+        `\\[${tagRegexStr}\\]([\\s\\S]*?)\\[\\/${closeTagRegexStr}\\]`,
+        'gi',
+    );
+    while ((m = closedInlineRe.exec(raw)) !== null) {
+        const hasInlineGroup = m.length > 2;
+        results.push({
+            inlineArg: hasInlineGroup ? m[1] : undefined,
+            content: hasInlineGroup ? m[2] : m[1],
+            fullMatch: m[0],
+        });
+    }
+    return results;
+}
+
 export function applyDossierUpdates(text, dossier) {
     const fallbackResult = {
         success: true,
@@ -673,9 +731,14 @@ export function applyDossierUpdates(text, dossier) {
 
     if (!text || typeof text !== 'string') return fallbackResult;
 
-    // 0. Check for explicit NOOP
-    const noopMatch = text.match(/\[NOOP\]([\s\S]*?)(?:\[\/NOOP\]|$)/i);
-    const isExplicitNoop = Boolean(noopMatch) || /^\s*\[NOOP\]\s*$/i.test(text.trim());
+    // Strip any closed <think>...</think> blocks before parsing directives
+    const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    if (!cleanedText) return fallbackResult;
+
+    // 0. Check for explicit NOOP (standalone line-start [NOOP] or explicitly closed [NOOP]...[/NOOP])
+    const noopMatch = cleanedText.match(/(?:^|\n)[ \t]*\[NOOP\][ \t]*(?:\r?\n|$)([\s\S]*?)(?:\[\/NOOP\]|$)/i)
+        || cleanedText.match(/\[NOOP\]([\s\S]*?)\[\/NOOP\]/i);
+    const isExplicitNoop = Boolean(noopMatch) || /^\s*\[NOOP\]\s*$/i.test(cleanedText);
     if (isExplicitNoop) {
         let noopSummary = '';
         if (noopMatch && noopMatch[1]) {
@@ -701,18 +764,25 @@ export function applyDossierUpdates(text, dossier) {
 
     // 1. Locate directive content: [UPDATE_DOSSIER] or [CONCIERGE_STATE]
     let raw = null;
-    const updateMatch = text.match(/\[UPDATE_DOSSIER\]([\s\S]*?)(?:\[\/UPDATE_DOSSIER\]|$)/i);
-    const stateMatch = text.match(/\[CONCIERGE_STATE\]([\s\S]*?)(?:\[\/CONCIERGE_STATE\]|$)/i);
+    const updateMatch = cleanedText.match(/(?:^|\n)[ \t]*\[UPDATE_DOSSIER\][ \t]*(?:\r?\n|$)([\s\S]*?)(?:\[\/UPDATE_DOSSIER\]|$)/i)
+        || cleanedText.match(/\[UPDATE_DOSSIER\]([\s\S]*?)\[\/UPDATE_DOSSIER\]/i);
+    const stateMatch = cleanedText.match(/(?:^|\n)[ \t]*\[CONCIERGE_STATE\][ \t]*(?:\r?\n|$)([\s\S]*?)(?:\[\/CONCIERGE_STATE\]|$)/i)
+        || cleanedText.match(/\[CONCIERGE_STATE\]([\s\S]*?)\[\/CONCIERGE_STATE\]/i);
 
     if (updateMatch) {
         raw = updateMatch[1];
     } else if (stateMatch) {
         raw = stateMatch[1];
     } else {
-        // Fallback: check if text contains standalone blocks directly
-        const hasDirectBlocks = /\[(?:CONTEMPLATION|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)\]/i.test(text);
+        // Do NOT scrape fallback blocks out of an unfinished chain-of-thought reasoning dump
+        const isCoTPreamble = /^\s*(?:<think>|Here(?:'s| is) a thinking process|Thinking Process:|Let's think step by step|1\.\s+\*\*(?:Analyze|Understand|Evaluate)\b)/i.test(cleanedText);
+        if (isCoTPreamble) {
+            return fallbackResult;
+        }
+        // Fallback: check if text contains standalone line-start blocks or explicitly closed blocks directly
+        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
         if (hasDirectBlocks) {
-            raw = text;
+            raw = cleanedText;
         }
     }
 
@@ -724,10 +794,11 @@ export function applyDossierUpdates(text, dossier) {
 
     // 0b. Extract [CONTEMPLATION] architectural reasoning scratchpad (inside or alongside [UPDATE_DOSSIER])
     let extractedContemplation = null;
-    const contempMatch = raw.match(/\[CONTEMPLATION\]([\s\S]*?)(?:\[\/CONTEMPLATION\]|(?=\n\s*(?:summary|system|title|premise|tone)\s*:)|(?=\[(?:CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE)\])|$)/i)
-        || text.match(/\[CONTEMPLATION\]([\s\S]*?)\[\/CONTEMPLATION\]/i);
-    if (contempMatch) {
-        const cKv = parseKeyValueLines(contempMatch[1]);
+    const contempBlocks = matchDossierSectionBlocks(raw, 'CONTEMPLATION', 'CONTEMPLATION');
+    const contempContent = contempBlocks[0]?.content
+        || (cleanedText.match(/\[CONTEMPLATION\]([\s\S]*?)\[\/CONTEMPLATION\]/i)?.[1] ?? null);
+    if (contempContent) {
+        const cKv = parseKeyValueLines(contempContent);
         const coreTension = (cKv.core_tension || cKv.coretension || cKv.tension || '').trim();
         const worldConsequences = (cKv.world_consequences || cKv.worldconsequences || cKv.consequences || '').trim();
         const webOfEntanglement = (cKv.web_of_entanglement || cKv.webofentanglement || cKv.entanglement || cKv.connections || '').trim();
@@ -743,9 +814,43 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    // Extract builder summary if emitted
+    // Pre-extract section blocks so top-level metadata keys (title:, system:, premise:, tone:, summary:)
+    // never accidentally match keys inside [WORLD_RULES], [CUSTOM_MODULE], [PROTAGONIST], etc.
+    const protoBlocks = matchDossierSectionBlocks(raw, 'PROTAGONIST', 'PROTAGONIST');
+    const npcBlocks = matchDossierSectionBlocks(raw, 'NPC(?::\\s*([^\\]\\r\\n]+))?', 'NPC');
+    const monsterBlocks = matchDossierSectionBlocks(raw, 'MONSTER', 'MONSTER');
+    const mapBlocks = matchDossierSectionBlocks(raw, 'MAP', 'MAP');
+    const factionBlocks = matchDossierSectionBlocks(raw, 'FACTION', 'FACTION');
+    const kickBlocks = matchDossierSectionBlocks(raw, 'KICK', 'KICK');
+    const cyoaBlocks = matchDossierSectionBlocks(raw, 'CYOA', 'CYOA');
+    const ruleBlocks = matchDossierSectionBlocks(raw, 'WORLD_RULES?', 'WORLD_RULES?');
+    const customModuleBlocks = matchDossierSectionBlocks(raw, 'CUSTOM_MODULE', 'CUSTOM_MODULE');
+    const configBlocks = matchDossierSectionBlocks(raw, 'CONFIG', 'CONFIG');
+
+    let topLevelRaw = raw;
+    for (const group of [
+        contempBlocks,
+        protoBlocks,
+        npcBlocks,
+        monsterBlocks,
+        mapBlocks,
+        factionBlocks,
+        kickBlocks,
+        cyoaBlocks,
+        ruleBlocks,
+        customModuleBlocks,
+        configBlocks,
+    ]) {
+        for (const blk of group) {
+            if (blk.fullMatch) {
+                topLevelRaw = topLevelRaw.replace(blk.fullMatch, '\n');
+            }
+        }
+    }
+
+    // Extract builder summary if emitted at top level
     let builderSummary = null;
-    const summaryMatch = raw.match(/summary\s*:\s*([^\n\r]+)/i);
+    const summaryMatch = topLevelRaw.match(/summary\s*:\s*([^\n\r]+)/i);
     if (summaryMatch) {
         builderSummary = summaryMatch[1].trim()
             .replace(/^(\*\*|__)(.*?)\1$/, '$2')
@@ -754,7 +859,7 @@ export function applyDossierUpdates(text, dossier) {
     }
 
     // ── 1. Meta / System ────────────────────────────────────────────────────────
-    const sysMatch = raw.match(/system\s*:\s*([^\n\r]+)/i);
+    const sysMatch = topLevelRaw.match(/system\s*:\s*([^\n\r]+)/i);
     if (sysMatch) {
         const rawKey = sysMatch[1].trim();
         const key = normalizeSystemKey(rawKey);
@@ -769,7 +874,7 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const titleMatch = raw.match(/title\s*:\s*([^\n\r]+)/i);
+    const titleMatch = topLevelRaw.match(/title\s*:\s*([^\n\r]+)/i);
     if (titleMatch) {
         const newTitle = titleMatch[1].trim()
             .replace(/^(\*\*|__)(.*?)\1$/, '$2')
@@ -781,7 +886,7 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const premiseMatch = raw.match(/premise\s*:\s*([^\n\r]+)/i);
+    const premiseMatch = topLevelRaw.match(/premise\s*:\s*([^\n\r]+)/i);
     if (premiseMatch) {
         const newPremise = premiseMatch[1].trim().replace(/^(\*\*|__)(.*?)\1$/, '$2');
         if (newPremise && updated.meta.premise !== newPremise) {
@@ -793,7 +898,7 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const toneMatch = raw.match(/tone\s*:\s*([^\n\r]+)/i);
+    const toneMatch = topLevelRaw.match(/tone\s*:\s*([^\n\r]+)/i);
     if (toneMatch) {
         const rawTone = cleanTargetName(toneMatch[1]);
         if (rawTone && updated.meta.tone !== rawTone) {
@@ -803,9 +908,8 @@ export function applyDossierUpdates(text, dossier) {
     }
 
     // ── 2. Protagonist ──────────────────────────────────────────────────────────
-    const protoMatch = raw.match(/\[PROTAGONIST\]([\s\S]*?)(?:\[\/PROTAGONIST\]|$)/i);
-    if (protoMatch) {
-        const pBlock = protoMatch[1];
+    if (protoBlocks.length > 0) {
+        const pBlock = protoBlocks[0].content;
         const kv = parseKeyValueLines(pBlock);
 
         if (kv.name && updated.protagonist.name !== kv.name) {
@@ -938,10 +1042,9 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const npcMatches = raw.matchAll(/(?:\[NPC(?::\s*([^\]\r\n]+))?\])([\s\S]*?)(?:\[\/NPC\]|$)/gi);
-    for (const match of npcMatches) {
-        const inlineName = match[1]?.trim();
-        const nBlock = match[2];
+    for (const match of npcBlocks) {
+        const inlineName = match.inlineArg?.trim();
+        const nBlock = match.content;
         const kv = parseKeyValueLines(nBlock);
         if (!kv.name && inlineName) kv.name = inlineName;
         if (!kv.name) continue;
@@ -1067,9 +1170,8 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const monsterMatches = raw.matchAll(/\[MONSTER\]([\s\S]*?)(?:\[\/MONSTER\]|$)/gi);
-    for (const match of monsterMatches) {
-        const mBlock = match[1];
+    for (const match of monsterBlocks) {
+        const mBlock = match.content;
         const kv = parseKeyValueLines(mBlock);
         if (!kv.name) continue;
 
@@ -1159,9 +1261,8 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const mapMatches = raw.matchAll(/\[MAP\]([\s\S]*?)(?:\[\/MAP\]|$)/gi);
-    for (const match of mapMatches) {
-        const mBlock = match[1];
+    for (const match of mapBlocks) {
+        const mBlock = match.content;
         const kv = parseKeyValueLines(mBlock);
         if (!kv.site) continue;
 
@@ -1225,9 +1326,8 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const factionMatches = raw.matchAll(/\[FACTION\]([\s\S]*?)(?:\[\/FACTION\]|$)/gi);
-    for (const match of factionMatches) {
-        const fBlock = match[1];
+    for (const match of factionBlocks) {
+        const fBlock = match.content;
         const kv = parseKeyValueLines(fBlock);
         if (!kv.name) continue;
 
@@ -1262,9 +1362,8 @@ export function applyDossierUpdates(text, dossier) {
     }
 
     // ── 6. The Kick (Opening Incident) ──────────────────────────────────────────
-    const kickMatch = raw.match(/\[KICK\]([\s\S]*?)(?:\[\/KICK\]|$)/i);
-    if (kickMatch) {
-        const kBlock = kickMatch[1];
+    if (kickBlocks.length > 0) {
+        const kBlock = kickBlocks[0].content;
         const kv = parseKeyValueLines(kBlock);
         if (kv.starting_location && updated.theKick.startingLocation !== kv.starting_location) {
             updated.theKick.startingLocation = kv.starting_location;
@@ -1281,9 +1380,8 @@ export function applyDossierUpdates(text, dossier) {
     }
 
     // ── 7. CYOA Examples (Optional Explicit Choices) ───────────────────────────
-    const cyoaMatch = raw.match(/\[CYOA\]([\s\S]*?)(?:\[\/CYOA\]|$)/i);
-    if (cyoaMatch) {
-        const cBlock = cyoaMatch[1];
+    if (cyoaBlocks.length > 0) {
+        const cBlock = cyoaBlocks[0].content;
         const lines = cBlock.split('\n')
             .map(l => l.replace(/^[\*\-\s]+/, '').trim())
             .filter(Boolean);
@@ -1319,9 +1417,8 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const ruleMatches = raw.matchAll(/\[WORLD_RULES?\]([\s\S]*?)(?:\[\/WORLD_RULES?\]|$)/gi);
-    for (const match of ruleMatches) {
-        const rBlock = match[1];
+    for (const match of ruleBlocks) {
+        const rBlock = match.content;
         const kv = parseKeyValueLines(rBlock);
         const title = cleanTargetName(kv.title || kv.name || '');
         if (!title && !kv.axiom && !kv.rule && !kv.core_axiom) continue;
@@ -1378,9 +1475,8 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    const customModuleMatch = raw.match(/\[CUSTOM_MODULE\]([\s\S]*?)(?:\[\/CUSTOM_MODULE\]|$)/i);
-    if (customModuleMatch) {
-        const cmBlock = customModuleMatch[1];
+    if (customModuleBlocks.length > 0) {
+        const cmBlock = customModuleBlocks[0].content;
         const kv = parseKeyValueLines(cmBlock);
         const tag = (kv.tag || kv.fieldkey || kv.field_key || kv.name || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '');
         if (tag) {
@@ -1431,9 +1527,8 @@ export function applyDossierUpdates(text, dossier) {
         },
     };
 
-    const configMatch = raw.match(/\[CONFIG\]([\s\S]*?)(?:\[\/CONFIG\]|$)/i);
-    if (configMatch) {
-        const cBlock = configMatch[1];
+    if (configBlocks.length > 0) {
+        const cBlock = configBlocks[0].content;
         const kv = parseKeyValueLines(cBlock);
 
         // Playstyle
@@ -2394,8 +2489,10 @@ export function parseDossierCritique(rawText) {
 
     if (!rawText || typeof rawText !== 'string') return defaultCritique;
 
-    const blockMatch = rawText.match(/\[DOSSIER_CRITIQUE\]([\s\S]*?)(?:\[\/DOSSIER_CRITIQUE\]|$)/i);
-    const body = blockMatch ? blockMatch[1] : rawText;
+    const cleaned = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const blockMatch = cleaned.match(/(?:^|\n)[ \t]*\[DOSSIER_CRITIQUE\][ \t]*(?:\r?\n|$)([\s\S]*?)(?:\[\/DOSSIER_CRITIQUE\]|$)/i)
+        || cleaned.match(/\[DOSSIER_CRITIQUE\]([\s\S]*?)(?:\[\/DOSSIER_CRITIQUE\]|$)/i);
+    const body = blockMatch ? blockMatch[1] : cleaned;
     const kv = parseKeyValueLines(body);
 
     const rawVerdict = String(kv.verdict || '').toUpperCase().trim();
@@ -2404,9 +2501,9 @@ export function parseDossierCritique(rawText) {
     score = Math.max(0, Math.min(100, score));
 
     const grade = (kv.grade || (score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : 'D')).trim();
-    const strengths = parseBulletOrListItems(body, 'strengths');
-    const weaknesses = parseBulletOrListItems(body, 'weaknesses');
-    const directives = parseBulletOrListItems(body, 'directives');
+    const strengths = parseBulletOrListItems(body, 'strengths', { splitCommas: false });
+    const weaknesses = parseBulletOrListItems(body, 'weaknesses', { splitCommas: false });
+    const directives = parseBulletOrListItems(body, 'directives', { splitCommas: false });
 
     const verdict = (rawVerdict === 'REVISE' || (rawVerdict !== 'PASS' && score < 82 && directives.length > 0))
         ? 'REVISE'

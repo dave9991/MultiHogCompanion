@@ -32,7 +32,7 @@ export function getConciergeConnectionSettings() {
         openaiUrl: s.conciergeOpenaiUrl || '',
         openaiKey: s.conciergeOpenaiKey || '',
         openaiModel: s.conciergeOpenaiModel || '',
-        maxTokens: s.conciergeMaxTokens || 2048,
+        maxTokens: Number(s.conciergeMaxTokens) > 0 ? Number(s.conciergeMaxTokens) : 0,
     };
 }
 
@@ -139,7 +139,7 @@ async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
     const body = {
         model: settings.openaiModel || 'gpt-4o-mini',
         messages,
-        max_tokens: settings.maxTokens > 0 ? settings.maxTokens : 4096,
+        max_tokens: settings.maxTokens > 0 ? settings.maxTokens : 8192,
         temperature: 0.7,
     };
 
@@ -188,7 +188,7 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
         messages: ollamaMessages,
         stream: false,
         options: {
-            num_predict: settings.maxTokens > 0 ? settings.maxTokens : 2048,
+            num_predict: settings.maxTokens > 0 ? settings.maxTokens : 8192,
             temperature: 0.7,
         },
     };
@@ -210,9 +210,25 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
 }
 
 /**
+ * Checks whether a string is an unfinished chain-of-thought reasoning dump
+ * with no final structured directive block or CYOA markup.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isTruncatedReasoningDump(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    const hasStructuredPayload = /<(?:choices|button)\b/i.test(trimmed) ||
+        /(?:^|\n)[ \t]*\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(trimmed);
+    if (hasStructuredPayload) return false;
+    return /^(?:<think>|Here(?:'s| is) a thinking process|Thinking Process:|Let's think step by step|1\.\s+\*\*(?:Analyze|Understand|Evaluate)\b)/i.test(trimmed);
+}
+
+/**
  * Robust text extractor for API response objects across OpenAI, Anthropic, Ollama, and Kobold.
  * Inspects both standard message content and reasoning_content (for thinking/reasoning models like
- * DeepSeek R1, Gemma 4, Qwen 2.5 thinking variants).
+ * DeepSeek R1, Gemma 4, Qwen 2.5/3 thinking variants).
  *
  * @param {object|string} data Raw API response
  * @returns {string}
@@ -225,14 +241,14 @@ export function extractTextFromApiResponse(data) {
     const choice = data.choices?.[0];
     if (choice) {
         const msg = choice.message;
-        const content = typeof msg?.content === 'string' ? msg.content : (choice.text || '');
+        const content = typeof msg?.content === 'string' ? msg.content.trim() : (choice.text || '').trim();
         const reasoning = typeof msg?.reasoning_content === 'string'
-            ? msg.reasoning_content
-            : (typeof msg?.reasoning === 'string' ? msg.reasoning : '');
+            ? msg.reasoning_content.trim()
+            : (typeof msg?.reasoning === 'string' ? msg.reasoning.trim() : '');
 
         if (content && reasoning) {
-            // If content contains choice tags, it is the clean answer
-            if (/<(?:choices|button)\b/i.test(content)) {
+            // If content contains choice tags or Concierge directive blocks, it is the clean answer
+            if (/<(?:choices|button)\b/i.test(content) || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(content)) {
                 return content;
             }
             // If reasoning contains choice tags while content does not, include reasoning
@@ -242,7 +258,19 @@ export function extractTextFromApiResponse(data) {
             return content;
         }
         if (content) return content;
-        if (reasoning) return reasoning;
+        if (reasoning) {
+            // If the model placed a structured Concierge directive inside reasoning_content, extract from that directive onward
+            const directiveMatch = reasoning.match(/(?:^|\n)[ \t]*(\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\][\s\S]*)$/i);
+            if (directiveMatch) {
+                return directiveMatch[1].trim();
+            }
+            // Do not leak unfinished chain-of-thought dumps when content was starved by token truncation
+            if (isTruncatedReasoningDump(reasoning)) {
+                console.warn('[PbtA Concierge] Model exhausted output token budget inside reasoning_content before producing content.');
+                return '';
+            }
+            return reasoning;
+        }
     }
 
     // Direct Ollama format
@@ -273,6 +301,74 @@ export function extractTextFromApiResponse(data) {
 }
 
 /**
+ * Resolves the response token limit for Concierge requests over the default SillyTavern connection.
+ * Preserves the user's preset limit when it is already generous (>= 8192) or unconfigured (null),
+ * and boosts small chat reply limits (< 8192) so reasoning models never truncate mid-blueprint.
+ *
+ * @param {object} [opts]
+ * @param {object} [opts.settings]
+ * @param {Array<{role: string, content: string|Array}>} [opts.messages]
+ * @param {object} [opts.context]
+ * @returns {number|null}
+ */
+export function resolveConciergeMaxTokens({ settings, messages, context } = {}) {
+    if (settings?.maxTokens && Number(settings.maxTokens) > 0) {
+        return Math.floor(Number(settings.maxTokens));
+    }
+
+    const ctx = context || getContext();
+    const configuredMaxTokens = Number(
+        ctx?.chatCompletionSettings?.openai_max_tokens ||
+        globalThis.oai_settings?.openai_max_tokens ||
+        ctx?.amountGen ||
+        globalThis.amount_gen ||
+        0
+    );
+
+    // If no preset response cap is visible or the user already configured >= 8192 tokens,
+    // return null so SillyTavern uses its native preset limit untouched.
+    if (!configuredMaxTokens || isNaN(configuredMaxTokens) || configuredMaxTokens >= 8192) {
+        return null;
+    }
+
+    // Otherwise, the active chat reply length (< 8192, e.g. 500 or 2048) would choke
+    // reasoning models + full blueprint scaffolding. Dynamically scale up to context headroom.
+    let contextLimit = Number(
+        ctx?.chatCompletionSettings?.openai_max_context ||
+        globalThis.oai_settings?.openai_max_context ||
+        ctx?.maxContext ||
+        globalThis.max_context ||
+        0
+    );
+    if ((!contextLimit || isNaN(contextLimit)) && typeof globalThis.getMaxContextTokens === 'function') {
+        try {
+            contextLimit = Number(globalThis.getMaxContextTokens()) || 0;
+        } catch (_) {}
+    }
+    if (!contextLimit || isNaN(contextLimit) || contextLimit <= 0) {
+        contextLimit = 16384;
+    }
+
+    let promptChars = 0;
+    if (Array.isArray(messages)) {
+        for (const msg of messages) {
+            if (typeof msg?.content === 'string') {
+                promptChars += msg.content.length;
+            } else if (Array.isArray(msg?.content)) {
+                for (const part of msg.content) {
+                    if (part && typeof part.text === 'string') {
+                        promptChars += part.text.length;
+                    }
+                }
+            }
+        }
+    }
+    const estimatedPromptTokens = Math.max(Math.ceil(promptChars / 3.2) + 250, 400);
+    const available = contextLimit - estimatedPromptTokens - 256;
+    return Math.max(configuredMaxTokens, Math.min(16384, Math.max(4096, available)));
+}
+
+/**
  * Send a request via SillyTavern default active connection.
  */
 async function sendViaDefault(context, settings, messages, { signal = null } = {}) {
@@ -298,11 +394,11 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
         console.warn('[PbtA Concierge] Images attached but main API may not support multimodal payloads. Attempting chat completion.');
     }
 
-    // Only set responseLength if explicitly specified by user settings.
-    // If null/undefined, SillyTavern preserves the user's active preset token limits and context budget.
-    const responseLength = (settings?.maxTokens && Number(settings.maxTokens) > 0)
-        ? Number(settings.maxTokens)
-        : null;
+    const responseLength = resolveConciergeMaxTokens({
+        settings,
+        messages: isolatedMessages,
+        context,
+    });
 
     // 1. Prefer generateRawData: returns raw API response without throwing 'Error: No message generated'
     // and allows extracting from reasoning_content when models output thoughts

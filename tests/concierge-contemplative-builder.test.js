@@ -20,6 +20,11 @@ import {
 } from '../concierge-parser.js';
 import { buildCustomModuleLoreEntry } from '../concierge-lore-distributor.js';
 import { buildPbtACartridge, formatInitialPbtaMemo } from '../pbta-ruleset.js';
+import {
+    getConciergeConnectionSettings,
+    resolveConciergeMaxTokens,
+    extractTextFromApiResponse,
+} from '../concierge-connection.js';
 
 describe('Contemplative Dossier Builder & Judge Architecture', () => {
     it('1. Builder prompt includes [CONTEMPLATION] scratchpad schema and preserves strict [UPDATE_DOSSIER] instruction', () => {
@@ -366,5 +371,123 @@ weakness: Chloroform & bright magnesium flares
         assert.equal(hydrated.monsters[0].currentHarm, 2);
         assert.equal(hydrated.monsters[0].harm, 4);
         assert.equal(hydrated.monsters[0].armor, 2);
+    });
+
+    it('Live Session Zero Fix 1: getConciergeConnectionSettings & extractTextFromApiResponse prevent 2048 token clamp and truncated CoT leakage', () => {
+        const settings = getConciergeConnectionSettings();
+        assert.equal(settings.maxTokens, 0, 'Default maxTokens must be 0 so SillyTavern preset token headroom is preserved');
+
+        // Generous preset (100k tokens) returns null so SillyTavern uses native preset untouched
+        const generousBudget = resolveConciergeMaxTokens({
+            settings,
+            messages: [{ role: 'user', content: 'Hello' }],
+            context: { chatCompletionSettings: { openai_max_context: 131072, openai_max_tokens: 100000 } },
+        });
+        assert.equal(generousBudget, null);
+
+        // Small chat reply limit (e.g. 500 tokens) boosts to >= 8192 so reasoning models do not truncate
+        const boostedBudget = resolveConciergeMaxTokens({
+            settings,
+            messages: [{ role: 'user', content: 'Hello' }],
+            context: { chatCompletionSettings: { openai_max_context: 32768, openai_max_tokens: 500 } },
+        });
+        assert.ok(boostedBudget >= 8192, `Expected boosted budget >= 8192, got ${boostedBudget}`);
+
+        // Truncated reasoning_content with empty content does not leak raw chain-of-thought
+        const truncatedCoTResp = {
+            choices: [{
+                message: {
+                    content: '',
+                    reasoning_content: "Here's a thinking process that leads to the suggested response:\n\n1. **Analyze the Request:**\n   * Required blocks: [PROTAGONIST], [NPC], [MONSTER]",
+                },
+            }],
+        };
+        assert.equal(extractTextFromApiResponse(truncatedCoTResp), '');
+
+        // Directive inside reasoning_content is extracted cleanly without preamble
+        const directiveInReasoningResp = {
+            choices: [{
+                message: {
+                    content: '',
+                    reasoning_content: "Here's a thinking process:\n1. Plan blocks.\n[UPDATE_DOSSIER]\nsummary: Added scout\n[/UPDATE_DOSSIER]",
+                },
+            }],
+        };
+        assert.equal(
+            extractTextFromApiResponse(directiveInReasoningResp),
+            '[UPDATE_DOSSIER]\nsummary: Added scout\n[/UPDATE_DOSSIER]',
+        );
+    });
+
+    it('Live Session Zero Fix 2: applyDossierUpdates ignores inline [BLOCK] mentions in leaked CoT and stops unclosed blocks at next block boundary', () => {
+        const empty = createEmptyDossier();
+
+        // 1. Unfinished CoT dump without [UPDATE_DOSSIER] must NOT trigger fallback scraping
+        const leakedCoT = `Here's a thinking process that leads to the suggested response:
+1. **Analyze the Request:**
+   * Should we include [WORLD_RULES] or [CUSTOM_MODULE]? No.
+   * Required blocks: [CONTEMPLATION], [PROTAGONIST], [FACTION], [NPC], [MONSTER], [MAP], [KICK].
+2. **Drafting NPC:**
+   name: Gideon High-Tower
+   role: Mentor`;
+
+        const cotReport = applyDossierUpdates(leakedCoT, empty);
+        assert.equal(cotReport.hasMutations, false, 'Must not scrape entities out of an unfinished CoT preamble');
+        assert.equal(cotReport.updatedDossier.protagonist.name, '');
+        assert.equal(cotReport.updatedDossier.npcs.length, 0);
+        assert.equal(cotReport.updatedDossier.monsters.length, 0);
+        assert.equal(cotReport.updatedDossier.worldRules.axioms.length, 0);
+        assert.equal(cotReport.updatedDossier.worldRules.customModule, null);
+
+        // 2. Unclosed block inside [UPDATE_DOSSIER] stops cleanly at the next standalone [BLOCK] header
+        //    and top-level title is NOT overwritten by [WORLD_RULES] title:
+        const unclosedAndWorldRule = `[UPDATE_DOSSIER]
+summary: Scaffolded megadungeon scout and subterranean law
+title: Beneath the Titan's Vault
+system: fantasy
+
+[PROTAGONIST]
+name: Rook
+playbook: The Scout
+
+[NPC]
+name: Gideon High-Tower
+role: Mentor
+
+[WORLD_RULES]
+title: Subterranean Bioluminescence
+category: ecology
+axiom: Torchlight attracts apex blind-hunters; delvers rely on cold alchemical moss.
+[/WORLD_RULES]
+[/UPDATE_DOSSIER]`;
+
+        const report2 = applyDossierUpdates(unclosedAndWorldRule, empty);
+        assert.equal(report2.hasMutations, true);
+        assert.equal(report2.updatedDossier.meta.title, "Beneath the Titan's Vault", 'Campaign title must not be overwritten by [WORLD_RULES] title');
+        assert.equal(report2.updatedDossier.protagonist.name, 'Rook', 'Unclosed [PROTAGONIST] must not bleed into [NPC] name');
+        assert.equal(report2.updatedDossier.npcs.length, 1);
+        assert.equal(report2.updatedDossier.npcs[0].name, 'Gideon High-Tower');
+        assert.equal(report2.updatedDossier.worldRules.axioms.length, 1);
+        assert.equal(report2.updatedDossier.worldRules.axioms[0].title, 'Subterranean Bioluminescence');
+    });
+
+    it('Live Session Zero Fix 3: parseDossierCritique preserves commas inside parenthetical stat arrays and full-sentence strengths', () => {
+        const rawCritique = `[DOSSIER_CRITIQUE]
+verdict: REVISE
+score: 15
+grade: D
+strengths: - The stat array (+2, +1, +1, 0, -1) follows standard Powered by the Apocalypse conventions, and the tone is evocative.
+weaknesses:
+- Severe naming collision across [PROTAGONIST], [NPC], [MONSTER], and [FACTION] (all named "Gideon High-Tower").
+directives:
+- Use [REMOVE_WORLD_RULE: Gideon High-Tower] and [REMOVE_CUSTOM_MODULE], and give each entity a distinct identity.
+[/DOSSIER_CRITIQUE]`;
+
+        const parsed = parseDossierCritique(rawCritique);
+        assert.equal(parsed.verdict, 'REVISE');
+        assert.equal(parsed.score, 15);
+        assert.equal(parsed.grade, 'D');
+        assert.equal(parsed.strengths.length, 1, 'Must not split (+2, +1, +1, 0, -1) on commas');
+        assert.ok(parsed.strengths[0].includes('(+2, +1, +1, 0, -1)'));
     });
 });

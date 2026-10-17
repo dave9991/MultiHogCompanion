@@ -63,11 +63,38 @@ const soloDossier = {
 };
 const soloMemo = formatInitialPbtaMemo(soloDossier);
 assert.ok(soloMemo.includes('Deckard (Blade Runner): 4/4 HP | Harm: 0/4 | Armor: 1'), 'Solo memo missing 4/4 HP anchor');
-assert.ok(soloMemo.includes('((PILLS)) Moves: Assess Situation (+Mind) (Scan for exits and blind spots), Act Under Pressure (+Cool) (Stay icy under fire)'), 'Solo memo missing normalized ((PILLS)) moves');
+assert.ok(soloMemo.includes('((PILLS)) Moves: Assess Situation [+Mind] (Scan for exits and blind spots), Act Under Pressure [+Cool] (Stay icy under fire)'), 'Solo memo missing normalized ((PILLS)) moves with [+Stat] tags');
 assert.ok(soloMemo.includes('((PILLS)) Gear: Blaster pistol, Longcoat'), 'Solo memo missing ((PILLS)) Gear');
 assert.ok(soloMemo.includes('((PILLS)) Conditions: None'), 'Solo memo missing ((PILLS)) Conditions');
 assert.ok(!soloMemo.includes('[PARTY]'), 'Solo memo should not have [PARTY] block');
 console.log('✓ formatInitialPbtaMemo correctly formats solo protagonist with 4/4 HP, normalized pill moves, and pill gear');
+
+// 3b. Regression test: multi-clause moves with internal commas/colons and equipment fallback
+const aelionDossier = {
+    protagonist: {
+        name: 'Aelion',
+        playbook: 'The Delver',
+        harm: { max: 5, armor: 1 },
+        stats: { Might: 1, Agility: 2, Lore: 1, Grit: 0, Presence: -1 },
+        startingMoves: [
+            'Jury-Rigged Trap (+Lore) When you hastily rig a snare or deadfall using dungeon debris, roll+Lore. On a 10+, it holds fast or deals +1 Harm. On a 7-9, choose one: your trap fails after one trigger, it makes loud noise, or you leave a tool behind.',
+            'Volley (+Agility) When you strike from a distance with your bow, roll+Agility. On a 10+, you have a clear shot—deal your damage. On a 7-9, choose one (whichever you choose you still deal damage): you have to move to get the shot placing you in danger, you have to take what you can get (-1d6 damage), or you have to take several shots, reducing your ammo by 1.',
+        ],
+        gear: ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'],
+        equipment: 'Composite shortbow (near/far, 2 Harm), Quiver of iron-tipped arrows (3 Ammo), Delver\'s grappling hook and 50ft silk rope',
+        conditions: ['(-) Starting injury or weakness: Tinnitus from an old blast, disorientation in absolute silence'],
+    },
+    theKick: { startingLocation: 'The Flooded Cistern' },
+    config: { harmMax: 5, pacingXp: 5, partyMode: 'solo' },
+};
+const aelionMemo = formatInitialPbtaMemo(aelionDossier);
+assert.ok(aelionMemo.includes('((PILLS)) Moves: Jury-Rigged Trap [+Lore] (When you hastily rig a snare or deadfall using dungeon debris, roll+Lore.'), 'Multi-clause move should wrap full description inside parens after [+Stat]');
+assert.ok(aelionMemo.includes('Volley [+Agility] (When you strike from a distance with your bow, roll+Agility.'), 'Second multi-clause move should wrap cleanly without nested parens');
+assert.ok(!aelionMemo.includes('Essential adventurer kit'), 'Should prefer specific equipment over generic placeholder gear');
+assert.ok(aelionMemo.includes('((PILLS)) Gear: Composite shortbow (near/far, 2 Harm), Quiver of iron-tipped arrows (3 Ammo)'), 'Equipment string should split only at top-level commas');
+assert.ok(!aelionMemo.includes('Starting injury or weakness'), 'Echoed condition prompt placeholder should be stripped');
+assert.ok(aelionMemo.includes('((PILLS)) Conditions: (-) Tinnitus from an old blast, (-) Disorientation in absolute silence'), 'Conditions should normalize cleanly with (-) prefix');
+console.log('✓ Multi-clause moves, equipment fallback, and condition sanitization verified');
 
 // 4. formatInitialPbtaMemo with party companions
 const squadDossier = {

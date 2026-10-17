@@ -19,6 +19,59 @@
  *    - Upstream blockToItems() assigns individual entity cards & health bars per member.
  */
 
+import {
+    formatMoveAsPill,
+    formatConditionAsPill,
+    normalizePill,
+    splitTopLevelPillItems,
+} from './pbta-ruleset.js';
+
+/**
+ * Normalizes a single ((PILLS)) Moves: or Conditions: line if it contains
+ * unparenthesized move descriptions, double parentheticals, or echoed prompt placeholders.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+export function normalizePbtaPillsLine(line) {
+    if (!line || typeof line !== 'string') return line;
+
+    // 1. Moves line
+    const movesMatch = line.match(/^(\s*(?:\(\(PILLS\)\)\s*)?Moves:\s*)(.+)$/i);
+    if (movesMatch) {
+        const [, prefix, rawMovesText] = movesMatch;
+        const topSegments = splitTopLevelPillItems(rawMovesText, { splitCommas: true });
+        // Check if any segment has text after a closing ')' or has two '(' groups
+        const needsRepair = topSegments.some(seg => {
+            const openCount = (seg.match(/\(/g) || []).length;
+            if (openCount >= 2) return true;
+            if (openCount === 1 && !seg.trim().endsWith(')')) return true;
+            return false;
+        });
+        if (needsRepair) {
+            const splitByMoveHeader = rawMovesText
+                .split(/,\s*(?=[A-Z][A-Za-z0-9'’\s-]{1,35}?\s*[\(\[][+-]?[A-Za-z0-9\s]{1,18}[\)\]])/)
+                .map(s => s.trim())
+                .filter(Boolean);
+            const sourceList = splitByMoveHeader.length > 0 ? splitByMoveHeader : topSegments;
+            const healed = sourceList.map(formatMoveAsPill).filter(Boolean).join(', ');
+            if (healed) return `${prefix}${healed}`;
+        }
+        return line;
+    }
+
+    // 2. Conditions line with echoed prompt placeholder
+    const condMatch = line.match(/^(\s*(?:\(\(PILLS\)\)\s*)?Conditions:\s*)(.+)$/i);
+    if (condMatch && /starting\s+injury\s+or\s+weakness/i.test(condMatch[2])) {
+        const [, prefix, rawCondsText] = condMatch;
+        const segments = splitTopLevelPillItems(rawCondsText, { splitCommas: true });
+        const healed = segments.map(formatConditionAsPill).filter(Boolean).join(', ');
+        return `${prefix}${healed || 'None'}`;
+    }
+
+    return line;
+}
+
 /**
  * Normalizes a single line containing Harm into a valid tandem HP line.
  * If the line does not contain Harm, returns the original line unchanged.
@@ -79,20 +132,21 @@ export function normalizePbtaVitalityLine(line) {
 
 /**
  * Normalizes an entire state memo text, ensuring all PbtA Harm entities have
- * synchronized descending tandem HP anchors.
+ * synchronized descending tandem HP anchors and valid pill formatting.
  *
  * @param {string} memoText
  * @returns {string}
  */
 export function normalizePbtaMemo(memoText) {
     if (!memoText || typeof memoText !== 'string') return memoText;
-    if (!/Harm/i.test(memoText)) return memoText;
+    if (!/Harm|Moves:|Conditions:/i.test(memoText)) return memoText;
 
     const lines = memoText.split('\n');
     let modified = false;
 
     const newLines = lines.map(line => {
-        const norm = normalizePbtaVitalityLine(line);
+        let norm = normalizePbtaVitalityLine(line);
+        norm = normalizePbtaPillsLine(norm);
         if (norm !== line) modified = true;
         return norm;
     });
@@ -355,6 +409,33 @@ export function mergeDossierIntoLiveMemo(liveMemo, dossier, charName = null) {
                 .map(([stat, val]) => `${stat} ${Number(val) > 0 ? '+' : ''}${val}`)
                 .join(', ');
             return `Stats: ${statsStr}`;
+        }
+
+        // 4. Update Moves inside [CHARACTER] with properly formatted pills
+        if (insideCharBlock && Array.isArray(p.startingMoves) && p.startingMoves.length > 0 && /^(?:\(\(PILLS\)\)\s*)?Moves:/i.test(line.trim())) {
+            const movesStr = p.startingMoves.map(formatMoveAsPill).filter(Boolean).join(', ');
+            if (movesStr) {
+                return `((PILLS)) Moves: ${movesStr}`;
+            }
+        }
+
+        // 5. Update Gear inside [CHARACTER] if current line is stock placeholder or dossier has gear/equipment
+        if (insideCharBlock && /^(?:\(\(PILLS\)\)\s*)?Gear:/i.test(line.trim())) {
+            const hasCustomGear = Array.isArray(p.gear) && p.gear.length > 0 && !p.gear.every(g => /^(?:Essential adventurer kit|Signature weapon|Basic equipment)/i.test(String(g || '').trim()));
+            const rawGear = hasCustomGear
+                ? p.gear
+                : (typeof p.equipment === 'string' && p.equipment.trim())
+                    ? splitTopLevelPillItems(p.equipment)
+                    : [];
+            if (rawGear.length > 0 && /Essential adventurer kit/i.test(line)) {
+                const gearStr = rawGear.map(normalizePill).filter(Boolean).join(', ');
+                if (gearStr) return `((PILLS)) Gear: ${gearStr}`;
+            }
+        }
+
+        // 6. Repair Conditions inside [CHARACTER] if echoed prompt placeholder leaked
+        if (insideCharBlock && /^(?:\(\(PILLS\)\)\s*)?Conditions:/i.test(line.trim()) && /starting\s+injury\s+or\s+weakness/i.test(line)) {
+            return normalizePbtaPillsLine(line);
         }
 
         return line;

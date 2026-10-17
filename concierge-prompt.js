@@ -351,19 +351,23 @@ relationships: on | off
 [PROTAGONIST]
 name: [[NAME:protagonist]]
 playbook: The Sleuth
-species: Human, gender/subtype
+species: Human (Male) (specify actual species and gender; never write literal "gender/subtype")
 appearance: Physical features, build, hair, eyes, scars (do not put clothing/armor here)
-equipment: Worn weapons, armor, visible clothing and carried essentials
+equipment: Signature weapon (2 Harm, close), worn armor ((+) Armor 1), visible clothing and carried essentials
+gear:
+- Signature weapon (2 Harm, close)
+- Worn armor ((+) Armor 1)
+- Specialized utility tool (3 uses)
 personality: Stable temperament and traits
 background: Brief backstory and origin grounded in the premise
 habits: Mannerisms, behavioral quirks, and recurring habits
 stats: Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1
 moves:
-- Move Name (+Stat) (Description of move trigger and outcome)
-- Second Move (+Stat) (Description)
+- Move Name [+Stat] (Description of move trigger and outcome)
+- Second Move [+Stat] (Description of move trigger and outcome)
 harm: 5
 armor: 1
-conditions: (-) Starting injury or weakness
+conditions: None (or a specific starting debility like "(-) Old Blast Tinnitus" — never write literal "Starting injury or weakness")
 status: Healthy
 [/PROTAGONIST]
 
@@ -378,7 +382,7 @@ notes: Details
 name: [[NAME:mentor]]
 role: Mentor | Patron | Merchant | Faction Contact | Companion (Party)
 archetype: Archetype / title (e.g. Veteran Scout, Hedge Mage, Bounty Hunter)
-species: Species / ancestry
+species: Human (Female) (actual species and gender)
 appearance: Distinct visual look
 equipment: Carried items
 demeanor: Personality demeanor
@@ -386,7 +390,7 @@ background: Backstory
 relationship: Bond with protagonist
 friendship: Initial platonic trust (-150 to +150, e.g. +35 for ally, -30 for rival, 0 for neutral)
 affection: Initial romantic warmth (-150 to +150, e.g. +50 for lover, 0 for neutral)
-moves_or_boons: Fictional benefit or boon
+moves_or_boons: Move Name (Fictional benefit or boon); Second Boon (Effect)
 notes: Extra notes
 [/NPC]
 
@@ -455,7 +459,7 @@ sample:
 1. **Turn 1 / Initial Scaffolding (Contemplative Architecture):** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:
    First emit \`[CONTEMPLATION]\` inside \`[UPDATE_DOSSIER]\` to map out the central tension, world consequences, character entanglement, and starting crucible. Then proactively scaffold a complete, coherent starting draft into \`[UPDATE_DOSSIER]\`: \`summary: ...\`, \`title\`, \`system\`, \`tone\`, \`premise\`, \`[CONFIG]\` dials, \`[PROTAGONIST]\` (+2, +1, +1, 0, -1 with 2 signature moves), 1 \`[FACTION]\`, 1 world \`[NPC]\`, 1 \`[MONSTER]\` with countdown doom track, 1 starting \`[MAP]\`, and \`[KICK]\`.
    * Ensure the Protagonist, Faction, NPC, and Monster are **entangled** (shared history, debts, conflicting agendas) rather than isolated tropes.
-   * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include \`[WORLD_RULES]\` and propagate those laws into the Protagonist's equipment, NPC roles, and \`[MAP]\` architecture. Only include a \`[CUSTOM_MODULE]\` if this rule requires a bespoke physical resource gauge (e.g. symbiote hunger, wing stamina); NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking").
+   * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include [WORLD_RULES] and propagate those laws into the Protagonist's equipment, NPC roles, and [MAP] architecture. Only include a [CUSTOM_MODULE] if this rule requires a bespoke physical resource gauge (e.g. symbiote hunger, wing stamina); NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking").
 2. **Follow-Up Edits (Partial Patches):** When modifying an existing blueprint, emit ONLY the tags being added, edited, or removed. Unchanged entities and fields are preserved automatically.
 3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
 4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.`;

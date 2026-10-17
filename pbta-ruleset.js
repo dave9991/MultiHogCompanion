@@ -773,7 +773,7 @@ Format:
 [CHARACTER]
 {{user}} (Archetype): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
 Stats: ${statsExample}
-((PILLS)) Moves: Move 1 (Trigger and narrative effect), Move 2 (Trigger and narrative effect)
+((PILLS)) Moves: Move 1 [+Stat] (Trigger and narrative effect), Move 2 [+Stat] (Trigger and narrative effect)
 ((PILLS)) Gear: Signature weapon (Tags, 2 Harm), Protective gear ((+) Armor 1)
 Wealth: Coin 3 (or setting currency)
 ((PILLS)) Conditions: None
@@ -783,7 +783,7 @@ Status: Healthy
 [/CHARACTER]
 
 PILL FORMATTING (renders as interactive badges with mouse-over tooltips):
-- Moves: Separate moves with commas, placing trigger and mechanical/narrative effect inside trailing parentheses: Move Name (Trigger and effect). The description appears on mouse-over. Keep commas out of the description unless inside parentheses.
+- Moves: Separate moves with commas, using square brackets for the stat tag and a single pair of trailing parentheses for the entire trigger/effect description: Move Name [+Stat] (Trigger and effect). NEVER leave move descriptions outside parentheses or use nested parentheses inside a move description.
 - Gear: Separate equipped items with commas, placing weapon tags, armor values, or uses inside trailing parentheses: Item Name (Tags, harm/armor). Use (+) for armor or protective bonuses, e.g. Static Shroud ((+) +1 Armor).
 - Conditions & Status: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward).
   NO D&D DAMAGE-OVER-TIME OR ROUND/TURN COUNTERS: NEVER output "1 damage per round", "X turns remaining", or saving throw DC tickers. PbtA conditions are fictional debilities or narrative triggers (e.g. "(-) Bleeding (Risk taking +1 Harm on strenuous physical action without medical aid)").
@@ -1170,6 +1170,147 @@ export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName =
 }
 
 /**
+ * Splits a string on top-level commas or semicolons outside parentheses/brackets.
+ * @param {string} str
+ * @param {{ splitCommas?: boolean }} [opts]
+ * @returns {string[]}
+ */
+export function splitTopLevelPillItems(str, { splitCommas = true } = {}) {
+    if (!str || typeof str !== 'string') return [];
+    const res = [];
+    let cur = '';
+    let depth = 0;
+    for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        if (c === '(' || c === '[') depth++;
+        else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+
+        const isSep = depth === 0 && (
+            c === ';' ||
+            (splitCommas && c === ',' && !(i > 0 && i < str.length - 1 && /\d/.test(str[i - 1]) && /\d/.test(str[i + 1])))
+        );
+        if (isSep) {
+            if (cur.trim()) res.push(cur.trim());
+            cur = '';
+        } else {
+            cur += c;
+        }
+    }
+    if (cur.trim()) res.push(cur.trim());
+    return res;
+}
+
+/**
+ * Formats a general pill item ("Name: Desc" -> "Name (Desc)") without matching colons deep inside prose.
+ * @param {string} item
+ * @returns {string}
+ */
+export function normalizePill(item) {
+    if (typeof item !== 'string') return String(item || '');
+    const trimmed = item.trim().replace(/^[-*•]\s*/, '').trim();
+    if (!trimmed) return '';
+    // Only treat a colon as "Name: Desc" if the label before the colon is short and has no parentheses
+    const colonMatch = trimmed.match(/^([^:()]{1,40}):\s*(.+)$/);
+    if (colonMatch && !/\([^)]+\)$/.test(trimmed)) {
+        const name = colonMatch[1].trim();
+        const desc = colonMatch[2].trim().replace(/\(/g, '[').replace(/\)/g, ']');
+        return `${name} (${desc})`;
+    }
+    return trimmed;
+}
+
+/**
+ * Formats a PbtA move or companion boon into a single clean MultiHog ((PILLS)) item:
+ * "Move Name [+Stat] (Trigger and effect with no nested parentheses)"
+ * Prevents upstream splitSmart from splitting on commas inside move descriptions,
+ * and prevents upstream renderPills from truncating the move name at a (+Stat) paren.
+ *
+ * @param {string} item
+ * @returns {string}
+ */
+export function formatMoveAsPill(item) {
+    if (typeof item !== 'string') return String(item || '');
+    const trimmed = item.trim().replace(/^[-*•]\s*/, '').trim();
+    if (!trimmed) return '';
+
+    const cleanDesc = (d) => {
+        let s = String(d || '').trim();
+        if (s.startsWith('(') && s.endsWith(')') && !s.slice(1, -1).includes(')')) {
+            s = s.slice(1, -1).trim();
+        }
+        // Restore "choose one (a, b, or c)" if previously mangled by old normalizePill
+        s = s.replace(/\b(choose\s+(?:one|two|three|\d+))\s*\(([^()]+)\)/gi, '$1: $2');
+        return s.replace(/\(/g, '[').replace(/\)/g, ']').trim();
+    };
+
+    // Case 1: "Move Name (+Stat) Description..." or "Move Name (Passive) Description..."
+    const statWithDescMatch = trimmed.match(/^([^(:\[\n—–]+?)\s*[\(\[]\s*([+-]?\s*[A-Za-z]{2,15})\s*[\)\]]\s*(?:[:—–-]\s*)?(\S[\s\S]*)$/);
+    if (statWithDescMatch) {
+        const moveName = statWithDescMatch[1].trim().replace(/[-—–:]\s*$/, '').trim();
+        const rawTag = statWithDescMatch[2].trim().replace(/\s+/g, '');
+        const desc = cleanDesc(statWithDescMatch[3]);
+        return desc ? `${moveName} [${rawTag}] (${desc})` : `${moveName} (${rawTag})`;
+    }
+
+    // Case 2: "Move Name (+Stat)" with no description
+    const statOnlyMatch = trimmed.match(/^([^(:\[\n—–]+?)\s*[\(\[]\s*([+-]\s*[A-Za-z]{2,15}|Passive|Innate|Active|Ritual)\s*[\)\]]$/i);
+    if (statOnlyMatch) {
+        const moveName = statOnlyMatch[1].trim().replace(/[-—–:]\s*$/, '').trim();
+        const rawTag = statOnlyMatch[2].trim().replace(/\s+/g, '');
+        return `${moveName} (${rawTag})`;
+    }
+
+    // Case 3: "Move Name: Description" or "Move Name — Description"
+    const sepMatch = trimmed.match(/^([^:\n—–-]{2,45}?)\s*(?::|—|–|\s+-)\s+([\s\S]+)$/);
+    if (sepMatch && !sepMatch[1].includes('(')) {
+        const moveName = sepMatch[1].trim();
+        const desc = cleanDesc(sepMatch[2]);
+        return desc ? `${moveName} (${desc})` : moveName;
+    }
+
+    // Case 4: "Move Name (Description)"
+    const parenMatch = trimmed.match(/^([^(:\n—–-]+?)\s*\(([\s\S]+)\)$/);
+    if (parenMatch) {
+        const moveName = parenMatch[1].trim().replace(/[:—–-]\s*$/, '').replace(/\(([^)]+)\)/g, '[$1]').trim();
+        const desc = cleanDesc(parenMatch[2]);
+        return desc ? `${moveName} (${desc})` : moveName;
+    }
+
+    return normalizePill(trimmed);
+}
+
+/**
+ * Formats a PbtA condition item into a clean pill, stripping echoed prompt hints
+ * like "Starting injury or weakness:" and ensuring a (-) or (+) prefix.
+ * @param {string} item
+ * @returns {string}
+ */
+export function formatConditionAsPill(item) {
+    if (typeof item !== 'string') return '';
+    let s = item.trim().replace(/^[-*•]\s*/, '').trim();
+    if (!s) return '';
+
+    let prefix = '';
+    const pm = s.match(/^(\([+-]\))\s*(.*)$/);
+    if (pm) {
+        prefix = pm[1];
+        s = pm[2].trim();
+    }
+
+    s = s.replace(/^starting\s+injury\s+or\s+weakness\s*(?:[:—–-]\s*)?/i, '').trim();
+    if (s.startsWith('(') && s.endsWith(')') && !s.slice(1, -1).includes('(')) {
+        s = s.slice(1, -1).trim();
+    }
+    if (!s || /^(?:none|n\/a|null|healthy|uninjured)$/i.test(s)) return '';
+    if (/^[a-z]/.test(s)) {
+        s = s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    const normalized = normalizePill(s);
+    return `${prefix || '(-)'} ${normalized}`;
+}
+
+/**
  * Generates the initial Multihog game state memo ([TIME], [LOCATION], [CHARACTER], [DUNGEON])
  * from a completed PbtA Campaign Dossier.
  *
@@ -1197,30 +1338,24 @@ export function formatInitialPbtaMemo(dossier) {
         statsStr = 'Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1';
     }
 
-    // Helper to normalize "Name: Desc" into "Name (Desc)" for pill tooltips
-    const normalizePill = item => {
-        if (typeof item !== 'string') return String(item || '');
-        const trimmed = item.trim();
-        const colonMatch = trimmed.match(/^([^:]+):\s*(.*)$/);
-        if (colonMatch && !/\([^)]+\)$/.test(trimmed)) {
-            return `${colonMatch[1].trim()} (${colonMatch[2].trim()})`;
-        }
-        return trimmed;
-    };
-
-    // Format moves (comma-separated for pill splitting)
+    // Format moves (comma-separated for pill splitting, with single trailing paren per move)
     const rawMoves = Array.isArray(p.startingMoves) && p.startingMoves.length > 0
         ? p.startingMoves
         : ['Act Under Fire (+Cool)', 'Read a Tense Situation (+Sharp)'];
-    const movesStr = rawMoves.map(normalizePill).join(', ');
+    const movesStr = rawMoves.map(formatMoveAsPill).filter(Boolean).join(', ');
 
-    // Format gear (comma-separated for pill splitting)
-    const rawGear = Array.isArray(p.gear) && p.gear.length > 0
+    // Format gear: prefer real p.gear items, else p.equipment, else stock fallback
+    const hasCustomGear = Array.isArray(p.gear) && p.gear.length > 0 && !p.gear.every(g => /^(?:Essential adventurer kit|Signature weapon|Basic equipment)/i.test(String(g || '').trim()));
+    const rawGear = hasCustomGear
         ? p.gear
-        : (typeof p.gear === 'string' && p.gear.trim())
-            ? p.gear.split(',').map(s => s.trim()).filter(Boolean)
-            : ['Essential adventurer kit (utility tools)', 'Signature weapon (2 Harm, close)'];
-    const gearStr = rawGear.map(normalizePill).join(', ');
+        : (typeof p.equipment === 'string' && p.equipment.trim())
+            ? splitTopLevelPillItems(p.equipment)
+            : (Array.isArray(p.gear) && p.gear.length > 0)
+                ? p.gear
+                : (typeof p.gear === 'string' && p.gear.trim())
+                    ? splitTopLevelPillItems(p.gear)
+                    : ['Essential adventurer kit (utility tools)', 'Signature weapon (2 Harm, close)'];
+    const gearStr = rawGear.map(normalizePill).filter(Boolean).join(', ');
 
     const locationStr = (kick.startingLocation || dossier.maps?.[0]?.site || 'The Starting Threshold').trim();
 
@@ -1236,9 +1371,9 @@ export function formatInitialPbtaMemo(dossier) {
     const harmCurrent = Math.max(0, parseInt(p.harm?.current, 10) || 0);
     const curHp = Math.max(0, harmMax - harmCurrent);
     const rawConditions = Array.isArray(p.conditions)
-        ? p.conditions
-        : (p.conditions ? [p.conditions] : []);
-    let condsStr = rawConditions.map(normalizePill).join(', ');
+        ? p.conditions.flatMap(c => typeof c === 'string' ? splitTopLevelPillItems(c) : [])
+        : (typeof p.conditions === 'string' ? splitTopLevelPillItems(p.conditions) : []);
+    let condsStr = rawConditions.map(formatConditionAsPill).filter(Boolean).join(', ');
     if (!condsStr) {
         condsStr = harmCurrent > 0 ? '(-) Wounded' : 'None';
     }
@@ -1277,24 +1412,37 @@ export function formatInitialPbtaMemo(dossier) {
             }
             cTitle = cTitle.replace(/[()]/g, '').trim() || 'Companion';
             let cBoons = comp.movesOrBoons || 'Assist (+1 forward when cooperating)';
-            const rawBoons = Array.isArray(cBoons) ? cBoons : [cBoons];
-            const cBoonsStr = rawBoons.map(normalizePill).join(', ');
+            const rawBoons = Array.isArray(cBoons)
+                ? cBoons
+                : typeof cBoons === 'string'
+                    ? splitTopLevelPillItems(cBoons, { splitCommas: !cBoons.includes(';') && !cBoons.includes(':') })
+                    : [String(cBoons)];
+            const cBoonsStr = rawBoons.map(formatMoveAsPill).filter(Boolean).join(', ');
 
             let cGear = comp.equipment || comp.gear || 'Signature equipment (utility)';
             const rawCompGear = Array.isArray(cGear)
                 ? cGear
                 : typeof cGear === 'string'
-                    ? cGear.split(',').map(s => s.trim()).filter(Boolean)
+                    ? splitTopLevelPillItems(cGear)
                     : [String(cGear)];
-            const cGearStr = rawCompGear.map(normalizePill).join(', ');
+            const cGearStr = rawCompGear.map(normalizePill).filter(Boolean).join(', ');
 
             let cBonds = comp.relationship || `${charName} (Allied with protagonist)`;
-            const rawCompBonds = Array.isArray(cBonds)
-                ? cBonds
-                : typeof cBonds === 'string'
-                    ? cBonds.split(',').map(s => s.trim()).filter(Boolean)
-                    : [String(cBonds)];
-            const cBondsStr = rawCompBonds.map(normalizePill).join(', ');
+            let cBondsStr = '';
+            if (Array.isArray(cBonds)) {
+                cBondsStr = cBonds.map(normalizePill).filter(Boolean).join(', ');
+            } else if (typeof cBonds === 'string') {
+                const trimmedBond = cBonds.trim();
+                // If it's a long prose sentence without trailing parens, wrap it as "ProtagonistName (Relationship detail)"
+                if (trimmedBond && (trimmedBond.length > 40 || /[;.]/.test(trimmedBond)) && !/\([^)]+\)$/.test(trimmedBond) && !trimmedBond.toLowerCase().startsWith(charName.toLowerCase())) {
+                    const safeBondDesc = trimmedBond.replace(/\(/g, '[').replace(/\)/g, ']');
+                    cBondsStr = `${charName} (${safeBondDesc})`;
+                } else {
+                    cBondsStr = splitTopLevelPillItems(trimmedBond).map(normalizePill).filter(Boolean).join(', ');
+                }
+            } else {
+                cBondsStr = `${charName} (Allied with protagonist)`;
+            }
 
             const cApp = comp.appearance || comp.description || (comp.demeanor ? `${comp.demeanor} demeanor` : '');
 
@@ -1302,8 +1450,10 @@ export function formatInitialPbtaMemo(dossier) {
             const cHarmCur = Math.max(0, parseInt(comp.harm?.current, 10) || 0);
             const cCurHp = Math.max(0, cHarmMax - cHarmCur);
             const cArmor = comp.harm?.armor || parseInt(comp.armor, 10) || 0;
-            const rawCConds = Array.isArray(comp.conditions) ? comp.conditions : (comp.conditions ? [comp.conditions] : []);
-            let cCondsStr = rawCConds.map(normalizePill).join(', ');
+            const rawCConds = Array.isArray(comp.conditions)
+                ? comp.conditions.flatMap(c => typeof c === 'string' ? splitTopLevelPillItems(c) : [])
+                : (typeof comp.conditions === 'string' ? splitTopLevelPillItems(comp.conditions) : []);
+            let cCondsStr = rawCConds.map(formatConditionAsPill).filter(Boolean).join(', ');
             if (!cCondsStr) {
                 cCondsStr = cHarmCur > 0 ? '(-) Wounded' : 'None';
             }

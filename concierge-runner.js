@@ -381,11 +381,13 @@ async function injectWorldSkeleton(chatId, dossier) {
  * @param {string} [options.wipeOldTitle] If set, completely purges previous chat and lorebooks for this title
  * @returns {Promise<{ success: boolean, message: string }>}
  */
-export async function launchPbtaCampaign(dossier, onProgress = () => {}, options = {}) {
+export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, options = {}) {
     const { wipeOldTitle = null } = options;
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    const { healAndNormalizeDossier } = await import('./concierge-parser.js');
     const { applyPbtACartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
+    const dossier = healAndNormalizeDossier(rawDossier);
     const systemKey = dossier.meta?.systemKey || 'fantasy';
     const charName = (dossier.protagonist?.name || '').trim();
     const adventureTitle = (dossier.meta?.title || '').trim();
@@ -870,6 +872,20 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             console.warn('[PbtA Concierge] Lorebook sync warning:', loreErr);
         }
 
+        // 2b. Refresh Player Character card bio in Lorebook Agent if protagonist name exists
+        if (charName) {
+            try {
+                const charCreator = await import('../SillyTavern-MultihogDnDFramework/character-creator.js');
+                if (typeof charCreator.addPlayerCardToLorebookAgent === 'function') {
+                    const pcSectionNames = await loadMainPcSectionNames();
+                    const bio = buildPlayerCardBio(dossier.protagonist, pcSectionNames);
+                    await charCreator.addPlayerCardToLorebookAgent(charName, bio, 150, { chatId });
+                }
+            } catch (pcErr) {
+                console.warn('[PbtA Concierge] PC card sync warning:', pcErr);
+            }
+        }
+
         // 3. Update PbtA Cartridge with dynamic rules and Harm tiers
         onProgress('🎲 Re-applying PbtA ruleset cartridge...', 60);
         const statsList = Object.keys(dossier.protagonist?.stats || {});
@@ -945,14 +961,18 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             if (chatId) {
                 rpgSettings.chatStateProjectionOwner = chatId;
                 rpgSettings.chatStates = rpgSettings.chatStates || {};
-                rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
-                rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
-                rpgSettings.chatStates[chatId].currentMemo = rpgSettings.currentMemo;
-                rpgSettings.chatStates[chatId].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
-                if (rpgSettings.customFields) {
-                    rpgSettings.chatStates[chatId].customFields = [...rpgSettings.customFields];
+                const cleanChatKey = chatId.replace(/\.jsonl$/i, '');
+                const keysToSync = [...new Set([chatId, `${cleanChatKey}.jsonl`, cleanChatKey].filter(k => k === chatId || rpgSettings.chatStates[k]))];
+                for (const key of keysToSync) {
+                    rpgSettings.chatStates[key] = rpgSettings.chatStates[key] || {};
+                    rpgSettings.chatStates[key].pbtaCampaignDossier = dossier;
+                    rpgSettings.chatStates[key].currentMemo = rpgSettings.currentMemo;
+                    rpgSettings.chatStates[key].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
+                    if (rpgSettings.customFields) {
+                        rpgSettings.chatStates[key].customFields = [...rpgSettings.customFields];
+                    }
+                    syncLivePbtaMemoVitality(rpgSettings, key);
                 }
-                syncLivePbtaMemoVitality(rpgSettings, chatId);
             }
 
             // Force tracker view hydration so Multihog HUD transitions immediately out of .rt-empty onboarding

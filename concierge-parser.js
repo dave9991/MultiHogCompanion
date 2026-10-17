@@ -386,6 +386,130 @@ function parseBulletList(block, sectionKey) {
 }
 
 /**
+ * Splits a string on top-level commas, semicolons, or pipes outside of parentheses/brackets.
+ * @param {string} str
+ * @param {{ splitCommas?: boolean }} [opts]
+ * @returns {string[]}
+ */
+export function splitTopLevelItems(str, { splitCommas = true } = {}) {
+    if (!str || typeof str !== 'string') return [];
+    const res = [];
+    let cur = '';
+    let depth = 0;
+    for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        if (c === '(' || c === '[') depth++;
+        else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+
+        const isSep = depth === 0 && (
+            c === ';' ||
+            c === '|' ||
+            (splitCommas && c === ',' && !(i > 0 && i < str.length - 1 && /\d/.test(str[i - 1]) && /\d/.test(str[i + 1])))
+        );
+        if (isSep) {
+            if (cur.trim()) res.push(cur.trim());
+            cur = '';
+        } else {
+            cur += c;
+        }
+    }
+    if (cur.trim()) res.push(cur.trim());
+    return res;
+}
+
+/**
+ * Strips echoed prompt placeholders (like "gender/subtype") from a species string.
+ * @param {string} val
+ * @returns {string}
+ */
+export function sanitizeSpeciesValue(val) {
+    if (!val || typeof val !== 'string') return '';
+    return val
+        .replace(/,\s*gender\s*\/\s*subtype/gi, '')
+        .replace(/\(\s*gender\s*\/\s*subtype\s*\)/gi, '')
+        .replace(/\bgender\s*\/\s*subtype\b/gi, '')
+        .replace(/\bspecies\s*\/\s*ancestry\b/gi, '')
+        .replace(/^[,\s;]+|[,\s;]+$/g, '')
+        .trim();
+}
+
+/**
+ * Normalizes a list or string of PbtA conditions, stripping echoed prompt hints
+ * (like "(-) Starting injury or weakness:") and ensuring debilities carry a (-) prefix.
+ * @param {string[]|string} rawConds
+ * @returns {string[]}
+ */
+export function sanitizeConditionsList(rawConds) {
+    const items = Array.isArray(rawConds)
+        ? rawConds.flatMap(c => typeof c === 'string' ? splitTopLevelItems(c, { splitCommas: true }) : [])
+        : typeof rawConds === 'string'
+            ? splitTopLevelItems(rawConds, { splitCommas: true })
+            : [];
+
+    const out = [];
+    for (const rawItem of items) {
+        let s = String(rawItem || '').replace(/^\s*(?:[-*+•]|\d+[.)])\s+/, '').trim();
+        if (!s) continue;
+
+        let prefix = '';
+        const prefixMatch = s.match(/^(\([+-]\))\s*(.*)$/);
+        if (prefixMatch) {
+            prefix = prefixMatch[1];
+            s = prefixMatch[2].trim();
+        }
+
+        // Strip echoed prompt template hints
+        s = s.replace(/^starting\s+injury\s+or\s+weakness\s*(?:[:—–-]\s*)?/i, '').trim();
+        // If stripping the prefix left an outer parenthetical "(Tinnitus...)", unwrap it
+        if (s.startsWith('(') && s.endsWith(')') && !s.slice(1, -1).includes('(')) {
+            s = s.slice(1, -1).trim();
+        }
+
+        if (!s || /^(?:none|n\/a|null|healthy|uninjured|omit if healthy)$/i.test(s)) {
+            continue;
+        }
+
+        // Capitalize first letter if lowercase
+        if (/^[a-z]/.test(s)) {
+            s = s.charAt(0).toUpperCase() + s.slice(1);
+        }
+
+        const finalPrefix = prefix || '(-)';
+        out.push(`${finalPrefix} ${s}`);
+    }
+    return out;
+}
+
+/**
+ * Checks whether a gear array is empty or contains only stock fallback placeholders.
+ * @param {any} gear
+ * @returns {boolean}
+ */
+export function isPlaceholderGearList(gear) {
+    if (!Array.isArray(gear) || gear.length === 0) return true;
+    return gear.every(g => {
+        const s = String(g || '').trim();
+        return !s || /^(?:Essential adventurer kit|Signature weapon|Basic equipment)/i.test(s);
+    });
+}
+
+/**
+ * Splits a freeform equipment string into individual gear items for HUD pills.
+ * @param {string} equipStr
+ * @returns {string[]}
+ */
+export function splitEquipmentIntoGearList(equipStr) {
+    if (!equipStr || typeof equipStr !== 'string') return [];
+    return splitTopLevelItems(equipStr, { splitCommas: true })
+        .map(item => {
+            const trimmed = item.replace(/^\s*(?:[-*+•]|\d+[.)])\s+/, '').trim();
+            if (!trimmed) return '';
+            return /^[a-z]/.test(trimmed) ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : trimmed;
+        })
+        .filter(Boolean);
+}
+
+/**
  * Resilient list item parser for bullet lines or inline comma/semicolon-separated values.
  * Ignores delimiters inside parentheses like "(+2, +1, +1, 0, -1)".
  * @param {string} block
@@ -401,10 +525,7 @@ function parseBulletOrListItems(block, sectionKey, { splitCommas = true } = {}) 
     if (rawVal) {
         const cleaned = rawVal.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
         if (!cleaned || /^(?:none|n\/a|null)$/i.test(cleaned)) return [];
-        const splitter = splitCommas
-            ? /(?:[;|](?![^()]*\))|,(?![^()]*\)))/
-            : /[;|](?![^()]*\))/;
-        return cleaned.split(splitter).map(s => s.trim()).filter(Boolean);
+        return splitTopLevelItems(cleaned, { splitCommas });
     }
     return [];
 }
@@ -924,9 +1045,12 @@ export function applyDossierUpdates(text, dossier) {
             updated.protagonist.bio = kv.bio;
             changes.push(`Protagonist bio updated`);
         }
-        if (kv.species && updated.protagonist.species !== kv.species.trim()) {
-            updated.protagonist.species = kv.species.trim();
-            changes.push(`Protagonist species: "${updated.protagonist.species}"`);
+        if (kv.species) {
+            const cleanSp = sanitizeSpeciesValue(kv.species) || kv.species.trim();
+            if (cleanSp && updated.protagonist.species !== cleanSp) {
+                updated.protagonist.species = cleanSp;
+                changes.push(`Protagonist species: "${updated.protagonist.species}"`);
+            }
         }
         const app = (kv.appearance || kv.body || '').trim();
         if (app && updated.protagonist.appearance !== app) {
@@ -992,10 +1116,11 @@ export function applyDossierUpdates(text, dossier) {
                 changes.push(`Protagonist Armor set to ${a}`);
             }
         }
-        if (kv.conditions) {
-            const condList = kv.conditions.split(/[,;]/).map(c => c.trim()).filter(Boolean);
+        const rawProtoConds = parseBulletOrListItems(pBlock, 'conditions');
+        if (rawProtoConds.length || kv.conditions !== undefined) {
+            const condList = sanitizeConditionsList(rawProtoConds.length ? rawProtoConds : kv.conditions);
+            updated.protagonist.conditions = condList;
             if (condList.length) {
-                updated.protagonist.conditions = condList;
                 changes.push(`Protagonist conditions set: ${condList.join(', ')}`);
             }
         }
@@ -1004,17 +1129,23 @@ export function applyDossierUpdates(text, dossier) {
             changes.push(`Protagonist status set to "${updated.protagonist.status}"`);
         }
 
-        const moves = parseBulletList(pBlock, 'moves');
+        const moves = parseBulletOrListItems(pBlock, 'moves', { splitCommas: false });
         if (moves.length) {
             updated.protagonist.startingMoves = moves;
             changes.push(`Protagonist moves updated (${moves.length} moves registered)`);
         }
 
-        if (kv.gear) {
-            const gearList = kv.gear.split(/[,;]/).map(g => g.trim()).filter(Boolean);
-            if (gearList.length) {
-                updated.protagonist.gear = gearList;
-                changes.push(`Protagonist gear updated: ${gearList.join(', ')}`);
+        const gearList = parseBulletOrListItems(pBlock, 'gear', { splitCommas: true });
+        if (gearList.length) {
+            updated.protagonist.gear = gearList;
+            if (!updated.protagonist.equipment) {
+                updated.protagonist.equipment = gearList.join(', ');
+            }
+            changes.push(`Protagonist gear updated: ${gearList.join(', ')}`);
+        } else if (equip && isPlaceholderGearList(updated.protagonist.gear)) {
+            const derivedGear = splitEquipmentIntoGearList(equip);
+            if (derivedGear.length) {
+                updated.protagonist.gear = derivedGear;
             }
         }
     }
@@ -1095,16 +1226,21 @@ export function applyDossierUpdates(text, dossier) {
             }
         }
 
-        let nConditions = [];
-        if (kv.conditions) {
-            nConditions = kv.conditions.split(/[,;]/).map(c => c.trim()).filter(Boolean);
-        }
+        const rawNpcConds = parseBulletOrListItems(nBlock, 'conditions');
+        const nConditions = (rawNpcConds.length || kv.conditions)
+            ? sanitizeConditionsList(rawNpcConds.length ? rawNpcConds : kv.conditions)
+            : [];
+
+        const rawNpcSpecies = kv.species || kv.race || '';
+        const cleanNpcSpecies = sanitizeSpeciesValue(rawNpcSpecies) || rawNpcSpecies.trim();
+        const bulletBoons = parseBulletList(nBlock, 'moves_or_boons').concat(parseBulletList(nBlock, 'moves'));
+        const npcMovesOrBoons = kv.moves_or_boons || kv.moves || (bulletBoons.length ? bulletBoons.join('; ') : '');
 
         const npcObj = {
             name: kv.name,
             role: kv.role || 'Ally',
             archetype: kv.archetype || kv.playbook || kv.class || '',
-            species: kv.species || kv.race || '',
+            species: cleanNpcSpecies,
             appearance: kv.appearance || kv.description || kv.look || '',
             equipment: kv.equipment || kv.gear || '',
             demeanor: kv.demeanor || '',
@@ -1112,7 +1248,7 @@ export function applyDossierUpdates(text, dossier) {
             relationship: kv.relationship || '',
             friendship: fVal,
             affection: aVal,
-            movesOrBoons: kv.moves_or_boons || kv.moves || '',
+            movesOrBoons: npcMovesOrBoons,
             notes: kv.notes || '',
             portraitSrc: null,
             harm: nHarm,
@@ -1135,10 +1271,10 @@ export function applyDossierUpdates(text, dossier) {
             if (given('relationship')) patch.relationship = npcObj.relationship;
             if (given('friendship')) patch.friendship = clampRelationshipScore(kv.friendship);
             if (given('affection')) patch.affection = clampRelationshipScore(kv.affection);
-            if (given('moves_or_boons', 'moves')) patch.movesOrBoons = npcObj.movesOrBoons;
+            if (given('moves_or_boons', 'moves') || bulletBoons.length) patch.movesOrBoons = npcObj.movesOrBoons;
             if (given('notes')) patch.notes = npcObj.notes;
             if (given('harm', 'current_harm', 'harm_current', 'wounds', 'armor') && nHarm) patch.harm = nHarm;
-            if (given('conditions')) patch.conditions = npcObj.conditions;
+            if (given('conditions') || rawNpcConds.length) patch.conditions = npcObj.conditions;
             if (given('status')) patch.status = npcObj.status;
             updated.npcs[existingIdx] = Object.assign({}, updated.npcs[existingIdx], patch);
             changes.push(`Updated NPC "${npcObj.name}" (${npcObj.role})`);
@@ -1164,7 +1300,7 @@ export function applyDossierUpdates(text, dossier) {
         if (targetName) {
             const beforeLen = updated.monsters.length;
             updated.monsters = updated.monsters.filter(m => m.name.toLowerCase() !== targetName.toLowerCase());
-            if (updated.monsters.length < beforeLen) {
+            if (updated.npcs && updated.monsters.length < beforeLen) {
                 changes.push(`Removed Adversary "${targetName}"`);
             }
         }
@@ -1201,17 +1337,20 @@ export function applyDossierUpdates(text, dossier) {
             if (!isNaN(cVal)) mCurHarm = cVal;
         }
 
+        const parsedAttacks = parseBulletOrListItems(mBlock, 'attacks', { splitCommas: true });
+        const parsedMonConds = parseBulletOrListItems(mBlock, 'conditions', { splitCommas: true });
+
         const monsterObj = {
             name: kv.name,
             harm: mMaxHarm,
             currentHarm: mCurHarm,
             armor: parseInt(kv.armor, 10) || 0,
-            attacks: kv.attacks ? kv.attacks.split(/[,;]/).map(a => a.trim()).filter(Boolean) : [],
+            attacks: parsedAttacks,
             weakness: kv.weakness || 'Unknown',
-            impendingDoom: parseBulletList(mBlock, 'countdown'),
+            impendingDoom: parseBulletOrListItems(mBlock, 'countdown', { splitCommas: false }),
             notes: kv.notes || '',
             status: kv.status ? kv.status.trim() : (mCurHarm > 0 ? '(-) Wounded' : ''),
-            conditions: kv.conditions ? kv.conditions.split(/[,;]/).map(c => c.trim()).filter(Boolean) : [],
+            conditions: parsedMonConds.length ? sanitizeConditionsList(parsedMonConds) : [],
         };
 
         const existingIdx = updated.monsters.findIndex(m => m.name.toLowerCase() === monsterObj.name.toLowerCase());
@@ -1222,12 +1361,12 @@ export function applyDossierUpdates(text, dossier) {
                 patch.currentHarm = monsterObj.currentHarm;
             }
             if (kv.armor) patch.armor = monsterObj.armor;
-            if (kv.attacks) patch.attacks = monsterObj.attacks;
+            if (parsedAttacks.length) patch.attacks = monsterObj.attacks;
             if (kv.weakness) patch.weakness = monsterObj.weakness;
             if (monsterObj.impendingDoom.length) patch.impendingDoom = monsterObj.impendingDoom;
             if (kv.notes) patch.notes = monsterObj.notes;
             if (kv.status) patch.status = monsterObj.status;
-            if (kv.conditions) patch.conditions = monsterObj.conditions;
+            if (parsedMonConds.length) patch.conditions = monsterObj.conditions;
             updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], patch);
             Object.assign(monsterObj, updated.monsters[existingIdx]);
             const woundLabel = monsterObj.currentHarm > 0 ? `Harm: ${monsterObj.currentHarm}/${monsterObj.harm}` : `Harm: ${monsterObj.harm}`;
@@ -1715,7 +1854,10 @@ export function serializeDossierToMarkdown(dossier) {
         .join(' · ');
 
     let movesMd = (p.startingMoves || []).map(m => `* ${m}`).join('\n') || '* No custom moves registered yet.';
-    let gearMd = (p.gear || []).map(g => `* ${g}`).join('\n') || '* Basic equipment.';
+    const effectiveGear = !isPlaceholderGearList(p.gear)
+        ? p.gear
+        : (p.equipment ? splitEquipmentIntoGearList(p.equipment) : (p.gear || []));
+    let gearMd = effectiveGear.map(g => `* ${g}`).join('\n') || '* Basic equipment.';
 
     let npcsMd = npcs.length
         ? npcs.map(n => {
@@ -1958,10 +2100,11 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.protagonist = dossier.protagonist || {};
     dossier.protagonist.name = (dossier.protagonist.name || '').trim();
     dossier.protagonist.playbook = (dossier.protagonist.playbook || '').trim();
+    dossier.protagonist.species = sanitizeSpeciesValue(dossier.protagonist.species || '') || (dossier.protagonist.species || '').trim();
     dossier.protagonist.bio = dossier.protagonist.bio || dossier.protagonist.background || '';
     dossier.protagonist.background = dossier.protagonist.background || dossier.protagonist.bio || '';
     dossier.protagonist.portraitSrc = dossier.protagonist.portraitSrc || null;
-    dossier.protagonist.conditions = Array.isArray(dossier.protagonist.conditions) ? dossier.protagonist.conditions : [];
+    dossier.protagonist.conditions = sanitizeConditionsList(dossier.protagonist.conditions || []);
 
     // Harm normalization
     let protoHarmObj = { max: harmMaxVal, current: 0, armor: 0 };
@@ -2009,8 +2152,15 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         dossier.protagonist.startingMoves = activeGenre.moves.slice(0, 2);
     }
 
-    if (!Array.isArray(dossier.protagonist.gear) || dossier.protagonist.gear.length === 0) {
+    if (dossier.protagonist.equipment && isPlaceholderGearList(dossier.protagonist.gear)) {
+        const fromEquip = splitEquipmentIntoGearList(dossier.protagonist.equipment);
+        dossier.protagonist.gear = fromEquip.length > 0
+            ? fromEquip
+            : ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'];
+    } else if (!Array.isArray(dossier.protagonist.gear) || dossier.protagonist.gear.length === 0) {
         dossier.protagonist.gear = ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'];
+    } else if (!dossier.protagonist.equipment && !isPlaceholderGearList(dossier.protagonist.gear)) {
+        dossier.protagonist.equipment = dossier.protagonist.gear.join(', ');
     }
 
     // 4. Arrays
@@ -2018,6 +2168,12 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.npcs.forEach(n => {
         n.name = (n.name || 'Unnamed NPC').trim();
         n.role = (n.role || 'Ally').trim();
+        if (n.species) {
+            n.species = sanitizeSpeciesValue(n.species) || n.species.trim();
+        }
+        if (n.conditions) {
+            n.conditions = sanitizeConditionsList(n.conditions);
+        }
         n.friendship = clampRelationshipScore(n.friendship);
         n.affection = clampRelationshipScore(n.affection);
     });
@@ -2028,7 +2184,9 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         m.harm = parseInt(m.harm, 10) || 3;
         m.currentHarm = parseInt(m.currentHarm, 10) || 0;
         m.armor = parseInt(m.armor, 10) || 0;
-        m.attacks = Array.isArray(m.attacks) ? m.attacks : (m.attacks ? [String(m.attacks)] : ['Claw/Strike (2 Harm)']);
+        m.attacks = Array.isArray(m.attacks) && m.attacks.length > 0
+            ? m.attacks
+            : (m.attacks && typeof m.attacks === 'string' ? splitTopLevelItems(m.attacks) : ['Claw/Strike (2 Harm)']);
         m.impendingDoom = Array.isArray(m.impendingDoom) ? m.impendingDoom : [];
     });
 

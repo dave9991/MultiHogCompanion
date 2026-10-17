@@ -175,17 +175,29 @@ export function extractWorldRuleKeywords(axiom) {
     if (!axiom || typeof axiom !== 'object') return [];
     const keys = new Set();
 
-    // 1. Title and category
-    if (axiom.title) {
-        keys.add(axiom.title.trim());
-        const titleTokens = axiom.title
+    const normalizeToken = (t) => {
+        const lower = t.toLowerCase();
+        return (lower.endsWith('s') && lower.length > 3 && !lower.endsWith('ss')) ? lower.slice(0, -1) : lower;
+    };
+
+    const extractTokens = (str) => {
+        const raw = String(str || '')
             .replace(/[^\w\s'-]/g, ' ')
             .split(/\s+/)
             .filter(w => w.length > 2 && !COMMON_STOPWORDS.has(w.toLowerCase()));
-        for (const t of titleTokens) keys.add(t);
+        if (raw.length <= 1) return raw;
+        const filtered = raw.filter((w, idx) => idx === raw.length - 1 || !/(?:ed|ing)$/i.test(w));
+        return filtered.slice(-2);
+    };
+
+    // 1. Title and category
+    if (axiom.title) {
+        keys.add(axiom.title.trim());
+        const titleTokens = extractTokens(axiom.title);
+        if (titleTokens.length > 0) keys.add(titleTokens[0].toLowerCase());
     }
     if (axiom.category) {
-        const catClean = axiom.category.replace(/_/g, ' ').trim();
+        const catClean = axiom.category.replace(/_/g, ' ').trim().toLowerCase();
         if (catClean) keys.add(catClean);
     }
 
@@ -210,27 +222,11 @@ export function extractWorldRuleKeywords(axiom) {
             leftSide = sub.trim();
         }
 
-        if (leftSide && leftSide.length < 35) keys.add(leftSide);
-        if (rightSide && rightSide.length < 35) keys.add(rightSide);
-
-        const extractTokens = (str) => {
-            return str
-                .replace(/[^\w\s'-]/g, ' ')
-                .split(/\s+/)
-                .filter(w => w.length > 2 && !COMMON_STOPWORDS.has(w.toLowerCase()));
-        };
-
         for (const token of extractTokens(leftSide)) {
-            keys.add(token);
-            if (token.endsWith('s') && token.length > 3) {
-                keys.add(token.slice(0, -1));
-            }
+            keys.add(normalizeToken(token));
         }
         for (const token of extractTokens(rightSide)) {
-            keys.add(token);
-            if (token.endsWith('s') && token.length > 3) {
-                keys.add(token.slice(0, -1));
-            }
+            keys.add(normalizeToken(token));
         }
     }
 
@@ -239,27 +235,20 @@ export function extractWorldRuleKeywords(axiom) {
     for (const nc of negativeConstraints) {
         if (!nc || typeof nc !== 'string') continue;
         const cleaned = nc
-            .replace(/^(no|none|never|without|zero|banned)\s+/i, '')
+            .replace(/^(no|none|never|without|zero|banned)\s*:?\s*/i, '')
             .trim();
-        if (cleaned && cleaned.length < 35) keys.add(cleaned);
 
-        const tokens = cleaned
-            .replace(/[^\w\s'-]/g, ' ')
-            .split(/\s+/)
-            .filter(w => w.length > 2 && !COMMON_STOPWORDS.has(w.toLowerCase()));
-        for (const t of tokens) {
-            keys.add(t);
-            if (t.endsWith('s') && t.length > 3) {
-                keys.add(t.slice(0, -1));
-            }
+        for (const t of extractTokens(cleaned)) {
+            keys.add(normalizeToken(t));
         }
     }
 
-    // 4. Setting system anchors
-    keys.add('world rule');
-    keys.add('world law');
-
-    return Array.from(keys).filter(Boolean).slice(0, 12);
+    // 4. Setting system anchors (ensure at least 'world rule' is included within the 12-item cap)
+    const result = Array.from(keys).filter(Boolean).slice(0, 11);
+    if (!result.includes('world rule') && !result.includes('world law')) {
+        result.push('world rule');
+    }
+    return result.slice(0, 12);
 }
 
 /**
@@ -272,14 +261,15 @@ export function extractWorldRuleKeywords(axiom) {
  */
 export function buildWorldRuleEntry(axiom) {
     if (!axiom || typeof axiom !== 'object') return null;
-    const cleanTitle = (axiom.title || 'World Law').trim();
+    const rawTitle = (axiom.title || '').trim();
     const category = (axiom.category || 'physics').trim();
     const lawText = (axiom.axiom || '').trim();
     const substitutions = Array.isArray(axiom.substitutions) ? axiom.substitutions : [];
     const negativeConstraints = Array.isArray(axiom.negativeConstraints) ? axiom.negativeConstraints : [];
     const architecturalNotes = (axiom.architecturalNotes || '').trim();
 
-    if (!cleanTitle && !lawText && !substitutions.length) return null;
+    if (!rawTitle && !lawText && !substitutions.length && !negativeConstraints.length) return null;
+    const cleanTitle = rawTitle || 'World Law';
 
     const subLines = substitutions.length
         ? ['Substitutions:', ...substitutions.map(s => `- ${s}`)]
@@ -322,12 +312,13 @@ export function buildWorldRuleEntry(axiom) {
  */
 export function buildCustomModuleLoreEntry(customModule) {
     if (!customModule || typeof customModule !== 'object') return null;
-    const fieldKey = (customModule.tag || customModule.fieldKey || 'custom').trim();
-    const label = (customModule.label || fieldKey).trim();
+    const rawKey = (customModule.tag || customModule.fieldKey || '').trim();
     const instruction = (customModule.instruction || '').trim();
     const sample = (customModule.sampleContent || customModule.sample || '').trim();
 
-    if (!fieldKey && !instruction) return null;
+    if (!rawKey && !instruction) return null;
+    const fieldKey = rawKey || 'custom';
+    const label = (customModule.label || fieldKey).trim();
 
     const core = [
         `[CORE]`,

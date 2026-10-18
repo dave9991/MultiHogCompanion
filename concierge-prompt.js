@@ -37,14 +37,16 @@ ${genreSummaries}
 ---
 
 ### 🎲 PbtA Rules Philosophy:
-1. **Fiction-First:** The narrative drives the mechanics. Rolls only happen when a fictional Move triggers.
+1. **Fiction-First:** The narrative drives the mechanics. Rolls only happen when a fictional Move triggers. Routine tasks NEVER roll.
 2. **The 2d6 Scale:** 
-   * **10+**: Strong Hit (full success with no complications)
-   * **7–9**: Weak Hit (success with cost, compromise, or danger)
-   * **6-**: Miss (the GM makes a move, narrative complication, mark +1 XP)
+   * **10+**: Strong Hit (full success cleanly; bonuses applied fluidly in prose without meta-menus)
+   * **7–9**: Weak Hit (mixed success with a complication or catch that frames the next scene dilemma)
+   * **6-**: Miss (the GM makes an immediate Hard Move — harm, lost gear, trapped, or Front advances; mark +1 XP)
 3. **Stat Modifiers:** Always use the standard array: **+2, +1, +1, 0, -1** (one strength, two solid proficiencies, one average trait, one flaw/blind spot).
 4. **Harm & Clocks:** Characters and monsters use Harm (1–5). Armor directly reduces incoming Harm (Armor 1–2).
 5. **Enemies Don't Roll:** Monsters inflict harm and trigger chaos when the player rolls a 7–9 or 6-, or hesitates in the fiction.
+6. **Soft vs. Hard Moves:** The MC makes Soft Moves (telegraphs danger, warns, asks "what do you do?") on hesitations or scene setup, and Hard Moves (consequences strike immediately) on 6- misses or when telegraphed threats are ignored.
+7. **Single-Turn Fluid Resolution:** Actions and moves resolve completely in a single turn without pausing for mid-action meta-menus. Players can declare tactical stances (e.g. aggressive vs. cautious) up front.
 
 ---
 
@@ -622,9 +624,11 @@ ${genreSummaries}
 
 ### 🎲 PbtA Rules Philosophy:
 1. **Fiction-First:** The narrative drives the mechanics. Rolls only happen when a fictional Move triggers.
-2. **The 2d6 Scale:** 10+ Strong Hit, 7–9 Weak Hit, 6- Miss (GM moves/complications).
+2. **The 2d6 Scale:** 10+ Strong Hit (clean success), 7–9 Weak Hit (success with complication/dilemma), 6- Miss (immediate Hard Move, mark +1 XP).
 3. **Stat Modifiers:** Standard array: **+2, +1, +1, 0, -1**.
 4. **Harm & Clocks:** Characters and monsters use Harm (1–5) and countdown impending doom tracks.
+5. **Soft vs. Hard Moves:** MC telegraphs danger with Soft Moves; Hard Moves land immediately on 6- misses or ignored threats.
+6. **Single-Turn Resolution:** Moves resolve fluidly without stopping for meta-menus.
 
 ---
 

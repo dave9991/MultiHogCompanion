@@ -96,11 +96,13 @@ Whenever a player action triggers a Move in the narrative, resolve using **2d6 +
 
 | Roll Total | Outcome Tier | Narrative Consequence |
 | :--- | :--- | :--- |
-| **10+** | **Strong Hit** (Full Success) | You achieve your goal cleanly without cost, harm, or complications. |
-| **7–9** | **Weak Hit** (Mixed Success) | You succeed, but at a cost, complication, compromise, or enemy counter-attack. |
-| **6-** | **Miss** (Trouble / Complication) | Failure or serious complication! The GM makes a hard move and the player marks **+1 XP**. |
+| **10+** | **Strong Hit** (Full Success) | You achieve your goal cleanly. Any move bonuses are applied fluidly in prose based on your declared stance/narrative without pausing for meta-menus. |
+| **7–9** | **Weak Hit** (Mixed Success) | You succeed, but at a cost, complication, compromise, or counter-attack. The MC resolves the hit immediately, and the complication frames the dilemma for your next turn. |
+| **6-** | **Miss** (Trouble / Complication) | Failure or serious complication! The GM makes an immediate **Hard Move** (consequences land now) and the player marks **+1 XP**. |
 
 * **Zero-Touch RNG:** Players do not manually roll dice. SillyTavern supplies pre-rolled dice from its background queue directly to the Game Master / Ref.
+* **Soft vs. Hard GM Moves:** When you hesitate or look to the MC to see what happens, the MC makes a **Soft Move** (foreshadows danger, warns, puts you in a spot) and asks what you do. When you roll a 6-, ignore a telegraphed threat, or hand over a golden opportunity, the MC executes an immediate **Hard Move** (harm dealt, gear broken, resources depleted, or Front advanced).
+* **Single-Turn Fluid Resolution:** The MC never halts the narrative mid-turn with mechanical selection menus (e.g. asking which bonus or cost you pick). Declare your tactical stance up front in your freeform action or CYOA choice (e.g. aggressive strike vs. defensive parry); the MC honors your intent and resolves the entire beat in one fluid post.
 * **No Initiative or Enemy Rolls:** Combat is a fluid conversation. Enemies do not roll attack bonuses or saving throws; their actions unfold when the player rolls a 7–9 or 6-, or hesitates in the fiction.
 * **Harm Clock (0–5):** Health is tracked via Harm (0 = unharmed, max Harm = incapacitated/fatal; configurable via dial). Armor directly reduces incoming Harm (e.g. Armor 1 turns 2 Harm into 1 Harm). At Max Harm (0 HP), the protagonist is completely incapacitated or dying; CYOA choices adapt to crisis and survival (clinging to life, faint plea, ally intervention, or slipping into darkness) rather than ordinary actions.
 
@@ -121,16 +123,16 @@ ${active.archetypes.join(', ')}
 
 ## 💡 3. Guidelines for Adventure Companion (CHAT)
 1. **Brainstorming & Fictional Moves:**
-   * Suggest moves that naturally fit what the player wants to do in the fiction.
+   * Suggest moves that naturally fit what the player wants to do in the fiction, and include a tactical stance (aggressive, cautious, protective) so the MC resolves it cleanly.
    * Reference the player's active stats from the State Memo to suggest their strongest approaches.
 2. **Interpreting Weak Hits (7–9):**
    * Treat 7–9 as success with a catch: offer dramatic compromises, sacrifices, hard choices, or temporary set-backs rather than outright failure.
 3. **State Tracker Commands (\`command_state_tracker\`):**
-   * Use PbtA Harm (e.g., \`Harm: 2/5\`) and debilities (e.g., \`(-) Shaken: -1 Wits\`) instead of D&D HP bloat, spell slots, or round-by-round damage counters.
+   * Use PbtA Harm (e.g., \`Harm: 2/5\`), \`Hold: X\`, and debilities (e.g., \`(-) Shaken: -1 Wits\`) instead of D&D HP bloat, spell slots, or round-by-round damage counters.
    * When a combatant reaches Max Harm (0 HP), set status to \`(-) Incapacitated\`, \`(-) Dying\`, or \`Defeated\`.
 4. **Acting for the Player (\`act_for_user\`):**
-   * When CYOA choices are present, look for move triggers (\`[Move (+Stat)]\`). If downed, focus on desperate survival, rallying an ally, or enduring.
-   * When composing free-form actions, write concise in-character fictional moves that trigger the active genre's mechanics.
+   * When CYOA choices are present, look for move triggers (\`[Move (+Stat)]\`) or Hold spending options (\`[Spend 1 Hold]\`). If downed, focus on desperate survival, rallying an ally, or enduring.
+   * When composing free-form actions, write concise in-character fictional moves with clear tactical intent that trigger the active genre's mechanics.
 
 ---
 

@@ -13,12 +13,17 @@ import {
 
 const role = buildPbtARoleContent();
 assert.ok(/GM MOVES/.test(role), 'role lists GM moves');
+assert.ok(/SOFT MOVES/.test(role) && /HARD MOVES/.test(role), 'role separates soft and hard move categories and triggers');
+assert.ok(/THE ESCALATION LADDER/.test(role), 'role specifies the escalation ladder');
+assert.ok(/SINGLE-TURN FLUID RESOLUTION/.test(role), 'role specifies single-turn fluid choice resolution');
+assert.ok(/NEVER halt the game mid-turn to ask meta-questions/.test(role), 'role forbids mid-turn meta pauses');
 assert.ok(/NPCs and enemies NEVER roll/.test(role), 'role states NPCs never roll');
 assert.ok(/Routine actions and ordinary conversation NEVER roll/.test(role), 'role states trigger rule');
 
 const rng = buildPbtARngContent();
 assert.ok(/2d6 → 3 \+ 5 = 8/.test(rng), 'rng documents queue line format');
 assert.ok(/10\+ Strong Hit/.test(rng) && /7–9 Weak Hit/.test(rng) && /6- Miss/.test(rng), 'rng has all tiers');
+assert.ok(/Make a HARD MOVE/.test(rng), 'rng strictly maps 6- Miss to a Hard Move');
 assert.ok(/Forward:/.test(rng) && /Hold:/.test(rng), 'rng defines forward and hold');
 assert.ok(!/-3 to \+3/.test(rng), 'modifier range is consistent');
 
@@ -55,5 +60,9 @@ const cartridge = buildPbtACartridge({ harmMax: 6, pacingXp: 4, use24hTime: true
 const footerPrompt = cartridge.payload.customSyspromptLibrary.find(s => s.id === 'pbta_base_override_footer');
 assert.ok(footerPrompt, 'cartridge includes pbta_base_override_footer in customSyspromptLibrary');
 assert.strictEqual(footerPrompt.content, footer24h, 'cartridge footer prompt content matches buildPbtAFooterContent');
+
+// Test CYOA prompt stance, hold, and dilemma integration
+assert.ok(/STANCE, HOLD & DILEMMA INTEGRATION/.test(cartridge.payload.cyoaConfig.customPromptText), 'cartridge CYOA prompt includes stance, hold, and dilemma instructions');
+assert.ok(/STANCE-LOADED CHOICES/.test(cartridge.payload.cyoaConfig.customPromptText), 'cartridge CYOA prompt includes stance-loaded choice instruction');
 
 console.log('--- ALL PBTA CORE RULES PROMPT TESTS PASSED CLEANLY! ---');

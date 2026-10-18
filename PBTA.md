@@ -11,14 +11,25 @@ Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves
 
 | Roll Total | Outcome Tier | Narrative Consequence |
 | :--- | :--- | :--- |
-| **10+** | **Strong Hit** (Full Success) | You achieve your goal cleanly without cost or complications. |
-| **7–9** | **Weak Hit** (Mixed Success) | You succeed, but at a cost, complication, compromise, or counter-attack. |
-| **6-** | **Miss** (Trouble / Complication) | Failure or major complication. The Ref makes a GM Move and you mark **+1 XP**. |
+| **10+** | **Strong Hit** (Full Success) | You achieve your goal cleanly. Any move bonuses are applied fluidly in prose based on your declared stance/narrative without pausing for meta-menus. |
+| **7–9** | **Weak Hit** (Mixed Success) | You succeed, but at a cost, complication, compromise, or counter-attack. The MC resolves the action immediately, and the complication frames the dilemma for your next turn. |
+| **6-** | **Miss** (Trouble / Complication) | Failure or major complication. The Ref makes an immediate **Hard Move** (harm dealt, gear lost, Front advanced) and you mark **+1 XP**. |
 
-### 2. Zero-Touch Dice
+### 2. Soft vs. Hard Moves & The Escalation Ladder
+* **Soft Moves (Telegraph & Ask):** When your character hesitates, looks to the MC to see what happens, or sets up a situation, the MC makes a **Soft Move** (signs of an approaching threat, revealing an unwelcome truth, putting someone in a spot). The MC warns and asks: *"What do you do?"*
+* **Hard Moves (Irrevocable Consequences):** When you roll a **6- Miss**, ignore a telegraphed soft move, or hand the MC a golden opportunity, the MC executes a **Hard Move** (deal Harm, break or take gear, burn resources, separate party, advance a grim portent). Consequences land immediately.
+* **The Escalation Ladder:** Threats are always telegraphed with a Soft Move first, giving you a chance to react. If you ignore the warning or fail your roll, the Hard Move falls without takebacks.
+
+### 3. Single-Turn Fluid Choice Resolution (Zero Meta-Menus)
+* **No Mid-Turn Meta Halts:** The MC never halts the story mid-turn to present an out-of-character menu (`"Do you pick option A or B?"`). The entire action resolves in a single narrative beat.
+* **Stance-Loaded Intent:** You can front-load your tactical stance into your freeform actions or CYOA choices (e.g., *aggressive strike* vs. *defensive parry*). The MC honors this declared stance when narrating bonuses and consequences.
+* **Dilemmas as the Next Beat:** On a 7–9 Weak Hit, the MC narrates the complication right away and lets it frame the dilemma for your subsequent CYOA choices.
+* **Hold / Forward Economy:** Moves that grant spendable choices (e.g. *Discern Realities*, *Defend*) record `Hold: X` in your `[CHARACTER]` sheet, and follow-up CYOA choices offer `[Spend 1 Hold]` actions naturally.
+
+### 4. Zero-Touch Dice
 **You never roll dice manually or pause the story.** SillyTavern secretly feeds pre-rolled random dice from its `[RNG_QUEUE]` to the Ref behind the scenes. When a move triggers, the Ref automatically pulls the dice, checks your sheet, and weaves the outcome directly into the prose.
 
-### 3. Fiction-First Combat
+### 5. Fiction-First Combat
 * **No Initiative Order:** Combat is a fluid conversation rather than round-by-round tactical math.
 * **No Enemy Rolls:** Enemies do not roll attack bonuses or saving throws; their actions unfold when you roll a 7–9 or 6-, or when you hesitate in the fiction.
 * **Harm Clock (0–5 or dynamic dial):** Instead of bloated HP pools, characters and enemies track Harm (1–5 or configured dial). Armor directly reduces incoming Harm (e.g., Armor 1 turns 2 Harm into 1 Harm). At Max Harm (0 HP), the character is incapacitated / defeated, triggering crisis consequences.

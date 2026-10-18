@@ -359,6 +359,9 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
         _isPersistingPbtaChatState = false;
         _persistResetTimer = null;
     }, 2500);
+    if (_persistResetTimer?.unref) {
+        _persistResetTimer.unref();
+    }
     try {
         try {
             const { checkHistoryPersistenceBlocked, isSameChatId } = await import('./history-integrity-guard.js');
@@ -989,4 +992,16 @@ export function collectRulesetDiagnostics(chatId = null, rpgSettings = null, com
     }
 
     return lines.join('\n');
+}
+
+/**
+ * Resets persistence state and cancels any pending timers for testing.
+ */
+export function resetPersistTimerForTesting() {
+    if (_persistResetTimer) {
+        clearTimeout(_persistResetTimer);
+        _persistResetTimer = null;
+    }
+    _isPersistingPbtaChatState = false;
+    _inFlightPersist = false;
 }

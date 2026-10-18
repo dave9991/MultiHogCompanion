@@ -52,6 +52,8 @@ import {
     parseMarkdownToDossier,
     validateDraft,
     isDossierEmptyOrUntouched,
+    escapeHtml,
+    buildAxiomCardHtml,
 } from './concierge-parser.js';
 import { launchPbtaCampaign, syncPbtaCampaignUpdates, reconstituteDossierWithAi } from './concierge-runner.js';
 import {
@@ -360,39 +362,7 @@ function updateBlueprintDeck() {
     wrList.empty();
     if (axioms.length) {
         axioms.forEach(ax => {
-            const cat = (ax.category || 'physics').toLowerCase();
-            let catColor = 'rgba(156, 163, 175, 0.4)';
-            if (cat.includes('bio')) catColor = 'rgba(16, 185, 129, 0.4)';
-            else if (cat.includes('magic')) catColor = 'rgba(168, 85, 247, 0.4)';
-            else if (cat.includes('physic')) catColor = 'rgba(56, 189, 248, 0.4)';
-            else if (cat.includes('social')) catColor = 'rgba(245, 158, 11, 0.4)';
-
-            const subsHtml = ax.substitutions?.length
-                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>Substitutions:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.substitutions.map(s => `<li>🔄 ${escapeHtml(s)}</li>`).join('')}</ul></div>`
-                : '';
-            const negHtml = ax.negativeConstraints?.length
-                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.9;"><b>Banned & Absences:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.negativeConstraints.map(nc => `<li>🚫 <span class="mhc-constraint-banned">${escapeHtml(nc)}</span></li>`).join('')}</ul></div>`
-                : '';
-            const archHtml = ax.architecturalNotes
-                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;">🏛️ <b>Infrastructure:</b> ${escapeHtml(ax.architecturalNotes)}</div>`
-                : '';
-
-            wrList.append(`
-                <div class="mhc-deck-item collapsible">
-                    <div class="mhc-deck-item-header">
-                        <div class="mhc-deck-item-title" style="color: #10b981;">
-                            🌐 ${escapeHtml(ax.title || 'World Law')} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${catColor};">${escapeHtml(ax.category || 'physics').toUpperCase()}</span>
-                        </div>
-                        <span class="mhc-deck-item-toggle">▼</span>
-                    </div>
-                    <div class="mhc-deck-item-detail">
-                        <div style="font-size: 0.85em; opacity: 0.95; margin-bottom: 4px;"><b>Axiom:</b> ${escapeHtml(ax.axiom || '')}</div>
-                        ${subsHtml}
-                        ${negHtml}
-                        ${archHtml}
-                    </div>
-                </div>
-            `);
+            wrList.append(buildAxiomCardHtml(ax));
         });
     } else {
         wrList.append('<div class="mhc-empty-hint">Standard world physics & tropes apply.</div>');
@@ -1973,15 +1943,7 @@ function bindModalEvents() {
     });
 }
 
-function escapeHtml(str) {
-    if (!str || typeof str !== 'string') return '';
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
+
 
 /**
  * Format a builder transaction as a rich Markdown diagnostic trace for Antigravity or bug reporting.

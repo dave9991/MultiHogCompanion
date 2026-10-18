@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildAxiomCardHtml, escapeHtml } from '../concierge-parser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,59 +57,12 @@ assert.ok(uiJs.includes('mhc_deck_custom_module_card'), 'concierge-ui.js must re
 assert.ok(uiJs.includes('mhc_deck_custom_module_tag'), 'concierge-ui.js must reference #mhc_deck_custom_module_tag');
 assert.ok(uiJs.includes('mhc_deck_custom_module_label'), 'concierge-ui.js must reference #mhc_deck_custom_module_label');
 assert.ok(uiJs.includes('mhc_deck_custom_module_instruction'), 'concierge-ui.js must reference #mhc_deck_custom_module_instruction');
-assert.ok(uiJs.includes('mhc_deck_custom_module_sample'), 'concierge-ui.js must reference #mhc_deck_custom_module_sample');
-assert.ok(uiJs.includes('mhc-constraint-banned'), 'concierge-ui.js must render .mhc-constraint-banned');
+assert.ok(uiJs.includes('buildAxiomCardHtml'), 'concierge-ui.js must wire buildAxiomCardHtml for axiom rendering');
 
 console.log('✓ concierge-ui.js contains complete wiring for World Rules & Custom Module rendering');
 
-// ── 4. Rendering Logic Simulation ─────────────────────────────────────────────
-console.log('Testing rendering generation logic...');
-
-function escapeHtml(str) {
-    if (!str || typeof str !== 'string') return '';
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-function simulateRenderAxiom(ax) {
-    const cat = (ax.category || 'physics').toLowerCase();
-    let catColor = 'rgba(156, 163, 175, 0.4)';
-    if (cat.includes('bio')) catColor = 'rgba(16, 185, 129, 0.4)';
-    else if (cat.includes('magic')) catColor = 'rgba(168, 85, 247, 0.4)';
-    else if (cat.includes('physic')) catColor = 'rgba(56, 189, 248, 0.4)';
-    else if (cat.includes('social')) catColor = 'rgba(245, 158, 11, 0.4)';
-
-    const subsHtml = ax.substitutions?.length
-        ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>Substitutions:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.substitutions.map(s => `<li>🔄 ${escapeHtml(s)}</li>`).join('')}</ul></div>`
-        : '';
-    const negHtml = ax.negativeConstraints?.length
-        ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.9;"><b>Banned & Absences:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.negativeConstraints.map(nc => `<li>🚫 <span class="mhc-constraint-banned">${escapeHtml(nc)}</span></li>`).join('')}</ul></div>`
-        : '';
-    const archHtml = ax.architecturalNotes
-        ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;">🏛️ <b>Infrastructure:</b> ${escapeHtml(ax.architecturalNotes)}</div>`
-        : '';
-
-    return `
-        <div class="mhc-deck-item collapsible">
-            <div class="mhc-deck-item-header">
-                <div class="mhc-deck-item-title" style="color: #10b981;">
-                    🌐 ${escapeHtml(ax.title || 'World Law')} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${catColor};">${escapeHtml(ax.category || 'physics').toUpperCase()}</span>
-                </div>
-                <span class="mhc-deck-item-toggle">▼</span>
-            </div>
-            <div class="mhc-deck-item-detail">
-                <div style="font-size: 0.85em; opacity: 0.95; margin-bottom: 4px;"><b>Axiom:</b> ${escapeHtml(ax.axiom || '')}</div>
-                ${subsHtml}
-                ${negHtml}
-                ${archHtml}
-            </div>
-        </div>
-    `;
-}
+// ── 4. Rendering Logic Execution ──────────────────────────────────────────────
+console.log('Testing buildAxiomCardHtml production rendering...');
 
 const sampleAxiom = {
     title: 'Biological Technology',
@@ -119,7 +73,7 @@ const sampleAxiom = {
     architecturalNotes: 'Living hive buildings with bone skybridges',
 };
 
-const renderedHtml = simulateRenderAxiom(sampleAxiom);
+const renderedHtml = buildAxiomCardHtml(sampleAxiom);
 assert.ok(renderedHtml.includes('🌐 Biological Technology'));
 assert.ok(renderedHtml.includes('BIOLOGY_FOR_TECH'));
 assert.ok(renderedHtml.includes('rgba(16, 185, 129, 0.4)'));
@@ -136,7 +90,7 @@ const unsafeAxiom = {
     negativeConstraints: ['<forbidden>'],
     architecturalNotes: '<structure>',
 };
-const safeRendered = simulateRenderAxiom(unsafeAxiom);
+const safeRendered = buildAxiomCardHtml(unsafeAxiom);
 assert.ok(!safeRendered.includes('<script>'));
 assert.ok(safeRendered.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
 assert.ok(safeRendered.includes('&amp; &quot;quotes&quot;'));

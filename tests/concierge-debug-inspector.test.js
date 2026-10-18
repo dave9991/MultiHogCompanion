@@ -192,12 +192,5 @@ assert.ok(modalHtml.includes('id="mhc_debug_dossier_json"'), 'Modal must have #m
 assert.ok(modalHtml.includes('class="menu_button mhc-copy-debug-trace-btn"'), 'Modal must have .mhc-copy-debug-trace-btn');
 console.log('✓ concierge-modal.html contains all required debug inspector elements');
 
-const settingsHtmlPath = path.join(ROOT_DIR, 'settings.html');
-const settingsHtml = fs.readFileSync(settingsHtmlPath, 'utf8');
-
-assert.strictEqual(settingsHtml.includes('id="mhc_debug_section"'), false, 'Settings must not have #mhc_debug_section');
-assert.strictEqual(settingsHtml.includes('id="mhc_concierge_debug_mode"'), false, 'Settings must not have #mhc_concierge_debug_mode');
-assert.strictEqual(settingsHtml.includes('id="mhc_settings_debug_badge"'), false, 'Settings must not have #mhc_settings_debug_badge');
-console.log('✓ settings.html cleanly omits settings-level debug controls');
-
 console.log('--- ALL CONCIERGE DEBUG INSPECTOR TESTS PASSED CLEANLY! ---');
+

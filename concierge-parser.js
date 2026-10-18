@@ -939,9 +939,9 @@ export function applyDossierUpdates(text, dossier) {
     // never accidentally match keys inside [WORLD_RULES], [CUSTOM_MODULE], [PROTAGONIST], etc.
     const protoBlocks = matchDossierSectionBlocks(raw, 'PROTAGONIST', 'PROTAGONIST');
     const npcBlocks = matchDossierSectionBlocks(raw, 'NPC(?::\\s*([^\\]\\r\\n]+))?', 'NPC');
-    const monsterBlocks = matchDossierSectionBlocks(raw, 'MONSTER', 'MONSTER');
-    const mapBlocks = matchDossierSectionBlocks(raw, 'MAP', 'MAP');
-    const factionBlocks = matchDossierSectionBlocks(raw, 'FACTION', 'FACTION');
+    const monsterBlocks = matchDossierSectionBlocks(raw, 'MONSTER(?::\\s*([^\\]\\r\\n]+))?', 'MONSTER');
+    const mapBlocks = matchDossierSectionBlocks(raw, 'MAP(?::\\s*([^\\]\\r\\n]+))?', 'MAP');
+    const factionBlocks = matchDossierSectionBlocks(raw, 'FACTION(?::\\s*([^\\]\\r\\n]+))?', 'FACTION');
     const kickBlocks = matchDossierSectionBlocks(raw, 'KICK', 'KICK');
     const cyoaBlocks = matchDossierSectionBlocks(raw, 'CYOA', 'CYOA');
     const ruleBlocks = matchDossierSectionBlocks(raw, 'WORLD_RULES?', 'WORLD_RULES?');
@@ -1178,6 +1178,7 @@ export function applyDossierUpdates(text, dossier) {
         const nBlock = match.content;
         const kv = parseKeyValueLines(nBlock);
         if (!kv.name && inlineName) kv.name = inlineName;
+        kv.name = cleanTargetName(kv.name);
         if (!kv.name) continue;
 
         // Check if this NPC block requests removal
@@ -1309,6 +1310,8 @@ export function applyDossierUpdates(text, dossier) {
     for (const match of monsterBlocks) {
         const mBlock = match.content;
         const kv = parseKeyValueLines(mBlock);
+        if (!kv.name && match.inlineArg) kv.name = match.inlineArg.trim();
+        kv.name = cleanTargetName(kv.name);
         if (!kv.name) continue;
 
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
@@ -1403,6 +1406,8 @@ export function applyDossierUpdates(text, dossier) {
     for (const match of mapBlocks) {
         const mBlock = match.content;
         const kv = parseKeyValueLines(mBlock);
+        if (!kv.site && match.inlineArg) kv.site = match.inlineArg.trim();
+        kv.site = cleanTargetName(kv.site);
         if (!kv.site) continue;
 
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
@@ -1468,6 +1473,8 @@ export function applyDossierUpdates(text, dossier) {
     for (const match of factionBlocks) {
         const fBlock = match.content;
         const kv = parseKeyValueLines(fBlock);
+        if (!kv.name && match.inlineArg) kv.name = match.inlineArg.trim();
+        kv.name = cleanTargetName(kv.name);
         if (!kv.name) continue;
 
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
@@ -2872,3 +2879,58 @@ export function formatDiagnosticTrace(tx) {
     return md;
 }
 
+/**
+ * Escapes characters for safe HTML inclusion.
+ * @param {string} str
+ * @returns {string}
+ */
+export function escapeHtml(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+/**
+ * Renders HTML for a single world axiom deck card.
+ * @param {object} ax
+ * @returns {string}
+ */
+export function buildAxiomCardHtml(ax) {
+    const cat = (ax.category || 'physics').toLowerCase();
+    let catColor = 'rgba(156, 163, 175, 0.4)';
+    if (cat.includes('bio')) catColor = 'rgba(16, 185, 129, 0.4)';
+    else if (cat.includes('magic')) catColor = 'rgba(168, 85, 247, 0.4)';
+    else if (cat.includes('physic')) catColor = 'rgba(56, 189, 248, 0.4)';
+    else if (cat.includes('social')) catColor = 'rgba(245, 158, 11, 0.4)';
+
+    const subsHtml = ax.substitutions?.length
+        ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>Substitutions:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.substitutions.map(s => `<li>🔄 ${escapeHtml(s)}</li>`).join('')}</ul></div>`
+        : '';
+    const negHtml = ax.negativeConstraints?.length
+        ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.9;"><b>Banned & Absences:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${ax.negativeConstraints.map(nc => `<li>🚫 <span class="mhc-constraint-banned">${escapeHtml(nc)}</span></li>`).join('')}</ul></div>`
+        : '';
+    const archHtml = ax.architecturalNotes
+        ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;">🏛️ <b>Infrastructure:</b> ${escapeHtml(ax.architecturalNotes)}</div>`
+        : '';
+
+    return `
+        <div class="mhc-deck-item collapsible">
+            <div class="mhc-deck-item-header">
+                <div class="mhc-deck-item-title" style="color: #10b981;">
+                    🌐 ${escapeHtml(ax.title || 'World Law')} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${catColor};">${escapeHtml(ax.category || 'physics').toUpperCase()}</span>
+                </div>
+                <span class="mhc-deck-item-toggle">▼</span>
+            </div>
+            <div class="mhc-deck-item-detail">
+                <div style="font-size: 0.85em; opacity: 0.95; margin-bottom: 4px;"><b>Axiom:</b> ${escapeHtml(ax.axiom || '')}</div>
+                ${subsHtml}
+                ${negHtml}
+                ${archHtml}
+            </div>
+        </div>
+    `;
+}

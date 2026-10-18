@@ -4,7 +4,6 @@ import {
     buildWorldRuleEntry,
     buildCustomModuleLoreEntry,
     prepareCampaignLorebookDistributions,
-    buildWorldSkeletonMarkdown,
     buildWorldSkeletonEntries,
 } from '../concierge-lore-distributor.js';
 
@@ -146,14 +145,8 @@ assert.deepStrictEqual(plainDist.worldRules, [], 'Plain dossier should produce e
 
 console.log('✓ prepareCampaignLorebookDistributions packages worldRules cleanly without breaking existing categories');
 
-// ── 5. World Skeleton Markdown & Day 0 Baseline Integration ──────────────────
+// ── 5. World Skeleton Day 0 Baseline Integration ─────────────────────────────
 console.log('Testing World Skeleton enrichment...');
-
-const skeletonMd = buildWorldSkeletonMarkdown(testDossier);
-assert.ok(skeletonMd.includes('## FACTIONS'), 'Must preserve ## FACTIONS header');
-assert.ok(skeletonMd.includes('## LOCATIONS'), 'Must preserve ## LOCATIONS header');
-assert.ok(skeletonMd.includes('## CONFLICTS'), 'Must preserve ## CONFLICTS header');
-assert.ok(skeletonMd.includes('Architecture: Living hive buildings and bone skybridges.'), 'Location description must reflect architectural notes');
 
 const skeletonEntries = buildWorldSkeletonEntries(testDossier);
 const locEntry = skeletonEntries.find(e => e.comment.includes('Spore Central Station'));

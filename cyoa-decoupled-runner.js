@@ -73,8 +73,8 @@ export function isProtagonistDowned(memoText, isPbta = false, narrativeText = ''
     }
     if (!memoText || typeof memoText !== 'string') return false;
 
-    // Check [CHARACTER] section first if present
-    const charMatch = memoText.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
+    // Check [CHARACTER] section first if present (terminated by [/CHARACTER], next section [HEADER], or end of text)
+    const charMatch = memoText.match(/\[CHARACTER\]([\s\S]*?)(?:\[\/CHARACTER\]|(?=\n[ \t]*\[(?:PARTY|ENEMIES|COMBAT|LOCATION|INVENTORY|WORLD)\])|$)/i);
     const scope = charMatch ? charMatch[1] : memoText;
 
     // Direct status keywords indicating down/dying

@@ -62,11 +62,11 @@ export function normalizePbtaPillsLine(line) {
 
     // 2. Conditions line with echoed prompt placeholder
     const condMatch = line.match(/^(\s*(?:\(\(PILLS\)\)\s*)?Conditions:\s*)(.+)$/i);
-    if (condMatch && /starting\s+injury\s+or\s+weakness/i.test(condMatch[2])) {
+    if (condMatch && /(?:starting\s+(?:injury(?:\s+or\s+weakness)?|weakness|condition)|placeholder)/i.test(condMatch[2])) {
         const [, prefix, rawCondsText] = condMatch;
         const segments = splitTopLevelPillItems(rawCondsText, { splitCommas: true });
-        const healed = segments.map(formatConditionAsPill).filter(Boolean).join(', ');
-        return `${prefix}${healed || 'None'}`;
+        const formatted = segments.map(formatConditionAsPill).filter(Boolean).join(', ');
+        return `${prefix}${formatted || 'None'}`;
     }
 
     return line;

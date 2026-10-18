@@ -1326,7 +1326,7 @@ export function formatConditionAsPill(item) {
         s = pm[2].trim();
     }
 
-    s = s.replace(/^starting\s+injury\s+or\s+weakness\s*(?:[:—–-]\s*)?/i, '').trim();
+    s = s.replace(/^(?:starting\s+(?:injury(?:\s+or\s+weakness)?|weakness|condition)|placeholder|guidance)\s*(?:[:—–-]\s*)?/i, '').trim();
     if (s.startsWith('(') && s.endsWith(')') && !s.slice(1, -1).includes('(')) {
         s = s.slice(1, -1).trim();
     }

@@ -90,7 +90,6 @@ import {
 import {
     isValidCharacterName,
     sanitizeCharacterStockPrompt,
-    healMacroCharacterIdentity,
     installCharacterCreatorBridge,
 } from './character-creator-sanitizer.js';
 
@@ -785,9 +784,6 @@ export async function runSync(reason = '') {
             renderTrackerQuarantineBanner(integrity);
             return false;
         }
-
-        // Heal corrupted {{user}} macro identities even before the adventure starts
-        await healMacroCharacterIdentity(chatId);
 
         // If adventure is unstarted or in onboarding screen, skip runtime persona/portrait/vitality sync
         if (!isAdventureActive(chatId)) {
@@ -2032,9 +2028,6 @@ jQuery(async () => {
             const inputVal = (typeof $ !== 'undefined' ? $('#rt-cr-name').val()?.trim() : '') || s?.characterCreatorDraft?.name || '';
             sanitizeCharacterStockPrompt(s.stockPrompts, inputVal);
         }
-        setTimeout(() => {
-            void healMacroCharacterIdentity(activeChatId).catch(() => {});
-        }, 1500);
     });
 
     installCharacterCreatorBridge();
@@ -2057,9 +2050,6 @@ jQuery(async () => {
         if (typeof refreshConciergeActiveContext === 'function') {
             void refreshConciergeActiveContext().catch(() => {});
         }
-        setTimeout(async () => {
-            await healMacroCharacterIdentity(getActiveChatId());
-        }, 450);
         setTimeout(async () => {
             const integrity = await checkTrackerProjectionIntegrity();
 
@@ -2127,9 +2117,6 @@ jQuery(async () => {
         isPbta: isPbtAActive(getActiveChatId()),
     });
     scheduleSync('INITIAL_LOAD', 1000);
-    setTimeout(async () => {
-        await healMacroCharacterIdentity(getActiveChatId());
-    }, 950);
     setTimeout(async () => {
         const s = getSettings();
 

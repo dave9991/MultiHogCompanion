@@ -569,30 +569,6 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
                 }
                 return;
             }
-
-            // ── LEGACY GUARDIAN PATH (when decoupled CYOA is disabled) ──
-            if (s.enableCyoaAutoRetry === false && s.enableCyoaMarkdownAutoRepair === false) {
-                return;
-            }
-
-            const text = String(lastMsg.mes || '');
-            if (hasCyoaChoices(text)) {
-                _retryTracker = { mesId: -1, count: 0 };
-                return;
-            }
-
-            // 1. Try Markdown Auto-Repair (instant, zero token re-roll)
-            if (s.enableCyoaMarkdownAutoRepair !== false) {
-                const repaired = tryRepairMarkdownChoices(text);
-                if (repaired) {
-                    const ok = await applyRepairedMessage(lastIdx, repaired);
-                    if (ok) {
-                        _retryTracker = { mesId: -1, count: 0 };
-                        showToast('info', 'Auto-converted markdown choices into CYOA buttons! 🧭', 'CYOA Guardian');
-                        return;
-                    }
-                }
-            }
         });
     }
 }

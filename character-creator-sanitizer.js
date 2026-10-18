@@ -1,7 +1,7 @@
 /**
  * character-creator-sanitizer.js — MultiHog Companion
  *
- * Prevents and heals macro leakage (e.g. {{user}}, {{char}}, {user}, User) during
+ * Prevents macro leakage (e.g. {{user}}, {{char}}, {user}, User) during
  * MultiHog character creation, quickstart, and persona synchronization.
  *
  * Background:
@@ -17,7 +17,6 @@
  * 2. Pre-emptively sanitizes stock prompts before character generation so the LLM never sees `{{user}}`.
  * 3. Intercepts `sendDirectPrompt` via `runtime-bridge.js` to ensure generated memos are rectified
  *    before upstream persona creation runs.
- * 4. Self-heals existing chats and personas that were corrupted with `{{user}}`.
  */
 
 import { configureRuntimeActions } from '../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js';
@@ -148,131 +147,6 @@ export function determineEffectiveCharacterName(context = {}) {
     }
 
     return null;
-}
-
-/**
- * Detects and heals corrupted macro character identities in settings and personas.
- * @param {string} chatId
- * @param {object} [options]
- * @returns {Promise<{ healed: boolean, realName?: string }>}
- */
-export async function healMacroCharacterIdentity(chatId, options = {}) {
-    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-    const s = ctx?.extensionSettings?.rpg_tracker
-        || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
-    if (!s) return { healed: false };
-
-    const cid = chatId || ctx?.getCurrentChatId?.() || ctx?.chatId || null;
-    const chatPartition = cid ? s.chatStates?.[cid] : null;
-
-    const pcName = chatPartition?.playerCharacter?.name || s.playerCharacter?.name || '';
-    const currentMemo = chatPartition?.currentMemo || s.currentMemo || '';
-    const hasMacroPcName = pcName && !isValidCharacterName(pcName) && /\{\{user\}\}|\{user\}|user/i.test(pcName);
-    const hasMacroMemo = currentMemo && /\[CHARACTER\][\s\S]*?(?:\{\{user\}\}|\{user\}|User)\s*[\(:\]]/i.test(currentMemo);
-
-    let powerUser = ctx?.power_user || (typeof window !== 'undefined' ? window.power_user : null);
-    if (!powerUser?.personas && typeof import('../../../power-user.js') !== 'undefined') {
-        try {
-            const pu = await import('../../../power-user.js');
-            powerUser = pu.power_user;
-        } catch (_) {}
-    }
-
-    // Check if any bound or active persona is named {{user}}
-    let corruptedAvatarId = null;
-    if (powerUser?.personas) {
-        for (const [avatarId, pName] of Object.entries(powerUser.personas)) {
-            if (pName && (/^\{\{user\}\}$/i.test(pName.trim()) || /^\{user\}$/i.test(pName.trim()))) {
-                corruptedAvatarId = avatarId;
-                break;
-            }
-        }
-    }
-
-    if (!hasMacroPcName && !hasMacroMemo && !corruptedAvatarId) {
-        return { healed: false };
-    }
-
-    // Find the real character name
-    const realName = determineEffectiveCharacterName({
-        draft: s.characterCreatorDraft,
-        playerCharacter: chatPartition?.playerCharacter || s.playerCharacter,
-        memo: currentMemo,
-        cid,
-    });
-
-    if (!realName || !isValidCharacterName(realName)) {
-        return { healed: false };
-    }
-
-    console.log(`[MultiHog Companion] Auto-healing corrupted macro character identity to "${realName}" for chat "${cid}"...`);
-    let didHeal = false;
-
-    // 1. Heal chat partition playerCharacter
-    if (chatPartition?.playerCharacter) {
-        chatPartition.playerCharacter.name = realName;
-        didHeal = true;
-    }
-    if (s.playerCharacter) {
-        s.playerCharacter.name = realName;
-        didHeal = true;
-    }
-
-    // 2. Heal memo
-    if (chatPartition?.currentMemo) {
-        chatPartition.currentMemo = rectifyMemoCharacterName(chatPartition.currentMemo, realName);
-        didHeal = true;
-    }
-    if (s.currentMemo) {
-        s.currentMemo = rectifyMemoCharacterName(s.currentMemo, realName);
-        didHeal = true;
-    }
-
-    // 3. Heal persona name in power_user.personas
-    if (corruptedAvatarId && powerUser?.personas) {
-        powerUser.personas[corruptedAvatarId] = realName;
-        didHeal = true;
-
-        try {
-            const { saveSettingsDebounced } = await import('../../../../script.js');
-            if (typeof saveSettingsDebounced === 'function') {
-                saveSettingsDebounced();
-            }
-        } catch (_) {}
-
-        // If this avatar is currently selected in SillyTavern, update user name as well
-        const activeAvatar = ctx?.chatMetadata?.persona || ctx?.user_avatar || (typeof window !== 'undefined' ? window.user_avatar : null);
-        if (activeAvatar === corruptedAvatarId) {
-            try {
-                const personasMod = await import('../../../personas.js');
-                if (typeof personasMod.setUserName === 'function') {
-                    personasMod.setUserName(realName);
-                } else if (typeof globalThis.setUserName === 'function') {
-                    globalThis.setUserName(realName);
-                }
-            } catch (_) {}
-        }
-    }
-
-    // 4. Persist chat state
-    if (cid && didHeal) {
-        try {
-            const persMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-persistence.js');
-            if (typeof persMod.saveChatState === 'function') {
-                persMod.saveChatState(cid);
-            }
-        } catch (_) {}
-    }
-
-    // 5. Trigger view refresh
-    try {
-        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
-        if (typeof bridge.refreshRenderedView === 'function') {
-            bridge.refreshRenderedView();
-        }
-    } catch (_) {}
-
-    return { healed: didHeal, realName };
 }
 
 let _bridgeInstalled = false;

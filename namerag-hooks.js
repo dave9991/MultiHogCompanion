@@ -433,8 +433,9 @@ export function setupMultiHogRollHooks(isNameRagActive) {
         btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i>');
 
         try {
-            const root = btn.closest('#rpg-tracker-quickstart');
-            const genre = root.find('#rt-quickstart-genre').val() || 'fantasy';
+            const root = btn.closest('#rt-quickstart, .rt-quickstart, #rpg-tracker-quickstart');
+            const activeGenreBtn = root.find('.rt-quickstart-genre-btn.active, .rt-quickstart-genre-btn[aria-pressed="true"]');
+            const genre = activeGenreBtn.data('genre') || activeGenreBtn.attr('data-genre') || root.find('#rt-quickstart-genre').val() || 'fantasy';
             const candidate = await rollNameRagCandidate(genre);
             const input = root.find('#rt-quickstart-name');
             input.val(candidate.name).trigger('input');
@@ -493,13 +494,14 @@ export function setupMultiHogRollHooks(isNameRagActive) {
     $(document).off('click.mhc_namerag_begin', '#rt-quickstart-begin');
     $(document).on('click.mhc_namerag_begin', '#rt-quickstart-begin', async function (e) {
         if (!isNameRagActive()) return;
-        const root = $(this).closest('#rpg-tracker-quickstart');
+        const root = $(this).closest('#rt-quickstart, .rt-quickstart, #rpg-tracker-quickstart');
         const nameInput = root.find('#rt-quickstart-name');
         if (nameInput.length && !nameInput.val().trim()) {
             // Field is empty — fetch a NameRAG candidate first so prompt is seeded
             e.stopImmediatePropagation();
             e.preventDefault();
-            const genre = root.find('#rt-quickstart-genre').val() || 'fantasy';
+            const activeGenreBtn = root.find('.rt-quickstart-genre-btn.active, .rt-quickstart-genre-btn[aria-pressed="true"]');
+            const genre = activeGenreBtn.data('genre') || activeGenreBtn.attr('data-genre') || root.find('#rt-quickstart-genre').val() || 'fantasy';
             const candidate = await rollNameRagCandidate(genre);
             nameInput.val(candidate.name).trigger('input');
             // Re-trigger click now that name is populated

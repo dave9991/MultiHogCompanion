@@ -90,7 +90,6 @@ import {
 import {
     isValidCharacterName,
     sanitizeCharacterStockPrompt,
-    installCharacterCreatorBridge,
 } from './character-creator-sanitizer.js';
 
 const EXTENSION_NAME = 'multihog_companion';
@@ -2025,12 +2024,12 @@ jQuery(async () => {
             }
         }
         if (s?.stockPrompts) {
-            const inputVal = (typeof $ !== 'undefined' ? $('#rt-cr-name').val()?.trim() : '') || s?.characterCreatorDraft?.name || '';
+            const inputVal = (typeof $ !== 'undefined'
+                ? ($('#rt-quickstart-name').val()?.trim() || $('#rt-cr-name').val()?.trim() || '')
+                : '') || s?.characterCreatorDraft?.name || '';
             sanitizeCharacterStockPrompt(s.stockPrompts, inputVal);
         }
     });
-
-    installCharacterCreatorBridge();
 
 
     if (event_types.CHAT_RENAMED) {

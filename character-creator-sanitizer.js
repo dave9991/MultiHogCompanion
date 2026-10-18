@@ -19,8 +19,6 @@
  *    before upstream persona creation runs.
  */
 
-import { configureRuntimeActions } from '../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js';
-
 /**
  * Checks whether a candidate string is a valid, real character name
  * (not a template macro or generic system placeholder).
@@ -149,92 +147,4 @@ export function determineEffectiveCharacterName(context = {}) {
     return null;
 }
 
-let _bridgeInstalled = false;
 
-/**
- * Installs the runtime bridge interceptor on `sendDirectPrompt` to sanitize
- * prompts before generation and rectify memos after generation.
- */
-export function installCharacterCreatorBridge() {
-    if (_bridgeInstalled) return;
-    _bridgeInstalled = true;
-
-    // Grab the existing runtime actions
-    let originalSendDirectPrompt = null;
-    try {
-        const bridge = Object.assign({}, window.__mhcBridgeActions || {});
-        // We can hook configureRuntimeActions
-    } catch (_) {}
-
-    // Dynamic wrapper around sendDirectPrompt
-    import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js').then(bridge => {
-        const original = bridge.sendDirectPrompt;
-
-        configureRuntimeActions({
-            sendDirectPrompt: async function interceptedSendDirectPrompt(message, options = {}) {
-                const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-                const s = ctx?.extensionSettings?.rpg_tracker
-                    || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
-
-                // 1. Detect if this prompt is for character generation
-                const isCharGen = options.systemPromptMode === 'modules_only'
-                    || /--- PLAYER PREFERENCES ---/i.test(message)
-                    || /Design a complete player character/i.test(message);
-
-                let targetName = '';
-                if (isCharGen) {
-                    // Extract name from message preferences
-                    const nameMatch = message.match(/Name:\s*([^\n\r]+)/i);
-                    if (nameMatch && isValidCharacterName(nameMatch[1])) {
-                        targetName = nameMatch[1].trim();
-                    } else if (s?.characterCreatorDraft?.name && isValidCharacterName(s.characterCreatorDraft.name)) {
-                        targetName = s.characterCreatorDraft.name.trim();
-                    } else if (typeof $ !== 'undefined' && $('#rt-cr-name').length) {
-                        const inputVal = $('#rt-cr-name').val()?.trim();
-                        if (inputVal && isValidCharacterName(inputVal)) {
-                            targetName = inputVal;
-                        }
-                    }
-
-                    // Pre-flight prompt sanitization: ensure stock prompts do NOT specify {{user}}
-                    if (s?.stockPrompts) {
-                        sanitizeCharacterStockPrompt(s.stockPrompts, targetName);
-                    }
-                }
-
-                // 2. Execute upstream sendDirectPrompt
-                const result = await original(message, options);
-
-                // 3. Post-generation check & rectification
-                if (isCharGen && s) {
-                    const activeChatId = ctx?.getCurrentChatId?.() || ctx?.chatId || null;
-                    const memo = s.currentMemo || '';
-                    if (memo && /\[CHARACTER\][\s\S]*?(?:\{\{user\}\}|\{user\}|User)\s*[\(:\]]/i.test(memo)) {
-                        const finalName = targetName || determineEffectiveCharacterName({
-                            draft: s.characterCreatorDraft,
-                            memo,
-                            cid: activeChatId,
-                        });
-
-                        if (finalName && isValidCharacterName(finalName)) {
-                            console.log(`[MultiHog Companion] Post-generation rectifying character name from macro to "${finalName}"`);
-                            s.currentMemo = rectifyMemoCharacterName(s.currentMemo, finalName);
-                            if (activeChatId && s.chatStates?.[activeChatId]) {
-                                s.chatStates[activeChatId].currentMemo = rectifyMemoCharacterName(
-                                    s.chatStates[activeChatId].currentMemo,
-                                    finalName
-                                );
-                            }
-                        }
-                    }
-                }
-
-                return result;
-            }
-        });
-
-        console.log('[MultiHog Companion] Character Creator runtime bridge successfully installed.');
-    }).catch(err => {
-        console.warn('[MultiHog Companion] Could not install Character Creator runtime bridge:', err);
-    });
-}

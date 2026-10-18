@@ -144,7 +144,8 @@ export function buildStage2CyoaPrompt({ narrative, memo, isPbta, rpgSettings }) 
             guidelines = `PbtA Moves & Narrative Choices:
 - Generate exactly ${choiceCount} choices tailored to the current scene and fictional pacing.
 - At most 1 choice should trigger a dramatic PbtA Move with a stat bonus (e.g. "— [Move (+Stat)]").
-- Remaining choices should be dialogue, tactical positioning, environmental awareness, or alternative actions (no move tags).
+- NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), AC, attack rolls, or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ / 7–9 / 6-).
+- Remaining choices should be dialogue in quotes, tactical positioning, environmental awareness, or alternative actions (no move tags).
 - Never overload choices with rolls; ordinary dialogue and observation never roll dice.`;
         }
 

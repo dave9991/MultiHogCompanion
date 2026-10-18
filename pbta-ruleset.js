@@ -1024,6 +1024,17 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
             origin: 'unlocked_base',
             baseTag: '[PARTY]_mechanics',
         },
+        {
+            id: 'pbta_base_override_constraints',
+            tag: 'constraints',
+            content: `<constraints>\n<resolution_constraints>\nNever skip or reinterpret a 2d6 Move roll. Mixed hits (7–9) demand a real complication or hard dilemma; Misses (6-) trigger immediate GM Hard Moves. A second attempt after a miss requires a fundamentally different fictional approach.\n</resolution_constraints>\n<spatial_and_entity_constraints>\nAdhere to fictional positioning and weapon tags (intimate, close, near, far). Max active [PARTY] size = 5 + {{user}}.\n</spatial_and_entity_constraints>\n<inventory_and_resource_constraints>\nGear items require uses (>0) or fictional availability. Physically impossible actions or incompatible gear are narrated as failing with fitting fictional consequences (-1 forward, lost opportunity, damage/harm, or increased danger). NEVER impose D&D "disadvantage" — use PbtA modifiers (-1 forward) or fictional positioning.\n</inventory_and_resource_constraints>\n<cheese_and_abuse>\nRoutine tasks and ordinary dialogue NEVER trigger Move rolls. If the player attempts rules abuse, intervene through the narrative world.\n</cheese_and_abuse>\n</constraints>`,
+            enabled: true,
+            scope: 'chat',
+            icon: 'fa-lock-open',
+            description: 'PbtA fiction-first constraints and modifier rules',
+            origin: 'unlocked_base',
+            baseTag: 'constraints',
+        },
     ];
 
     if (overrides.tone || config.tone) {
@@ -1087,6 +1098,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         end_of_output_footer: false,
         xp_system: false,
         '[PARTY]_mechanics': false,
+        constraints: false, // Suppress base D&D constraints containing disadvantage/spells
         CYOA_mode: !isFreeform,
         // D&D systems disabled in PbtA
         weapon_proficiencies: false,

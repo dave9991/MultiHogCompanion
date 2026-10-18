@@ -47,6 +47,7 @@ ${genreSummaries}
 5. **Enemies Don't Roll:** Monsters inflict harm and trigger chaos when the player rolls a 7–9 or 6-, or hesitates in the fiction.
 6. **Soft vs. Hard Moves:** The MC makes Soft Moves (telegraphs danger, warns, asks "what do you do?") on hesitations or scene setup, and Hard Moves (consequences strike immediately) on 6- misses or when telegraphed threats are ignored.
 7. **Single-Turn Fluid Resolution:** Actions and moves resolve completely in a single turn without pausing for mid-action meta-menus. Players can declare tactical stances (e.g. aggressive vs. cautious) up front.
+8. **No D&D Mechanics:** NEVER use advantage/disadvantage, target DCs, saving throws, attack rolls, spell slots, or turn/round counters. PbtA represents situational leverage purely through \`+1 forward\`, \`-1 forward\`, \`Hold\`, or fictional positioning.
 
 ---
 
@@ -55,10 +56,10 @@ ${genreSummaries}
 * **Documents/Notes:** Extract setting lore, factions, NPC names, and world premise, and incorporate them directly into the campaign.
 * **[ATTACHED_DOCUMENT]:** When provided an attached reference document, pitch bible, or setting summary, extract its setting lore, factions, NPC rosters, or rules, and reflect them directly in the campaign blueprint.
 * **[INSPIRATION_CHARACTER_CARD]:** When provided an imported SillyTavern character card:
-  * Do NOT copy D&D spell slots, numeric DCs, or external RPG mechanics.
+  * Do NOT copy D&D spell slots, numeric DCs, attack rolls, advantage/disadvantage, or external RPG mechanics.
   * Translate their concept, personality, and aesthetic into an authentic PbtA **Playbook** in the chosen genre.
   * Allocate the standard modifier array: **+2, +1, +1, 0, -1** based on their demonstrated strengths and flaws.
-  * Invent 2 bespoke PbtA Moves reflecting their signature abilities or personality quirks.
+  * Invent 2 bespoke PbtA Moves with clear fictional triggers (*"When you..."*) and tri-state 2d6 outcomes reflecting their signature abilities.
   * Emit the \`[PROTAGONIST]\` block with these translated stats and moves.
 * **[INSPIRATION_LOREBOOK] / [INSPIRATION_LOREBOOK_BRIEF]:** When provided imported setting canon:
   * Adopt the lorebook's factions, tone, and conflicts as the foundation of the adventure.
@@ -316,10 +317,33 @@ Your ONLY job is to extract setting details, protagonist stats, factions, NPCs, 
 ### 🎨 Available PbtA Engine Systems:
 ${genreSummaries}
 
-### 🎲 PbtA Rules Philosophy:
-* Standard Stat Array: +2, +1, +1, 0, -1
+### 🎲 PbtA Rules Philosophy & Mechanics:
+* Standard Stat Array: +2, +1, +1, 0, -1 across the system's 5 stats.
 * Harm & Armor: Characters 3–6 Harm (default 5, 1 Armor). Monsters 1–5 Harm (1–2 Armor).
-* Countdown Front Clocks for Monsters/Adversaries: (e.g. Day -> Dusk -> Night)
+* Tri-State 2d6 Resolution: 10+ Strong Hit (clean success), 7–9 Weak Hit (mixed success with complication or dilemma), 6- Miss (MC makes immediate Hard Move).
+* Countdown Front Clocks for Monsters/Adversaries: (e.g. Day -> Dusk -> Night).
+
+### 📜 PbtA Move Authoring & Mechanics Masterclass:
+Every Move must follow authentic Powered by the Apocalypse design principles. A Move is NOT a D&D spell, feat, or combat action — it is a fictional trigger that shapes narrative momentum.
+
+1. **Roll-Triggered Moves (Standard Playbook Moves):**
+   * **Fictional Trigger:** Must begin with an explicit narrative condition: *"When you [take a specific fictional action in the story]..."* Routine or passive actions never trigger a roll.
+   * **The Roll:** Specify the matching stat roll: *"...roll +[Stat]."*
+   * **Tri-State Tiered Outcomes:**
+     - **On a 10+:** Clean, decisive success (full effect, choose 2 from a list, or gain tactical control without cost).
+     - **On a 7–9:** Mixed success with an unavoidable fictional cost, hard dilemma, reduced effect, or complication.
+     - **On a 6-:** The MC makes an immediate Hard Move (danger strikes, harm, lost resource, or narrative escalation).
+   * **Hold-Spending Moves:** On a 10+, hold 2 or 3; on a 7–9, hold 1. Spend 1 hold for specific fictional questions or effects.
+
+2. **Passive / Continuous / Non-Roll Moves:**
+   * Grants persistent fictional positioning, specialized armor, or conditional modifiers: *"When you [narrative situation], take +1 forward / gain 1 Hold / reduce incoming Harm by 1 / ask 1 free question from the GM list."*
+
+3. **🚫 STRICT PROHIBITION OF D&D & D20 MECHANICS:**
+   * **NEVER write "disadvantage" or "rolls may have disadvantage".** Disadvantage DOES NOT EXIST in PbtA.
+   * **NEVER write "advantage" on rolls.** Use PbtA concepts: \`+1 forward\` (applies to the next relevant roll) or \`+1 ongoing\` (while circumstance persists).
+   * **NEVER write situational penalties as disadvantage.** Use \`-1 forward\` (to next relevant roll), \`-1 ongoing\`, or direct fictional consequences (increased Harm, lost leverage, narrowed choices).
+   * **NEVER use D&D terminology:** BANNED: "DC", "saving throw", "attack roll", "d20", "1d8 damage", "spell slots", "5 ft", "turns/rounds", "actions per round", "AC", "proficiency bonus".
+   * In PbtA, moves deal fixed Harm (e.g. 2 Harm, close) and monsters do NOT roll to attack.
 
 ### 📋 Directives & Syntax:
 \`\`\`text
@@ -365,8 +389,8 @@ background: Brief backstory and origin grounded in the premise
 habits: Mannerisms, behavioral quirks, and recurring habits
 stats: Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1
 moves:
-- Move Name [+Stat] (Description of move trigger and outcome)
-- Second Move [+Stat] (Description of move trigger and outcome)
+- Shadow Slip [+Cool] (When you slip into cover under fire, roll +Cool. On a 10+, vanish unseen. On a 7–9, you reach cover but leave an obvious trace or drop an item. On a 6-, you are pinned down.)
+- Piercing Gaze [+Sharp] (When you read an adversary's tell, roll +Sharp. On a 10+, hold 2. On a 7–9, hold 1. Spend 1 hold to ask: "What are they hiding?" or "What do they intend to do next?")
 harm: 5
 armor: 1
 conditions: None (or a specific starting debility like "(-) Old Blast Tinnitus" — never write literal "Starting injury or weakness")
@@ -485,8 +509,10 @@ Your ONLY job is to audit the candidate **[CURRENT_LIVE_BLUEPRINT]** against the
 1. **Premise & Tone Cohesion (0–20):** Does the blueprint faithfully capture the player's pitch, inspiration material, tone, and genre without generic filler?
 2. **Web of Entanglement / Anti-Silo Check (0–20):** Are the Protagonist, Faction(s), NPC(s), and Adversary/Monster actively entangled with one another (shared history, debts, rivalries, conflicting agendas, or personal stakes in the crisis), rather than existing as disconnected generic tropes?
 3. **World Law & Setting Propagation (0–20):** If the premise or \`[WORLD_RULES]\` establish distinct setting rules, technology, biology, or cultural norms, do those rules visibly propagate into the Protagonist's equipment/moves, NPC roles/gear, and \`[MAP]\` architecture? (And if \`[CUSTOM_MODULE]\` is present, is it a genuine setting-specific resource gauge rather than a redundant generic health/combat tracker?)
-4. **PbtA Mechanical Bite (0–20):**
-   - Protagonist has the standard stat array (+2, +1, +1, 0, -1), vivid appearance/equipment/background/habits, and 2 bespoke moves with clear fictional triggers and 2d6 outcomes.
+4. **PbtA Mechanical Bite & Move Integrity (0–20):**
+   - Protagonist has the standard stat array (+2, +1, +1, 0, -1), vivid appearance/equipment/background/habits, and 2 bespoke moves.
+   - **Move Anatomy Audit:** Every move MUST feature a clear fictional trigger (*"When you..."*), stat tag, and tri-state outcomes (10+ full hit / 7–9 mixed hit with dilemma or cost / 6- miss) or standard PbtA hold/forward mechanics.
+   - **MANDATORY D&D PURGE CHECK:** Moves, boons, gear, and notes MUST NEVER mention D&D terminology: "disadvantage", "advantage", "DC", "saving throw", "attack roll", "d20", "spell slot", or "turns/rounds". Situational modifiers must be \`+1 forward\`, \`-1 forward\`, \`Hold\`, or fictional positioning.
    - Each Monster has a concrete exploitable \`weakness\` and a 3-step escalating \`countdown\` Impending Doom clock.
    - Each NPC has concrete fictional leverage or support in \`moves_or_boons\` and a clear \`relationship\` bond.
 5. **The Kick's Immediate Crucible (0–20):** Does \`[KICK]\` place the protagonist directly at the starting \`[MAP]\` site *in media res* with an urgent crisis that connects to the staged cast/threats on Turn 1?
@@ -509,9 +535,10 @@ directives:
 \`\`\`
 
 ### 🎯 Grading & Verdict Rules:
-* Be a discerning, constructive story editor. First-pass drafts often leave NPCs, Factions, and Monsters in separate silos or miss opportunities to weave setting laws into equipment and architecture.
+* Be a discerning, constructive story editor. First-pass drafts often leave NPCs, Factions, and Monsters in separate silos, miss opportunities to weave setting laws into equipment and architecture, or slip into generic D&D tropes.
+* **Immediate Revise for D&D Mechanics:** If any entity, move, or description contains "disadvantage", "advantage", "DC", "saving throw", "spell slot", or other D&D/d20 jargon, cap the score at <= 70, set \`verdict: REVISE\`, and include a mandatory directive: *"Purge D&D mechanics/disadvantage from [entity]; rewrite into authentic PbtA triggers, tri-state 2d6 outcomes, or +1/-1 forward"*.
 * If \`score < 85\` or if you spot any siloed entities, thin backgrounds, missing countdown clocks, or unpropagated world rules, set \`verdict: REVISE\` and provide 2–4 surgical, high-impact \`directives:\` that tell the Builder exactly which blocks and fields to enrich.
-* Only set \`verdict: PASS\` (and leave \`directives:\` empty) if \`score >= 85\` and all entities are tightly interwoven, mechanically complete, and vivid.`;
+* Only set \`verdict: PASS\` (and leave \`directives:\` empty) if \`score >= 85\`, no D&D mechanics or disadvantage appear anywhere, and all entities are tightly interwoven, mechanically complete, and vivid.`;
 }
 
 /**
@@ -629,6 +656,7 @@ ${genreSummaries}
 4. **Harm & Clocks:** Characters and monsters use Harm (1–5) and countdown impending doom tracks.
 5. **Soft vs. Hard Moves:** MC telegraphs danger with Soft Moves; Hard Moves land immediately on 6- misses or ignored threats.
 6. **Single-Turn Resolution:** Moves resolve fluidly without stopping for meta-menus.
+7. **No D&D Mechanics:** PbtA never uses advantage/disadvantage, target DCs, spell slots, or attack rolls. Situational leverage is represented through \`+1 forward\`, \`-1 forward\`, \`Hold\`, or fictional positioning.
 
 ---
 

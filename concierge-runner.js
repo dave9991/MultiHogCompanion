@@ -613,7 +613,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
 
         // ── 5. Inject Dossier into World Info & State ───────────────────────────
             onProgress('📜 Inscribing Campaign Dossier into World Memory...', 85);
-            const dossierMd = serializeDossierToMarkdown(dossier);
+            const dossierMd = serializeDossierToMarkdown(dossier, { includeCyoa: false });
             await injectDossierIntoWorldInfo(chatId, dossierMd);
 
             // Store dossier and initialize game state memo in MultiHog for runtime panel access
@@ -860,7 +860,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
     try {
         // 1. Inscribe updated dossier into World Info
         onProgress('📜 Inscribing updated dossier into World Info...', 20);
-        const dossierMd = serializeDossierToMarkdown(dossier);
+        const dossierMd = serializeDossierToMarkdown(dossier, { includeCyoa: false });
         await injectDossierIntoWorldInfo(chatId, dossierMd);
 
         // 2. Distribute updated entities into campaign lorebooks

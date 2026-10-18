@@ -145,6 +145,9 @@ export function buildStage2CyoaPrompt({ narrative, memo, isPbta, rpgSettings }) 
 - Generate exactly ${choiceCount} choices tailored to the current scene and fictional pacing.
 - At most 1 choice should trigger a dramatic PbtA Move with a stat bonus (e.g. "— [Move (+Stat)]").
 - NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), AC, attack rolls, or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ / 7–9 / 6-).
+- STANCE & INTENT: Action choices may express a clear tactical stance (e.g. aggressive strike vs. defensive parry, stealthy approach vs. bold charge).
+- SPENDING HOLD: If [CHARACTER] has spendable Hold (e.g. "Hold: X"), at most 1 choice may offer to spend a point: "— [Spend 1 Hold: Tactical Advantage]".
+- DILEMMA CONTINUATION: When the preceding narrative introduced a complication (from a 7–9 Weak Hit) or a telegraphed threat (from a Soft Move), ensure choices provide concrete ways to navigate that dilemma.
 - Remaining choices should be dialogue in quotes, tactical positioning, environmental awareness, or alternative actions (no move tags).
 - Never overload choices with rolls; ordinary dialogue and observation never roll dice.`;
         }

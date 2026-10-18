@@ -82,13 +82,15 @@ test('4. buildPbtACartridge suppresses base D&D constraints and installs clean P
 
     // Verify constraints snippet does NOT contain 5e disadvantage penalty
     assert.ok(constraintsSnippet.content.includes('NEVER impose D&D "disadvantage"'), 'Must explicitly forbid disadvantage in constraints snippet');
-    assert.ok(constraintsSnippet.content.includes('-1 forward, lost opportunity, damage/harm, or increased danger'), 'Must specify PbtA penalties');
+    // Verify constraints snippet contains output_constraints forbidding choices in narrative
+    assert.ok(constraintsSnippet.content.includes('<output_constraints>'), 'Must have output_constraints');
+    assert.ok(constraintsSnippet.content.includes('NEVER output lettered choices'), 'Must forbid lettered choices in narrative');
 
     const unsuppressedSnippet = constraintsSnippet.content.replace(/NEVER impose D&D "disadvantage"[^\n]*/gi, '');
     assert.ok(!/disadvantage/i.test(unsuppressedSnippet), 'No unsuppressed disadvantage in PbtA constraints snippet');
 });
 
-test('5. buildStage2CyoaPrompt bans advantage/disadvantage in PbtA mode', () => {
+test('5. buildStage2CyoaPrompt bans advantage/disadvantage in PbtA mode and guides Hold and dilemmas', () => {
     const { systemPrompt } = buildStage2CyoaPrompt({
         narrative: 'The beast lunges forward with claws bared.',
         memo: '[CHARACTER]\n{{user}} (Hunter): 5/5 HP | Harm: 0/5',
@@ -99,6 +101,8 @@ test('5. buildStage2CyoaPrompt bans advantage/disadvantage in PbtA mode', () => 
     assert.ok(systemPrompt.includes('NO D&D MECHANICS:'), 'PbtA CYOA prompt must include NO D&D MECHANICS guideline');
     assert.ok(systemPrompt.includes('advantage/disadvantage'), 'PbtA CYOA prompt must ban advantage/disadvantage');
     assert.ok(systemPrompt.includes('moves roll 2d6 + Stat against fixed tiers (10+ / 7–9 / 6-)'), 'Must explain 2d6 tiers');
+    assert.ok(systemPrompt.includes('SPENDING HOLD:'), 'PbtA CYOA prompt must instruct on spending Hold');
+    assert.ok(systemPrompt.includes('DILEMMA CONTINUATION:'), 'PbtA CYOA prompt must instruct on dilemma continuation');
 
     const cleanCyoa = systemPrompt.replace(/NO D&D MECHANICS:[^\n]*/gi, '');
     assert.ok(!/disadvantage/i.test(cleanCyoa), 'No unsuppressed disadvantage in PbtA CYOA prompt');

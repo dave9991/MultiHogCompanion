@@ -21,6 +21,7 @@ import {
     isStage2CyoaRunning,
     resolveCyoaMaxTokens,
 } from '../cyoa-decoupled-runner.js';
+import { serializeDossierToMarkdown } from '../concierge-parser.js';
 
 console.log('--- Testing Decoupled CYOA Engine ---');
 
@@ -464,6 +465,28 @@ const dedicatedTokens = resolveCyoaMaxTokens({
 assert.strictEqual(dedicatedTokens, 6000, 'Dedicated endpoint maxTokens must be respected');
 
 console.log('✓ resolveCyoaMaxTokens dynamically scales context headroom for 4k/8k+ reasoning models and honors user overrides');
+
+// ── 9. Testing World Info Serialization Exclusion ──
+console.log('9. Testing serializeDossierToMarkdown with includeCyoa: false for World Info...');
+const testDossierWithCyoa = {
+    meta: { title: 'Test Adventure', premise: 'A deep quest' },
+    protagonist: { name: 'Aelion', stats: { Might: 2, Wits: 1 } },
+    theKick: { startingLocation: 'Gate', crisis: 'Threat', openingPrompt: 'You arrive.' },
+    cyoaExamples: [
+        '1. ⚔️ Strike with blade — [Hack & Slash (+Might)]',
+        '2. 🔍 Investigate the rune — [Discern Realities (+Wits)]',
+    ],
+    config: { playstyle: 'cyoa_5', harmMax: 5 },
+};
+
+const fullSerializedMd = serializeDossierToMarkdown(testDossierWithCyoa, { includeCyoa: true });
+assert.ok(fullSerializedMd.includes('Tailored CYOA Move Choices'), 'Standard serialization must include CYOA choices');
+
+const worldInfoSerializedMd = serializeDossierToMarkdown(testDossierWithCyoa, { includeCyoa: false });
+assert.ok(!worldInfoSerializedMd.includes('Tailored CYOA Move Choices'), 'World Info serialization must omit CYOA choices');
+assert.ok(!worldInfoSerializedMd.includes('Hack & Slash'), 'World Info must not contain CYOA choice content');
+assert.ok(worldInfoSerializedMd.includes('Aelion'), 'World Info must retain protagonist info');
+console.log('✓ World Info dossier serialization cleanly excludes CYOA choices to avoid narrator confusion');
 
 console.log('\n--- All Decoupled CYOA Engine tests PASSED! 🧭 ---');
 

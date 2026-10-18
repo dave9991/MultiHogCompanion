@@ -313,10 +313,11 @@ CORE LOOP (every turn):
 HANDLING CHOICES & BONUSES (SINGLE-TURN FLUID RESOLUTION):
 - NEVER halt the game mid-turn to ask meta-questions or present mechanical menus (e.g. "Do you want +1 harm or to dodge?", "Which of these options do you pick?").
 - Resolve the entire action in one fluid beat:
-  • Stance & Intent: If the player's action or chosen CYOA button declared a stance (e.g. aggressive strike vs. cautious parry), honor that intent when allocating bonuses or compromises.
+  • Stance & Intent: If the player's action declared a stance (e.g. aggressive strike vs. cautious parry), honor that intent when allocating bonuses or compromises.
   • Dramatic Narrative Selection: When intent is unstated, choose the most dramatic option that fits the fiction and narrate it directly.
-  • Dilemmas as Next Scene Beats: On a 7–9 Weak Hit, narrate the success alongside the complication immediately. Let this complication frame the dilemma for the NEXT turn's CYOA choices.
-  • Hold Economy: For Moves that award Hold, update [CHARACTER] with "Hold: X" (e.g. Hold: 2 (Tactical Advantage)) and allow subsequent CYOA choices to offer spending options rather than pausing mid-turn.
+  • Dilemmas as Next Scene Beats: On a 7–9 Weak Hit, narrate the success alongside the complication immediately. Never pause mid-turn; let the complication unfold directly in the ongoing fiction.
+  • Hold Economy: For Moves that award Hold, update [CHARACTER] with "Hold: X" (e.g. Hold: 2 (Tactical Advantage)). Spendable hold is tracked on the sheet and consumed by the player on future actions.
+- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or action menus in your response. Simply describe the fiction honestly, ask "What do you do?", and output the status footer. Interactive tactical choices are handled by a dedicated engine outside your narrative.
 
 PRINCIPLES:
 - Begin and end with the fiction: the fiction triggers moves, and moves change the fiction.
@@ -1027,7 +1028,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_constraints',
             tag: 'constraints',
-            content: `<constraints>\n<resolution_constraints>\nNever skip or reinterpret a 2d6 Move roll. Mixed hits (7–9) demand a real complication or hard dilemma; Misses (6-) trigger immediate GM Hard Moves. A second attempt after a miss requires a fundamentally different fictional approach.\n</resolution_constraints>\n<spatial_and_entity_constraints>\nAdhere to fictional positioning and weapon tags (intimate, close, near, far). Max active [PARTY] size = 5 + {{user}}.\n</spatial_and_entity_constraints>\n<inventory_and_resource_constraints>\nGear items require uses (>0) or fictional availability. Physically impossible actions or incompatible gear are narrated as failing with fitting fictional consequences (-1 forward, lost opportunity, damage/harm, or increased danger). NEVER impose D&D "disadvantage" — use PbtA modifiers (-1 forward) or fictional positioning.\n</inventory_and_resource_constraints>\n<cheese_and_abuse>\nRoutine tasks and ordinary dialogue NEVER trigger Move rolls. If the player attempts rules abuse, intervene through the narrative world.\n</cheese_and_abuse>\n</constraints>`,
+            content: `<constraints>\n<resolution_constraints>\nNever skip or reinterpret a 2d6 Move roll. Mixed hits (7–9) demand a real complication or hard dilemma; Misses (6-) trigger immediate GM Hard Moves. A second attempt after a miss requires a fundamentally different fictional approach.\n</resolution_constraints>\n<output_constraints>\nNEVER output lettered choices (a, b, c), numbered action menus, or multiple-choice questions in the story narrative. Conclude the scene with "What do you do?" and the status footer.\n</output_constraints>\n<spatial_and_entity_constraints>\nAdhere to fictional positioning and weapon tags (intimate, close, near, far). Max active [PARTY] size = 5 + {{user}}.\n</spatial_and_entity_constraints>\n<inventory_and_resource_constraints>\nGear items require uses (>0) or fictional availability. Physically impossible actions or incompatible gear are narrated as failing with fitting fictional consequences (-1 forward, lost opportunity, damage/harm, or increased danger). NEVER impose D&D "disadvantage" — use PbtA modifiers (-1 forward) or fictional positioning.\n</inventory_and_resource_constraints>\n<cheese_and_abuse>\nRoutine tasks and ordinary dialogue NEVER trigger Move rolls. If the player attempts rules abuse, intervene through the narrative world.\n</cheese_and_abuse>\n</constraints>`,
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',

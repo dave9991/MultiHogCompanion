@@ -1850,7 +1850,8 @@ export function parseConciergeStateBlock(text, dossier) {
  * @param {object} dossier
  * @returns {string}
  */
-export function serializeDossierToMarkdown(dossier) {
+export function serializeDossierToMarkdown(dossier, options = {}) {
+    const { includeCyoa = true } = options;
     const meta = dossier.meta || {};
     const p = dossier.protagonist || {};
     const npcs = dossier.npcs || [];
@@ -1997,7 +1998,7 @@ ${mapsMd}${worldRulesMd}${customModuleMd}
 ## ⚡ The Kick (Opening Crisis):
 * **Starting Point:** ${kick.startingLocation || 'The road'}
 * **Inciting Crisis:** ${kick.crisis || 'Trouble approaches'}
-* **Opening Hook:** ${kick.openingPrompt || 'You stand at the threshold...'}${dossier.cyoaExamples && dossier.cyoaExamples.length ? `\n\n---\n\n## 🎲 Tailored CYOA Move Choices:\n${dossier.cyoaExamples.map(c => `* ${c}`).join('\n')}` : ''}${dossier.config ? `\n\n---\n\n## ⚙️ Campaign Calibration Dials:
+* **Opening Hook:** ${kick.openingPrompt || 'You stand at the threshold...'}${includeCyoa && dossier.cyoaExamples && dossier.cyoaExamples.length ? `\n\n---\n\n## 🎲 Tailored CYOA Move Choices:\n${dossier.cyoaExamples.map(c => `* ${c}`).join('\n')}` : ''}${dossier.config ? `\n\n---\n\n## ⚙️ Campaign Calibration Dials:
 * **Playstyle:** ${dossier.config.playstyle || 'cyoa_5'}
 * **Harm Capacity:** ${dossier.config.harmMax || 5}
 * **Party Mode:** ${dossier.config.partyMode || 'squad'}

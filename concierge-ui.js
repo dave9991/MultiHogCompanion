@@ -311,9 +311,16 @@ function updateBlueprintDeck() {
     const cfg = activeDossier.config || {};
     const playstyle = cfg.playstyle || 'cyoa_5';
     let playstyleLabel = 'CYOA (5 Choices)';
-    if (playstyle === 'freeform') playstyleLabel = 'Pure Freeform (No Choices)';
-    else if (playstyle === 'cyoa_3') playstyleLabel = 'CYOA (3 Choices)';
+    let playstyleDialLabel = '🧭 CYOA: 5 Choices';
+    if (playstyle === 'freeform') {
+        playstyleLabel = 'Pure Freeform (No Choices)';
+        playstyleDialLabel = '🧭 CYOA: Freeform';
+    } else if (playstyle === 'cyoa_3') {
+        playstyleLabel = 'CYOA (3 Choices)';
+        playstyleDialLabel = '🧭 CYOA: 3 Choices';
+    }
     $('#mhc_deck_dial_playstyle').text(playstyleLabel);
+    $('#mhc_dial_playstyle_btn').text(playstyleDialLabel);
 
     const harmMax = cfg.harmMax || 5;
     let harmTag = '(Standard)';
@@ -1739,7 +1746,7 @@ function bindModalEvents() {
     });
 
     // Campaign Calibration Dial click interactions (manual cycling)
-    $('#mhc_deck_dial_playstyle').on('click', () => {
+    const cyclePlaystyle = () => {
         activeDossier.config = activeDossier.config || {};
         const current = activeDossier.config.playstyle || 'cyoa_5';
         const cycle = { 'cyoa_5': 'cyoa_3', 'cyoa_3': 'freeform', 'freeform': 'cyoa_5' };
@@ -1747,7 +1754,9 @@ function bindModalEvents() {
         changelog.push(`Toggled playstyle to ${activeDossier.config.playstyle}`);
         updateBlueprintDeck();
         saveDraft();
-    });
+    };
+    $('#mhc_deck_dial_playstyle').on('click', cyclePlaystyle);
+    $('#mhc_dial_playstyle_btn').on('click', cyclePlaystyle);
 
     $('#mhc_dial_harm_btn').on('click', () => {
         activeDossier.config = activeDossier.config || {};

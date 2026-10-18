@@ -17,6 +17,8 @@ assert.ok(/SOFT MOVES/.test(role) && /HARD MOVES/.test(role), 'role separates so
 assert.ok(/THE ESCALATION LADDER/.test(role), 'role specifies the escalation ladder');
 assert.ok(/SINGLE-TURN FLUID RESOLUTION/.test(role), 'role specifies single-turn fluid choice resolution');
 assert.ok(/NEVER halt the game mid-turn to ask meta-questions/.test(role), 'role forbids mid-turn meta pauses');
+assert.ok(/NO CHOICES OR MENUS IN NARRATIVE/.test(role), 'role forbids narrative choice menus');
+assert.ok(!/frame the dilemma for the NEXT turn's CYOA choices/.test(role), 'role does not mention CYOA choices');
 assert.ok(/NPCs and enemies NEVER roll/.test(role), 'role states NPCs never roll');
 assert.ok(/Routine actions and ordinary conversation NEVER roll/.test(role), 'role states trigger rule');
 

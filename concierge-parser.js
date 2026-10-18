@@ -161,6 +161,8 @@ export function validateDraft(draft) {
             dossier: healedDossier,
             chatHistory: draft.chatHistory,
             changelog: Array.isArray(draft.changelog) ? draft.changelog : [],
+            originChatId: typeof draft.originChatId === 'string' ? draft.originChatId : (draft.originChatId || null),
+            originCampaignTitle: typeof draft.originCampaignTitle === 'string' ? draft.originCampaignTitle : (draft.originCampaignTitle || null),
             timestamp: typeof draft.timestamp === 'number' ? draft.timestamp : Date.now(),
         };
     } catch (_) {

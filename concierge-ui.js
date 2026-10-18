@@ -67,12 +67,18 @@ import {
     getCompanionActiveCartridge,
     getCandidateChatIds,
 } from './pbta-ruleset-persistence.js';
-import { extension_settings } from '../../../extensions.js';
+let extension_settings = globalThis.extension_settings || {};
+try {
+    const extModule = await import('../../../extensions.js');
+    if (extModule?.extension_settings) extension_settings = extModule.extension_settings;
+} catch (_) {}
 
 export const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
 
 let modalInitialized = false;
 let activeDossier = createEmptyDossier();
+let loadedCampaignOriginChatId = null;
+let loadedCampaignOriginTitle = null;
 let chatHistory = [];
 let changelog = [];
 let pendingAttachments = [];
@@ -129,6 +135,8 @@ function saveDraft() {
             dossier: activeDossier,
             chatHistory,
             changelog,
+            originChatId: loadedCampaignOriginChatId,
+            originCampaignTitle: loadedCampaignOriginTitle,
             timestamp: Date.now(),
         };
         localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify(payload));
@@ -247,6 +255,8 @@ export function resetConciergeState({ showGreeting = true } = {}) {
     } catch (_) {}
 
     activeDossier = createEmptyDossier();
+    loadedCampaignOriginChatId = null;
+    loadedCampaignOriginTitle = null;
     chatHistory = [];
     changelog = [];
     pendingAttachments = [];
@@ -1302,6 +1312,175 @@ async function handleFilesSelected(files) {
 }
 
 /**
+ * Find and heal active campaign dossier from memory or World Info for a given chat (or active chat).
+ * @param {string|null} [targetChatId=null]
+ * @returns {Promise<object|null>}
+ */
+export async function loadActiveCampaignDossier(targetChatId = null) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    const currentChatId = targetChatId
+        || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || ctx?.getCurrentChatId?.()
+        || ctx?.chatId
+        || ctx?.chatMetadata?.chat_id
+        || '';
+    const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+    const candidateIds = getCandidateChatIds(currentChatId, rpgSettings);
+
+    // 1. Primary Source: Check explicit CompanionActiveCartridge record (persisted in line 1 of chat .jsonl)
+    const activeCart = getCompanionActiveCartridge(currentChatId, rpgSettings);
+    if (activeCart?.dossier) {
+        return healAndNormalizeDossier(activeCart.dossier);
+    }
+
+    // 2. Check candidate chatStates partitions in memory
+    for (const cid of candidateIds) {
+        if (rpgSettings?.chatStates?.[cid]?.pbtaCampaignDossier) {
+            return healAndNormalizeDossier(rpgSettings.chatStates[cid].pbtaCampaignDossier);
+        }
+    }
+
+    // 3. Fallback: Check World Info books
+    const cleanId = currentChatId ? currentChatId.replace(/\.jsonl$/i, '').trim() : '';
+    const bookCandidates = [
+        ctx?.chatMetadata?.world_info,
+        cleanId ? `Campaign_${cleanId}` : null,
+        'Campaign_PbtA',
+    ].filter(Boolean);
+
+    for (const book of bookCandidates) {
+        try {
+            const data = await fetchWorldInfoBook(book);
+            if (!data?.entries) continue;
+            for (const entry of Object.values(data.entries)) {
+                if (entry?.comment?.includes('CAMPAIGN_DOSSIER') ||
+                    entry?.comment?.includes('PbtA Concierge') ||
+                    entry?.key?.includes('campaign_dossier') ||
+                    entry?.content?.includes('CAMPAIGN DOSSIER') ||
+                    entry?.content?.includes('Protagonist:')) {
+                    const parsed = parseMarkdownToDossier(entry.content);
+                    if (parsed) return parsed;
+                }
+            }
+        } catch (_) {}
+    }
+    return null;
+}
+
+/**
+ * Dynamically evaluate whether the '🔄 Sync to Active Game' button should be shown.
+ * Shows the button ONLY if:
+ * 1. The currently active chat has an ongoing campaign (loadActiveCampaignDossier returns non-null).
+ * 2. An active campaign was loaded into Session Zero (loadedCampaignOriginChatId or dossier origin).
+ * 3. The currently active chat matches the origin chat of the loaded campaign (or campaign identity matches).
+ *
+ * @param {string|null} [targetChatId=null]
+ * @returns {Promise<boolean>} Whether the button is visible
+ */
+export async function updateSyncButtonState(targetChatId = null) {
+    const syncBtn = $('#mhc_sync_active_campaign_btn');
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    const currentChatId = targetChatId
+        || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || ctx?.getCurrentChatId?.()
+        || ctx?.chatId
+        || ctx?.chatMetadata?.chat_id
+        || '';
+
+    let activeRunning = null;
+    try {
+        activeRunning = await loadActiveCampaignDossier(currentChatId);
+    } catch (_) {}
+
+    // Check 1: If current chat has no active running campaign, we can never sync to it
+    if (!activeRunning) {
+        if (syncBtn.length) syncBtn.hide();
+        return false;
+    }
+
+    // Check 2: Session Zero must have an active dossier with content
+    if (!activeDossier || isDossierEmptyOrUntouched(activeDossier)) {
+        if (syncBtn.length) syncBtn.hide();
+        return false;
+    }
+
+    // Check 3: Chat affinity check
+    const originId = loadedCampaignOriginChatId || activeDossier._originChatId;
+    const originTitle = (loadedCampaignOriginTitle || activeDossier._originCampaignTitle || '').trim().toLowerCase();
+    const runningTitle = (activeRunning.meta?.title || '').trim().toLowerCase();
+    const activeDossierTitle = (activeDossier.meta?.title || '').trim().toLowerCase();
+
+    let matches = false;
+
+    if (originId && currentChatId) {
+        const currentCandidates = getCandidateChatIds(currentChatId);
+        const originCandidates = getCandidateChatIds(originId);
+        if (currentCandidates.some(id => originCandidates.includes(id))) {
+            matches = true;
+        }
+    }
+
+    // Fallback: If titles match explicitly between running campaign and loaded campaign
+    if (!matches && originTitle && runningTitle && originTitle === runningTitle) {
+        matches = true;
+    } else if (!matches && !originId && runningTitle && activeDossierTitle && runningTitle === activeDossierTitle && runningTitle !== 'untitled pbta campaign') {
+        matches = true;
+    }
+
+    if (matches) {
+        if (syncBtn.length) syncBtn.show();
+        return true;
+    } else {
+        if (syncBtn.length) syncBtn.hide();
+        return false;
+    }
+}
+
+/**
+ * Refreshes active chat context indicators in Concierge:
+ * - Updates 'Load Active Campaign' button with current chat's adventure title.
+ * - Updates 'Sync to Active Game' button visibility based on chat affinity.
+ *
+ * @param {string|null} [targetChatId=null]
+ */
+export async function refreshConciergeActiveContext(targetChatId = null) {
+    try {
+        const activeRunning = await loadActiveCampaignDossier(targetChatId);
+        if (activeRunning?.meta?.title && activeRunning.meta.title !== 'Untitled PbtA Campaign') {
+            const shortTitle = activeRunning.meta.title.length > 20 ? `${activeRunning.meta.title.slice(0, 18)}...` : activeRunning.meta.title;
+            $('#mhc_load_active_campaign_btn')
+                .attr('title', `Active campaign "${activeRunning.meta.title}" detected in this chat! Click to pull into Session Zero.`)
+                .html(`📂 Load "${shortTitle}"`);
+        } else {
+            $('#mhc_load_active_campaign_btn')
+                .attr('title', 'Pull the active chat\'s Campaign Dossier into Session Zero to view or edit')
+                .html('📂 Load Active Campaign');
+        }
+
+        await updateSyncButtonState(targetChatId);
+    } catch (_) {}
+}
+
+export function getLoadedCampaignOrigin() {
+    return {
+        originChatId: loadedCampaignOriginChatId,
+        originCampaignTitle: loadedCampaignOriginTitle,
+    };
+}
+
+export function setLoadedCampaignOrigin(chatId, title = null, dossier = null) {
+    loadedCampaignOriginChatId = chatId;
+    loadedCampaignOriginTitle = title;
+    if (dossier) {
+        activeDossier = dossier;
+    }
+    if (activeDossier) {
+        activeDossier._originChatId = chatId;
+        activeDossier._originCampaignTitle = title;
+    }
+}
+
+/**
  * Bind modal DOM events.
  */
 function bindModalEvents() {
@@ -1379,57 +1558,6 @@ function bindModalEvents() {
         }
     });
 
-    // Helper: Find and heal active campaign dossier from memory or World Info
-    async function loadActiveCampaignDossier() {
-        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-        const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-            || ctx?.getCurrentChatId?.()
-            || ctx?.chatId
-            || ctx?.chatMetadata?.chat_id
-            || '';
-        const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
-        const candidateIds = getCandidateChatIds(currentChatId, rpgSettings);
-
-        // 1. Primary Source: Check explicit CompanionActiveCartridge record (persisted in line 1 of chat .jsonl)
-        const activeCart = getCompanionActiveCartridge(currentChatId, rpgSettings);
-        if (activeCart?.dossier) {
-            return healAndNormalizeDossier(activeCart.dossier);
-        }
-
-        // 2. Check candidate chatStates partitions in memory
-        for (const cid of candidateIds) {
-            if (rpgSettings?.chatStates?.[cid]?.pbtaCampaignDossier) {
-                return healAndNormalizeDossier(rpgSettings.chatStates[cid].pbtaCampaignDossier);
-            }
-        }
-
-        // 3. Fallback: Check World Info books
-        const cleanId = currentChatId ? currentChatId.replace(/\.jsonl$/i, '').trim() : '';
-        const bookCandidates = [
-            ctx?.chatMetadata?.world_info,
-            cleanId ? `Campaign_${cleanId}` : null,
-            'Campaign_PbtA',
-        ].filter(Boolean);
-
-        for (const book of bookCandidates) {
-            try {
-                const data = await fetchWorldInfoBook(book);
-                if (!data?.entries) continue;
-                for (const entry of Object.values(data.entries)) {
-                    if (entry?.comment?.includes('CAMPAIGN_DOSSIER') ||
-                        entry?.comment?.includes('PbtA Concierge') ||
-                        entry?.key?.includes('campaign_dossier') ||
-                        entry?.content?.includes('CAMPAIGN DOSSIER') ||
-                        entry?.content?.includes('Protagonist:')) {
-                        const parsed = parseMarkdownToDossier(entry.content);
-                        if (parsed) return parsed;
-                    }
-                }
-            } catch (_) {}
-        }
-        return null;
-    }
-
     // Inspiration Toolbar: Load Active Campaign Dossier
     $('#mhc_load_active_campaign_btn').on('click', async () => {
         startImportProgress('Active Campaign');
@@ -1491,8 +1619,19 @@ function bindModalEvents() {
 
             // Install active campaign into live dossier & deck
             activeDossier = healAndNormalizeDossier(dossier);
+            const ctxEarly = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+                || ctxEarly?.getCurrentChatId?.()
+                || ctxEarly?.chatId
+                || ctxEarly?.chatMetadata?.chat_id
+                || '';
+            loadedCampaignOriginChatId = currentChatId;
+            loadedCampaignOriginTitle = (activeDossier.meta?.title || '').trim();
+            activeDossier._originChatId = loadedCampaignOriginChatId;
+            activeDossier._originCampaignTitle = loadedCampaignOriginTitle;
+
             updateBlueprintDeck();
-            $('#mhc_sync_active_campaign_btn').show();
+            await updateSyncButtonState();
 
             const loadNotice = `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust Harm capacity, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`;
             appendChatBubble('assistant', loadNotice);
@@ -1900,6 +2039,12 @@ function bindModalEvents() {
 
     // Sync Active Campaign (in-place update without resetting chat)
     $('#mhc_sync_active_campaign_btn').on('click', async () => {
+        const activeRunning = await loadActiveCampaignDossier();
+        if (!activeRunning) {
+            toastr?.error('No active PbtA campaign found in this chat to synchronize with.', 'Sync Blocked');
+            return;
+        }
+
         const overlay = $('#mhc_launch_progress_overlay');
         const label = $('#mhc_launch_progress_label');
         const bar = $('#mhc_launch_progress_bar');
@@ -2127,6 +2272,8 @@ export async function openConciergeModal() {
     } else if (draftResult?.draft) {
         // Valid draft found: restore it if in-memory history isn't already active
         const { draft } = draftResult;
+        loadedCampaignOriginChatId = draft.originChatId || draft.dossier?._originChatId || null;
+        loadedCampaignOriginTitle = draft.originCampaignTitle || draft.dossier?._originCampaignTitle || null;
         if (!chatHistory.length) {
             activeDossier = draft.dossier;
             chatHistory = draft.chatHistory;
@@ -2161,26 +2308,8 @@ export async function openConciergeModal() {
         }
     }
 
-    // Check if active chat has a running campaign dossier
-    try {
-        const activeRunning = await loadActiveCampaignDossier();
-        if (activeRunning?.meta?.title && activeRunning.meta.title !== 'Untitled PbtA Campaign') {
-            const shortTitle = activeRunning.meta.title.length > 20 ? `${activeRunning.meta.title.slice(0, 18)}...` : activeRunning.meta.title;
-            $('#mhc_load_active_campaign_btn')
-                .attr('title', `Active campaign "${activeRunning.meta.title}" detected in this chat! Click to pull into Session Zero.`)
-                .html(`📂 Load "${shortTitle}"`);
-        } else {
-            $('#mhc_load_active_campaign_btn')
-                .attr('title', 'Pull the active chat\'s Campaign Dossier into Session Zero to view or edit')
-                .html('📂 Load Active Campaign');
-        }
-    } catch (_) {}
-
-    if (activeDossier?.protagonist?.name || (activeDossier?.meta?.title && activeDossier.meta.title !== 'Untitled PbtA Campaign')) {
-        $('#mhc_sync_active_campaign_btn').show();
-    } else {
-        $('#mhc_sync_active_campaign_btn').hide();
-    }
+    // Refresh active chat context indicators and sync button visibility
+    await refreshConciergeActiveContext();
 
     updateBlueprintDeck();
     renderDebugInspectorView();

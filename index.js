@@ -18,6 +18,7 @@ import {
 } from './pbta-ruleset.js';
 import {
     openConciergeModal,
+    refreshConciergeActiveContext,
     renderDebugInspectorView,
     formatDiagnosticTrace,
 } from './concierge-ui.js';
@@ -2027,6 +2028,9 @@ jQuery(async () => {
     eventSource.on(event_types.CHAT_CHANGED, () => {
         logRulesetEvent('CHAT_CHANGED', { activeChatId: getActiveChatId() });
         scheduleSync('CHAT_CHANGED', 500);
+        if (typeof refreshConciergeActiveContext === 'function') {
+            void refreshConciergeActiveContext().catch(() => {});
+        }
         setTimeout(async () => {
             const integrity = await checkTrackerProjectionIntegrity();
             if (!integrity.healthy) {

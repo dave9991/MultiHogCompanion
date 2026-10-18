@@ -113,6 +113,30 @@ export async function findMatchingPersona(charName, providedPersonas = null) {
 }
 
 /**
+ * Checks whether a candidate string is a valid, real character name
+ * (not a template macro or generic system placeholder).
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isValidCharacterName(name) {
+    if (!name || typeof name !== 'string') return false;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length < 2 || trimmed.length > 80) return false;
+
+    // Reject template macros anywhere in the name: {{user}}, {{char}}, {user}, {char}, etc.
+    if (/\{+(?:user|char|name|player)\}+/i.test(trimmed)) return false;
+    if (/^\{+.*?\}$/.test(trimmed)) return false;
+
+    // Strip bracket/brace artifacts and examine core word
+    const cleaned = trimmed.replace(/[{}]/g, '').trim();
+    if (/^(character|unknown|user|name|player|my character|unnamed|pc)$/i.test(cleaned)) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
  * Helper to extract character name from a memo string.
  * @param {string} memo
  * @returns {string | null}
@@ -133,16 +157,19 @@ export function extractNameFromMemo(memo) {
         const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
         if (m) {
             const candidate = m[1].trim();
-            if (candidate && !/^(character|unknown|user|name)$/i.test(candidate)) return candidate;
+            if (isValidCharacterName(candidate)) return candidate;
+            return null;
         }
-        if (firstLine && !/^(character|unknown|user|name)$/i.test(firstLine) && firstLine.length <= 50) {
+        if (firstLine && isValidCharacterName(firstLine) && firstLine.length <= 50) {
             return firstLine;
         }
     }
     const nameField = memo.match(/(?:^|\n)\s*(?:Name|Character Name)\s*[:\|]\s*([^\n\|\[<]{2,60})/im);
     if (nameField) {
         const candidate = nameField[1].replace(/<[^>]+>/g, '').trim();
-        if (candidate && !/^(character|unknown|user)$/i.test(candidate)) return candidate;
+        if (isValidCharacterName(candidate)) return candidate;
     }
     return null;
 }
+
+

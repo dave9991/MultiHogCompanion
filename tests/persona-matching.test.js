@@ -79,6 +79,17 @@ assert.strictEqual(extractNameFromMemo(memoPlain), 'John "The axe" Smith', 'Shou
 const memoHtml = `[CHARACTER]\nJohn &quot;The axe&quot; Smith: 20/20 HP\n[/CHARACTER]`;
 assert.strictEqual(extractNameFromMemo(memoHtml), 'John "The axe" Smith', 'Should decode HTML entities in name');
 
-console.log('✓ extractNameFromMemo properly handles bullets, plain lines, and HTML entities');
+// 3d. Macro candidate rejection ({{user}}, {user}, User, Name, Character)
+const memoUserMacro = `[CHARACTER]\n{{user}} (Cyber-Salvager): 8/8 HP\n[/CHARACTER]`;
+assert.strictEqual(extractNameFromMemo(memoUserMacro), null, 'Should strictly reject {{user}} macro as a character name');
+
+const memoBraceMacro = `[CHARACTER]\n{user} (Cyber-Salvager): 8/8 HP\n[/CHARACTER]`;
+assert.strictEqual(extractNameFromMemo(memoBraceMacro), null, 'Should strictly reject {user} macro as a character name');
+
+const memoGenericUser = `[CHARACTER]\nUser (Warrior): 12/12 HP\n[/CHARACTER]`;
+assert.strictEqual(extractNameFromMemo(memoGenericUser), null, 'Should strictly reject generic User as a character name');
+
+console.log('✓ extractNameFromMemo properly handles bullets, plain lines, HTML entities, and strictly rejects macros');
 
 console.log('--- ALL PERSONA MATCHING TESTS PASSED CLEANLY! ---');
+

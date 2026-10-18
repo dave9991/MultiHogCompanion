@@ -87,8 +87,15 @@ import {
     scanAllChatHistories,
     formatHistoryDiagnosticReport,
 } from './history-integrity-guard.js';
+import {
+    isValidCharacterName,
+    sanitizeCharacterStockPrompt,
+    healMacroCharacterIdentity,
+    installCharacterCreatorBridge,
+} from './character-creator-sanitizer.js';
 
 const EXTENSION_NAME = 'multihog_companion';
+
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
 
 const DEFAULT_SETTINGS = {
@@ -194,16 +201,17 @@ function extractNameFromMemo(memo) {
         const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
         if (m) {
             const candidate = m[1].trim();
-            if (candidate && !/^(character|unknown|user|name)$/i.test(candidate)) return candidate;
+            if (isValidCharacterName(candidate)) return candidate;
+            return null;
         }
-        if (firstLine && !/^(character|unknown|user|name)$/i.test(firstLine) && firstLine.length <= 50) {
+        if (firstLine && isValidCharacterName(firstLine) && firstLine.length <= 50) {
             return firstLine;
         }
     }
     const nameField = memo.match(/(?:^|\n)\s*(?:Name|Character Name)\s*[:\|]\s*([^\n\|\[<]{2,60})/im);
     if (nameField) {
         const candidate = nameField[1].replace(/<[^>]+>/g, '').trim();
-        if (candidate && !/^(character|unknown|user)$/i.test(candidate)) return candidate;
+        if (isValidCharacterName(candidate)) return candidate;
     }
     return null;
 }
@@ -254,11 +262,13 @@ function getMultihogPlayerName(chatId) {
 
     // 1. Chat partition playerCharacter or pbtaCampaignDossier
     for (const cid of candidateIds) {
-        if (s.chatStates?.[cid]?.playerCharacter?.name) {
-            return s.chatStates[cid].playerCharacter.name.trim();
+        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
+        if (pcName && isValidCharacterName(pcName)) {
+            return pcName.trim();
         }
-        if (s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name) {
-            return s.chatStates[cid].pbtaCampaignDossier.protagonist.name.trim();
+        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name;
+        if (protoName && isValidCharacterName(protoName)) {
+            return protoName.trim();
         }
     }
 
@@ -266,7 +276,7 @@ function getMultihogPlayerName(chatId) {
     for (const cid of candidateIds) {
         if (s.chatStates?.[cid]?.currentMemo) {
             const name = extractNameFromMemo(s.chatStates[cid].currentMemo);
-            if (name) return name;
+            if (name && isValidCharacterName(name)) return name;
         }
     }
 
@@ -278,16 +288,18 @@ function getMultihogPlayerName(chatId) {
 
     if ((isOwnerMatch || isOwnerUnset) && s.currentMemo) {
         const name = extractNameFromMemo(s.currentMemo);
-        if (name) return name;
+        if (name && isValidCharacterName(name)) return name;
     }
 
     // 4. Top-level playerCharacter (if live and belongs to this chat)
     if ((isOwnerMatch || isOwnerUnset) && s.playerCharacter?.name) {
-        return s.playerCharacter.name.trim();
+        const topName = s.playerCharacter.name.trim();
+        if (isValidCharacterName(topName)) return topName;
     }
 
     return null;
 }
+
 
 /**
  * Generates normalized lookup keys/variants for a character or persona name.
@@ -774,10 +786,14 @@ export async function runSync(reason = '') {
             return false;
         }
 
+        // Heal corrupted {{user}} macro identities even before the adventure starts
+        await healMacroCharacterIdentity(chatId);
+
         // If adventure is unstarted or in onboarding screen, skip runtime persona/portrait/vitality sync
         if (!isAdventureActive(chatId)) {
             return false;
         }
+
 
         let didWork = false;
 
@@ -2004,15 +2020,25 @@ jQuery(async () => {
     $(document).off('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn');
     $(document).on('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn', async function () {
         const activeChatId = getActiveChatId();
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        const s = ctx?.extensionSettings?.rpg_tracker;
         if (!isPbtAActive(activeChatId)) {
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-            const s = ctx?.extensionSettings?.rpg_tracker;
             if (s && isLiveSettingsPollutedWithPbtA(s)) {
                 console.log('[MultiHog Companion] Sanitizing stale PbtA stock prompts before character generation...');
                 await cleanseStockDndSettings(s, { chatId: activeChatId, syncSetup: true });
             }
         }
+        if (s?.stockPrompts) {
+            const inputVal = (typeof $ !== 'undefined' ? $('#rt-cr-name').val()?.trim() : '') || s?.characterCreatorDraft?.name || '';
+            sanitizeCharacterStockPrompt(s.stockPrompts, inputVal);
+        }
+        setTimeout(() => {
+            void healMacroCharacterIdentity(activeChatId).catch(() => {});
+        }, 1500);
     });
+
+    installCharacterCreatorBridge();
+
 
     if (event_types.CHAT_RENAMED) {
         eventSource.on(event_types.CHAT_RENAMED, async (detail) => {
@@ -2032,7 +2058,11 @@ jQuery(async () => {
             void refreshConciergeActiveContext().catch(() => {});
         }
         setTimeout(async () => {
+            await healMacroCharacterIdentity(getActiveChatId());
+        }, 450);
+        setTimeout(async () => {
             const integrity = await checkTrackerProjectionIntegrity();
+
             if (!integrity.healthy) {
                 renderTrackerQuarantineBanner(integrity);
                 updateRulesetBadge();
@@ -2098,7 +2128,11 @@ jQuery(async () => {
     });
     scheduleSync('INITIAL_LOAD', 1000);
     setTimeout(async () => {
+        await healMacroCharacterIdentity(getActiveChatId());
+    }, 950);
+    setTimeout(async () => {
         const s = getSettings();
+
         const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
         await syncNameRagAdhocSysprompt(adhocActive);
         await ensureActiveChatRulesetConsistency();

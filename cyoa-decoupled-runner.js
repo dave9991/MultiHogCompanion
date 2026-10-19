@@ -50,27 +50,29 @@ export function abortStage2Cyoa(reason = 'unspecified') {
  * Detects whether the narrative text describes the protagonist collapsing,
  * falling unconscious, or being incapacitated.
  *
- * @param {string} narrativeText
+ * @deprecated Retired in favor of LLM semantic evaluation within Stage 2 prompt guidelines.
+ * Returns false to prevent poetic prose (e.g., "daylight bleeding out") from triggering false-positive death spirals.
+ *
+ * @param {string} [_narrativeText]
  * @returns {boolean}
  */
-export function isNarrativeDowned(narrativeText) {
-    if (!narrativeText || typeof narrativeText !== 'string') return false;
-    return /\b(?:collapse(?:s|d)?\s+(?:to\s+the\s+(?:floor|ground)|unconscious|senseless)|fall(?:s|en)?\s+unconscious|slip(?:s|ped)?\s+into\s+unconsciousness|vision\s+fades\s+to\s+black|rendered\s+unconscious|knocked\s+unconscious|mortally\s+wounded|succumb(?:s|ed)?\s+to\s+(?:the\s+wounds|death)|bleeding\s+out)\b/i.test(narrativeText);
+export function isNarrativeDowned(_narrativeText) {
+    return false;
 }
 
 /**
- * Checks whether the protagonist is downed/incapacitated in the State Memo or latest narrative.
+ * Checks whether the protagonist is downed/incapacitated in the structured State Memo.
  * Handles both PbtA (Max Harm / 0 HP) and D&D (0 HP / Dying / Unconscious).
+ *
+ * NOTE: Narrative prose matching via regex was deprecated and removed.
+ * In Fast Pipeline mode, turn-delta incapacitation is evaluated semantically
+ * by the Stage 2 LLM Choice Generator rather than brittle regex heuristics.
  *
  * @param {string} memoText
  * @param {boolean} [isPbta=false]
- * @param {string} [narrativeText='']
  * @returns {boolean}
  */
-export function isProtagonistDowned(memoText, isPbta = false, narrativeText = '') {
-    if (narrativeText && isNarrativeDowned(narrativeText)) {
-        return true;
-    }
+export function isProtagonistDowned(memoText, isPbta = false) {
     if (!memoText || typeof memoText !== 'string') return false;
 
     // Check [CHARACTER] section first if present (terminated by [/CHARACTER], next section [HEADER], or end of text)
@@ -95,11 +97,12 @@ export function isProtagonistDowned(memoText, isPbta = false, narrativeText = ''
             return true;
         }
     } else {
-        // D&D: 0 HP or negative HP
-        const hpMatch = scope.match(/:\s*([+-]?\d+)(?:\/(\d+))?\s*HP\b/i);
+        // D&D: 0 HP or negative HP (supports both "Name: 0/32 HP" and "HP: 0/32")
+        const hpMatch = scope.match(/(?:HP\s*:\s*([+-]?\d+)|:\s*([+-]?\d+)(?:\/(\d+))?\s*HP\b)/i);
         if (hpMatch) {
-            const curHp = parseInt(hpMatch[1], 10);
-            if (curHp <= 0) return true;
+            const rawHp = hpMatch[1] !== undefined ? hpMatch[1] : hpMatch[2];
+            const curHp = parseInt(rawHp, 10);
+            if (!Number.isNaN(curHp) && curHp <= 0) return true;
         }
     }
 
@@ -117,7 +120,7 @@ export function isProtagonistDowned(memoText, isPbta = false, narrativeText = ''
  * @returns {{ systemPrompt: string, userPrompt: string }}
  */
 export function buildStage2CyoaPrompt({ narrative, memo, isPbta, rpgSettings }) {
-    const isDowned = isProtagonistDowned(memo, isPbta, narrative);
+    const isDowned = isProtagonistDowned(memo, isPbta);
     const cyoaConfig = rpgSettings?.cyoaConfig || {};
     const playstyle = cyoaConfig.playstyle || 'cyoa_5';
     const choiceCount = playstyle === 'cyoa_3' ? 3 : 5;
@@ -148,6 +151,7 @@ export function buildStage2CyoaPrompt({ narrative, memo, isPbta, rpgSettings }) 
 - STANCE & INTENT: Action choices may express a clear tactical stance (e.g. aggressive strike vs. defensive parry, stealthy approach vs. bold charge).
 - SPENDING HOLD: If [CHARACTER] has spendable Hold (e.g. "Hold: X"), at most 1 choice may offer to spend a point: "— [Spend 1 Hold: Tactical Advantage]".
 - DILEMMA CONTINUATION: When the preceding narrative introduced a complication (from a 7–9 Weak Hit) or a telegraphed threat (from a Soft Move), ensure choices provide concrete ways to navigate that dilemma.
+- INCAPACITATION / CRISIS EXCEPTION: If the latest narrative explicitly depicts the PROTAGONIST collapsing, knocked unconscious, or suffering mortal harm during this scene, DO NOT offer standard physical attacks or aggressive moves. Instead, pivot choices to crisis survival: clinging to life, a faint plea for aid, desperate sacrifice, or looking to an ally.
 - Remaining choices should be dialogue in quotes, tactical positioning, environmental awareness, or alternative actions (no move tags).
 - Never overload choices with rolls; ordinary dialogue and observation never roll dice.`;
         }
@@ -183,7 +187,8 @@ Do NOT include any narrative explanation, commentary, or extra text outside the 
   1. Primary Combat Action or Spell (e.g., Attack with equipped weapon, cast a prepared spell)
   2. Tactical Maneuver or Positioning (e.g., Take cover, disengage, flank the enemy)
   3. Spoken Dialogue or Command (e.g., Command allies, shout a challenge, parley)
-  ${choiceCount === 5 ? '4. Environmental Interaction or Perception (e.g., Search for an escape route, use terrain)\n  5. Defensive Option or Item (e.g., Drink a potion, ready shield, dodge)' : ''}`;
+  ${choiceCount === 5 ? '4. Environmental Interaction or Perception (e.g., Search for an escape route, use terrain)\n  5. Defensive Option or Item (e.g., Drink a potion, ready shield, dodge)' : ''}
+- INCAPACITATION / DOWNED EXCEPTION: If the latest narrative explicitly depicts the PROTAGONIST (player character) collapsing, knocked unconscious, or reduced to 0 HP during this scene, DO NOT offer active attacks or normal maneuvers. Instead, pivot all choices to survival, death saving throws, clinging to consciousness, or calling for help.`;
         }
 
         systemPrompt = `You are the specialized CYOA Choice Engine for a D&D tabletop RPG.

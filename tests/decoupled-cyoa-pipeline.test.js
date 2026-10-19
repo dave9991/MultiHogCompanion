@@ -316,29 +316,30 @@ abortStage2Cyoa();
 assert.strictEqual(isStage2CyoaRunning(), false, 'Should remain idle after abort');
 console.log('✓ abortStage2Cyoa executes safely');
 
-// ── 7. Fast Pipelined CYOA & Narrative Downed Detection ──
-console.log('7. Testing Fast Pipelined CYOA & Narrative Downed Detection...');
+// ── 7. Fast Pipelined CYOA & Semantic Incapacitation Integration ──
+console.log('7. Testing Fast Pipelined CYOA & Semantic Incapacitation Integration...');
 const { isNarrativeDowned } = await import('../cyoa-decoupled-runner.js');
 
-// Narrative Downed
-assert.strictEqual(isNarrativeDowned('The troll strikes you hard. You collapse to the floor unconscious.'), true);
-assert.strictEqual(isNarrativeDowned('The blast hits you, and your vision fades to black as you hit the wall.'), true);
-assert.strictEqual(isNarrativeDowned('The enemy slashes your shield, leaving a deep gouge.'), false);
+// isNarrativeDowned is deprecated and safe (always returns false to prevent false positives)
+assert.strictEqual(isNarrativeDowned('The daylight slowly bleeding out of the sky.'), false);
+assert.strictEqual(isNarrativeDowned('The troll strikes you hard. You collapse to the floor unconscious.'), false);
 
-// isProtagonistDowned with narrative integration
+// isProtagonistDowned strictly relies on structured State Memo (immune to poetic false positives)
 const healthyMemo = `[CHARACTER]\nName: Silas\nHP: 24/24\n[/CHARACTER]`;
-assert.strictEqual(isProtagonistDowned(healthyMemo, false, 'You collapse to the ground senseless.'), true, 'Narrative downed must override healthy memo');
-assert.strictEqual(isProtagonistDowned(healthyMemo, false, 'You parry the blow and step back.'), false, 'Healthy memo + healthy narrative must remain not downed');
+assert.strictEqual(isProtagonistDowned(healthyMemo, false), false, 'Healthy memo must remain not downed');
+assert.strictEqual(isProtagonistDowned(`[CHARACTER]\nName: Silas\nHP: 0/24\n[/CHARACTER]`, false), true, '0 HP memo must be detected as downed');
 
-// Fast Pipelined Prompt Synthesis
+// Fast Pipelined Prompt Synthesis with Semantic Incapacitation Instructions
 const fastPrompt = buildStage2CyoaPrompt({
-    narrative: 'The archers fire a volley. You dive behind a cart for cover.',
+    narrative: 'The trail winds upward through dense pines, the daylight slowly bleeding out of the sky.',
     memo: healthyMemo,
     isPbta: false,
     rpgSettings: { enableFastPipeline: true },
 });
 assert.ok(fastPrompt.userPrompt.includes('### IMMEDIATE TACTICAL SITUATION & NARRATIVE DELTA:'), 'Fast mode prompt must include narrative delta instructions');
 assert.ok(fastPrompt.userPrompt.includes('Turn-Start Baseline'), 'Fast mode prompt must designate baseline memo');
+assert.ok(fastPrompt.systemPrompt.includes('INCAPACITATION / DOWNED EXCEPTION:'), 'System prompt must include semantic incapacitation guidelines for LLM evaluation');
+assert.ok(!fastPrompt.systemPrompt.includes('CRITICAL MANDATE — THE PROTAGONIST IS DOWNED'), 'Healthy memo at sunset must NOT trigger forced downed mandate');
 
 // Legacy Sequential Prompt (when fast pipeline is explicitly disabled)
 const legacyPrompt = buildStage2CyoaPrompt({
@@ -349,15 +350,15 @@ const legacyPrompt = buildStage2CyoaPrompt({
 });
 assert.ok(!legacyPrompt.userPrompt.includes('IMMEDIATE TACTICAL SITUATION & NARRATIVE DELTA'), 'Legacy mode must not include delta instructions');
 
-// Narrative Downed prompts generate Downed mandate even with healthy memo
+// Settled Downed memo generates Downed mandate
 const downedPrompt = buildStage2CyoaPrompt({
     narrative: 'The blow is fatal. You fall unconscious onto the stone floor.',
-    memo: healthyMemo,
+    memo: `[CHARACTER]\nName: Silas\nHP: 0/24\n[/CHARACTER]`,
     isPbta: false,
     rpgSettings: { enableFastPipeline: true },
 });
-assert.ok(downedPrompt.systemPrompt.includes('CRITICAL MANDATE — THE PROTAGONIST IS DOWNED'), 'Narrative downed must mandate survival choices');
-console.log('✓ Fast Pipelined prompt synthesis and narrative downed detection verified');
+assert.ok(downedPrompt.systemPrompt.includes('CRITICAL MANDATE — THE PROTAGONIST IS DOWNED'), 'Settled 0 HP memo must mandate survival choices');
+console.log('✓ Fast Pipelined prompt synthesis and semantic incapacitation guidelines verified');
 
 // ── 8. Dynamic Context Budget (resolveCyoaMaxTokens) ──
 console.log('8. Testing resolveCyoaMaxTokens Dynamic Context Headroom...');

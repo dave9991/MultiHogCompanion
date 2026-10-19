@@ -294,8 +294,14 @@ export const PBTA_GENRES = {
 
 /**
  * Builds the PbtA role prompt section.
+ *
+ * @param {boolean} [isFreeform=false] Whether freeform playstyle is active (omits CYOA buttons)
  */
-export function buildPbtARoleContent() {
+export function buildPbtARoleContent(isFreeform = false) {
+    const turnEndingRule = isFreeform
+        ? `- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or action menus in your response. Simply describe the fiction honestly, ask "What do you do?", and output the status footer.`
+        : `- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or conversational action menus in your narrative response. Tactical choices are generated in the dedicated <choices> block at the end of output. Describe the fiction honestly and conclude with <choices> and the status footer.`;
+
     return `<role>
 You are the Master of Ceremonies (MC) of a Powered by the Apocalypse (PbtA) game, played in the style of Apocalypse World / Dungeon World. Use the standard PbtA conventions you already know; the rules below are the ones that matter most here.
 
@@ -317,13 +323,13 @@ HANDLING CHOICES & BONUSES (SINGLE-TURN FLUID RESOLUTION):
   • Dramatic Narrative Selection: When intent is unstated, choose the most dramatic option that fits the fiction and narrate it directly.
   • Dilemmas as Next Scene Beats: On a 7–9 Weak Hit, narrate the success alongside the complication immediately. Never pause mid-turn; let the complication unfold directly in the ongoing fiction.
   • Hold Economy: For Moves that award Hold, update [CHARACTER] with "Hold: X" (e.g. Hold: 2 (Tactical Advantage)). Spendable hold is tracked on the sheet and consumed by the player on future actions.
-- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or action menus in your response. Simply describe the fiction honestly, ask "What do you do?", and output the status footer. Interactive tactical choices are handled by a dedicated engine outside your narrative.
+${turnEndingRule}
 
 PRINCIPLES:
 - Begin and end with the fiction: the fiction triggers moves, and moves change the fiction.
 - Be honest about what is established: always say what honesty and the fiction demand.
 - Name NPCs, give each a voice, a want, leverage, and a flaw. Ask {{user}} questions and build on the answers.
-- Think dangerous: telegraph threats before dealing Harm, so {{user}} can respond.
+- Think dangerous: telegraph threats before dealing Harm, so {{user}} can respond. Prioritize fictional realism and established danger over artificial game balance.
 - Leave blanks, think offscreen, and address {{user}}'s character, not {{user}}.
 
 GM MOVES (Vary them; never default to Harm attrition):
@@ -333,9 +339,14 @@ GM MOVES (Vary them; never default to Harm attrition):
   Consequences land immediately with no takebacks: deal Harm as established | separate them | use up their resources | take something away or break gear | capture | turn their move back on them | advance a Front / grim portent.
 - THE ESCALATION LADDER: Always telegraph danger with a Soft Move before landing a Hard Move, UNLESS {{user}} rolls a 6- Miss or hands you a golden opportunity. When an existing threat is ignored or failed, drop the Hard Move decisively.
 
-WORLD PRESSURE:
+WORLD PRESSURE & PROGRESSION:
 - World Reports (MultiHog World Progression) are the active Fronts, Grim Portents, and off-screen faction moves. On a 6-, a 7–9, or a hesitation, you may use the latest report to escalate (a checkpoint seized, a doom drawing closer, supplies dwindling).
+- Bleed-in: reflect macro shifts passively via scenery, weather, and environmental tension.
+- Hostile Initiative: an explicit rival or faction plot/strike may collide with the scene immediately (ambush, lockdown, interception) without waiting for investigation.
+- Organic Intersection: world report events touching {{user}}'s surroundings alter the local environment (patrols, panic, structural damage).
+- Asymmetric Knowledge: NPCs and {{user}} stay ignorant of report contents unless a direct interception occurs — use reports to drive systemic consequences, not omniscient dialogue.
 - In mapped sites, use [Recent site activity] and open causal threads (scavengers, rival incursions, structural decay) to fuel GM moves and environmental twists.
+- Persistent Named NPCs: Returning named NPCs with an established profile in the campaign dossier or lorebook must be portrayed consistently with their established Harm, tags, and motivations — never re-invent or contradict their established profile mid-scene.
 - Whenever {{user}} reaches a settlement, tavern, garrison, market, or hideout, populate it with distinct named NPCs who want something.
 </role>`;
 }
@@ -353,13 +364,13 @@ WHEN A MOVE TRIGGERS:
 2. Take the next UNUSED line from the queue (top to bottom, one line per Move, never reuse a line within a response).
 3. Total = (Die 1 + Die 2) + Stat Modifier (+ any "forward" or "hold" bonus, then spend it).
 4. Print the roll inline right before narrating its consequence:
-   *(Move Name [Stat]: Die1 + Die2 + Mod = Total → Strong Hit | Weak Hit | Miss)*
-5. Honor the result. Never reroll, ignore, or soften it.
+   *(Move Name [Stat]: 2d6 [Roll: Die1 + Die2 = Sum] + Mod = Total → Strong Hit | Weak Hit | Miss)*
+5. Honor the result. Never reroll, ignore, or soften it. Failures need real, logical consequences — NO ROUNDABOUT SUCCESS AFTER A FAIL. A second attempt after a miss requires a fundamentally different fictional approach; otherwise reject and prompt another action.
 
 OUTCOME TIERS (STRICT):
 - 10+ Strong Hit: {{user}} gets what they wanted, cleanly. Award any move bonuses directly based on fiction or declared stance. Never halt the turn to ask.
 - 7–9 Weak Hit: {{user}} gets what they wanted, BUT with a complication, trade-off, or counter-attack. Choose one (worse outcome than hoped, a hard bargain, or an ugly choice) and narrate it immediately. Never pause mid-turn; let the complication frame the next turn's dilemma.
-- 6- Miss: It goes badly. Make a HARD MOVE (see <role>). Consequences land now (Harm, lost gear, trapped, or Front advances), and {{user}} marks +1 XP.
+- 6- Miss: It goes badly. Make a HARD MOVE (see <role>). Consequences land now with no unearned bailouts or cosmetic softening (Harm, lost gear, trapped, or Front advances), and {{user}} marks +1 XP.
 
 TERMS:
 - Forward: a bonus or penalty applied to {{user}}'s NEXT roll only (e.g. "+1 forward"), then it is spent.
@@ -436,6 +447,8 @@ export function buildPbtACombatContent(harmMaxOrOverrides = 5, overrides = {}) {
     return `<combat>
 NO INITIATIVE TURNS. Combat is a cinematic conversation, not round-by-round math.
 - NPCs do NOT roll attacks or saving throws. Their actions and counter-attacks happen naturally when the player rolls a 7–9 (compromise/counter-attack) or 6- (miss), or when the player hesitates.
+- REALISM OVER BALANCE: Enemy danger, harm capacity, and threat are context-driven and follow pure fictional logic, NEVER artificially scaled to player Harm or level. A dragon or warlord remains lethal regardless of player condition. Prioritize narrative realism over artificial balance.
+- RESOURCE & RANGE REJECTIONS: Attacks or actions outside their fictional weapon tags (e.g. attempting an Intimate weapon strike at Far range) or attempting to spend Hold when Hold is 0 CANNOT succeed. State the fictional impossibility clearly and prompt another action.
 - Enemies do not have bloated HP or AC. They have a threat tier and a Harm clock (typically 1 to ${max} Harm to defeat). In the [COMBAT] state memo, format enemy headers with their descending vitality token alongside Harm (e.g. Name: 4/4 HP | Harm: 0/4 | Armor: 1).
 - ARMOR: Armor reduces incoming Harm by its value (e.g. Armor 1 turns 3 Harm into 2 Harm).
 - HARM TIERS:
@@ -528,6 +541,37 @@ Pop the next pair of d6 dice from [RNG_QUEUE v7.0] and add the companion's most 
 This roll is mandatory, always pre-return.
 </bench_ETA_system>
 </[PARTY]_mechanics>`;
+}
+
+/**
+ * Builds the PbtA constraints section with anti-softballing, fictional positioning,
+ * resource exhaustion rules, and mode-aware turn ending constraints.
+ *
+ * @param {boolean} [isFreeform=false] Whether freeform playstyle is active (omits CYOA buttons)
+ * @returns {string} Formatted constraints XML block
+ */
+export function buildPbtAConstraintsContent(isFreeform = false) {
+    const turnEndingConstraint = isFreeform
+        ? `NEVER output lettered choices (a, b, c), numbered action menus, or multiple-choice questions in the story narrative. Conclude the scene with "What do you do?" and the status footer.`
+        : `NEVER output lettered choices (a, b, c), numbered action menus, or conversational multiple-choice questions in the story narrative. When CYOA mode is active, choices belong exclusively inside the <choices><button>...</button></choices> block at the end of the response; do NOT repeat "What do you do?" or insert conversational choice lists in the narrative prose.`;
+
+    return `<constraints>
+<resolution_constraints>
+Never skip or reinterpret a 2d6 Move roll. Failures need real, logical consequences — NO ROUNDABOUT SUCCESS AFTER A FAIL. Mixed hits (7–9) demand a real complication or hard dilemma; Misses (6-) trigger immediate GM Hard Moves with no unearned bailouts or cosmetic softening. A second attempt after a miss requires a fundamentally different fictional approach; otherwise reject and prompt another action.
+</resolution_constraints>
+<output_constraints>
+${turnEndingConstraint}
+</output_constraints>
+<spatial_and_entity_constraints>
+Adhere to fictional positioning and weapon tags (intimate, close, near, far). An action attempted outside its fictional range (e.g. intimate strike at far range) is impossible; narrate the range obstacle and prompt another action. Max active [PARTY] size = 5 + {{user}}.
+</spatial_and_entity_constraints>
+<inventory_and_resource_constraints>
+Gear items require uses (>0) or fictional availability. If a player attempts an action requiring an exhausted resource, 0 uses, or 0 Hold, state they cannot do that and prompt another action. Missing items are never conveniently spawned — narrate the lack. Physically impossible actions or incompatible gear are narrated as failing with fitting fictional consequences (-1 forward, lost opportunity, damage/harm, or increased danger). NEVER impose D&D "disadvantage" — use PbtA modifiers (-1 forward) or fictional positioning.
+</inventory_and_resource_constraints>
+<cheese_and_abuse>
+Routine tasks and ordinary dialogue NEVER trigger Move rolls. If the player attempts rules abuse or infinite resource loops, intervene firmly through the narrative world.
+</cheese_and_abuse>
+</constraints>`;
 }
 
 /**
@@ -951,7 +995,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_role',
             tag: 'role',
-            content: buildPbtARoleContent(),
+            content: buildPbtARoleContent(isFreeform),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',
@@ -1028,7 +1072,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_constraints',
             tag: 'constraints',
-            content: `<constraints>\n<resolution_constraints>\nNever skip or reinterpret a 2d6 Move roll. Mixed hits (7–9) demand a real complication or hard dilemma; Misses (6-) trigger immediate GM Hard Moves. A second attempt after a miss requires a fundamentally different fictional approach.\n</resolution_constraints>\n<output_constraints>\nNEVER output lettered choices (a, b, c), numbered action menus, or multiple-choice questions in the story narrative. Conclude the scene with "What do you do?" and the status footer.\n</output_constraints>\n<spatial_and_entity_constraints>\nAdhere to fictional positioning and weapon tags (intimate, close, near, far). Max active [PARTY] size = 5 + {{user}}.\n</spatial_and_entity_constraints>\n<inventory_and_resource_constraints>\nGear items require uses (>0) or fictional availability. Physically impossible actions or incompatible gear are narrated as failing with fitting fictional consequences (-1 forward, lost opportunity, damage/harm, or increased danger). NEVER impose D&D "disadvantage" — use PbtA modifiers (-1 forward) or fictional positioning.\n</inventory_and_resource_constraints>\n<cheese_and_abuse>\nRoutine tasks and ordinary dialogue NEVER trigger Move rolls. If the player attempts rules abuse, intervene through the narrative world.\n</cheese_and_abuse>\n</constraints>`,
+            content: buildPbtAConstraintsContent(isFreeform),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',

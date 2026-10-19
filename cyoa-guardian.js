@@ -76,6 +76,7 @@ export function stripCyoaFromOutgoingChat(chat, options = {}) {
     const cyoaModeXmlPattern = /<CYOA_mode\b[^>]*>[\s\S]*?<\/CYOA_mode\s*>/gi;
     const choiceBlockPattern = /<choices\b[^>]*>[\s\S]*?<\/choices\s*>|<div\b[^>]*\brt-cyoa-choices\b[^>]*>[\s\S]*?<\/div\s*>|<button\b[^>]*>[\s\S]*?<\/button\s*>/gi;
     const historicalMarkdownChoicesPattern = /\n*\*{0,2}What (?:does [^\n*?]+|do you) do\?\*{0,2}\s*(?:\n+\s*(?:[1-5]\.|\(\d+\)|[-*•])\s+[^\n]+)+(?=\s*(?:\n\s*\*(?:Status|Harm|HP|XP|Hold|Location|Time|Day|Level|\([A-Za-z]+:)|\n\s*<choices|$))/gi;
+    const historicalStandalonePromptPattern = /\n*\*{0,2}What (?:does [^\n*?]+|do you) do\?\*{0,2}\s*(?=\s*(?:\n\s*[\*\_]?\(?(?:Status|Harm|HP|XP|Hold|Location|Time|Day|Level|\([A-Za-z]+:)|\n\s*<choices|$))/gi;
 
     const lastIdx = chat.length - 1;
 
@@ -99,6 +100,10 @@ export function stripCyoaFromOutgoingChat(chat, options = {}) {
             if (!isCurrentTurn && historicalMarkdownChoicesPattern.test(updated)) {
                 historicalMarkdownChoicesPattern.lastIndex = 0;
                 updated = updated.replace(historicalMarkdownChoicesPattern, '').trim();
+            }
+            if (!isCurrentTurn && historicalStandalonePromptPattern.test(updated)) {
+                historicalStandalonePromptPattern.lastIndex = 0;
+                updated = updated.replace(historicalStandalonePromptPattern, '').trim();
             }
             return updated;
         };

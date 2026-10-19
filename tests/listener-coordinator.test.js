@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { triggerDecoupledCyoaForMessage } from '../cyoa-guardian.js';
+import { coordinateCyoaForMessage } from '../cyoa-safety-net.js';
 import { rollNameRagCandidate, setupMultiHogRollHooks } from '../namerag-hooks.js';
 
 console.log('--- Running Listener Coordinator & Defensive Hardening Test Suite ---');
@@ -24,7 +24,7 @@ let toastCount = 0;
 const mockToast = () => { toastCount++; };
 
 // First call: Should trigger Stage 2 for message 1
-const firstAttempt = await triggerDecoupledCyoaForMessage({
+const firstAttempt = await coordinateCyoaForMessage({
     messageId: 1,
     triggerSource: 'CHARACTER_MESSAGE_RENDERED',
     getSettings: () => ({ enableDecoupledCyoa: true }),
@@ -34,7 +34,7 @@ const firstAttempt = await triggerDecoupledCyoaForMessage({
 // (firstAttempt may be true or false depending on runner mock, but deduplication state is set)
 
 // Immediate second call with identical messageId and swipeId: MUST be rejected by deduplication guard
-const duplicateAttempt = await triggerDecoupledCyoaForMessage({
+const duplicateAttempt = await coordinateCyoaForMessage({
     messageId: 1,
     triggerSource: 'GENERATION_ENDED',
     getSettings: () => ({ enableDecoupledCyoa: true }),
@@ -46,7 +46,7 @@ console.log('✓ Decoupled CYOA duplicate trigger correctly rejected without red
 
 // 2. Test Message 0 and Unstarted Chat Rejection
 console.log('Testing boundary guard on Message 0 (greeting)...');
-const msg0Attempt = await triggerDecoupledCyoaForMessage({
+const msg0Attempt = await coordinateCyoaForMessage({
     messageId: 0,
     triggerSource: 'CHARACTER_MESSAGE_RENDERED',
     getSettings: () => ({ enableDecoupledCyoa: true }),

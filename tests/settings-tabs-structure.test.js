@@ -32,9 +32,9 @@ test('MultiHog Companion Settings Reorganization Structure', async (t) => {
         assert.match(rulesetTabSlice, /id="mhc_pbta_quickstart"/, 'Quickstart button must be in ruleset tab');
     });
 
-    await t.test('Story tab contains CYOA Guardian, Relationship Sync, and Lorebook Sync', () => {
+    await t.test('Story tab contains CYOA Safety Net, Relationship Sync, and Lorebook Sync', () => {
         const storyTabSlice = html.split('id="mhc_tab_story"')[1].split('id="mhc_tab_media"')[0];
-        assert.match(storyTabSlice, /id="mhc_cyoa_auto_retry_enable"/, 'CYOA Guardian must be in story tab');
+        assert.match(storyTabSlice, /id="mhc_cyoa_enable"/, 'CYOA Safety Net must be in story tab');
         assert.match(storyTabSlice, /id="mhc_rel_narrative_sync"/, 'Relationship Sync must be in story tab');
         assert.match(storyTabSlice, /id="mhc_lorebook_sync_enable"/, 'Lorebook Sync must be in story tab');
     });

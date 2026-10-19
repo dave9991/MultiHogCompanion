@@ -18,7 +18,7 @@ import {
     buildConciergeSystemPrompt,
 } from '../concierge-prompt.js';
 import { buildPbtACartridge } from '../pbta-ruleset.js';
-import { buildStage2CyoaPrompt } from '../cyoa-decoupled-runner.js';
+import { buildCyoaPrompt } from '../cyoa-generator.js';
 
 test('1. buildConciergeBuilderPrompt contains PbtA Move Masterclass and strictly bans D&D disadvantage', () => {
     const builderPrompt = buildConciergeBuilderPrompt();
@@ -90,8 +90,8 @@ test('4. buildPbtACartridge suppresses base D&D constraints and installs clean P
     assert.ok(!/disadvantage/i.test(unsuppressedSnippet), 'No unsuppressed disadvantage in PbtA constraints snippet');
 });
 
-test('5. buildStage2CyoaPrompt bans advantage/disadvantage in PbtA mode and guides Hold and dilemmas', () => {
-    const { systemPrompt } = buildStage2CyoaPrompt({
+test('5. buildCyoaPrompt bans advantage/disadvantage in PbtA mode and guides Hold and dilemmas', () => {
+    const { systemPrompt } = buildCyoaPrompt({
         narrative: 'The beast lunges forward with claws bared.',
         memo: '[CHARACTER]\n{{user}} (Hunter): 5/5 HP | Harm: 0/5',
         isPbta: true,

@@ -2,11 +2,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     isProtagonistDowned,
-    extractCleanChoicesMarkup,
-    buildStage2CyoaPrompt,
-} from '../cyoa-decoupled-runner.js';
+    extractChoicesMarkup,
+    buildCyoaPrompt,
+} from '../cyoa-generator.js';
 
-describe('Decoupled CYOA Runner Edge Cases', () => {
+describe('CYOA Choice Generator Edge Cases', () => {
 
     it('accurately identifies downed protagonist across diverse narrative cues without false positives', () => {
         // True positives in PbtA memo
@@ -51,7 +51,7 @@ I need to generate 3 choices for the player.
 <button>3. 🔮 Channel an arcane ward</button>
 </choices>
 `;
-        const cleaned1 = extractCleanChoicesMarkup(rawWithThoughts);
+        const cleaned1 = extractChoicesMarkup(rawWithThoughts);
         assert.ok(!cleaned1.includes('<think>'), 'Must strip thinking block');
         assert.ok(cleaned1.includes('<choices>'));
         assert.ok(cleaned1.includes('<button>1. ⚡ Strike the bandit captain</button>'));
@@ -64,7 +64,7 @@ I need to generate 3 choices for the player.
 <button>1. Examine the locked chest</button>
 <button>2. Search the desk drawers</button>
 `;
-        const cleaned2 = extractCleanChoicesMarkup(unclosedBlock);
+        const cleaned2 = extractChoicesMarkup(unclosedBlock);
         assert.ok(cleaned2.startsWith('<choices>'));
         assert.ok(cleaned2.endsWith('</choices>'));
         assert.ok(cleaned2.includes('<button>1. Examine the locked chest</button>'));
@@ -77,7 +77,7 @@ Here are your available choices:
 2. Look for another way around
 3. Lower a rope for the party
 `;
-        const cleaned3 = extractCleanChoicesMarkup(markdownList);
+        const cleaned3 = extractChoicesMarkup(markdownList);
         assert.ok(cleaned3.startsWith('<choices>'));
         assert.ok(cleaned3.includes('<button>1. Leap across the chasm</button>'));
         assert.ok(cleaned3.includes('<button>2. Look for another way around</button>'));
@@ -89,7 +89,7 @@ Here are your available choices:
         const downedMemo = '[CHARACTER]\n- Lyra (Mage): 0/5 HP | Harm: 5/5 | Armor: 0\nStatus: Incapacitated';
         const narrative = 'The dragon breath knocks Lyra to the stone floor, her vision fading.';
 
-        const prompt = buildStage2CyoaPrompt({
+        const prompt = buildCyoaPrompt({
             narrative,
             memo: downedMemo,
             isPbta: true,
@@ -109,7 +109,7 @@ Here are your available choices:
         const healthyMemo = '[CHARACTER]\n- Lyra: 5/5 HP | Harm: 0/5';
         const narrative = 'You reach the crossroads.';
 
-        const prompt3 = buildStage2CyoaPrompt({
+        const prompt3 = buildCyoaPrompt({
             narrative,
             memo: healthyMemo,
             isPbta: true,
@@ -117,7 +117,7 @@ Here are your available choices:
         });
         assert.ok(prompt3.systemPrompt.includes('exactly 3 choices'));
 
-        const prompt5 = buildStage2CyoaPrompt({
+        const prompt5 = buildCyoaPrompt({
             narrative,
             memo: healthyMemo,
             isPbta: true,

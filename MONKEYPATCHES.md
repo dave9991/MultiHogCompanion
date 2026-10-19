@@ -96,7 +96,7 @@ SillyTavern adds native support for contextual resolution hooks in slash command
 Upstream MultiHog uses a `generate_interceptor` to inject its RPG state prompt before generation. Companion requires a secondary pass to:
 1. Strip stale CYOA button markdown and conversational "What do you do?" lists from older chat turns so the LLM context remains clean.
 2. In Safety Net mode (recommended), preserve the active turn's `<CYOA_mode>` block so the narrator generates single-stage choices directly without extra latency.
-3. In Always Decoupled mode, strip `<CYOA_mode>` across all turns to enforce dedicated two-stage generation.
+3. In Two-Stage mode, strip `<CYOA_mode>` across all turns to enforce dedicated choice generation.
 
 #### Mechanism
 1. Registered in `manifest.json`: `"generate_interceptor": "mhcGenerationInterceptor"`.

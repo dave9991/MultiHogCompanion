@@ -21,7 +21,7 @@ Before adding, modifying, or removing any event listener, DOM delegation, or mon
 * **No `setTimeout` Ladders**: Never introduce staggered `setTimeout` chains (e.g. 500ms, 550ms, 600ms) to dodge async timing issues. Use deterministic sequential coordinators.
 * **Chat Switching**: Route all chat change logic through `runChatChangedCoordinator(activeChatId, token)` with active token invalidation to cancel stale work during rapid chat switches.
 * **Assistant Message Turns**: Use `CHARACTER_MESSAGE_RENDERED` as the canonical post-generation message event (once the message is committed to DOM). Do not add parallel duplicate listeners to `MESSAGE_RECEIVED`.
-* **Decoupled CYOA Dispatching**: Route all Stage 2 CYOA generation through `triggerDecoupledCyoaForMessage` to prevent duplicate concurrent LLM generation passes.
+* **CYOA Dispatching**: Route all CYOA generation and repair through `coordinateCyoaForMessage` to prevent duplicate concurrent LLM generation passes.
 * **Settings Update Protection**: Shield `SETTINGS_UPDATED` handlers with an execution mutex (e.g. `_isSettingsSyncActive`) to prevent cascade loops when setting changes trigger further events.
 
 ---

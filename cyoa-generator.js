@@ -1,72 +1,54 @@
 /**
- * cyoa-decoupled-runner.js — MultiHog Companion
+ * cyoa-generator.js — MultiHog Companion
  *
- * Dedicated Stage 2 Choice Generator for Decoupled Two-Stage CYOA.
+ * Dedicated Standalone Choice Generator and Prompt Builder for CYOA.
  *
  * Execution Flow:
- * 1. Stage 1 (Narrator) generates pure story prose (with <CYOA_mode> stripped from prompt).
- * 2. MultiHog State Tracker audits the story and settles state memo (HP, Harm, downed conditions).
- * 3. Stage 2 (This Runner) triggers with the settled State Memo and latest narrative chunk.
- * 4. Generates synchronized choices (e.g. Downed/Crisis choices if at 0 HP/Max Harm).
- * 5. Appends <choices> to chat[mesId], updates swipes, triggers _rpgFinalizeCyoaNarratorRender(),
- *    and unblocks UI.
+ * 1. Called on-demand by cyoa-safety-net when choices are missing, downed/crisis choices
+ *    are required, or via manual player slash commands (/cyoagen, /cyoafix).
+ * 2. Formulates prompt based on settled narrative prose and state memo (evaluating 0 HP / Max Harm).
+ * 3. Dispatches routed LLM request with context-aware token budgeting.
+ * 4. Extracts and sanitizes <choices><button>...</button></choices> markup.
+ * 5. Commits choices to chat message, swipes, updates UI, and invokes MultiHog DOM binders.
  */
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
 
 let _activeCyoaAbortController = null;
-let _isStage2Running = false;
+let _isGenerating = false;
 
 /**
- * Returns whether Stage 2 CYOA generation is currently running.
+ * Returns whether CYOA choice generation is currently running.
  * @returns {boolean}
  */
-export function isStage2CyoaRunning() {
-    return _isStage2Running;
+export function isCyoaGenerating() {
+    return _isGenerating;
 }
 
 /**
- * Aborts any in-flight Stage 2 CYOA generation and cleans up UI lock.
+ * Aborts any in-flight CYOA generation and cleans up UI lock.
  *
  * @param {string} [reason='unspecified']
  */
-export function abortStage2Cyoa(reason = 'unspecified') {
-    if (!_isStage2Running && !_activeCyoaAbortController) {
+export function abortCyoaGeneration(reason = 'unspecified') {
+    if (!_isGenerating && !_activeCyoaAbortController) {
         removeCyoaLoadingIndicator();
         restoreSendButtonUI();
         return;
     }
-    console.log('[MultiHog Companion] CYOA Stage 2 aborted. Reason:', reason);
+    console.log('[MultiHog Companion] CYOA generation aborted. Reason:', reason);
     if (_activeCyoaAbortController) {
         _activeCyoaAbortController.abort();
         _activeCyoaAbortController = null;
     }
-    _isStage2Running = false;
+    _isGenerating = false;
     removeCyoaLoadingIndicator();
     restoreSendButtonUI();
 }
 
 /**
- * Detects whether the narrative text describes the protagonist collapsing,
- * falling unconscious, or being incapacitated.
- *
- * @deprecated Retired in favor of LLM semantic evaluation within Stage 2 prompt guidelines.
- * Returns false to prevent poetic prose (e.g., "daylight bleeding out") from triggering false-positive death spirals.
- *
- * @param {string} [_narrativeText]
- * @returns {boolean}
- */
-export function isNarrativeDowned(_narrativeText) {
-    return false;
-}
-
-/**
  * Checks whether the protagonist is downed/incapacitated in the structured State Memo.
  * Handles both PbtA (Max Harm / 0 HP) and D&D (0 HP / Dying / Unconscious).
- *
- * NOTE: Narrative prose matching via regex was deprecated and removed.
- * In Fast Pipeline mode, turn-delta incapacitation is evaluated semantically
- * by the Stage 2 LLM Choice Generator rather than brittle regex heuristics.
  *
  * @param {string} memoText
  * @param {boolean} [isPbta=false]
@@ -110,7 +92,7 @@ export function isProtagonistDowned(memoText, isPbta = false) {
 }
 
 /**
- * Constructs the Stage 2 prompt for the dedicated choice generator.
+ * Constructs the prompt for the dedicated choice generator.
  *
  * @param {object} opts
  * @param {string} opts.narrative Latest narrative beat from assistant
@@ -119,7 +101,7 @@ export function isProtagonistDowned(memoText, isPbta = false) {
  * @param {object} [opts.rpgSettings] MultiHog settings
  * @returns {{ systemPrompt: string, userPrompt: string }}
  */
-export function buildStage2CyoaPrompt({ narrative, memo, isPbta, rpgSettings }) {
+export function buildCyoaPrompt({ narrative, memo, isPbta, rpgSettings }) {
     const isDowned = isProtagonistDowned(memo, isPbta);
     const cyoaConfig = rpgSettings?.cyoaConfig || {};
     const playstyle = cyoaConfig.playstyle || 'cyoa_5';
@@ -247,11 +229,10 @@ Generate the ${choiceCount} choices now inside <choices>...</choices>:`;
  * @param {string} rawText
  * @returns {string|null}
  */
-export function extractCleanChoicesMarkup(rawText) {
+export function extractChoicesMarkup(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
 
     // 0. Strip reasoning/thinking tokens (<think>...</think>, <thought>...</thought>)
-    // If choices were output inside an unclosed think block, preserve the choices
     let text = rawText
         .replace(/<think\b[^>]*>[\s\S]*?(?:<\/think\s*>|$)/gi, (m) => {
             if (/<(?:choices|button)\b/i.test(m)) {
@@ -382,23 +363,19 @@ export async function waitForStateTracker(timeoutMs = 120000) {
     const startTime = Date.now();
     const isRunning = () => typeof globalThis._rpgStateModelRunning === 'function' && globalThis._rpgStateModelRunning();
 
-    // 1. Wait up to 3500ms for State Tracker to initiate (MultiHog runs keyword scans, map checks, and swiping before triggering state pass)
     const launchWaitLimit = 3500;
     while (Date.now() - startTime < launchWaitLimit) {
         if (isRunning()) break;
         await new Promise(resolve => setTimeout(resolve, 40));
     }
 
-    // 2. If State Tracker did not launch (e.g. disabled, throttled turn, or non-character turn), proceed immediately
     if (!isRunning()) {
         return true;
     }
 
-    // 3. Wait for State Tracker to finish auditing narrative
     while (Date.now() - startTime < timeoutMs) {
         await new Promise(resolve => setTimeout(resolve, 100));
         if (!isRunning()) {
-            // Give a tiny tick for settings / currentMemo write to flush
             await new Promise(resolve => setTimeout(resolve, 80));
             return true;
         }
@@ -410,9 +387,6 @@ export async function waitForStateTracker(timeoutMs = 120000) {
 
 /**
  * Injects a temporary visual loading indicator into the active message's DOM.
- * Anchored to `.mes_block` directly adjacent to `.mes_text` so that re-renders of `.mes_text`
- * (e.g. by reasoningHandler, auto-translate, or code block highlighters) do not erase it.
- * Includes an inline Cancel button with Chrome button markers so Framework never hijacks it.
  *
  * @param {number} [messageId]
  */
@@ -427,12 +401,10 @@ export function insertCyoaLoadingIndicator(messageId) {
     }
 
     const mesBlock = mesContainer.querySelector('.mes_block') || mesContainer;
-    // If indicator already exists in this message, don't remove and re-add to avoid flicker
     if (mesBlock.querySelector('.mhc-cyoa-loading-badge')) {
         return;
     }
 
-    // Remove any stale badge on other messages
     removeCyoaLoadingIndicator();
 
     const mesText = mesBlock.querySelector('.mes_text');
@@ -455,7 +427,7 @@ export function insertCyoaLoadingIndicator(messageId) {
     if (cancelBtn) {
         cancelBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            abortStage2Cyoa('cancel_button');
+            abortCyoaGeneration('cancel_button');
         });
     }
 
@@ -476,9 +448,7 @@ export function removeCyoaLoadingIndicator() {
 }
 
 /**
- * Locks the SillyTavern send UI during Stage 2 generation.
- * Uses both scoped CSS and DOM attributes so neither SillyTavern unblockGeneration nor
- * activateSendButtons can prematurely unlock the send button while choices formulate.
+ * Locks the SillyTavern send UI during CYOA generation.
  */
 export function lockSendButtonUI() {
     if (typeof document === 'undefined') return;
@@ -509,8 +479,7 @@ export function lockSendButtonUI() {
 }
 
 /**
- * Restores the SillyTavern send UI after Stage 2 generation completes or aborts.
- * Restores DOM attributes and cleans up generating attribute directly without emitting spurious events.
+ * Restores the SillyTavern send UI after CYOA generation completes or aborts.
  */
 export function restoreSendButtonUI() {
     if (typeof document === 'undefined') return;
@@ -528,14 +497,7 @@ export function restoreSendButtonUI() {
 }
 
 /**
- * Resolves the token budget for Stage 2 CYOA choice generation.
- * Supports:
- * 1. Explicit user override in MultiHog / Companion settings (cyoaMaxTokens > 0).
- * 2. Dedicated connection (e.g. secondary Ollama/OpenAI profile).
- * 3. Default connection: Dynamically derives token budget from configured Main API
- *    context window (e.g. openai_max_context, max_context) minus estimated prompt size,
- *    providing full headroom for models requiring 4k-8k+ reasoning tokens (DeepSeek R1,
- *    Gemma 4, Qwen thinking variants).
+ * Resolves the token budget for CYOA choice generation.
  *
  * @param {object} [opts]
  * @param {object} [opts.rpgSettings] MultiHog / companion settings
@@ -548,13 +510,13 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
     const ctx = context || (typeof globalThis.SillyTavern !== 'undefined' ? globalThis.SillyTavern.getContext?.() : null) || {};
     const companionSettings = ctx.extensionSettings?.multihog_companion || globalThis.extension_settings?.multihog_companion || {};
 
-    // 1. Explicit user override takes top priority (MultiHog settings or Companion settings)
+    // 1. Explicit user override takes top priority
     const explicitOverride = Number(rpgSettings?.cyoaMaxTokens || companionSettings?.cyoaMaxTokens);
     if (!isNaN(explicitOverride) && explicitOverride > 0) {
         return Math.floor(explicitOverride);
     }
 
-    // 2. Dedicated connection (profile, direct ollama, direct openai)
+    // 2. Dedicated connection
     if (connSettings && connSettings.connectionSource && connSettings.connectionSource !== 'default') {
         const dedicatedTokens = Number(connSettings.maxTokens);
         if (!isNaN(dedicatedTokens) && dedicatedTokens > 0) {
@@ -562,12 +524,10 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
         }
     }
 
-    // 3. Main API (default connection): dynamically derive from context window
+    // 3. Main API: dynamically derive from context window
     const mainApi = ctx.mainApi || globalThis.main_api || 'openai';
-
     let contextLimit = 0;
 
-    // Check SillyTavern's global getMaxContextTokens helper if available
     if (typeof globalThis.getMaxContextTokens === 'function') {
         try {
             const raw = Number(globalThis.getMaxContextTokens());
@@ -577,7 +537,6 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
         } catch (_) {}
     }
 
-    // Check OpenAI specific context size if mainApi is openai
     if (!contextLimit && mainApi === 'openai') {
         const oaiContext = Number(
             ctx.chatCompletionSettings?.openai_max_context ||
@@ -588,7 +547,6 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
         }
     }
 
-    // Check generic maxContext (context.maxContext or globalThis.max_context)
     if (!contextLimit) {
         const genContext = Number(ctx.maxContext || globalThis.max_context);
         if (!isNaN(genContext) && genContext > 0) {
@@ -596,12 +554,10 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
         }
     }
 
-    // Baseline fallback if context size cannot be determined: 8192
     if (!contextLimit || isNaN(contextLimit) || contextLimit <= 0) {
         contextLimit = 8192;
     }
 
-    // Estimate prompt tokens (~3.2 chars/token for english/markdown, with a 250-token safety buffer for wrapper tags/role delimiters)
     let promptChars = 0;
     if (Array.isArray(messages)) {
         for (const msg of messages) {
@@ -617,18 +573,14 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
         }
     }
     const estimatedPromptTokens = Math.max(Math.ceil(promptChars / 3.2) + 250, 400);
-
-    // Leave a 256-token headroom buffer
     const safetyBuffer = 256;
     let availableBudget = contextLimit - estimatedPromptTokens - safetyBuffer;
 
-    // Minimum floor: at least 4096 if contextLimit >= 8192, else at least 2048 (or available remaining)
     const minFloor = contextLimit >= 8192 ? 4096 : Math.min(2048, contextLimit - estimatedPromptTokens);
     if (availableBudget < minFloor) {
         availableBudget = minFloor;
     }
 
-    // If openai_max_tokens is configured on the main API and is >= 4096, clamp if availableBudget exceeds it
     const configuredMaxTokens = Number(
         ctx.chatCompletionSettings?.openai_max_tokens ||
         globalThis.oai_settings?.openai_max_tokens ||
@@ -642,7 +594,38 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
 }
 
 /**
- * Executes the complete Stage 2 Decoupled CYOA pass.
+ * Extracts raw textual content from diverse LLM API response bodies.
+ * Supports OpenAI chat completions, text completions, and reasoning tokens.
+ *
+ * @param {object|string} response
+ * @returns {string}
+ */
+export function extractTextFromApiResponse(response) {
+    if (!response) return '';
+    if (typeof response === 'string') return response;
+
+    // Standard OpenAI Chat Completion
+    const choice = response.choices?.[0];
+    if (choice) {
+        if (typeof choice.message?.content === 'string' && choice.message.content.trim()) {
+            return choice.message.content;
+        }
+        // Reasoning models (o1, DeepSeek R1, Qwen reasoning) where choices were placed in reasoning_content
+        if (typeof choice.message?.reasoning_content === 'string' && choice.message.reasoning_content.trim()) {
+            return choice.message.reasoning_content;
+        }
+        if (typeof choice.text === 'string' && choice.text.trim()) {
+            return choice.text;
+        }
+    }
+
+    // Direct content field or raw string representation
+    if (typeof response.content === 'string') return response.content;
+    return '';
+}
+
+/**
+ * Executes a standalone CYOA choice generation pass for a target narrative message.
  *
  * @param {object} params
  * @param {number} params.messageId Index of the assistant message in chat
@@ -652,12 +635,12 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
  * @param {Function} [params.showToast] Toast notification helper
  * @returns {Promise<boolean>} Success status
  */
-export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpgSettings, showToast }) {
-    if (_isStage2Running) {
-        abortStage2Cyoa('restart_stage2');
+export async function generateCyoaChoices({ messageId, narrative, isPbta, rpgSettings, showToast }) {
+    if (_isGenerating) {
+        abortCyoaGeneration('restart_generation');
     }
 
-    _isStage2Running = true;
+    _isGenerating = true;
     _activeCyoaAbortController = new AbortController();
     const signal = _activeCyoaAbortController.signal;
 
@@ -679,8 +662,8 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         // 3. Obtain State Memo baseline (active/turn-start memo)
         const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
 
-        // 4. Build Stage 2 prompt
-        const { systemPrompt, userPrompt } = buildStage2CyoaPrompt({
+        // 4. Build prompt
+        const { systemPrompt, userPrompt } = buildCyoaPrompt({
             narrative,
             memo: freshMemo,
             isPbta,
@@ -701,21 +684,21 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             messages,
         });
 
-        console.log(`[MultiHog Companion] Decoupled CYOA Stage 2 token budget: ${connSettings.maxTokens}`);
+        console.log(`[MultiHog Companion] CYOA Generator token budget: ${connSettings.maxTokens}`);
 
         // 6. Generate choices via routed LLM call
         const rawOutput = await sendRoutedLlmRequest(connSettings, messages, signal);
         if (signal.aborted) return false;
 
         // 7. Extract valid <choices> block
-        const choicesMarkup = extractCleanChoicesMarkup(rawOutput);
+        const choicesMarkup = extractChoicesMarkup(rawOutput);
         if (!choicesMarkup) {
-            console.warn('[MultiHog Companion] Decoupled CYOA did not produce valid choice markup:', rawOutput);
+            console.warn('[MultiHog Companion] CYOA Generator did not produce valid choice markup:', rawOutput);
             removeCyoaLoadingIndicator();
             restoreSendButtonUI();
-            _isStage2Running = false;
+            _isGenerating = false;
             if (showToast) {
-                showToast('warning', 'Decoupled CYOA did not produce valid choice buttons. Use /cyoagen to retry.', 'CYOA Engine');
+                showToast('warning', 'CYOA did not produce valid choice buttons. Use /cyoagen to retry.', 'CYOA Engine');
             }
             return false;
         }
@@ -727,12 +710,11 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             console.warn('[MultiHog Companion] Target message not found in chat!');
             removeCyoaLoadingIndicator();
             restoreSendButtonUI();
-            _isStage2Running = false;
+            _isGenerating = false;
             return false;
         }
 
         const currentMsg = chat[messageId];
-        // Strip any residual footer if needed and append choices
         const cleanBaseText = String(currentMsg.mes || '')
             .replace(/<choices\b[^>]*>[\s\S]*?<\/choices\s*>/gi, '')
             .replace(/<div\b[^>]*\b(?:rt-cyoa-choices|mhc-cyoa-loading-badge)\b[^>]*>[\s\S]*?<\/div\s*>/gi, '')
@@ -741,14 +723,12 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
         const finalMesText = `${cleanBaseText}\n\n${choicesMarkup}`;
         currentMsg.mes = finalMesText;
 
-        // Update swipe history array if present
         if (Array.isArray(currentMsg.swipes) && currentMsg.swipe_id !== undefined) {
             currentMsg.swipes[currentMsg.swipe_id] = finalMesText;
         }
 
         removeCyoaLoadingIndicator();
 
-        // Update message DOM
         if (typeof ctx.updateMessageBlock === 'function') {
             ctx.updateMessageBlock(messageId, currentMsg);
         } else {
@@ -777,13 +757,13 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
             showToast('info', 'Tactical CYOA choices synchronized! 🧭', 'CYOA Engine');
         }
 
-        console.log('[MultiHog Companion] Decoupled CYOA Stage 2 completed successfully.');
+        console.log('[MultiHog Companion] CYOA choice generation completed successfully.');
         return true;
     } catch (err) {
         if (signal.aborted || err?.name === 'AbortError') {
-            console.log('[MultiHog Companion] Decoupled CYOA generation was aborted by user/signal.');
+            console.log('[MultiHog Companion] CYOA generation was aborted by user/signal.');
         } else {
-            console.error('[MultiHog Companion] Decoupled CYOA generation failed:', err);
+            console.error('[MultiHog Companion] CYOA generation failed:', err);
             if (showToast) {
                 showToast('warning', 'Failed to generate CYOA choices. UI restored.', 'CYOA Engine');
             }
@@ -792,7 +772,7 @@ export async function runDecoupledCyoaStage2({ messageId, narrative, isPbta, rpg
     } finally {
         removeCyoaLoadingIndicator();
         restoreSendButtonUI();
-        _isStage2Running = false;
+        _isGenerating = false;
         _activeCyoaAbortController = null;
     }
 }

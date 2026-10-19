@@ -142,15 +142,15 @@
             <!-- TAB 2: STORY & AUTOMATION                                      -->
             <!-- ============================================================== -->
             <div class="mhc-tab-content" id="mhc_tab_story">
-                <!-- ── CYOA Engine: Decoupled Two-Stage Generation ── -->
-                <div id="mhc_cyoa_guardian_section" class="inline-drawer mhc-cyoa-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <!-- ── CYOA Subsystem: Safety Net & Choice Engine ── -->
+                <div id="mhc_cyoa_section" class="inline-drawer mhc-cyoa-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
                     <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
-                        <label class="checkbox_label" title="Enable CYOA Guardian & Auto-Repair Engine" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
-                            <input id="mhc_cyoa_auto_retry_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
-                            <span style="font-size: 0.9em;"><b>🧭 CYOA Guardian &amp; Auto-Repair Engine:</b> Choice Protection</span>
+                        <label class="checkbox_label" title="Enable CYOA Safety Net & Choice Engine" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                            <input id="mhc_cyoa_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
+                            <span style="font-size: 0.9em;"><b>🧭 CYOA Safety Net:</b> Choice Protection &amp; Formatting</span>
                         </label>
                         <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand CYOA settings">
-                            <span id="mhc_cyoa_guardian_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); white-space: nowrap;">Active</span>
+                            <span id="mhc_cyoa_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); white-space: nowrap;">Active</span>
                             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
                         </div>
                     </div>
@@ -164,12 +164,12 @@
                         <div style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06);">
                             <label for="mhc_cyoa_mode_select" style="font-size: 0.85em; font-weight: bold; display: block; margin-bottom: 4px;">Operating Mode:</label>
                             <select id="mhc_cyoa_mode_select" class="text_pole" style="width: 100%; font-size: 0.85em;">
-                                <option value="safety_net" selected>Intelligent Safety Net &amp; Auto-Repair (Recommended)</option>
-                                <option value="always_decoupled">Always Decoupled (Two-Stage)</option>
+                                <option value="safety_net" selected>Intelligent Safety Net &amp; Auto-Repair (Single-Stage, Recommended)</option>
+                                <option value="two_stage">Always Two-Stage (Pure Story First, Choices Second)</option>
                             </select>
                             <div style="font-size: 0.75em; opacity: 0.7; margin-top: 4px; line-height: 1.25;">
-                                <b>Safety Net:</b> Single-stage generation by default. Auto-formats plain numbered choices into buttons with 0 extra calls, and falls back to Stage 2 only if choices are omitted.<br>
-                                <b>Always Decoupled:</b> Forces two generation passes on every turn (pure story first, dedicated choices second).
+                                <b>Safety Net:</b> Single-stage generation by default. Auto-formats plain numbered choices into buttons with 0 extra calls, and triggers the choice generator only if choices are omitted or character is downed.<br>
+                                <b>Always Two-Stage:</b> Forces two generation passes on every turn (pure story first, dedicated choices second).
                             </div>
                         </div>
 
@@ -179,7 +179,7 @@
                                 <label for="mhc_cyoa_max_tokens" style="font-size: 0.85em; font-weight: bold; cursor: pointer;">CYOA Token Budget:</label>
                                 <div style="font-size: 0.75em; opacity: 0.7; line-height: 1.2;">0 = Auto-derived from Main API Context Window (recommended for reasoning models)</div>
                             </div>
-                            <input type="number" id="mhc_cyoa_max_tokens" min="0" max="131072" step="256" style="width: 85px; text-align: right;" placeholder="0" title="Token limit for Stage 2 CYOA generation. Set to 0 to dynamically use available context headroom.">
+                            <input type="number" id="mhc_cyoa_max_tokens" min="0" max="131072" step="256" style="width: 85px; text-align: right;" placeholder="0" title="Token limit for dedicated CYOA generation. Set to 0 to dynamically use available context headroom.">
                         </div>
 
                         <!-- Manual Actions Sub-bar -->

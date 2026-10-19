@@ -1,32 +1,34 @@
 /**
- * MultiHog Companion - CYOA Guardian
+ * cyoa-safety-net.js — MultiHog Companion
  *
- * Automatically monitors narrator responses in both D&D 5e and PbtA adventures.
- * When the LLM drops CYOA choices (due to attention drift or instruction collision
- * with the status footer line), Guardian:
- * 1. Checks if markdown choices were generated without <button> tags and
- *    auto-repairs them into interactive CYOA buttons immediately.
- * 2. If completely omitted, auto-swipes with a high-priority steering reminder
- *    injected into the prompt (capped at max 1 retry to prevent infinite loops).
- * 3. Exposes /cyoaretry and /cyoafix slash commands for manual player control.
+ * Dedicated Safety Net and Lifecycle Coordinator for CYOA Choice Buttons.
+ *
+ * Execution Model:
+ * 1. Single-Stage by Default: Outgoing prompt retains active turn <CYOA_mode> so
+ *    the narrator generates story and choices together in one pass.
+ * 2. Prompt Hygiene: Strips historical choice buttons and markdown choice lists
+ *    from older turns so context remains clean and focused.
+ * 3. Intelligent Safety Net:
+ *    a. If narrator generates valid interactive buttons -> Complete (no-op).
+ *    b. If narrator generates plain numbered markdown -> Fast local regex auto-repair (0 extra latency/calls).
+ *    c. If choices are dropped or character is downed -> Triggers standalone cyoa-generator.
+ * 4. Manual Control: Exposes /cyoagen, /cyoafix, and /cyoaretry slash commands.
  */
 
 import {
-    runDecoupledCyoaStage2,
-    abortStage2Cyoa,
-    isStage2CyoaRunning,
+    generateCyoaChoices,
+    abortCyoaGeneration,
+    isCyoaGenerating,
     insertCyoaLoadingIndicator,
     lockSendButtonUI,
     isProtagonistDowned,
-} from './cyoa-decoupled-runner.js';
+} from './cyoa-generator.js';
 import { isPbtAActive } from './pbta-ruleset-persistence.js';
 import { isAdventureActive } from './adventure-chat.js';
 
 let _wasGenerationStopped = false;
-let _pendingSteeringReminder = null;
-let _retryTracker = { mesId: -1, count: 0 };
-let _lastStage2AttemptedMessageId = -1;
-let _lastStage2AttemptedSwipeId = -1;
+let _lastAttemptedMessageId = -1;
+let _lastAttemptedSwipeId = -1;
 
 let _getSettings = () => {
     if (typeof SillyTavern !== 'undefined') {
@@ -64,9 +66,14 @@ export function isNarratorGenerating() {
 
 /**
  * Strips <CYOA_mode> prompt instructions and historical choice button markup
- * from outgoing chat messages so the Stage 1 narrator generates pure narrative prose.
+ * from outgoing chat messages so context remains clean.
+ *
+ * In Safety Net mode (default), preserves the active user turn's CYOA instructions
+ * so the narrator produces single-stage choices directly.
  *
  * @param {object[]} chat
+ * @param {object} [options={}]
+ * @param {boolean} [options.stripActiveCyoa=false]
  * @returns {boolean} True if any message was modified
  */
 export function stripCyoaFromOutgoingChat(chat, options = {}) {
@@ -80,9 +87,6 @@ export function stripCyoaFromOutgoingChat(chat, options = {}) {
     const historicalStandalonePromptPattern = /\n*\*{0,2}What (?:does [^\n*?]+|do you) do\?\*{0,2}\s*(?=\s*(?:\n\s*[\*\_]?\(?(?:Status|Harm|HP|XP|Hold|Location|Time|Day|Level|\([A-Za-z]+:)|\n\s*<choices|$))/gi;
 
     // Find the active user message index matching MultiHog's backwards lookup.
-    // In multi-step turns (e.g. Map Architect / CreateAreaMap tool calls),
-    // intermediate assistant tool-call and system tool-result messages are appended
-    // after the user message during the post-tool continuation pass.
     let activeUserIdx = -1;
     for (let i = chat.length - 1; i >= 0; i--) {
         const m = chat[i];
@@ -177,7 +181,6 @@ export function isCyoaExpected(rpgSettings, isPbtaActive = false) {
     if (!rpgSettings || rpgSettings.enabled === false) return false;
 
     if (isPbtaActive) {
-        // In PbtA, CYOA is active unless playstyle is explicitly freeform
         const playstyle = rpgSettings.cyoaConfig?.playstyle;
         if (playstyle === 'freeform') return false;
         if (rpgSettings.syspromptModules?.CYOA_mode === false) return false;
@@ -224,7 +227,6 @@ export function tryRepairMarkdownChoices(text) {
         }
     }
 
-    // Require between 2 and 8 numbered choices
     if (choiceIndices.length < 2 || choiceIndices.length > 8) {
         return null;
     }
@@ -232,8 +234,6 @@ export function tryRepairMarkdownChoices(text) {
     const firstIdx = choiceIndices[0];
     const lastIdx = choiceIndices[choiceIndices.length - 1];
 
-    // Choice list must be near the very end of the message.
-    // Any non-empty lines following the choices must only be the status footer.
     const footerRegex = /^\s*[\*\_]?\(?(?:Status|Harm|HP|XP|Hold|Location|Spell|Turn|Round|State|Level|Time|Day|HH:MM|\d{1,2}:\d{2})/i;
     const footerRegexAlt = /^\s*[\*\_]?\[?(?:Status|Harm|HP|XP|Hold|Location|Time|Day|HH:MM|\d{1,2}:\d{2})/i;
 
@@ -242,11 +242,10 @@ export function tryRepairMarkdownChoices(text) {
         if (!trailingLine) continue;
         const isFooter = footerRegex.test(trailingLine) || footerRegexAlt.test(trailingLine);
         if (!isFooter) {
-            return null; // Normal narrative prose follows the list; this was not a choices block
+            return null;
         }
     }
 
-    // All lines between firstIdx and lastIdx must be choices or empty lines
     for (let i = firstIdx; i <= lastIdx; i++) {
         const l = lines[i].trim();
         if (l && !choiceIndices.includes(i)) {
@@ -254,7 +253,6 @@ export function tryRepairMarkdownChoices(text) {
         }
     }
 
-    // Check if the immediately preceding line is an optional choices/options header
     let replaceStartIdx = firstIdx;
     if (firstIdx > 0) {
         const cleanPrev = lines[firstIdx - 1].replace(/[\*_:#\-]/g, '').trim();
@@ -263,7 +261,6 @@ export function tryRepairMarkdownChoices(text) {
         }
     }
 
-    // Wrap each choice line into <button> tags
     const buttonLines = [];
     for (const idx of choiceIndices) {
         const raw = lines[idx].trim();
@@ -279,7 +276,6 @@ export function tryRepairMarkdownChoices(text) {
     const beforeChoices = lines.slice(0, replaceStartIdx);
     const trailingLines = lines.slice(lastIdx + 1);
 
-    // If trailingLines contain the status footer, place choices cleanly after the footer
     const hasTrailingFooter = trailingLines.some(l => {
         const t = l.trim();
         return t && (footerRegex.test(t) || footerRegexAlt.test(t));
@@ -305,83 +301,11 @@ export function tryRepairMarkdownChoices(text) {
 }
 
 /**
- * Arms an ephemeral steering reminder to be injected on the next retry generation.
- *
- * @param {object} opts
- * @param {boolean} opts.isPbta
- * @param {number} [opts.choiceCount=5]
- */
-export function armCyoaSteeringReminder({ isPbta = false, choiceCount = 5 }) {
-    const example = isPbta
-        ? `<choices>\n<button>1. ⚡ Take direct action to address the situation — [Move Name (+Stat)]</button>\n<button>2. 💬 "What's your read on this? Does anything feel off to you?"</button>\n<button>3. 🔍 Scan the surrounding area for anyone watching or listening in</button>\n</choices>`
-        : `<choices>\n<button>1. ⚡ Take direct action to engage the target — [Attack (+5) vs AC 14]</button>\n<button>2. 💬 "Hold on. Let's talk before anyone does something reckless." — [Persuasion (+3) DC 12]</button>\n<button>3. 🔍 Scan the surrounding area for hidden threats or escape routes</button>\n</choices>`;
-
-    _pendingSteeringReminder = `\n\n[CRITICAL GM FORMATTING REQUIREMENT]
-Your previous response failed because it omitted the required CYOA choice buttons.
-You MUST end this response with exactly ${choiceCount} choices wrapped inside a single <choices> XML block, with EVERY choice enclosed in a <button> tag:
-${example}
-Output sequence: (1) Scene narrative -> (2) <choices> block -> (3) Status footer.
-DO NOT omit the <choices><button> block!`;
-}
-
-/**
- * Injects the armed CYOA steering reminder into the outgoing chat prompt.
- * Called by mhcGenerationInterceptor.
- *
- * @param {object[]} chat
- * @returns {boolean} True if injected
- */
-export function interceptCyoaSteering(chat) {
-    if (!_pendingSteeringReminder || !Array.isArray(chat) || chat.length === 0) {
-        return false;
-    }
-
-    const reminder = _pendingSteeringReminder;
-    _pendingSteeringReminder = null;
-
-    for (let i = chat.length - 1; i >= 0; i--) {
-        const msg = chat[i];
-        if (!msg) continue;
-        const role = String(msg.role || '').toLowerCase();
-        const isUser = msg.is_user || role === 'user' || role === 'human' || role === 'player';
-        if (isUser) {
-            if (typeof msg.mes === 'string') {
-                msg.mes += reminder;
-            } else if (typeof msg.content === 'string') {
-                msg.content += reminder;
-            } else if (Array.isArray(msg.content)) {
-                msg.content.push({ type: 'text', text: reminder });
-            }
-            console.log('[MultiHog Companion] CYOA Guardian injected steering reminder into user prompt.');
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Triggers a swipe right to generate a fresh alternative response.
- */
-export async function triggerSwipeRight() {
-    try {
-        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-        if (typeof ctx?.swipe?.right === 'function') {
-            await ctx.swipe.right();
-            return true;
-        }
-        const nextBtn = document.querySelector('#chat .mes:last-child .swipe_right, #chat .mes:last-child .mes_swipe_next');
-        if (nextBtn) {
-            nextBtn.click();
-            return true;
-        }
-    } catch (err) {
-        console.error('[MultiHog Companion] Failed to trigger swipe right:', err);
-    }
-    return false;
-}
-
-/**
  * Applies repaired text to the message and updates SillyTavern DOM and state.
+ *
+ * @param {number} messageId
+ * @param {string} repairedText
+ * @returns {Promise<boolean>}
  */
 export async function applyRepairedMessage(messageId, repairedText) {
     try {
@@ -413,7 +337,6 @@ export async function applyRepairedMessage(messageId, repairedText) {
             globalThis.saveChatDebounced();
         }
 
-        // Trigger MultiHog's DOM binder to immediately style and bind the buttons
         if (typeof globalThis._rpgFinalizeCyoaNarratorRender === 'function') {
             globalThis._rpgFinalizeCyoaNarratorRender();
         }
@@ -425,18 +348,22 @@ export async function applyRepairedMessage(messageId, repairedText) {
 }
 
 /**
- * Unified dispatcher for Decoupled Stage 2 CYOA generation.
- * Handles deduplication and streaming synchronization between CHARACTER_MESSAGE_RENDERED and GENERATION_ENDED.
+ * Unified dispatcher and safety net for CYOA choices.
+ * Evaluates settled narrator messages:
+ * 1. If choices exist and character is healthy -> complete (no-op).
+ * 2. If choices are in plain markdown -> local auto-repair to buttons.
+ * 3. If choices are missing or character is downed -> triggers generateCyoaChoices.
  *
  * @param {object} params
  * @param {number} [params.messageId=-1]
  * @param {string} [params.triggerSource='unknown']
- * @param {() => object} params.getSettings
- * @param {() => boolean} params.isPbtaActive
+ * @param {() => object} [params.getSettings]
+ * @param {() => boolean} [params.isPbtaActive]
  * @param {(type: string, message: string, title?: string) => void} [params.showToast]
+ * @param {boolean} [params.force=false]
  * @returns {Promise<boolean>}
  */
-export async function triggerDecoupledCyoaForMessage({
+export async function coordinateCyoaForMessage({
     messageId = -1,
     triggerSource = 'unknown',
     getSettings,
@@ -456,13 +383,12 @@ export async function triggerDecoupledCyoaForMessage({
     const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
     if (!force && cyoaMode === 'disabled') return false;
 
-    // If triggered by message rendering while narrator is still actively streaming,
-    // defer execution to GENERATION_ENDED when narrative prose is complete.
+    // Defer if narrator is still actively streaming
     if (triggerSource === 'CHARACTER_MESSAGE_RENDERED' && isNarratorGenerating()) {
         return false;
     }
 
-    if (isStage2CyoaRunning()) {
+    if (isCyoaGenerating()) {
         lockSendButtonUI();
         if (messageId >= 0) insertCyoaLoadingIndicator(messageId);
         return false;
@@ -473,11 +399,9 @@ export async function triggerDecoupledCyoaForMessage({
     if (!Array.isArray(chat) || chat.length === 0) return false;
 
     const idx = messageId >= 0 ? messageId : chat.length - 1;
-    // Never trigger Stage 2 CYOA on Message 0 (greeting) or unstarted/clean chats
     if (idx < 0 || (!force && (idx === 0 || !isAdventureActive()))) return false;
 
     const msg = chat[idx];
-    // Reject system messages, user messages, tool-call messages (e.g. CreateAreaMap) and intermediate smallsys frames
     if (!msg || msg.is_user || msg.is_system || msg.extra?.isSmallSys || msg.extra?.tool_invocations || (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)) {
         return false;
     }
@@ -488,7 +412,7 @@ export async function triggerDecoupledCyoaForMessage({
     if (!force && !isCyoaExpected(rpgSettings, pbtaActive)) return false;
 
     const currentSwipeId = msg.swipe_id ?? 0;
-    if (!force && _lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
+    if (!force && _lastAttemptedMessageId === idx && _lastAttemptedSwipeId === currentSwipeId) {
         return false;
     }
 
@@ -497,14 +421,11 @@ export async function triggerDecoupledCyoaForMessage({
         const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
         const isDowned = isProtagonistDowned(freshMemo, pbtaActive);
         if (!isDowned) {
-            // Choices present and character is alive: complete, no-op!
             return false;
         }
-        // If downed, verify choices reflect crisis/death saves
         if (/Death Saving Throw|Last Breath|Cling to life|Succumb|whisper a final plea|faint plea/i.test(msg.mes)) {
             return false;
         }
-        // Fall through to regenerate downed choices
     }
 
     // 2. Local Regex Auto-Repair Path: Check if plain numbered markdown choices can be converted to buttons
@@ -520,15 +441,15 @@ export async function triggerDecoupledCyoaForMessage({
         }
     }
 
-    // 3. Fallback Repair Path: Choices were skipped or missing -> Trigger Stage 2 Choice Generator
-    _lastStage2AttemptedMessageId = idx;
-    _lastStage2AttemptedSwipeId = currentSwipeId;
+    // 3. Fallback Repair Path: Choices were skipped or missing -> Trigger Choice Generator
+    _lastAttemptedMessageId = idx;
+    _lastAttemptedSwipeId = currentSwipeId;
 
-    console.log(`[MultiHog Companion] Triggering CYOA Stage 2 fallback repair via ${triggerSource} for message:`, idx);
+    console.log(`[MultiHog Companion] Triggering CYOA choice generator via ${triggerSource} for message:`, idx);
 
     try {
         const text = String(msg.mes || '');
-        const ok = await runDecoupledCyoaStage2({
+        const ok = await generateCyoaChoices({
             messageId: idx,
             narrative: text,
             isPbta: pbtaActive,
@@ -540,27 +461,29 @@ export async function triggerDecoupledCyoaForMessage({
             showToast,
         });
         if (!ok) {
-            _lastStage2AttemptedMessageId = -1;
-            _lastStage2AttemptedSwipeId = -1;
+            _lastAttemptedMessageId = -1;
+            _lastAttemptedSwipeId = -1;
         }
         return ok;
     } catch (err) {
-        _lastStage2AttemptedMessageId = -1;
-        _lastStage2AttemptedSwipeId = -1;
-        console.error('[MultiHog Companion] Decoupled CYOA Stage 2 error:', err);
+        _lastAttemptedMessageId = -1;
+        _lastAttemptedSwipeId = -1;
+        console.error('[MultiHog Companion] CYOA choice generator error:', err);
         return false;
     }
 }
 
 /**
- * Registers CYOA Guardian event hooks.
+ * Registers CYOA Safety Net event hooks with catalog anchor tags.
  *
  * @param {object} deps
  * @param {() => object} deps.getSettings
  * @param {() => boolean} deps.isPbtaActive
  * @param {(type: string, message: string, title?: string) => void} deps.showToast
+ * @param {object} [deps.eventSource]
+ * @param {object} [deps.event_types]
  */
-export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSource: esParam, event_types: etParam }) {
+export function initCyoaSafetyNet({ getSettings, isPbtaActive, showToast, eventSource: esParam, event_types: etParam }) {
     if (typeof getSettings === 'function') {
         _getSettings = getSettings;
     }
@@ -568,47 +491,42 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     const et = etParam || (typeof event_types !== 'undefined' ? event_types : null) || (typeof window !== 'undefined' ? window.event_types : null) || globalThis.event_types;
     if (!es || !et) return;
 
-    // [CATALOG: EVT-09] See LISTENERS.md — CYOA Stage 2 Abort Guard (GENERATION_STARTED)
+    // [CATALOG: EVT-09] See LISTENERS.md — CYOA Generation Guard (GENERATION_STARTED)
     if (et.GENERATION_STARTED) {
-        es.on(et.GENERATION_STARTED, (...args) => {
-            const dryRun = args.length ? args[args.length - 1] : false;
-            if (dryRun === true) {
-                return;
-            }
+        es.on(et.GENERATION_STARTED, () => {
             _wasGenerationStopped = false;
-            _lastStage2AttemptedMessageId = -1;
-            _lastStage2AttemptedSwipeId = -1;
-            // Abort any in-flight Stage 2 pass when a new live generation starts (especially swipes)
-            abortStage2Cyoa('new_generation_started');
+            _lastAttemptedMessageId = -1;
+            _lastAttemptedSwipeId = -1;
+            abortCyoaGeneration('generation_started');
         });
     }
 
-    // [CATALOG: EVT-10] See LISTENERS.md — CYOA Stop Button Guard (GENERATION_STOPPED)
+    // [CATALOG: EVT-10] See LISTENERS.md — CYOA Stop Guard (GENERATION_STOPPED)
     if (et.GENERATION_STOPPED) {
         es.on(et.GENERATION_STOPPED, () => {
             _wasGenerationStopped = true;
-            _pendingSteeringReminder = null;
-            abortStage2Cyoa('generation_stopped');
+            _lastAttemptedMessageId = -1;
+            _lastAttemptedSwipeId = -1;
+            abortCyoaGeneration('generation_stopped');
         });
     }
 
-    // [CATALOG: EVT-05] See LISTENERS.md — CYOA Chat Change State Reset (CHAT_CHANGED)
+    // [CATALOG: EVT-05] See LISTENERS.md — CYOA State Reset (CHAT_CHANGED)
     if (et.CHAT_CHANGED) {
         es.on(et.CHAT_CHANGED, () => {
-            _retryTracker = { mesId: -1, count: 0 };
-            _pendingSteeringReminder = null;
-            _lastStage2AttemptedMessageId = -1;
-            _lastStage2AttemptedSwipeId = -1;
-            abortStage2Cyoa('chat_changed');
+            _wasGenerationStopped = false;
+            _lastAttemptedMessageId = -1;
+            _lastAttemptedSwipeId = -1;
+            abortCyoaGeneration('chat_changed');
         });
     }
 
     // [CATALOG: DOM-06] See LISTENERS.md — Native Capture Phase Click Interceptor for Stop Buttons
     if (typeof document !== 'undefined') {
         const handleStopClick = () => {
-            if (isStage2CyoaRunning()) {
-                console.log('[MultiHog Companion] User clicked Stop. Aborting Decoupled CYOA.');
-                abortStage2Cyoa('user_stop_clicked');
+            if (isCyoaGenerating()) {
+                console.log('[MultiHog Companion] User clicked Stop. Aborting CYOA generation.');
+                abortCyoaGeneration('user_stop_clicked');
             }
         };
         document.addEventListener('click', (e) => {
@@ -619,7 +537,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         }, true);
     }
 
-    // [CATALOG: EVT-12] See LISTENERS.md — CYOA Prompt Sanitizer (CHAT_COMPLETION_PROMPT_READY)
+    // [CATALOG: EVT-12] See LISTENERS.md — CYOA Outgoing Prompt Sanitizer (CHAT_COMPLETION_PROMPT_READY)
     if (et.CHAT_COMPLETION_PROMPT_READY) {
         es.on(et.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
             const s = getSettings();
@@ -627,16 +545,16 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
             if (cyoaMode === 'disabled') return;
             if (Array.isArray(eventData?.chat)) {
                 stripCyoaFromOutgoingChat(eventData.chat, {
-                    stripActiveCyoa: cyoaMode === 'always_decoupled',
+                    stripActiveCyoa: cyoaMode === 'two_stage' || cyoaMode === 'always_decoupled',
                 });
             }
         });
     }
 
-    // [CATALOG: EVT-06] See LISTENERS.md — Decoupled CYOA Stage 2 Dispatcher (CHARACTER_MESSAGE_RENDERED)
+    // [CATALOG: EVT-06] See LISTENERS.md — CYOA Safety Net & Auto-Repair Dispatcher (CHARACTER_MESSAGE_RENDERED)
     if (et.CHARACTER_MESSAGE_RENDERED) {
         es.on(et.CHARACTER_MESSAGE_RENDERED, (messageId) => {
-            void triggerDecoupledCyoaForMessage({
+            void coordinateCyoaForMessage({
                 messageId,
                 triggerSource: 'CHARACTER_MESSAGE_RENDERED',
                 getSettings,
@@ -646,10 +564,10 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         });
     }
 
-    // [CATALOG: EVT-11] See LISTENERS.md — Decoupled CYOA Stage 2 Completion Trigger (GENERATION_ENDED)
+    // [CATALOG: EVT-11] See LISTENERS.md — CYOA Fallback Completion Trigger (GENERATION_ENDED)
     if (et.GENERATION_ENDED) {
         es.on(et.GENERATION_ENDED, async () => {
-            await triggerDecoupledCyoaForMessage({
+            await coordinateCyoaForMessage({
                 triggerSource: 'GENERATION_ENDED',
                 getSettings,
                 isPbtaActive,
@@ -660,8 +578,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
 }
 
 /**
- * Regenerates CYOA choices for a given message using Stage 2 without touching the narrative prose.
- * Supports both options object { messageId, isPbtaActive, showToast } and positional arguments (messageId, isPbtaActive, showToast).
+ * Regenerates CYOA choices for a given message without touching the narrative prose.
  *
  * @param {object|number} [optsOrMessageId={}]
  * @param {boolean|Function} [maybeIsPbta]
@@ -701,11 +618,9 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
         ? isPbtaActive()
         : (isPbtaActive !== undefined ? Boolean(isPbtaActive) : (typeof isPbtAActive === 'function' ? isPbtAActive() : false));
 
-    // Reset loop guard so manual re-roll on the same message is permitted
-    _lastStage2AttemptedMessageId = -1;
-    _lastStage2AttemptedSwipeId = -1;
+    _lastAttemptedMessageId = -1;
+    _lastAttemptedSwipeId = -1;
 
-    // Strip any existing choices from this message before re-rolling
     const cleanNarrative = String(msg.mes || '')
         .replace(/<choices\b[^>]*>[\s\S]*?<\/choices\s*>/gi, '')
         .replace(/<div\b[^>]*\b(?:rt-cyoa-choices|mhc-cyoa-loading-badge)\b[^>]*>[\s\S]*?<\/div\s*>/gi, '')
@@ -718,8 +633,7 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
 
     if (showToast) showToast('info', 'Formulating fresh choices... 🎲', 'CYOA Engine');
 
-    // Route through the decoupled Stage 2 coordinator
-    return await triggerDecoupledCyoaForMessage({
+    return await coordinateCyoaForMessage({
         messageId: idx,
         triggerSource: 'SLASH_COMMAND',
         getSettings: customGetSettings || _getSettings,
@@ -731,8 +645,7 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
 
 /**
  * Repairs existing plain-text markdown choices into buttons, or generates
- * fresh choices via Stage 2 if no choices exist at all.
- * Supports both options object { messageId, isPbtaActive, showToast } and positional arguments (messageId, isPbtaActive, showToast).
+ * fresh choices if no choices exist at all.
  *
  * @param {object|number} [optsOrMessageId={}]
  * @param {boolean|Function} [maybeIsPbta]
@@ -768,7 +681,6 @@ export async function repairOrGenerateChoicesForMessage(optsOrMessageId = {}, ma
         return false;
     }
 
-    // 1. If plain markdown choices exist, wrap them instantly
     const repaired = tryRepairMarkdownChoices(msg.mes);
     if (repaired) {
         const ok = await applyRepairedMessage(idx, repaired);
@@ -778,7 +690,6 @@ export async function repairOrGenerateChoicesForMessage(optsOrMessageId = {}, ma
         return ok;
     }
 
-    // 2. If no choices exist at all, trigger Stage 2 to generate them!
     return await regenerateCyoaChoicesForMessage({
         messageId: idx,
         isPbtaActive,
@@ -808,7 +719,6 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { ge
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoaretry',
         callback: async () => {
-            // Backward-compatible alias for /cyoagen
             const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
             return ok ? 'Regenerated CYOA choices.' : 'Failed to regenerate CYOA choices.';
         },
@@ -821,6 +731,6 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { ge
             const ok = await repairOrGenerateChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
             return ok ? 'Successfully repaired/generated CYOA choices.' : 'Could not repair/generate CYOA choices.';
         },
-        helpString: '<div>Converts plain-text numbered choices into buttons, or generates them via Stage 2 if missing.</div>',
+        helpString: '<div>Converts plain-text numbered choices into buttons, or generates them via choice generator if missing.</div>',
     }));
 }

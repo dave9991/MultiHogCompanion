@@ -65,15 +65,22 @@ import {
     getRelationshipSyncStatus,
 } from './relationship-narrative-sync.js';
 import {
-    initCyoaGuardian,
-    interceptCyoaSteering,
+    initCyoaSafetyNet,
     stripCyoaFromOutgoingChat,
     registerCyoaSlashCommands,
     regenerateCyoaChoicesForMessage,
     repairOrGenerateChoicesForMessage,
     tryRepairMarkdownChoices,
     applyRepairedMessage,
-} from './cyoa-guardian.js';
+} from './cyoa-safety-net.js';
+import {
+    generateCyoaChoices,
+    buildCyoaPrompt,
+    extractChoicesMarkup,
+    isProtagonistDowned,
+    isCyoaGenerating,
+    abortCyoaGeneration,
+} from './cyoa-generator.js';
 import {
     initAdventureChatRenameGuard,
     isAdventureActive,
@@ -1761,13 +1768,14 @@ async function initUI() {
 
         await initRelationshipSyncUI();
 
-        // ── 7. Decoupled CYOA & Safety Net Controls ──
-        const cyoaEnableCb = $('#mhc_cyoa_auto_retry_enable');
+        // ── 7. CYOA Safety Net & Choice Engine Controls ──
+        const cyoaEnableCb = $('#mhc_cyoa_enable, #mhc_cyoa_auto_retry_enable');
         const cyoaModeSelect = $('#mhc_cyoa_mode_select');
         const isCyoaEnabled = current.enableDecoupledCyoa !== false && current.cyoaMode !== 'disabled';
         cyoaEnableCb.prop('checked', isCyoaEnabled);
 
-        const activeMode = current.cyoaMode || (current.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
+        let activeMode = current.cyoaMode || (current.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
+        if (activeMode === 'always_decoupled') activeMode = 'two_stage';
         if (cyoaModeSelect.length) {
             cyoaModeSelect.val(activeMode === 'disabled' ? 'safety_net' : activeMode);
             cyoaModeSelect.prop('disabled', !isCyoaEnabled);
@@ -1860,19 +1868,16 @@ function buildPbtA2d6Block(lineCount = 12) {
 function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
     if (!Array.isArray(chat)) return;
 
-    // 1. Decoupled Two-Stage CYOA / CYOA Guardian handling
+    // 1. CYOA Safety Net / Standalone Prompt Sanitization
     const s = getSettings();
     const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
-    if (cyoaMode === 'always_decoupled') {
+    if (cyoaMode === 'two_stage' || cyoaMode === 'always_decoupled') {
         // Strip <CYOA_mode> instructions & past choice blocks so narrator generates pure prose
         stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: true });
     } else if (cyoaMode === 'safety_net') {
         // Safety net mode: Keep active <CYOA_mode> in prompt for single-stage generation,
         // but strip historical choices & markdown "What do you do?" lists from older context.
         stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: false });
-    } else {
-        // Legacy CYOA Guardian: Inject steering reminder if armed
-        interceptCyoaSteering(chat);
     }
 
     // 2. PbtA RNG Queue replacement
@@ -2170,7 +2175,7 @@ jQuery(async () => {
 
     // 4. Register Event Listeners
     initAdventureChatRenameGuard();
-    initCyoaGuardian({ getSettings, isPbtaActive: isPbtAActive, showToast, eventSource, event_types });
+    initCyoaSafetyNet({ getSettings, isPbtaActive: isPbtAActive, showToast, eventSource, event_types });
 
     // [CATALOG: EVT-01]
     if (event_types.APP_READY) {

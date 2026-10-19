@@ -12,6 +12,7 @@ import {
     extractContextForPlaceholder,
     buildQueryFromPlaceholderContext,
     resolveDossierNamePlaceholders,
+    rollNameRagCandidate,
 } from '../namerag-hooks.js';
 import { buildConciergeSystemPrompt, buildConciergeBuilderPrompt } from '../concierge-prompt.js';
 
@@ -295,5 +296,13 @@ const offlineResolved = await resolveDossierNamePlaceholders(offlineBlueprint, {
 assert.ok(!offlineResolved.includes('[[NAME:'), 'Offline fallback must resolve placeholders completely');
 assert.ok(/name:\s+[A-Za-z]+/.test(offlineResolved), 'A clean replacement name must be assigned');
 console.log('✓ Offline fallback cleanly populates names without leaving placeholder tokens');
+
+// 10. Test rollNameRagCandidate timeout & fallback source tagging
+console.log('Testing rollNameRagCandidate timeout and fallback source tagging...');
+const fallbackRoll = await rollNameRagCandidate('fantasy', '', { timeoutMs: 50 });
+assert.ok(fallbackRoll.name, 'Fallback roll must return a name');
+assert.strictEqual(fallbackRoll.source, 'offline_fallback', 'Should be tagged with offline_fallback source');
+assert.ok(fallbackRoll.error, 'Should capture error message for toast notification');
+console.log('✓ rollNameRagCandidate tags fallback source and error message cleanly');
 
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

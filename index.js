@@ -1067,6 +1067,7 @@ export function setupImagineInterceptor() {
     if (imagineCmd && typeof imagineCmd.callback === 'function') {
         if (imagineCmd._mhcIntercepted) return;
 
+        // [CATALOG: ADR-MP-02] See MONKEYPATCHES.md — /imagine Slash Command Callback Wrapping
         const originalCallback = imagineCmd.callback;
 
         imagineCmd.callback = async function (args, trigger) {
@@ -1850,6 +1851,7 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
     }
 }
 
+// [CATALOG: ADR-MP-03]
 // Register the interceptor on globalThis so SillyTavern can call it.
 globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
 
@@ -1873,6 +1875,111 @@ function updateRulesetBadge() {
 
     if (summary) {
         summary.innerHTML = formatted.summaryHtml;
+    }
+}
+
+let _chatChangedTimer = null;
+let _activeChatChangedToken = 0;
+let _isSettingsSyncActive = false;
+let _settingsUpdatedTimer = null;
+
+/**
+ * Sequential coordinator for CHAT_CHANGED.
+ * Replaces the arbitrary staggered setTimeout ladder with a deterministic async lifecycle.
+ *
+ * @param {string} targetChatId
+ * @param {number} token
+ */
+async function runChatChangedCoordinator(targetChatId, token) {
+    try {
+        // 1. Check projection integrity (quarantine damaged partitions if any)
+        const integrity = await checkTrackerProjectionIntegrity();
+        if (token !== _activeChatChangedToken) return;
+
+        if (!integrity.healthy) {
+            renderTrackerQuarantineBanner(integrity);
+            updateRulesetBadge();
+            return;
+        }
+
+        // 2. Ensure ruleset consistency (cleansing D&D stockPrompts vs hydrating PbtA)
+        await ensureActiveChatRulesetConsistency();
+        if (token !== _activeChatChangedToken) return;
+
+        // 3. Synchronize live persona and portrait to current chat
+        await runSync('CHAT_CHANGED');
+        if (token !== _activeChatChangedToken) return;
+
+        // 4. Synchronize UI badges & Lorebook status
+        updateRulesetBadge();
+        updateLorebookSyncUI();
+
+        // 5. Persistence check & background syncs
+        if (await checkHistoryPersistenceBlocked()) {
+            updateRelationshipSyncUI();
+            return;
+        }
+        if (token !== _activeChatChangedToken) return;
+
+        const s = getSettings();
+        const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
+        await syncNameRagAdhocSysprompt(adhocActive);
+        if (token !== _activeChatChangedToken) return;
+
+        updateRelationshipSyncUI();
+        if (isAdventureActive()) {
+            scanAndInitUnsyncedNpcs().then(() => {
+                if (token === _activeChatChangedToken) {
+                    updateRelationshipSyncUI();
+                }
+            });
+        }
+    } catch (err) {
+        console.error('[MultiHog Companion] Error during chat changed coordinator:', err);
+    }
+}
+
+/**
+ * Sequential coordinator for SETTINGS_UPDATED.
+ * Protects against infinite re-entrancy loops.
+ */
+async function runSettingsUpdatedCoordinator() {
+    if (_isSettingsSyncActive) return;
+    _isSettingsSyncActive = true;
+    try {
+        await ensureActiveChatRulesetConsistency();
+        updateRulesetBadge();
+        updateLorebookSyncUI();
+        updateRelationshipSyncUI();
+    } catch (err) {
+        console.error('[MultiHog Companion] Error during settings updated coordinator:', err);
+    } finally {
+        _isSettingsSyncActive = false;
+    }
+}
+
+/**
+ * Consolidated startup routine for INITIAL_LOAD.
+ * Replaces the initial 1000ms-1400ms startup ladder with a single deterministic sequence.
+ */
+async function runInitialLoadCoordinator() {
+    const activeChatId = getActiveChatId();
+    logRulesetEvent('INITIAL_LOAD', {
+        activeChatId,
+        isPbta: isPbtAActive(activeChatId),
+    });
+
+    try {
+        const s = getSettings();
+        const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
+        await syncNameRagAdhocSysprompt(adhocActive);
+        await ensureActiveChatRulesetConsistency();
+        updateRulesetBadge();
+        updateLorebookSyncUI();
+        updateRelationshipSyncUI();
+        await runSync('INITIAL_LOAD');
+    } catch (err) {
+        console.error('[MultiHog Companion] Error during initial load coordinator:', err);
     }
 }
 
@@ -2003,17 +2110,17 @@ jQuery(async () => {
     initAdventureChatRenameGuard();
     initCyoaGuardian({ getSettings, isPbtaActive: isPbtAActive, showToast, eventSource, event_types });
 
+    // [CATALOG: EVT-01]
     if (event_types.APP_READY) {
         eventSource.on(event_types.APP_READY, setupImagineInterceptor);
     }
     setupMultiHogRollHooks(() => {
         const s = getSettings();
         return s.enableNameRag !== false && s.nameRagEnhanceMultiHog !== false;
-    });
+    }, { showToast });
 
     // Pre-flight sanitizer for MultiHog Character Creation and Instant Action
-    $(document).off('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn');
-    $(document).on('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn', async function () {
+    const runPreflightSanitizer = async function () {
         const activeChatId = getActiveChatId();
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
         const s = ctx?.extensionSettings?.rpg_tracker;
@@ -2029,53 +2136,53 @@ jQuery(async () => {
                 : '') || s?.characterCreatorDraft?.name || '';
             sanitizeCharacterStockPrompt(s.stockPrompts, inputVal);
         }
+    };
+
+    $(document).off('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn');
+    // [CATALOG: DOM-01a]
+    $(document).on('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn', runPreflightSanitizer);
+
+    // Support keyboard submission (Enter key) on name input fields
+    $(document).off('keydown.mhc_quickstart_sanitizer', '#rt-quickstart-name, #rt-cr-name');
+    // [CATALOG: DOM-01b]
+    $(document).on('keydown.mhc_quickstart_sanitizer', '#rt-quickstart-name, #rt-cr-name', function (e) {
+        if (e.key === 'Enter') {
+            void runPreflightSanitizer();
+        }
     });
 
-
+    let _chatRenamedTimer = null;
+    // [CATALOG: EVT-03]
     if (event_types.CHAT_RENAMED) {
-        eventSource.on(event_types.CHAT_RENAMED, async (detail) => {
+        eventSource.on(event_types.CHAT_RENAMED, (detail) => {
             const s = getSettings();
             if (s.enableLorebookSync && s.autoSyncOnRename) {
-                setTimeout(async () => {
+                if (_chatRenamedTimer) clearTimeout(_chatRenamedTimer);
+                _chatRenamedTimer = setTimeout(async () => {
+                    _chatRenamedTimer = null;
                     await syncCampaignLorebooks({ isAuto: true });
                     await updateLorebookSyncUI();
-                }, 200);
+                }, 150);
             }
         });
     }
+    // [CATALOG: EVT-04]
     eventSource.on(event_types.CHAT_CHANGED, () => {
-        logRulesetEvent('CHAT_CHANGED', { activeChatId: getActiveChatId() });
-        scheduleSync('CHAT_CHANGED', 500);
+        const activeChatId = getActiveChatId();
+        logRulesetEvent('CHAT_CHANGED', { activeChatId });
         if (typeof refreshConciergeActiveContext === 'function') {
             void refreshConciergeActiveContext().catch(() => {});
         }
-        setTimeout(async () => {
-            const integrity = await checkTrackerProjectionIntegrity();
 
-            if (!integrity.healthy) {
-                renderTrackerQuarantineBanner(integrity);
-                updateRulesetBadge();
-                return;
-            }
-            await ensureActiveChatRulesetConsistency();
-            updateRulesetBadge();
-        }, 550);
-        setTimeout(updateRulesetBadge, 600);
-        setTimeout(updateLorebookSyncUI, 650);
-        setTimeout(async () => {
-            if (await checkHistoryPersistenceBlocked()) return;
-            const s = getSettings();
-            const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
-            await syncNameRagAdhocSysprompt(adhocActive);
-        }, 700);
-        setTimeout(async () => {
-            updateRelationshipSyncUI();
-            if (await checkHistoryPersistenceBlocked()) return;
-            if (isAdventureActive()) {
-                scanAndInitUnsyncedNpcs().then(updateRelationshipSyncUI);
-            }
-        }, 800);
+        const token = ++_activeChatChangedToken;
+        if (_chatChangedTimer) clearTimeout(_chatChangedTimer);
+        _chatChangedTimer = setTimeout(() => {
+            _chatChangedTimer = null;
+            void runChatChangedCoordinator(activeChatId, token);
+        }, 500);
     });
+    // [CATALOG: EVT-07]
+    // Canonical assistant turn listener: executes once the message is committed to DOM
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
         if (!isAdventureActive()) return;
         scheduleSync('CHARACTER_MESSAGE_RENDERED', 400);
@@ -2084,49 +2191,28 @@ jQuery(async () => {
             updateRelationshipSyncUI();
         }, 600);
     });
-    eventSource.on(event_types.MESSAGE_RECEIVED, () => {
-        if (!isAdventureActive()) return;
-        scheduleSync('MESSAGE_RECEIVED', 400);
-        setTimeout(async () => {
-            await checkAndSyncTierCrossovers();
-            updateRelationshipSyncUI();
-        }, 600);
-    });
+    // [CATALOG: EVT-08]
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
         if (isPersistingPbtaChatState()) {
             clearPersistingPbtaChatState();
             return;
         }
+        if (_isSettingsSyncActive) return;
+
         logRulesetEvent('SETTINGS_UPDATED', { activeChatId: getActiveChatId() });
         scheduleSync('SETTINGS_UPDATED', 600);
-        setTimeout(async () => {
-            await ensureActiveChatRulesetConsistency();
-            updateRulesetBadge();
-        }, 650);
-        setTimeout(updateRulesetBadge, 700);
-        setTimeout(updateLorebookSyncUI, 750);
-        setTimeout(() => {
-            updateRelationshipSyncUI();
-        }, 800);
+
+        if (_settingsUpdatedTimer) clearTimeout(_settingsUpdatedTimer);
+        _settingsUpdatedTimer = setTimeout(() => {
+            _settingsUpdatedTimer = null;
+            void runSettingsUpdatedCoordinator();
+        }, 600);
     });
 
-    // Initial check on load
-    logRulesetEvent('INITIAL_LOAD', {
-        activeChatId: getActiveChatId(),
-        isPbta: isPbtAActive(getActiveChatId()),
-    });
-    scheduleSync('INITIAL_LOAD', 1000);
-    setTimeout(async () => {
-        const s = getSettings();
-
-        const adhocActive = s.enableNameRag !== false && s.nameRagAdhocSysprompt !== false;
-        await syncNameRagAdhocSysprompt(adhocActive);
-        await ensureActiveChatRulesetConsistency();
-        updateRulesetBadge();
-    }, 1100);
-    setTimeout(updateRulesetBadge, 1200);
-    setTimeout(updateLorebookSyncUI, 1300);
-    setTimeout(updateRelationshipSyncUI, 1400);
+    // Initial check on load: single coordinated sequence after initial UI settle
+    setTimeout(() => {
+        void runInitialLoadCoordinator();
+    }, 800);
 
     console.log('[MultiHog Companion] Extension loaded successfully.');
 });

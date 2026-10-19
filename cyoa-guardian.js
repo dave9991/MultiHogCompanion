@@ -355,6 +355,94 @@ export async function applyRepairedMessage(messageId, repairedText) {
 }
 
 /**
+ * Unified dispatcher for Decoupled Stage 2 CYOA generation.
+ * Handles deduplication and streaming synchronization between CHARACTER_MESSAGE_RENDERED and GENERATION_ENDED.
+ *
+ * @param {object} params
+ * @param {number} [params.messageId=-1]
+ * @param {string} [params.triggerSource='unknown']
+ * @param {() => object} params.getSettings
+ * @param {() => boolean} params.isPbtaActive
+ * @param {(type: string, message: string, title?: string) => void} [params.showToast]
+ * @returns {Promise<boolean>}
+ */
+export async function triggerDecoupledCyoaForMessage({
+    messageId = -1,
+    triggerSource = 'unknown',
+    getSettings,
+    isPbtaActive,
+    showToast,
+} = {}) {
+    if (_wasGenerationStopped) return false;
+    const s = typeof getSettings === 'function' ? getSettings() : {};
+    if (s.enableDecoupledCyoa === false) return false;
+
+    // If triggered by message rendering while narrator is still actively streaming,
+    // defer execution to GENERATION_ENDED when narrative prose is complete.
+    if (triggerSource === 'CHARACTER_MESSAGE_RENDERED' && isNarratorGenerating()) {
+        return false;
+    }
+
+    if (isStage2CyoaRunning()) {
+        lockSendButtonUI();
+        if (messageId >= 0) insertCyoaLoadingIndicator(messageId);
+        return false;
+    }
+
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const chat = ctx?.chat;
+    if (!Array.isArray(chat) || chat.length === 0) return false;
+
+    const idx = messageId >= 0 ? messageId : chat.length - 1;
+    // Never trigger Stage 2 CYOA on Message 0 (greeting) or unstarted/clean chats
+    if (idx <= 0 || !isAdventureActive()) return false;
+
+    const msg = chat[idx];
+    if (!msg || msg.is_user || msg.is_system) return false;
+
+    const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+    const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
+
+    if (!isCyoaExpected(rpgSettings, pbtaActive)) return false;
+    if (hasCyoaChoices(msg.mes)) return false;
+
+    const currentSwipeId = msg.swipe_id ?? 0;
+    if (_lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
+        return false;
+    }
+
+    _lastStage2AttemptedMessageId = idx;
+    _lastStage2AttemptedSwipeId = currentSwipeId;
+
+    console.log(`[MultiHog Companion] Triggering Decoupled CYOA Stage 2 via ${triggerSource} for message:`, idx);
+
+    try {
+        const text = String(msg.mes || '');
+        const ok = await runDecoupledCyoaStage2({
+            messageId: idx,
+            narrative: text,
+            isPbta: pbtaActive,
+            rpgSettings: {
+                ...rpgSettings,
+                cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
+                enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
+            },
+            showToast,
+        });
+        if (!ok) {
+            _lastStage2AttemptedMessageId = -1;
+            _lastStage2AttemptedSwipeId = -1;
+        }
+        return ok;
+    } catch (err) {
+        _lastStage2AttemptedMessageId = -1;
+        _lastStage2AttemptedSwipeId = -1;
+        console.error('[MultiHog Companion] Decoupled CYOA Stage 2 error:', err);
+        return false;
+    }
+}
+
+/**
  * Registers CYOA Guardian event hooks.
  *
  * @param {object} deps
@@ -367,6 +455,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     const et = etParam || (typeof event_types !== 'undefined' ? event_types : null) || (typeof window !== 'undefined' ? window.event_types : null) || globalThis.event_types;
     if (!es || !et) return;
 
+    // [CATALOG: EVT-09] See LISTENERS.md — CYOA Stage 2 Abort Guard (GENERATION_STARTED)
     if (et.GENERATION_STARTED) {
         es.on(et.GENERATION_STARTED, (...args) => {
             const dryRun = args.length ? args[args.length - 1] : false;
@@ -381,6 +470,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         });
     }
 
+    // [CATALOG: EVT-10] See LISTENERS.md — CYOA Stop Button Guard (GENERATION_STOPPED)
     if (et.GENERATION_STOPPED) {
         es.on(et.GENERATION_STOPPED, () => {
             _wasGenerationStopped = true;
@@ -389,6 +479,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         });
     }
 
+    // [CATALOG: EVT-05] See LISTENERS.md — CYOA Chat Change State Reset (CHAT_CHANGED)
     if (et.CHAT_CHANGED) {
         es.on(et.CHAT_CHANGED, () => {
             _retryTracker = { mesId: -1, count: 0 };
@@ -399,7 +490,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         });
     }
 
-    // Bind document-level Stop button listener so clicking Stop square aborts Stage 2 immediately
+    // [CATALOG: DOM-06] See LISTENERS.md — Native Capture Phase Click Interceptor for Stop Buttons
     if (typeof document !== 'undefined') {
         const handleStopClick = () => {
             if (isStage2CyoaRunning()) {
@@ -415,7 +506,7 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         }, true);
     }
 
-    // Fail-safe prompt sanitization on CHAT_COMPLETION_PROMPT_READY
+    // [CATALOG: EVT-12] See LISTENERS.md — CYOA Prompt Sanitizer (CHAT_COMPLETION_PROMPT_READY)
     if (et.CHAT_COMPLETION_PROMPT_READY) {
         es.on(et.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
             const s = getSettings();
@@ -425,150 +516,28 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
         });
     }
 
-    // Show loading badge, lock send button, and launch Stage 2 in background the instant the narrator message renders
+    // [CATALOG: EVT-06] See LISTENERS.md — Decoupled CYOA Stage 2 Dispatcher (CHARACTER_MESSAGE_RENDERED)
     if (et.CHARACTER_MESSAGE_RENDERED) {
         es.on(et.CHARACTER_MESSAGE_RENDERED, (messageId) => {
-            const s = getSettings();
-            if (s.enableDecoupledCyoa === false) {
-                return;
-            }
-
-            if (isNarratorGenerating()) {
-                // Narrator is still actively generating/streaming.
-                // Do not launch Stage 2 prematurely with partial narrative text.
-                // GENERATION_ENDED will run Stage 2 with the complete narrative prose.
-                return;
-            }
-
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-            const chat = ctx?.chat;
-            if (!Array.isArray(chat) || chat.length === 0) return;
-
-            const idx = messageId >= 0 ? messageId : chat.length - 1;
-            // Never trigger Stage 2 CYOA generation on Message 0 (character card greeting) or unstarted chats
-            if (idx === 0 || !isAdventureActive()) {
-                return;
-            }
-            const msg = chat[idx];
-            if (!msg || msg.is_user || msg.is_system) {
-                return;
-            }
-
-            const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
-            const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
-
-            if (!isCyoaExpected(rpgSettings, pbtaActive)) {
-                return;
-            }
-            if (hasCyoaChoices(msg.mes)) {
-                return;
-            }
-
-            const currentSwipeId = msg.swipe_id ?? 0;
-            if (_lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
-                if (isStage2CyoaRunning()) {
-                    lockSendButtonUI();
-                    insertCyoaLoadingIndicator(idx);
-                }
-                return;
-            }
-
-            if (isStage2CyoaRunning()) {
-                lockSendButtonUI();
-                insertCyoaLoadingIndicator(idx);
-                return;
-            }
-
-            _lastStage2AttemptedMessageId = idx;
-            _lastStage2AttemptedSwipeId = currentSwipeId;
-
-            console.log('[MultiHog Companion] Character message rendered. Triggering Decoupled CYOA Stage 2 for message:', idx);
-
-            // Launch Stage 2 as an unawaited background task:
-            // It displays the indicator, waits for the State Tracker model pass, and then produces choices
-            const text = String(msg.mes || '');
-            runDecoupledCyoaStage2({
-                messageId: idx,
-                narrative: text,
-                isPbta: pbtaActive,
-                rpgSettings: {
-                    ...rpgSettings,
-                    cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
-                    enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
-                },
+            void triggerDecoupledCyoaForMessage({
+                messageId,
+                triggerSource: 'CHARACTER_MESSAGE_RENDERED',
+                getSettings,
+                isPbtaActive,
                 showToast,
-            }).then(ok => {
-                if (!ok) {
-                    _lastStage2AttemptedMessageId = -1;
-                    _lastStage2AttemptedSwipeId = -1;
-                }
-            }).catch(err => {
-                _lastStage2AttemptedMessageId = -1;
-                _lastStage2AttemptedSwipeId = -1;
-                console.error('[MultiHog Companion] Decoupled CYOA Stage 2 error:', err);
             });
         });
     }
 
+    // [CATALOG: EVT-11] See LISTENERS.md — Decoupled CYOA Stage 2 Completion Trigger (GENERATION_ENDED)
     if (et.GENERATION_ENDED) {
         es.on(et.GENERATION_ENDED, async () => {
-            if (_wasGenerationStopped) return;
-            if (isStage2CyoaRunning()) {
-                lockSendButtonUI();
-                return;
-            }
-
-            const s = getSettings();
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-            const chat = ctx?.chat;
-            if (!Array.isArray(chat) || chat.length === 0) return;
-
-            const lastIdx = chat.length - 1;
-            if (lastIdx <= 0 || !isAdventureActive()) return;
-            const lastMsg = chat[lastIdx];
-            if (!lastMsg || lastMsg.is_user || lastMsg.is_system) return;
-
-            const currentSwipeId = lastMsg.swipe_id ?? 0;
-            if (_lastStage2AttemptedMessageId === lastIdx && _lastStage2AttemptedSwipeId === currentSwipeId) {
-                return;
-            }
-
-            const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
-            const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
-
-            if (!isCyoaExpected(rpgSettings, pbtaActive)) {
-                return;
-            }
-
-            // ── DECOUPLED TWO-STAGE CYOA PATH (Fail-safe backup if not triggered by CHARACTER_MESSAGE_RENDERED) ──
-            if (s.enableDecoupledCyoa !== false) {
-                const text = String(lastMsg.mes || '');
-                // If message already has CYOA buttons (e.g. from previous edit), skip Stage 2
-                if (hasCyoaChoices(text)) {
-                    _retryTracker = { mesId: -1, count: 0 };
-                    return;
-                }
-
-                _lastStage2AttemptedMessageId = lastIdx;
-                _lastStage2AttemptedSwipeId = currentSwipeId;
-
-                const ok = await runDecoupledCyoaStage2({
-                    messageId: lastIdx,
-                    narrative: text,
-                    isPbta: pbtaActive,
-                    rpgSettings: {
-                        ...rpgSettings,
-                        cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
-                        enableFastPipeline: s?.enableFastPipeline !== false && rpgSettings?.enableFastPipeline !== false,
-                    },
-                    showToast,
-                });
-                if (!ok) {
-                    _lastStage2AttemptedMessageId = -1;
-                    _lastStage2AttemptedSwipeId = -1;
-                }
-                return;
-            }
+            await triggerDecoupledCyoaForMessage({
+                triggerSource: 'GENERATION_ENDED',
+                getSettings,
+                isPbtaActive,
+                showToast,
+            });
         });
     }
 }

@@ -75,6 +75,7 @@ export function extractNameFromBio(bio) {
  * @param {string} [targetName]
  * @returns {boolean} true if modified
  */
+// [CATALOG: ADR-MP-05] See MONKEYPATCHES.md — In-Memory Upstream Settings Cleansing (stockPrompts Mutation)
 export function sanitizeCharacterStockPrompt(stockPrompts, targetName = '') {
     if (!stockPrompts || typeof stockPrompts !== 'object') return false;
     let modified = false;

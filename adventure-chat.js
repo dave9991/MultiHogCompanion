@@ -458,16 +458,17 @@ export function initAdventureChatRenameGuard() {
         return;
     }
     _renameGuardInitialized = true;
-
     const register = typeof eventSource.makeFirst === 'function'
         ? eventSource.makeFirst.bind(eventSource)
         : eventSource.on.bind(eventSource);
 
+    // [CATALOG: EVT-02] See LISTENERS.md — Adventure Chat Rename Guard (makeFirst)
     register(event_types.CHAT_RENAMED, async (detail) => {
         const oldId = String(detail?.oldFileName || '').replace(/\.jsonl$/i, '').trim();
         const newId = String(detail?.newFileName || '').replace(/\.jsonl$/i, '').trim();
         if (!oldId || !newId) return;
 
+        // [CATALOG: ADR-MP-06] See MONKEYPATCHES.md — Cross-Tick Campaign Restart Coordination Flag
         const pending = typeof window !== 'undefined' ? window._mhcPendingFreshRestart : null;
         if (!pending) return;
 

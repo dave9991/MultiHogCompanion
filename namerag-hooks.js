@@ -46,18 +46,31 @@ export function buildGenreQuery(genre = 'fantasy', classHint = '') {
  * @param {string} [classHint]
  * @returns {Promise<{ name: string, vibe?: string }>}
  */
-export async function rollNameRagCandidate(genre = 'fantasy', classHint = '') {
+export async function rollNameRagCandidate(genre = 'fantasy', classHint = '', { timeoutMs = 4000 } = {}) {
     const query = buildGenreQuery(genre, classHint);
+    let errorOccurred = false;
+    let errorMessage = '';
+
     try {
-        const results = await searchNames({ query, limit: 6 });
+        const searchPromise = searchNames({ query, limit: 6 });
+        let timeoutHandle;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutHandle = setTimeout(() => reject(new Error('NameRAG query timed out')), timeoutMs);
+        });
+        const results = await Promise.race([searchPromise, timeoutPromise]);
+        clearTimeout(timeoutHandle);
+
         if (results && results.length > 0) {
             const picked = results[Math.floor(Math.random() * results.length)];
             return {
                 name: picked.name,
                 vibe: picked.vibe || picked.meaning || '',
+                source: 'namerag',
             };
         }
     } catch (err) {
+        errorOccurred = true;
+        errorMessage = err?.message || String(err);
         console.warn('[MultiHog Companion] rollNameRagCandidate failed, falling back:', err);
     }
 
@@ -65,11 +78,19 @@ export async function rollNameRagCandidate(genre = 'fantasy', classHint = '') {
     try {
         const mod = await import('../SillyTavern-MultihogDnDFramework/src/state/character-names.js');
         if (typeof mod?.pickGenreCharacterName === 'function') {
-            return { name: mod.pickGenreCharacterName(genre) };
+            return {
+                name: mod.pickGenreCharacterName(genre),
+                source: 'offline_fallback',
+                error: errorOccurred ? errorMessage : 'No results from NameRAG',
+            };
         }
     } catch (_) {}
 
-    return { name: 'Rowan Vance' };
+    return {
+        name: 'Rowan Vance',
+        source: 'static_fallback',
+        error: errorOccurred ? errorMessage : 'Fallback module unavailable',
+    };
 }
 
 /**
@@ -419,9 +440,12 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefreshOrCtx, maybeCt
  * Hooks MultiHog's Character Creator, Quick Start, and Onboarding roll buttons
  * to use NameRAG when enabled.
  * @param {() => boolean} isNameRagActive Check function returning whether NameRAG is enabled in Companion settings
+ * @param {object} [options]
+ * @param {(type: string, message: string, title?: string) => void} [options.showToast] Toast notification helper
  */
-export function setupMultiHogRollHooks(isNameRagActive) {
+export function setupMultiHogRollHooks(isNameRagActive, { showToast } = {}) {
     // 1. Quick Start Roll Name button (#rt-quickstart-roll-name)
+    // [CATALOG: DOM-02] [CATALOG: ADR-MP-04] See LISTENERS.md / MONKEYPATCHES.md — Quick Start Roll Name Hijack
     $(document).off('click.mhc_namerag_qs', '#rt-quickstart-roll-name');
     $(document).on('click.mhc_namerag_qs', '#rt-quickstart-roll-name', async function (e) {
         if (!isNameRagActive()) return; // Let MultiHog's native listener handle it
@@ -439,12 +463,21 @@ export function setupMultiHogRollHooks(isNameRagActive) {
             const candidate = await rollNameRagCandidate(genre);
             const input = root.find('#rt-quickstart-name');
             input.val(candidate.name).trigger('input');
+            if (candidate.source !== 'namerag' && typeof showToast === 'function') {
+                showToast('warning', 'NameRAG service unavailable; rolled standard name.', 'NameRAG Roll');
+            }
+        } catch (err) {
+            console.error('[MultiHog Companion] Quickstart roll error:', err);
+            if (typeof showToast === 'function') {
+                showToast('error', `NameRAG error: ${err.message || err}`, 'NameRAG Roll');
+            }
         } finally {
             btn.prop('disabled', false).html(origHtml);
         }
     });
 
     // 2. Character Creator Random Name button (#rt-cr-random-name)
+    // [CATALOG: DOM-03] [CATALOG: ADR-MP-04] See LISTENERS.md / MONKEYPATCHES.md — Character Creator Roll Name Hijack
     $(document).off('click.mhc_namerag_cr', '#rt-cr-random-name');
     $(document).on('click.mhc_namerag_cr', '#rt-cr-random-name', async function (e) {
         if (!isNameRagActive()) return;
@@ -462,12 +495,21 @@ export function setupMultiHogRollHooks(isNameRagActive) {
             const candidate = await rollNameRagCandidate(genre, classHint);
             const input = panel.find('#rt-cr-name');
             input.val(candidate.name).trigger('input');
+            if (candidate.source !== 'namerag' && typeof showToast === 'function') {
+                showToast('warning', 'NameRAG service unavailable; rolled standard name.', 'NameRAG Roll');
+            }
+        } catch (err) {
+            console.error('[MultiHog Companion] Character creator roll error:', err);
+            if (typeof showToast === 'function') {
+                showToast('error', `NameRAG error: ${err.message || err}`, 'NameRAG Roll');
+            }
         } finally {
             btn.prop('disabled', false).html(origHtml);
         }
     });
 
     // 3. Onboarding Roll Name button (#rt-ob-roll-name)
+    // [CATALOG: DOM-04] [CATALOG: ADR-MP-04] See LISTENERS.md / MONKEYPATCHES.md — Onboarding Roll Name Hijack
     $(document).off('click.mhc_namerag_ob', '#rt-ob-roll-name');
     $(document).on('click.mhc_namerag_ob', '#rt-ob-roll-name', async function (e) {
         if (!isNameRagActive()) return;
@@ -484,13 +526,21 @@ export function setupMultiHogRollHooks(isNameRagActive) {
             const candidate = await rollNameRagCandidate(genre);
             const input = container.find('#rt-ob-rolled-name, #rt-onboarding-name');
             input.val(candidate.name).trigger('input');
+            if (candidate.source !== 'namerag' && typeof showToast === 'function') {
+                showToast('warning', 'NameRAG service unavailable; rolled standard name.', 'NameRAG Roll');
+            }
+        } catch (err) {
+            console.error('[MultiHog Companion] Onboarding roll error:', err);
+            if (typeof showToast === 'function') {
+                showToast('error', `NameRAG error: ${err.message || err}`, 'NameRAG Roll');
+            }
         } finally {
             btn.prop('disabled', false).html(origHtml);
         }
     });
 
     // 4. Instant Action Blank Name Interception (#rt-quickstart-begin)
-    // If player starts Quick Start without rolling/typing a name, pre-fill from NameRAG to prevent LLM default repetition
+    // [CATALOG: DOM-05] See LISTENERS.md — Instant Action Blank Name Pre-Fill Observer
     $(document).off('click.mhc_namerag_begin', '#rt-quickstart-begin');
     $(document).on('click.mhc_namerag_begin', '#rt-quickstart-begin', async function (e) {
         if (!isNameRagActive()) return;
@@ -500,10 +550,17 @@ export function setupMultiHogRollHooks(isNameRagActive) {
             // Field is empty — fetch a NameRAG candidate first so prompt is seeded
             e.stopImmediatePropagation();
             e.preventDefault();
-            const activeGenreBtn = root.find('.rt-quickstart-genre-btn.active, .rt-quickstart-genre-btn[aria-pressed="true"]');
-            const genre = activeGenreBtn.data('genre') || activeGenreBtn.attr('data-genre') || root.find('#rt-quickstart-genre').val() || 'fantasy';
-            const candidate = await rollNameRagCandidate(genre);
-            nameInput.val(candidate.name).trigger('input');
+            try {
+                const activeGenreBtn = root.find('.rt-quickstart-genre-btn.active, .rt-quickstart-genre-btn[aria-pressed="true"]');
+                const genre = activeGenreBtn.data('genre') || activeGenreBtn.attr('data-genre') || root.find('#rt-quickstart-genre').val() || 'fantasy';
+                const candidate = await rollNameRagCandidate(genre);
+                nameInput.val(candidate.name).trigger('input');
+                if (candidate.source !== 'namerag' && typeof showToast === 'function') {
+                    showToast('warning', 'NameRAG service unavailable; rolled standard name.', 'NameRAG Roll');
+                }
+            } catch (err) {
+                console.error('[MultiHog Companion] Quickstart begin name seed error:', err);
+            }
             // Re-trigger click now that name is populated
             $(this).trigger('click');
         }

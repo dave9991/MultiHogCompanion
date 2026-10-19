@@ -162,6 +162,7 @@ export function setupCompanionDocInterceptor() {
     if (typeof window === 'undefined' || !window.fetch) return;
     if (_interceptorActive || window.fetch.__mhcDocBridgeInstalled) return;
 
+    // [CATALOG: ADR-MP-01] See MONKEYPATCHES.md — PbtA Ruleset Documentation fetch Interceptor
     _originalFetch = window.fetch;
 
     const interceptedFetch = async function (input, init) {

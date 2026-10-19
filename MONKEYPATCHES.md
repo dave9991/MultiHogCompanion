@@ -117,8 +117,8 @@ Upstream MultiHog's CYOA subsystem natively strips past choices from outgoing pr
 
 ### ADR-MP-04: Upstream DOM Event Hijacking via `stopImmediatePropagation` (NameRAG)
 
-* **Status:** Active / Fragile
-* **Location:** [`namerag-hooks.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/namerag-hooks.js#L423-L490) (`setupMultiHogRollHooks`)
+* **Status:** Active / Hardened (Phase 2)
+* **Location:** [`namerag-hooks.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/namerag-hooks.js#L440-L545) (`setupMultiHogRollHooks`)
 * **Patch Type:** DOM Event Suppression & Replacement via jQuery Delegation
 
 #### Context & Justification
@@ -130,17 +130,19 @@ The user wanted dynamic, genre-aware names generated via the local NameRAG servi
 2. When a button is clicked and NameRAG is enabled in Companion settings:
    - Calls `e.stopImmediatePropagation()` and `e.preventDefault()`.
    - Disables the button and renders a spinner (`<i class="fa-solid fa-spinner fa-spin"></i>`).
-   - Queries NameRAG API with the active genre.
-   - Sets the resulting candidate into the input field and triggers the `input` event so MultiHog's state updates.
+   - Queries NameRAG API with the active genre wrapped in a 4-second timeout promise (`timeoutMs: 4000`).
+   - If NameRAG succeeds: populates the candidate name into the input field and triggers `input`.
+   - If NameRAG times out, is offline, or returns empty: gracefully invokes the local offline genre name generator, populates the input, and displays a non-intrusive warning toast: *"NameRAG service unavailable; rolled standard name"*.
+   - In the `finally` block: always restores the button's original HTML and re-enables it.
 3. If NameRAG is disabled:
    - Returns early without stopping propagation, allowing MultiHog's native click listener to handle the click.
 
 #### Blast Radius (What Breaks If Removed)
 * Rolling names in MultiHog's QuickStart or Character Creator will use stock D&D names rather than NameRAG genre-specific names.
 
-#### Fragility & Code Smell Analysis
-* 🔴 **High Fragility:** Uses `e.stopImmediatePropagation()`. If NameRAG throws an unhandled exception or network timeout, the button is left disabled or unresponsive, completely breaking the user's ability to roll a name.
-* Relies on specific DOM IDs (`#rt-quickstart-roll-name`, `#rt-cr-name`, etc.). If upstream renames elements, the hijack silently breaks.
+#### Fragility & Hardening Status
+* 🟢 **Hardened in Phase 2:** Previously, if NameRAG hung or threw an unhandled exception, the button froze in a disabled state. Now, with strict 4s timeouts, offline fallbacks, and user warning toasts, the UI cannot be permanently trapped even if the local NameRAG service crashes.
+* Relies on specific DOM IDs (`#rt-quickstart-roll-name`, `#rt-cr-name`, etc.). If upstream renames elements, the hijack silently falls back to stock behavior.
 
 #### Retirement Criteria
 Upstream MultiHog provides a pluggable name generator interface (e.g., `registerNameRollProvider(fn)`).

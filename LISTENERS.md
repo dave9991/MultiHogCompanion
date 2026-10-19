@@ -156,13 +156,16 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-06: `CHARACTER_MESSAGE_RENDERED` (Decoupled CYOA Stage 2 Dispatcher)
+### EVT-06: `CHARACTER_MESSAGE_RENDERED` (CYOA Safety Net & Auto-Repair Dispatcher)
 * **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM.
-* **Registered In:** `cyoa-guardian.js` (lines 369-420)
-* **Handler:** Routes through `triggerDecoupledCyoaForMessage`. If not streaming, immediately launches Stage 2 CYOA, locks send button, and shows loading indicator.
-* **Preconditions:** `enableDecoupledCyoa !== false`, not message 0, adventure active, CYOA expected, message does not already contain choices.
-* **Blast Radius:** CYOA buttons will not generate automatically; user must click manual regenerate.
-* **Optimization Status:** **OPTIMIZED (Phase 2)**. Unified with `GENERATION_ENDED` via shared idempotent dispatcher.
+* **Registered In:** `cyoa-guardian.js`
+* **Handler:** Routes through `triggerDecoupledCyoaForMessage`. Evaluates the settled assistant message:
+  1. **Happy Path:** If `<choices><button>...</button></choices>` already exist and character is alive, exits immediately (0 LLM overhead, 1-pass fast generation).
+  2. **Local Regex Repair:** If plain numbered markdown choices exist (`1. ... 2. ...`), automatically formats them into buttons via `tryRepairMarkdownChoices` with zero LLM calls.
+  3. **Fallback Generation:** If choices were completely skipped or truncated (or if downed without crisis options), launches Stage 2 fallback repair runner to append choices.
+* **Preconditions:** `cyoaMode !== 'disabled'`, not message 0, adventure active, CYOA expected, not a tool-call or smallsys message (`extra.isSmallSys`, `tool_invocations`).
+* **Blast Radius:** Omitted or plain markdown choices will not be automatically converted into interactive buttons; user must click manual repair.
+* **Optimization Status:** **OPTIMIZED (Phase 3)**. Unified reactive safety net with tool-message guarding and zero-cost local regex repairs.
 
 ---
 
@@ -204,20 +207,20 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-11: `GENERATION_ENDED` (CYOA Completion Trigger)
+### EVT-11: `GENERATION_ENDED` (CYOA Fallback Completion Trigger)
 * **Trigger:** Generation pipeline concludes.
 * **Registered In:** `cyoa-guardian.js`
-* **Handler:** Routes through `triggerDecoupledCyoaForMessage`. If `CHARACTER_MESSAGE_RENDERED` deferred due to active streaming, executes Stage 2 with complete narrative text.
-* **Blast Radius:** Messages generated with streaming enabled would lack CYOA choices.
-* **Optimization Status:** **OPTIMIZED (Phase 2)**. Deduplicated against `CHARACTER_MESSAGE_RENDERED`.
+* **Handler:** Routes through `triggerDecoupledCyoaForMessage`. If `CHARACTER_MESSAGE_RENDERED` was deferred due to active streaming or follow-up tool calls, evaluates final settled message and repairs/generates choices as needed.
+* **Blast Radius:** Messages generated with streaming enabled might lack CYOA choice buttons if skipped.
+* **Optimization Status:** **OPTIMIZED (Phase 3)**. Tool-call guarded and deduplicated against `CHARACTER_MESSAGE_RENDERED`.
 
 ---
 
 ### EVT-12: `CHAT_COMPLETION_PROMPT_READY` (CYOA Prompt Sanitizer)
 * **Trigger:** SillyTavern constructs prompt payload right before sending to LLM.
 * **Registered In:** `cyoa-guardian.js`
-* **Handler:** `stripCyoaFromOutgoingChat(eventData.chat)` removes synthetic CYOA buttons and tags from past context.
-* **Blast Radius:** LLM starts generating its own malformed pseudo-buttons and breaks character prose.
+* **Handler:** `stripCyoaFromOutgoingChat(eventData.chat, { stripActiveCyoa })`. In Safety Net mode, preserves active turn's `<CYOA_mode>` for fast single-stage generation while stripping historical `<choices>` and markdown choice lists from older turns. In Always Decoupled mode, strips `<CYOA_mode>` across all turns.
+* **Blast Radius:** Older choices and "What do you do?" lists would remain in chat history and poison new turn generation.
 * **Status:** Clean synchronous transform.
 
 ---

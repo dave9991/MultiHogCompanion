@@ -1722,12 +1722,30 @@ async function initUI() {
 
         await initRelationshipSyncUI();
 
-        // ── 7. Decoupled CYOA Controls ──
+        // ── 7. Decoupled CYOA & Safety Net Controls ──
         const cyoaEnableCb = $('#mhc_cyoa_auto_retry_enable');
-        cyoaEnableCb.prop('checked', current.enableDecoupledCyoa !== false);
+        const cyoaModeSelect = $('#mhc_cyoa_mode_select');
+        const isCyoaEnabled = current.enableDecoupledCyoa !== false && current.cyoaMode !== 'disabled';
+        cyoaEnableCb.prop('checked', isCyoaEnabled);
+
+        const activeMode = current.cyoaMode || (current.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
+        if (cyoaModeSelect.length) {
+            cyoaModeSelect.val(activeMode === 'disabled' ? 'safety_net' : activeMode);
+            cyoaModeSelect.prop('disabled', !isCyoaEnabled);
+        }
 
         cyoaEnableCb.on('change', function () {
-            updateSettings({ enableDecoupledCyoa: $(this).is(':checked') });
+            const checked = $(this).is(':checked');
+            cyoaModeSelect.prop('disabled', !checked);
+            updateSettings({
+                enableDecoupledCyoa: checked,
+                cyoaMode: checked ? (cyoaModeSelect.val() || 'safety_net') : 'disabled',
+            });
+        });
+
+        cyoaModeSelect.on('change', function () {
+            const selectedMode = $(this).val();
+            updateSettings({ cyoaMode: selectedMode });
         });
 
         const cyoaTokensInput = $('#mhc_cyoa_max_tokens');
@@ -1805,9 +1823,14 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
 
     // 1. Decoupled Two-Stage CYOA / CYOA Guardian handling
     const s = getSettings();
-    if (s.enableDecoupledCyoa !== false) {
+    const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
+    if (cyoaMode === 'always_decoupled') {
         // Strip <CYOA_mode> instructions & past choice blocks so narrator generates pure prose
-        stripCyoaFromOutgoingChat(chat);
+        stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: true });
+    } else if (cyoaMode === 'safety_net') {
+        // Safety net mode: Keep active <CYOA_mode> in prompt for single-stage generation,
+        // but strip historical choices & markdown "What do you do?" lists from older context.
+        stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: false });
     } else {
         // Legacy CYOA Guardian: Inject steering reminder if armed
         interceptCyoaSteering(chat);

@@ -183,11 +183,11 @@ Do NOT include any narrative explanation, commentary, or extra text outside the 
   ${choiceCount === 5 ? '4. 🛡️ Look to a party member to administer a potion or cast healing magic\n  5. 🌑 Succumb to the darkness and slip into unconsciousness' : ''}`;
         } else {
             guidelines = `D&D Tactical & Narrative Choices:
-- Generate exactly ${choiceCount} actionable choices fitting D&D combat and exploration:
-  1. Primary Combat Action or Spell (e.g., Attack with equipped weapon, cast a prepared spell)
-  2. Tactical Maneuver or Positioning (e.g., Take cover, disengage, flank the enemy)
-  3. Spoken Dialogue or Command (e.g., Command allies, shout a challenge, parley)
-  ${choiceCount === 5 ? '4. Environmental Interaction or Perception (e.g., Search for an escape route, use terrain)\n  5. Defensive Option or Item (e.g., Drink a potion, ready shield, dodge)' : ''}
+- Generate exactly ${choiceCount} actionable, context-aware choices fitting D&D combat, exploration, and roleplay.
+- Offer natural variety: direct attack/spell, tactical maneuver/positioning, spoken dialogue, skill-based investigation/perception, or defensive action.
+- STRICT NEGATIVE CONSTRAINT: DO NOT output category labels or template headings (e.g. NEVER write "Primary Combat Action:", "Tactical Maneuver:", "Spoken Dialogue:", or "**"). Write direct, immersive action descriptions.
+- Prefix each choice option with an appropriate thematic emoji.
+- For checks or rolls, format mechanics in brackets after an em dash: e.g. "— [Investigation (+5) DC 14]", "— [Attack (+5) vs AC 14]", or "— [No roll]".
 - INCAPACITATION / DOWNED EXCEPTION: If the latest narrative explicitly depicts the PROTAGONIST (player character) collapsing, knocked unconscious, or reduced to 0 HP during this scene, DO NOT offer active attacks or normal maneuvers. Instead, pivot all choices to survival, death saving throws, clinging to consciousness, or calling for help.`;
         }
 
@@ -201,9 +201,11 @@ FORMAT CONTRACT:
 ${cyoaEmojis ? '- Prefix each choice option with an appropriate thematic emoji.' : ''}
 - Example format:
 <choices>
-<button>1. ⚔️ Strike the hobgoblin with your longsword</button>
-<button>2. 🔥 Cast Fire Bolt at the archer on the ledge</button>
-<button>3. 🛡️ Disengage and retreat behind cover</button>
+<button>1. ⚔️ Strike the hobgoblin with your longsword — [Attack (+5) vs AC 14]</button>
+<button>2. 🔍 Inspect the archway for pressure plates — [Investigation (+5) DC 14]</button>
+<button>3. 🗣️ "Hold your fire! We come in peace." — [Persuasion (+3) DC 12]</button>
+<button>4. 🛡️ Disengage and slip behind the stone pillar — [No roll]</button>
+<button>5. 🧪 Drink a potion of healing from your pouch — [No roll]</button>
 </choices>
 Do NOT include any commentary or extra text outside the <choices>...</choices> block.`;
     }

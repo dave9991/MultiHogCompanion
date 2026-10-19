@@ -145,9 +145,9 @@
                 <!-- ── CYOA Engine: Decoupled Two-Stage Generation ── -->
                 <div id="mhc_cyoa_guardian_section" class="inline-drawer mhc-cyoa-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
                     <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
-                        <label class="checkbox_label" title="Enable Decoupled Two-Stage CYOA to generate synchronized choices after state updates" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                        <label class="checkbox_label" title="Enable CYOA Guardian & Auto-Repair Engine" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
                             <input id="mhc_cyoa_auto_retry_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
-                            <span style="font-size: 0.9em;"><b>🧭 Decoupled Two-Stage CYOA:</b> Synchronized Choices</span>
+                            <span style="font-size: 0.9em;"><b>🧭 CYOA Guardian &amp; Auto-Repair Engine:</b> Choice Protection</span>
                         </label>
                         <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand CYOA settings">
                             <span id="mhc_cyoa_guardian_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); white-space: nowrap;">Active</span>
@@ -157,8 +157,21 @@
 
                     <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
                         <p style="font-size: 0.82em; opacity: 0.75; margin: 0 0 10px 0; line-height: 1.35;">
-                            Generates synchronized choices in a dedicated second pass after the State Tracker audits damage and conditions. Eliminates downed-state choice desyncs for both <b>D&amp;D 5e</b> and <b>PbtA</b>.
+                            Provides intelligent safety net protection and automated choice formatting for both <b>D&amp;D 5e</b> and <b>PbtA</b> adventures.
                         </p>
+
+                        <!-- Operating Mode Selector -->
+                        <div style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                            <label for="mhc_cyoa_mode_select" style="font-size: 0.85em; font-weight: bold; display: block; margin-bottom: 4px;">Operating Mode:</label>
+                            <select id="mhc_cyoa_mode_select" class="text_pole" style="width: 100%; font-size: 0.85em;">
+                                <option value="safety_net" selected>Intelligent Safety Net &amp; Auto-Repair (Recommended)</option>
+                                <option value="always_decoupled">Always Decoupled (Two-Stage)</option>
+                            </select>
+                            <div style="font-size: 0.75em; opacity: 0.7; margin-top: 4px; line-height: 1.25;">
+                                <b>Safety Net:</b> Single-stage generation by default. Auto-formats plain numbered choices into buttons with 0 extra calls, and falls back to Stage 2 only if choices are omitted.<br>
+                                <b>Always Decoupled:</b> Forces two generation passes on every turn (pure story first, dedicated choices second).
+                            </div>
+                        </div>
 
                         <!-- Token Budget Configuration -->
                         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06);">

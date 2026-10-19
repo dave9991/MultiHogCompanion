@@ -169,6 +169,25 @@ assert.strictEqual(
     'Does not misidentify a numbered list embedded in earlier narrative paragraphs'
 );
 
+// Case E: Character name question header with MultiHog Status footer
+const rawCharacterHeader = `Whatever happened here, the result is down in the mist.
+
+**What does Silas Vance do?**
+1. **Descend:** Use the rope or gear to climb down into the mist.
+2. **Call Out:** Shout into the valley to see if anyone is alive.
+3. **Scan the Drop:** Use his flashlight and enhanced perception.
+4. **Camp:** Set up on the ridge and wait.
+5. **(Other)**
+
+*(Status: 32/32 HP) | (XP: 0/48,000) | (Location: The Ridge, Last Outpost)*
+*Level 8 | 06:35 PM, Day 1*`;
+
+const repairedChar = tryRepairMarkdownChoices(rawCharacterHeader);
+assert.ok(repairedChar, 'Should repair choices with character name header and Status footer');
+assert.ok(repairedChar.includes('<button>1. **Descend:** Use the rope or gear to climb down into the mist.</button>'));
+assert.ok(!repairedChar.includes('**What does Silas Vance do?**'), 'Character question header absorbed into choice block');
+assert.ok(repairedChar.includes('*(Status: 32/32 HP)'), 'Preserves Status footer');
+
 console.log('✓ Markdown choices auto-repair and edge-case safety verified');
 
 // ── 4. Steering Prompt Arming and Interception ──────────────────────────────

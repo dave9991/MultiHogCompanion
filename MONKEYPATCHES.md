@@ -94,17 +94,18 @@ SillyTavern adds native support for contextual resolution hooks in slash command
 
 #### Context & Justification
 Upstream MultiHog uses a `generate_interceptor` to inject its RPG state prompt before generation. Companion requires a secondary pass to:
-1. Strip stale CYOA button markdown from past chat turns so the LLM does not get confused by old choices.
-2. Inject single-line narrative steering reminders when Decoupled CYOA is running.
+1. Strip stale CYOA button markdown and conversational "What do you do?" lists from older chat turns so the LLM context remains clean.
+2. In Safety Net mode (recommended), preserve the active turn's `<CYOA_mode>` block so the narrator generates single-stage choices directly without extra latency.
+3. In Always Decoupled mode, strip `<CYOA_mode>` across all turns to enforce dedicated two-stage generation.
 
 #### Mechanism
 1. Registered in `manifest.json`: `"generate_interceptor": "mhcGenerationInterceptor"`.
 2. Exported to `globalThis.mhcGenerationInterceptor`.
 3. SillyTavern calls this function with the outgoing `chat` array before prompt compilation.
-4. Executes `interceptCyoaSteering(chat)` and passes the sanitized chat to the generator.
+4. Executes `stripCyoaFromOutgoingChat(chat, { stripActiveCyoa })` according to `cyoaMode` and passes the sanitized chat to the generator.
 
 #### Blast Radius (What Breaks If Removed)
-* Stale CYOA markdown buttons (`[1] Attack [2] Flee`) remain in chat history context sent to the LLM, causing the LLM to hallucinate synthetic button syntax in prose.
+* Stale CYOA markdown buttons (`[1] Attack [2] Flee`) and previous "What do you do?" lists remain in chat history context sent to the LLM, causing the LLM to hallucinate synthetic button syntax or repeat conversational questions in prose.
 * Dynamic CYOA steering instructions are not delivered to the narrator model.
 
 #### Fragility & Code Smell Analysis

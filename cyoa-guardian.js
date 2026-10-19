@@ -68,25 +68,43 @@ export function isNarratorGenerating() {
  * @param {object[]} chat
  * @returns {boolean} True if any message was modified
  */
-export function stripCyoaFromOutgoingChat(chat) {
+export function stripCyoaFromOutgoingChat(chat, options = {}) {
     if (!Array.isArray(chat) || chat.length === 0) return false;
     let didModify = false;
 
+    const stripActiveCyoa = options.stripActiveCyoa === true;
     const cyoaModeXmlPattern = /<CYOA_mode\b[^>]*>[\s\S]*?<\/CYOA_mode\s*>/gi;
     const choiceBlockPattern = /<choices\b[^>]*>[\s\S]*?<\/choices\s*>|<div\b[^>]*\brt-cyoa-choices\b[^>]*>[\s\S]*?<\/div\s*>|<button\b[^>]*>[\s\S]*?<\/button\s*>/gi;
+    const historicalMarkdownChoicesPattern = /\n*\*{0,2}What (?:does [^\n*?]+|do you) do\?\*{0,2}\s*(?:\n+\s*(?:[1-5]\.|\(\d+\)|[-*•])\s+[^\n]+)+(?=\s*(?:\n\s*\*(?:Status|Harm|HP|XP|Hold|Location|Time|Day|Level|\([A-Za-z]+:)|\n\s*<choices|$))/gi;
+
+    const lastIdx = chat.length - 1;
 
     for (let i = 0; i < chat.length; i++) {
         const msg = chat[i];
         if (!msg) continue;
+        const isCurrentTurn = (i === lastIdx);
+        const shouldStripCyoaMode = stripActiveCyoa || !isCurrentTurn;
 
-        if (typeof msg.mes === 'string') {
-            let updated = msg.mes;
-            if (cyoaModeXmlPattern.test(updated)) {
+        const cleanString = (str) => {
+            if (typeof str !== 'string') return str;
+            let updated = str;
+            if (shouldStripCyoaMode && cyoaModeXmlPattern.test(updated)) {
+                cyoaModeXmlPattern.lastIndex = 0;
                 updated = updated.replace(cyoaModeXmlPattern, '').trim();
             }
             if (choiceBlockPattern.test(updated)) {
+                choiceBlockPattern.lastIndex = 0;
                 updated = updated.replace(choiceBlockPattern, '').trim();
             }
+            if (!isCurrentTurn && historicalMarkdownChoicesPattern.test(updated)) {
+                historicalMarkdownChoicesPattern.lastIndex = 0;
+                updated = updated.replace(historicalMarkdownChoicesPattern, '').trim();
+            }
+            return updated;
+        };
+
+        if (typeof msg.mes === 'string') {
+            const updated = cleanString(msg.mes);
             if (updated !== msg.mes) {
                 msg.mes = updated;
                 didModify = true;
@@ -94,13 +112,7 @@ export function stripCyoaFromOutgoingChat(chat) {
         }
 
         if (typeof msg.content === 'string') {
-            let updated = msg.content;
-            if (cyoaModeXmlPattern.test(updated)) {
-                updated = updated.replace(cyoaModeXmlPattern, '').trim();
-            }
-            if (choiceBlockPattern.test(updated)) {
-                updated = updated.replace(choiceBlockPattern, '').trim();
-            }
+            const updated = cleanString(msg.content);
             if (updated !== msg.content) {
                 msg.content = updated;
                 didModify = true;
@@ -110,13 +122,7 @@ export function stripCyoaFromOutgoingChat(chat) {
         if (Array.isArray(msg.content)) {
             for (const part of msg.content) {
                 if (part?.type === 'text' && typeof part.text === 'string') {
-                    let updated = part.text;
-                    if (cyoaModeXmlPattern.test(updated)) {
-                        updated = updated.replace(cyoaModeXmlPattern, '').trim();
-                    }
-                    if (choiceBlockPattern.test(updated)) {
-                        updated = updated.replace(choiceBlockPattern, '').trim();
-                    }
+                    const updated = cleanString(part.text);
                     if (updated !== part.text) {
                         part.text = updated;
                         didModify = true;
@@ -197,11 +203,13 @@ export function tryRepairMarkdownChoices(text) {
 
     // Choice list must be near the very end of the message.
     // Any non-empty lines following the choices must only be the status footer.
+    const footerRegex = /^\s*[\*\_]?\(?(?:Status|Harm|HP|XP|Hold|Location|Spell|Turn|Round|State|Level|Time|Day|HH:MM|\d{1,2}:\d{2})/i;
+    const footerRegexAlt = /^\s*[\*\_]?\[?(?:Status|Harm|HP|XP|Hold|Location|Time|Day|HH:MM|\d{1,2}:\d{2})/i;
+
     for (let i = lastIdx + 1; i < lines.length; i++) {
         const trailingLine = lines[i].trim();
         if (!trailingLine) continue;
-        const isFooter = /^\s*[\*\_]?\(?(?:Harm|HP|XP|Hold|Location|Spell|Turn|Round|State|Level|Time|Day|HH:MM|\d{1,2}:\d{2})/i.test(trailingLine)
-            || /^\s*[\*\_]?\[?(?:Harm|HP|XP|Hold|Location|Time|Day|HH:MM|\d{1,2}:\d{2})/i.test(trailingLine);
+        const isFooter = footerRegex.test(trailingLine) || footerRegexAlt.test(trailingLine);
         if (!isFooter) {
             return null; // Normal narrative prose follows the list; this was not a choices block
         }
@@ -219,7 +227,7 @@ export function tryRepairMarkdownChoices(text) {
     let replaceStartIdx = firstIdx;
     if (firstIdx > 0) {
         const cleanPrev = lines[firstIdx - 1].replace(/[\*_:#\-]/g, '').trim();
-        if (/^(?:(?:available|next|your)?\s*(?:choices|options|actions)|what do you do\??)$/i.test(cleanPrev)) {
+        if (/^(?:(?:available|next|your)?\s*(?:choices|options|actions)|what (?:does [^?]+|do you) do\??)$/i.test(cleanPrev)) {
             replaceStartIdx = firstIdx - 1;
         }
     }
@@ -237,14 +245,32 @@ export function tryRepairMarkdownChoices(text) {
     }
 
     const choiceBlock = `<choices>\n${buttonLines.join('\n')}\n</choices>`;
+    const beforeChoices = lines.slice(0, replaceStartIdx);
+    const trailingLines = lines.slice(lastIdx + 1);
 
-    const newLines = [
-        ...lines.slice(0, replaceStartIdx),
-        choiceBlock,
-        ...lines.slice(lastIdx + 1),
-    ];
+    // If trailingLines contain the status footer, place choices cleanly after the footer
+    const hasTrailingFooter = trailingLines.some(l => {
+        const t = l.trim();
+        return t && (footerRegex.test(t) || footerRegexAlt.test(t));
+    });
 
-    return newLines.join('\n');
+    let newLines;
+    if (hasTrailingFooter) {
+        newLines = [
+            ...beforeChoices,
+            ...trailingLines,
+            '',
+            choiceBlock,
+        ];
+    } else {
+        newLines = [
+            ...beforeChoices,
+            choiceBlock,
+            ...trailingLines,
+        ];
+    }
+
+    return newLines.join('\n').trim();
 }
 
 /**
@@ -396,7 +422,8 @@ export async function triggerDecoupledCyoaForMessage({
     }
     const resolvedGetSettings = typeof getSettings === 'function' ? getSettings : _getSettings;
     const s = typeof resolvedGetSettings === 'function' ? resolvedGetSettings() : {};
-    if (!force && s.enableDecoupledCyoa === false) return false;
+    const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
+    if (!force && cyoaMode === 'disabled') return false;
 
     // If triggered by message rendering while narrator is still actively streaming,
     // defer execution to GENERATION_ENDED when narrative prose is complete.
@@ -419,23 +446,54 @@ export async function triggerDecoupledCyoaForMessage({
     if (idx < 0 || (!force && (idx === 0 || !isAdventureActive()))) return false;
 
     const msg = chat[idx];
-    if (!msg || msg.is_user || msg.is_system) return false;
+    // Reject system messages, user messages, tool-call messages (e.g. CreateAreaMap) and intermediate smallsys frames
+    if (!msg || msg.is_user || msg.is_system || msg.extra?.isSmallSys || msg.extra?.tool_invocations || (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0)) {
+        return false;
+    }
 
     const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
     const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
 
     if (!force && !isCyoaExpected(rpgSettings, pbtaActive)) return false;
-    if (!force && hasCyoaChoices(msg.mes)) return false;
 
     const currentSwipeId = msg.swipe_id ?? 0;
     if (!force && _lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
         return false;
     }
 
+    // 1. Happy Path: Check if valid <choices><button>...</button></choices> already exist
+    if (!force && hasCyoaChoices(msg.mes)) {
+        const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
+        const isDowned = isProtagonistDowned(freshMemo, pbtaActive);
+        if (!isDowned) {
+            // Choices present and character is alive: complete, no-op!
+            return false;
+        }
+        // If downed, verify choices reflect crisis/death saves
+        if (/Death Saving Throw|Last Breath|Cling to life|Succumb|whisper a final plea|faint plea/i.test(msg.mes)) {
+            return false;
+        }
+        // Fall through to regenerate downed choices
+    }
+
+    // 2. Local Regex Auto-Repair Path: Check if plain numbered markdown choices can be converted to buttons
+    if (!force && !hasCyoaChoices(msg.mes)) {
+        const repaired = tryRepairMarkdownChoices(msg.mes);
+        if (repaired) {
+            console.log(`[MultiHog Companion] Auto-repaired markdown choices into buttons for message:`, idx);
+            const ok = await applyRepairedMessage(idx, repaired);
+            if (ok) {
+                if (showToast) showToast('info', 'Auto-formatted choices into buttons 🧭', 'CYOA Engine');
+                return true;
+            }
+        }
+    }
+
+    // 3. Fallback Repair Path: Choices were skipped or missing -> Trigger Stage 2 Choice Generator
     _lastStage2AttemptedMessageId = idx;
     _lastStage2AttemptedSwipeId = currentSwipeId;
 
-    console.log(`[MultiHog Companion] Triggering Decoupled CYOA Stage 2 via ${triggerSource} for message:`, idx);
+    console.log(`[MultiHog Companion] Triggering CYOA Stage 2 fallback repair via ${triggerSource} for message:`, idx);
 
     try {
         const text = String(msg.mes || '');
@@ -534,8 +592,12 @@ export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSo
     if (et.CHAT_COMPLETION_PROMPT_READY) {
         es.on(et.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
             const s = getSettings();
-            if (s.enableDecoupledCyoa !== false && Array.isArray(eventData?.chat)) {
-                stripCyoaFromOutgoingChat(eventData.chat);
+            const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
+            if (cyoaMode === 'disabled') return;
+            if (Array.isArray(eventData?.chat)) {
+                stripCyoaFromOutgoingChat(eventData.chat, {
+                    stripActiveCyoa: cyoaMode === 'always_decoupled',
+                });
             }
         });
     }

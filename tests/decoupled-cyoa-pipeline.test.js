@@ -65,6 +65,24 @@ assert.ok(testChat[1].mes.includes('*(Status: 10/10 HP)*'), 'Status footer must 
 assert.ok(!testChat[3].mes.includes('rt-cyoa-choices'), 'rt-cyoa-choices div must be stripped from assistant message 2');
 assert.ok(testChat[3].mes.includes('Your sword strikes true!'), 'Assistant narrative must be preserved');
 
+// Test 1b: Safety Net mode preserves active turn <CYOA_mode> but cleans older messages
+const safetyNetChat = [
+    {
+        role: 'assistant',
+        mes: 'You stand in the mist.\n\n**What does Silas Vance do?**\n1. Search the dirt\n2. Call out\n\n*(Status: 32/32 HP)*\n*Level 8 | 06:30 PM, Day 1*',
+    },
+    {
+        role: 'user',
+        mes: 'I search the dirt.\n\n<CYOA_mode>\nGenerate 5 numbered choices at the end.\n</CYOA_mode>',
+    },
+];
+
+stripCyoaFromOutgoingChat(safetyNetChat, { stripActiveCyoa: false });
+assert.ok(safetyNetChat[1].mes.includes('<CYOA_mode>'), 'Safety net mode MUST keep active turn <CYOA_mode> for single-stage generation');
+assert.ok(!safetyNetChat[0].mes.includes('What does Silas Vance do?'), 'Safety net mode MUST strip historical markdown choice list from prior turns');
+assert.ok(safetyNetChat[0].mes.includes('You stand in the mist.'), 'Narrative prose must be preserved in older turns');
+assert.ok(safetyNetChat[0].mes.includes('*(Status: 32/32 HP)*'), 'Status footer must be preserved in older turns');
+
 console.log('✓ Prompt sanitization cleanly strips CYOA mode and historical buttons without touching story');
 
 // ── 2. Downed Detection (PbtA vs D&D) ──

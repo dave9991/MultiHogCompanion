@@ -41,10 +41,16 @@ export function getCandidateChatIds(chatId, rpgSettings = null) {
     const expanded = [];
     for (const id of filtered) {
         expanded.push(id);
+        const collapsed = id.replace(/\s+/g, ' ');
+        if (collapsed !== id) {
+            expanded.push(collapsed);
+        }
         if (id.endsWith('.jsonl')) {
             expanded.push(id.slice(0, -6));
+            if (collapsed !== id) expanded.push(collapsed.slice(0, -6));
         } else {
             expanded.push(`${id}.jsonl`);
+            if (collapsed !== id) expanded.push(`${collapsed}.jsonl`);
         }
     }
     return [...new Set(expanded)];
@@ -71,6 +77,13 @@ export function getCompanionActiveCartridge(chatId = null, rpgSettings = null, c
         for (const cid of candidateIds) {
             if (comp.companionActiveCartridges[cid]) {
                 return comp.companionActiveCartridges[cid];
+            }
+        }
+        // Normalize whitespace fallback
+        const normCandidates = candidateIds.map(c => c.replace(/\s+/g, ' '));
+        for (const [key, val] of Object.entries(comp.companionActiveCartridges)) {
+            if (normCandidates.includes(key.replace(/\s+/g, ' '))) {
+                return val;
             }
         }
     }

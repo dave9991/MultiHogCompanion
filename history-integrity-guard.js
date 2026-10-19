@@ -569,8 +569,11 @@ export async function scanAllChatHistories(options = {}) {
  * @param {object} scanResult Output from `scanAllChatHistories`
  * @returns {string}
  */
-export function formatHistoryDiagnosticReport(scanResult) {
-    const { integrity, totalPartitions, fileBackedCount, healthyCount, brokenCount, results } = scanResult;
+export function formatHistoryDiagnosticReport(scanResult = null) {
+    if (!scanResult || typeof scanResult !== 'object') {
+        return '*(No history diagnostic scan result provided)*';
+    }
+    const { integrity = {}, totalPartitions = 0, fileBackedCount = 0, healthyCount = 0, brokenCount = 0, results = [] } = scanResult;
     const lines = [];
 
     lines.push('### MultiHog Companion — History File & Projection Integrity Report');

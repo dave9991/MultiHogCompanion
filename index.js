@@ -1045,7 +1045,46 @@ export async function quickStartPbtA(genreKey = 'fantasy', charName = '', scenar
         const qs = await import('../SillyTavern-MultihogDnDFramework/quickstart.js');
         if (typeof qs.runQuickStart === 'function') {
             showToast('info', `Starting ${genre.label} adventure...`, 'Quick Start');
-            await qs.runQuickStart(genre.multihogGenre, null, cleanCharName, instructions);
+
+            // Temporarily suppress upstream's starter message so upstream does not dump
+            // the mechanical instruction block into chat as a user message, and set onboardingLevel
+            // to 'none' so upstream does not generate D&D levels or [XP] blocks.
+            let originalSendStarter = true;
+            let originalLevel = null;
+            let rpgSettings = null;
+            try {
+                const sm = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+                rpgSettings = sm?.getSettings?.();
+                if (rpgSettings) {
+                    originalSendStarter = rpgSettings.onboardingSendStarterMessage;
+                    rpgSettings.onboardingSendStarterMessage = false;
+                    originalLevel = rpgSettings.onboardingLevel;
+                    rpgSettings.onboardingLevel = 'none';
+                }
+            } catch (_) {}
+
+            try {
+                await qs.runQuickStart(genre.multihogGenre, null, cleanCharName, instructions);
+            } finally {
+                if (rpgSettings) {
+                    rpgSettings.onboardingSendStarterMessage = originalSendStarter;
+                    if (originalLevel !== null) {
+                        rpgSettings.onboardingLevel = originalLevel;
+                    }
+                }
+            }
+
+            // Send clean narrative opening message
+            const starterText = scenarioDesc
+                ? `Begin the adventure.\n\n${scenarioDesc}`
+                : 'Begin the adventure.';
+            const textarea = /** @type {HTMLTextAreaElement|null} */ (document.getElementById('send_textarea'));
+            const sendBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('send_but'));
+            if (textarea && sendBtn) {
+                textarea.value = starterText;
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                sendBtn.click();
+            }
         } else {
             showToast('warning', 'Quick Start function not available. PbtA ruleset is active — type your first message!', 'MultiHog Companion');
         }

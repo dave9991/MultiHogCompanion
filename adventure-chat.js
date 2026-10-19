@@ -379,8 +379,8 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
     // ── 2. Intelligent adventure renaming ──────────────────────────────────────
     const candidateTitle = (adventureTitle || fallbackLabel || '').trim();
     if (candidateTitle) {
-        // Sanitize illegal filename characters
-        const cleanTitle = candidateTitle.replace(/[\\/:*?"<>|]/g, '').trim();
+        // Sanitize illegal filename characters and collapse consecutive whitespace
+        const cleanTitle = candidateTitle.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
         // Limit to reasonable display length
         const safeTitle = cleanTitle.length > 60 ? cleanTitle.slice(0, 60).trim() : cleanTitle;
 

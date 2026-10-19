@@ -43,7 +43,8 @@ assert.ok(qs.includes('5/5 HP | Harm: 0/5'), 'Quick Start mandate missing 5/5 HP
 assert.ok(qs.includes('((PILLS)) Moves:'), 'Quick Start mandate missing ((PILLS)) Moves');
 assert.ok(qs.includes('((PILLS)) Gear:'), 'Quick Start mandate missing ((PILLS)) Gear');
 assert.ok(qs.includes('((PILLS)) Conditions:'), 'Quick Start mandate missing ((PILLS)) Conditions');
-console.log('✓ Quick Start instructions mandate tandem HP and ((PILLS))');
+assert.ok(qs.length <= 950, `Quick Start instructions length (${qs.length}) must be <= 950 to fit upstream 1000 char limit`);
+console.log('✓ Quick Start instructions mandate tandem HP and ((PILLS)) within safe length budget');
 
 // 3. formatInitialPbtaMemo with solo protagonist
 const soloDossier = {

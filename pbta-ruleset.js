@@ -20,7 +20,7 @@ export const PBTA_GENRES = {
         multihogGenre: 'fantasy',
         stats: ['Might', 'Agility', 'Wits', 'Heart', 'Arcana'],
         statDescriptions: 'Might (melee/force), Agility (finesse/speed), Wits (lore/perception), Heart (courage/empathy), Arcana (spells/relics)',
-        archetypes: ['Fighter', 'Rogue', 'Wizard', 'Cleric', 'Ranger', 'Bard', 'Paladin', 'Druid'],
+        archetypes: ['The Fighter', 'The Ranger', 'The Thief', 'The Wizard', 'The Cleric', 'The Bard', 'The Paladin', 'The Druid'],
         moves: [
             'Hack & Slash (+Might) — engage an enemy in melee combat',
             'Volley (+Agility) — aim and shoot an enemy at range',
@@ -829,10 +829,10 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
 
     return {
         character: `Main character's core stats. MECHANICS ONLY: Never include narrative background or physical appearance in [CHARACTER].
-NO D&D MECHANICS: Never write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns". Use PbtA concepts: Harm (+1 Harm), positioning, and modifiers (+1 forward, +1 hold).
+NO D&D MECHANICS: Use PbtA Playbooks (e.g. The Fighter, The Ranger). Never use D&D 5e subclasses (e.g. Arcane Archer, Battle Master). Never write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns". Use PbtA concepts: Harm (+1 Harm), positioning, and modifiers (+1 forward, +1 hold).
 Format:
 [CHARACTER]
-{{user}} (Archetype): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
+{{user}} (Playbook): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
 Stats: ${statsExample}
 ((PILLS)) Moves: Move 1 [+Stat] (Trigger and narrative effect), Move 2 [+Stat] (Trigger and narrative effect)
 ((PILLS)) Gear: Signature weapon (Tags, 2 Harm), Protective gear ((+) Armor 1)
@@ -1226,18 +1226,17 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
  */
 export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName = '', customNotes = '') {
     const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const moveNames = genre.moves.map(m => m.split('—')[0].replace(/\s*\(\+Attribute\)/, '').trim()).join(', ');
+    const archetypesSnippet = genre.archetypes.slice(0, 4).join(', ');
 
     return [
-        `RULES: Powered by the Apocalypse (PbtA) ruleset.`,
-        `GENRE: ${genre.label}.`,
+        `RULES: PbtA ruleset (${genre.label}).`,
         charName ? `NAME: ${charName}.` : null,
-        `ATTRIBUTES: Assign the standard PbtA modifier array (+2, +1, +1, 0, -1) across: ${genre.stats.join(', ')}. Exactly ONE stat must be -1 (flaw/weakness).`,
-        `STAT DESCRIPTIONS: ${genre.statDescriptions}.`,
-        `SUGGESTED ARCHETYPES: ${genre.archetypes.join(', ')}.`,
-        `SUGGESTED MOVES (pick 2): ${genre.moves.join('; ')}.`,
-        `NO D&D MECHANICS: Moves MUST use PbtA terminology (Harm, +1 forward, fictional positioning). NEVER write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns".`,
-        `NO D&D GEAR: Armor MUST use PbtA armor rating (e.g. Armor 1, Armor 2), NEVER "AC +X". Weapons MUST use tags and Harm (e.g. close, 2 Harm), NEVER D&D damage dice (1d8) or +1/+2 magic suffixes.`,
-        `FORMAT MANDATE: Output [CHARACTER] using 5/5 HP | Harm: 0/5 | Armor: 0, Stats with modifiers, ((PILLS)) Moves: Move 1 (detail), Move 2 (detail), ((PILLS)) Gear: Signature weapon (tags), Armor ((+) +1 Armor), Wealth, ((PILLS)) Conditions: None, Hold/Forward: None, XP: 0/5, Status: Healthy. Do NOT output D&D stats (STR/DEX 1-20), AC, BAB, spell slots, or daily ability counters.`,
+        `ATTRIBUTES: Modifier array (+2, +1, +1, 0, -1) across: ${genre.stats.join(', ')}. Exactly ONE stat is -1.`,
+        `PLAYBOOK: Choose ONE PbtA Playbook (e.g. ${archetypesSnippet}). Output as "Name (Playbook)". FORBIDDEN: No D&D subclasses (no Arcane Archer, Battle Master, Assassin).`,
+        `MOVES (pick 2): ${moveNames}.`,
+        `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or damage dice. Use Harm (0/5), Armor (0), weapon tags, and XP: 0/5 in [CHARACTER].`,
+        `FORMAT MANDATE: Output [CHARACTER] with 5/5 HP | Harm: 0/5 | Armor: 0, Stats with modifiers, ((PILLS)) Moves: Move 1 (detail), ((PILLS)) Gear: Item (tags), Wealth, ((PILLS)) Conditions: None, Hold/Forward: None, XP: 0/5, Status: Healthy.`,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }

@@ -254,5 +254,64 @@ assert.strictEqual(regenEmptyResNum, false, 'regenerateCyoaChoicesForMessage han
 delete globalThis.SillyTavern;
 
 console.log('✓ isNarratorGenerating and parameter normalization verified');
+
+// ── 6. Slash Command Registration & Execution (Decoupled Stage 2 Routing) ───
+console.log('6. Testing registerCyoaSlashCommands and Decoupled Stage 2 routing...');
+const { registerCyoaSlashCommands } = await import('../cyoa-guardian.js');
+
+const registeredCommands = {};
+const mockSlashCommandParser = {
+    addCommandObject: (cmd) => {
+        registeredCommands[cmd.name] = cmd;
+    },
+};
+const mockSlashCommand = {
+    fromProps: (props) => props,
+};
+
+registerCyoaSlashCommands(mockSlashCommandParser, mockSlashCommand, {
+    getSettings: () => ({ enableDecoupledCyoa: true, cyoaMaxTokens: 200 }),
+    isPbtaActive: () => false,
+    showToast: () => {},
+});
+
+assert.ok(registeredCommands.cyoagen, 'cyoagen command registered');
+assert.ok(registeredCommands.cyoaretry, 'cyoaretry command registered');
+assert.ok(registeredCommands.cyoafix, 'cyoafix command registered');
+
+// Setup mock SillyTavern chat with a narrator message containing stale choices
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chat: [
+            { is_user: false, is_system: false, mes: 'Welcome to the tavern.' },
+            {
+                is_user: false,
+                is_system: false,
+                mes: 'The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>',
+                swipes: ['The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>'],
+                swipe_id: 0,
+            },
+        ],
+        extensionSettings: {
+            rpg_tracker: {
+                playstyle: 'cyoa_3',
+                currentMemo: '[CHARACTER]\nHero: 10/10 HP\n[/CHARACTER]',
+            },
+        },
+    }),
+};
+
+// Running cyoaretry callback must not throw "getSettings is not defined"
+let slashError = null;
+try {
+    const res = await registeredCommands.cyoaretry.callback();
+    assert.ok(typeof res === 'string', 'cyoaretry callback must return a result string without error');
+} catch (err) {
+    slashError = err;
+}
+assert.strictEqual(slashError, null, 'cyoaretry must never throw ReferenceError: getSettings is not defined');
+delete globalThis.SillyTavern;
+
+console.log('✓ registerCyoaSlashCommands and Decoupled Stage 2 routing verified');
 console.log('--- ALL CYOA GUARDIAN TESTS PASSED CLEANLY! ---');
 

@@ -27,6 +27,19 @@ let _retryTracker = { mesId: -1, count: 0 };
 let _lastStage2AttemptedMessageId = -1;
 let _lastStage2AttemptedSwipeId = -1;
 
+let _getSettings = () => {
+    if (typeof SillyTavern !== 'undefined') {
+        const ctx = SillyTavern.getContext?.();
+        if (ctx?.extensionSettings?.MultiHogCompanion) {
+            return ctx.extensionSettings.MultiHogCompanion;
+        }
+    }
+    if (typeof extension_settings !== 'undefined' && extension_settings?.MultiHogCompanion) {
+        return extension_settings.MultiHogCompanion;
+    }
+    return {};
+};
+
 /**
  * Checks if the narrator / SillyTavern is currently generating or streaming text.
  * @returns {boolean}
@@ -372,10 +385,18 @@ export async function triggerDecoupledCyoaForMessage({
     getSettings,
     isPbtaActive,
     showToast,
+    force = false,
 } = {}) {
-    if (_wasGenerationStopped) return false;
-    const s = typeof getSettings === 'function' ? getSettings() : {};
-    if (s.enableDecoupledCyoa === false) return false;
+    if (_wasGenerationStopped) {
+        if (force) {
+            _wasGenerationStopped = false;
+        } else {
+            return false;
+        }
+    }
+    const resolvedGetSettings = typeof getSettings === 'function' ? getSettings : _getSettings;
+    const s = typeof resolvedGetSettings === 'function' ? resolvedGetSettings() : {};
+    if (!force && s.enableDecoupledCyoa === false) return false;
 
     // If triggered by message rendering while narrator is still actively streaming,
     // defer execution to GENERATION_ENDED when narrative prose is complete.
@@ -395,7 +416,7 @@ export async function triggerDecoupledCyoaForMessage({
 
     const idx = messageId >= 0 ? messageId : chat.length - 1;
     // Never trigger Stage 2 CYOA on Message 0 (greeting) or unstarted/clean chats
-    if (idx <= 0 || !isAdventureActive()) return false;
+    if (idx < 0 || (!force && (idx === 0 || !isAdventureActive()))) return false;
 
     const msg = chat[idx];
     if (!msg || msg.is_user || msg.is_system) return false;
@@ -403,11 +424,11 @@ export async function triggerDecoupledCyoaForMessage({
     const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
     const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
 
-    if (!isCyoaExpected(rpgSettings, pbtaActive)) return false;
-    if (hasCyoaChoices(msg.mes)) return false;
+    if (!force && !isCyoaExpected(rpgSettings, pbtaActive)) return false;
+    if (!force && hasCyoaChoices(msg.mes)) return false;
 
     const currentSwipeId = msg.swipe_id ?? 0;
-    if (_lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
+    if (!force && _lastStage2AttemptedMessageId === idx && _lastStage2AttemptedSwipeId === currentSwipeId) {
         return false;
     }
 
@@ -451,6 +472,9 @@ export async function triggerDecoupledCyoaForMessage({
  * @param {(type: string, message: string, title?: string) => void} deps.showToast
  */
 export function initCyoaGuardian({ getSettings, isPbtaActive, showToast, eventSource: esParam, event_types: etParam }) {
+    if (typeof getSettings === 'function') {
+        _getSettings = getSettings;
+    }
     const es = esParam || (typeof eventSource !== 'undefined' ? eventSource : null) || (typeof window !== 'undefined' ? window.eventSource : null) || globalThis.eventSource;
     const et = etParam || (typeof event_types !== 'undefined' ? event_types : null) || (typeof window !== 'undefined' ? window.event_types : null) || globalThis.event_types;
     if (!es || !et) return;
@@ -555,6 +579,7 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
     let messageId = -1;
     let isPbtaActive = maybeIsPbta;
     let showToast = maybeShowToast;
+    let customGetSettings = null;
 
     if (typeof optsOrMessageId === 'number') {
         messageId = optsOrMessageId;
@@ -562,6 +587,7 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
         messageId = optsOrMessageId.messageId ?? -1;
         if (optsOrMessageId.isPbtaActive !== undefined) isPbtaActive = optsOrMessageId.isPbtaActive;
         if (optsOrMessageId.showToast !== undefined) showToast = optsOrMessageId.showToast;
+        if (typeof optsOrMessageId.getSettings === 'function') customGetSettings = optsOrMessageId.getSettings;
     }
 
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
@@ -578,7 +604,6 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
         return false;
     }
 
-    const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
     const pbtaActive = typeof isPbtaActive === 'function'
         ? isPbtaActive()
         : (isPbtaActive !== undefined ? Boolean(isPbtaActive) : (typeof isPbtAActive === 'function' ? isPbtAActive() : false));
@@ -600,16 +625,14 @@ export async function regenerateCyoaChoicesForMessage(optsOrMessageId = {}, mayb
 
     if (showToast) showToast('info', 'Formulating fresh choices... 🎲', 'CYOA Engine');
 
-    const s = getSettings();
-    return await runDecoupledCyoaStage2({
+    // Route through the decoupled Stage 2 coordinator
+    return await triggerDecoupledCyoaForMessage({
         messageId: idx,
-        narrative: cleanNarrative,
-        isPbta: pbtaActive,
-        rpgSettings: {
-            ...rpgSettings,
-            cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
-        },
+        triggerSource: 'SLASH_COMMAND',
+        getSettings: customGetSettings || _getSettings,
+        isPbtaActive: () => pbtaActive,
         showToast,
+        force: true,
     });
 }
 
@@ -627,6 +650,7 @@ export async function repairOrGenerateChoicesForMessage(optsOrMessageId = {}, ma
     let messageId = -1;
     let isPbtaActive = maybeIsPbta;
     let showToast = maybeShowToast;
+    let customGetSettings = null;
 
     if (typeof optsOrMessageId === 'number') {
         messageId = optsOrMessageId;
@@ -634,6 +658,7 @@ export async function repairOrGenerateChoicesForMessage(optsOrMessageId = {}, ma
         messageId = optsOrMessageId.messageId ?? -1;
         if (optsOrMessageId.isPbtaActive !== undefined) isPbtaActive = optsOrMessageId.isPbtaActive;
         if (optsOrMessageId.showToast !== undefined) showToast = optsOrMessageId.showToast;
+        if (typeof optsOrMessageId.getSettings === 'function') customGetSettings = optsOrMessageId.getSettings;
     }
 
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
@@ -661,19 +686,27 @@ export async function repairOrGenerateChoicesForMessage(optsOrMessageId = {}, ma
     }
 
     // 2. If no choices exist at all, trigger Stage 2 to generate them!
-    return await regenerateCyoaChoicesForMessage({ messageId: idx, isPbtaActive, showToast });
+    return await regenerateCyoaChoicesForMessage({
+        messageId: idx,
+        isPbtaActive,
+        showToast,
+        getSettings: customGetSettings || _getSettings,
+    });
 }
 
 /**
  * Registers CYOA slash commands (/cyoagen, /cyoafix, /cyoaretry).
  */
-export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive, showToast }) {
+export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { getSettings, isPbtaActive, showToast } = {}) {
+    if (typeof getSettings === 'function') {
+        _getSettings = getSettings;
+    }
     if (!SlashCommandParser?.addCommandObject || !SlashCommand) return;
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoagen',
         callback: async () => {
-            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast });
+            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
             return ok ? 'Regenerated CYOA choices.' : 'Failed to regenerate CYOA choices.';
         },
         helpString: '<div>Formulates fresh CYOA choices for the latest narrator turn without touching the story prose.</div>',
@@ -683,7 +716,7 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { is
         name: 'cyoaretry',
         callback: async () => {
             // Backward-compatible alias for /cyoagen
-            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast });
+            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
             return ok ? 'Regenerated CYOA choices.' : 'Failed to regenerate CYOA choices.';
         },
         helpString: '<div>Alias for /cyoagen. Re-rolls CYOA choices for the latest narrator turn.</div>',
@@ -692,7 +725,7 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { is
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoafix',
         callback: async () => {
-            const ok = await repairOrGenerateChoicesForMessage({ isPbtaActive, showToast });
+            const ok = await repairOrGenerateChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
             return ok ? 'Successfully repaired/generated CYOA choices.' : 'Could not repair/generate CYOA choices.';
         },
         helpString: '<div>Converts plain-text numbered choices into buttons, or generates them via Stage 2 if missing.</div>',

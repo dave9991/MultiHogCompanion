@@ -2103,7 +2103,7 @@ jQuery(async () => {
             helpString: '<div>Scans all MultiHog chat partitions, verifies offloaded <code>multihog_history_*.json.gz</code> files and SHA-256 checksums, and reports any broken pointers or projection locks.</div>',
         }));
 
-        registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { isPbtaActive: isPbtAActive, showToast });
+        registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { getSettings, isPbtaActive: isPbtAActive, showToast });
     }
 
     // 4. Register Event Listeners

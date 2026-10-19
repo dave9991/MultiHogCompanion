@@ -17,6 +17,7 @@ import {
     isStage2CyoaRunning,
     insertCyoaLoadingIndicator,
     lockSendButtonUI,
+    isProtagonistDowned,
 } from './cyoa-decoupled-runner.js';
 import { isPbtAActive } from './pbta-ruleset-persistence.js';
 import { isAdventureActive } from './adventure-chat.js';

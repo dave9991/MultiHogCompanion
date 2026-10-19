@@ -12,6 +12,7 @@ import {
     tryRepairMarkdownChoices,
     armCyoaSteeringReminder,
     interceptCyoaSteering,
+    triggerDecoupledCyoaForMessage,
 } from '../cyoa-guardian.js';
 
 console.log('--- Running CYOA Guardian Test Suite ---');
@@ -331,6 +332,47 @@ try {
 assert.strictEqual(slashError, null, 'cyoaretry must never throw ReferenceError: getSettings is not defined');
 delete globalThis.SillyTavern;
 
+// 7. Testing triggerDecoupledCyoaForMessage happy path with existing choices (regression for isProtagonistDowned)
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chat: [
+            { is_user: false, is_system: false, mes: 'Welcome to the tavern.' },
+            {
+                is_user: false,
+                is_system: false,
+                mes: 'The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>',
+                swipes: ['The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>'],
+                swipe_id: 0,
+            },
+        ],
+        extensionSettings: {
+            rpg_tracker: {
+                enabled: true,
+                playstyle: 'cyoa_3',
+                syspromptModules: { CYOA_mode: true },
+                currentMemo: '[CHARACTER]\nHero: 10/10 HP\n[/CHARACTER]',
+            },
+            MultiHogCompanion: {
+                enableDecoupledCyoa: true,
+            },
+        },
+    }),
+};
+
+let eventError = null;
+try {
+    const handled = await triggerDecoupledCyoaForMessage({
+        triggerSource: 'GENERATION_ENDED',
+        isPbtaActive: () => true,
+    });
+    assert.strictEqual(handled, false, 'Should return false (no-op) when choices are already present and hero is healthy');
+} catch (err) {
+    eventError = err;
+}
+assert.strictEqual(eventError, null, 'triggerDecoupledCyoaForMessage must not throw ReferenceError: isProtagonistDowned is not defined');
+delete globalThis.SillyTavern;
+
+console.log('✓ triggerDecoupledCyoaForMessage happy path & isProtagonistDowned reference verified');
 console.log('✓ registerCyoaSlashCommands and Decoupled Stage 2 routing verified');
 console.log('--- ALL CYOA GUARDIAN TESTS PASSED CLEANLY! ---');
 

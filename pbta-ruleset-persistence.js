@@ -528,6 +528,19 @@ export function isLiveSettingsPollutedWithPbtA(s) {
         return true;
     }
 
+    // 4. Check for pbta_ snippets in syspromptSnippetDatabase or section order
+    if (Array.isArray(s.syspromptSnippetDatabase) && s.syspromptSnippetDatabase.some(p => p.id?.startsWith('pbta_') && p.globalEnabled)) {
+        return true;
+    }
+    if (Array.isArray(s.syspromptSectionOrder) && s.syspromptSectionOrder.some(k => k.startsWith('lib:pbta_'))) {
+        return true;
+    }
+
+    // 5. Check if cyoaConfig has custom PbtA prompt active
+    if (s.cyoaConfig?.useCustomPrompt && /\[INTERACTIVE CHOICE BUTTONS\]/i.test(s.cyoaConfig?.customPromptText || '')) {
+        return true;
+    }
+
     return false;
 }
 
@@ -547,9 +560,21 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
         || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
     if (!settings || typeof settings !== 'object') return false;
 
-    // 1. Remove or disable PbtA overrides from customSyspromptLibrary
+    // 1. Remove or disable PbtA overrides from customSyspromptLibrary, snippet database, and section order
     if (Array.isArray(settings.customSyspromptLibrary)) {
         settings.customSyspromptLibrary = settings.customSyspromptLibrary.filter(p => !p.id?.startsWith('pbta_'));
+    }
+    if (Array.isArray(settings.syspromptSnippetDatabase)) {
+        settings.syspromptSnippetDatabase = settings.syspromptSnippetDatabase.filter(p => !p.id?.startsWith('pbta_'));
+    }
+    if (Array.isArray(settings.syspromptSectionOrder)) {
+        settings.syspromptSectionOrder = settings.syspromptSectionOrder.filter(k => !k.startsWith('lib:pbta_'));
+    }
+    if (Array.isArray(settings.gameSystemDatabase)) {
+        settings.gameSystemDatabase = settings.gameSystemDatabase.filter(p => !p.id?.startsWith('pbta_'));
+    }
+    if (Array.isArray(settings.gameSystems)) {
+        settings.gameSystems = settings.gameSystems.filter(p => !p.id?.startsWith('pbta_'));
     }
 
     // 2. Pull factory defaults from MultiHog defaults.js (with resilient fallback)
@@ -651,6 +676,17 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
                     persMod.saveChatState(targetChatId);
                 }
             }
+        } catch (_) {}
+    }
+
+    // 8b. Explicitly stamp the chat as dnd5e to prevent false-positive ruleset bleed
+    if (targetChatId) {
+        try {
+            await setCompanionActiveCartridge(targetChatId, {
+                cartridgeId: 'dnd5e',
+                genre: 'fantasy',
+                systemLabel: 'D&D 5e',
+            }, settings);
         } catch (_) {}
     }
 

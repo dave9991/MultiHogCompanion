@@ -2182,16 +2182,47 @@ jQuery(async () => {
     }, { showToast });
 
     // Pre-flight sanitizer for MultiHog Character Creation and Instant Action
-    const runPreflightSanitizer = async function () {
+    let _isSanitizingQuickStart = false;
+    const runPreflightSanitizer = async function (e) {
+        if (e?._mhcSanitized) return;
+
         const activeChatId = getActiveChatId();
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
         const s = ctx?.extensionSettings?.rpg_tracker;
-        if (!isPbtAActive(activeChatId)) {
-            if (s && isLiveSettingsPollutedWithPbtA(s)) {
+        const targetEl = this;
+
+        if (!isPbtAActive(activeChatId) && s && isLiveSettingsPollutedWithPbtA(s)) {
+            // Halt upstream runQuickStart until cleansing completes
+            if (e && typeof e.stopImmediatePropagation === 'function') {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+            }
+            if (_isSanitizingQuickStart) return;
+            _isSanitizingQuickStart = true;
+            try {
                 console.log('[MultiHog Companion] Sanitizing stale PbtA stock prompts before character generation...');
                 await cleanseStockDndSettings(s, { chatId: activeChatId, syncSetup: true });
+                if (s?.stockPrompts) {
+                    const inputVal = (typeof $ !== 'undefined'
+                        ? ($('#rt-quickstart-name').val()?.trim() || $('#rt-cr-name').val()?.trim() || '')
+                        : '') || s?.characterCreatorDraft?.name || '';
+                    sanitizeCharacterStockPrompt(s.stockPrompts, inputVal);
+                }
+            } catch (err) {
+                console.warn('[MultiHog Companion] Preflight sanitizer error:', err);
+            } finally {
+                _isSanitizingQuickStart = false;
             }
+
+            // Re-trigger click now that settings and catalogs are 100% clean D&D
+            if (targetEl) {
+                const reEvent = $.Event('click');
+                reEvent._mhcSanitized = true;
+                $(targetEl).trigger(reEvent);
+            }
+            return;
         }
+
         if (s?.stockPrompts) {
             const inputVal = (typeof $ !== 'undefined'
                 ? ($('#rt-quickstart-name').val()?.trim() || $('#rt-cr-name').val()?.trim() || '')
@@ -2200,16 +2231,16 @@ jQuery(async () => {
         }
     };
 
-    $(document).off('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn');
+    $(document).off('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn, .rt-quickstart-genre-btn');
     // [CATALOG: DOM-01a]
-    $(document).on('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn', runPreflightSanitizer);
+    $(document).on('click.mhc_quickstart_sanitizer', '#rt-quickstart-begin, #rt-cr-generate-btn, .rt-quickstart-genre-btn', runPreflightSanitizer);
 
     // Support keyboard submission (Enter key) on name input fields
     $(document).off('keydown.mhc_quickstart_sanitizer', '#rt-quickstart-name, #rt-cr-name');
     // [CATALOG: DOM-01b]
     $(document).on('keydown.mhc_quickstart_sanitizer', '#rt-quickstart-name, #rt-cr-name', function (e) {
         if (e.key === 'Enter') {
-            void runPreflightSanitizer();
+            void runPreflightSanitizer.call(this, e);
         }
     });
 

@@ -83,6 +83,33 @@ assert.ok(!safetyNetChat[0].mes.includes('What does Silas Vance do?'), 'Safety n
 assert.ok(safetyNetChat[0].mes.includes('You stand in the mist.'), 'Narrative prose must be preserved in older turns');
 assert.ok(safetyNetChat[0].mes.includes('*(Status: 32/32 HP)*'), 'Status footer must be preserved in older turns');
 
+// Test 1c: Safety Net mode preserves active turn <CYOA_mode> when tool-calls/results follow the user message (e.g. Map Architect)
+const toolCallChat = [
+    {
+        role: 'assistant',
+        mes: 'Older turn narrative\n<choices><button>1. Old</button></choices>',
+    },
+    {
+        role: 'user',
+        is_user: true,
+        mes: 'Begin the adventure.\n\n<CYOA_mode>\nGenerate 5 numbered choices at the end.\n</CYOA_mode>',
+    },
+    {
+        role: 'assistant',
+        mes: '',
+        extra: { tool_invocations: [{ name: 'CreateAreaMap' }] },
+    },
+    {
+        role: 'system',
+        is_system: true,
+        mes: '[MAP_ARCHITECT_RESULT — PRIVATE] Map saved.',
+    },
+];
+
+stripCyoaFromOutgoingChat(toolCallChat, { stripActiveCyoa: false });
+assert.ok(toolCallChat[1].mes.includes('<CYOA_mode>'), 'Safety net mode MUST keep active turn <CYOA_mode> even when tool calls/system messages follow the user message');
+assert.ok(!toolCallChat[0].mes.includes('<choices>'), 'Historical choices must still be stripped from prior turns');
+
 console.log('✓ Prompt sanitization cleanly strips CYOA mode and historical buttons without touching story');
 
 // ── 2. Downed Detection (PbtA vs D&D) ──

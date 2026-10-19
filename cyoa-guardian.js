@@ -78,12 +78,37 @@ export function stripCyoaFromOutgoingChat(chat, options = {}) {
     const historicalMarkdownChoicesPattern = /\n*\*{0,2}What (?:does [^\n*?]+|do you) do\?\*{0,2}\s*(?:\n+\s*(?:[1-5]\.|\(\d+\)|[-*•])\s+[^\n]+)+(?=\s*(?:\n\s*\*(?:Status|Harm|HP|XP|Hold|Location|Time|Day|Level|\([A-Za-z]+:)|\n\s*<choices|$))/gi;
     const historicalStandalonePromptPattern = /\n*\*{0,2}What (?:does [^\n*?]+|do you) do\?\*{0,2}\s*(?=\s*(?:\n\s*[\*\_]?\(?(?:Status|Harm|HP|XP|Hold|Location|Time|Day|Level|\([A-Za-z]+:)|\n\s*<choices|$))/gi;
 
-    const lastIdx = chat.length - 1;
+    // Find the active user message index matching MultiHog's backwards lookup.
+    // In multi-step turns (e.g. Map Architect / CreateAreaMap tool calls),
+    // intermediate assistant tool-call and system tool-result messages are appended
+    // after the user message during the post-tool continuation pass.
+    let activeUserIdx = -1;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const m = chat[i];
+        if (!m) continue;
+        const role = String(m.role || m.Role || '').toLowerCase().trim();
+        if (m.is_user || role === 'user' || role === 'human' || role === 'player') {
+            activeUserIdx = i;
+            break;
+        }
+    }
+    if (activeUserIdx === -1) {
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const role = String(chat[i]?.role || chat[i]?.Role || '').toLowerCase().trim();
+            if (role && role !== 'system' && role !== 'assistant' && role !== 'ai' && role !== 'model') {
+                activeUserIdx = i;
+                break;
+            }
+        }
+    }
+    if (activeUserIdx === -1 && chat.length > 0) {
+        activeUserIdx = chat.length - 1;
+    }
 
     for (let i = 0; i < chat.length; i++) {
         const msg = chat[i];
         if (!msg) continue;
-        const isCurrentTurn = (i === lastIdx);
+        const isCurrentTurn = (i >= activeUserIdx);
         const shouldStripCyoaMode = stripActiveCyoa || !isCurrentTurn;
 
         const cleanString = (str) => {

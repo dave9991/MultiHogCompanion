@@ -112,6 +112,15 @@ const dirtySettings = {
     ],
     rngEnabled: true,
     rngQueueD20: true,
+    syspromptSnippetDatabase: [
+        { id: 'pbta_base_override_role', globalEnabled: true },
+        { id: 'user_snippet', globalEnabled: true },
+    ],
+    syspromptSectionOrder: [
+        'base:role',
+        'lib:pbta_base_override_role',
+        'base:combat',
+    ],
     chatStates: {
         'new_chat_101': {
             setup: {},
@@ -139,6 +148,11 @@ assert.strictEqual(dirtySettings.syspromptModules.rng_system, true, 'syspromptMo
 const remainingPbtaSnippets = dirtySettings.customSyspromptLibrary.filter(p => p.id?.startsWith('pbta_'));
 assert.strictEqual(remainingPbtaSnippets.length, 0, 'pbta_ snippets must be removed from customSyspromptLibrary');
 assert.strictEqual(dirtySettings.customSyspromptLibrary.some(p => p.id === 'custom_user_snippet'), true, 'User snippets must be preserved');
+
+// Verify syspromptSnippetDatabase and syspromptSectionOrder are cleansed
+assert.strictEqual(dirtySettings.syspromptSnippetDatabase.some(p => p.id?.startsWith('pbta_')), false, 'pbta_ snippets must be removed from syspromptSnippetDatabase');
+assert.strictEqual(dirtySettings.syspromptSnippetDatabase.some(p => p.id === 'user_snippet'), true, 'User database snippets must be preserved');
+assert.strictEqual(dirtySettings.syspromptSectionOrder.some(k => k.startsWith('lib:pbta_')), false, 'lib:pbta_ entries must be removed from syspromptSectionOrder');
 
 // Verify isLiveSettingsPollutedWithPbtA now returns false
 assert.strictEqual(isLiveSettingsPollutedWithPbtA(dirtySettings), false, 'Settings must be clean after cleanseStockDndSettings');

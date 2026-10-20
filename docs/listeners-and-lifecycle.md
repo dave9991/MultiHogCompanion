@@ -147,6 +147,13 @@ Chat switching is divided into two distinct execution phases:
   2. Upstream's `onChatRenamedMigrate` executes second, reading the proof and migrating partition files.
   3. `index.js` hooks `CHAT_RENAMED` via standard `eventSource.on` and arms a 150ms debounce timer, allowing upstream async disk writes to settle before `syncCampaignLorebooks({ isAuto: true, chatId: targetChatId })` runs.
 
+### D. Settings Update Coordination (The Two-Tier Anti-Recursion Shield)
+* **Location**: [`index.js` (`EVT-08` / `runSettingsUpdatedCoordinator`)](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js) & [`pbta-ruleset-persistence.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/pbta-ruleset-persistence.js)
+* **Problem**: SillyTavern emits `SETTINGS_UPDATED` globally whenever any extension saves settings via `saveSettingsDebounced()`. If an event handler on `SETTINGS_UPDATED` saves settings in response, it causes an infinite recursive cascade loop.
+* **Solution**:
+  1. **Shield 1 (Self-Inflicted Write Consumption)**: Before processing `SETTINGS_UPDATED`, Companion checks `isPersistingPbtaChatState()`. If true, Companion itself initiated the write during PbtA persistence; the event is silently consumed and aborted (`clearPersistingPbtaChatState(); return;`).
+  2. **Shield 2 (Re-Entrancy Mutex Gate)**: User-initiated settings modifications are debounced by 600ms and wrapped in an atomic execution lock (`_isSettingsSyncActive`). Any secondary events fired while the coordinator runs are immediately dropped.
+
 ---
 
 ## 4. Key Pointers & Upstream References

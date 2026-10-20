@@ -115,3 +115,16 @@ Defined in [`events.js#L49`](file:///home/dlittle/ai-stack/sillytavern-test/st-s
   ```
 * **Why It Beats `MESSAGE_RECEIVED`**:
   `MESSAGE_RECEIVED` fires when the raw network payload returns. DOM nodes, message containers, and buttons do not exist yet. Relying on `MESSAGE_RECEIVED` forces fragile `setTimeout` ladders. `CHARACTER_MESSAGE_RENDERED` guarantees DOM presence and is the canonical hook for buttons, UI decorations, and post-turn analysis.
+
+---
+
+## 9. Settings Persistence & `SETTINGS_UPDATED`
+
+Defined in [`events.js#L30`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/events.js#L30) and emitted in [`script.js#L8051`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/script.js#L8051).
+
+* **Trigger**: Emitted whenever `saveSettingsDebounced()` completes a `POST /api/settings/save` call.
+* **Global Scope Warning**: This event is **application-wide**. It fires when *any* core setting or third-party extension setting is saved.
+* **The Infinite Loop Trap**: Any listener on `SETTINGS_UPDATED` that saves configuration in its handler triggers another `SETTINGS_UPDATED` event, leading to an infinite recursive loop.
+* **Anti-Recursion Best Practice**:
+  1. **Self-Write Absorption**: If your extension persists background state, set an in-flight flag (`_isSelfPersisting = true`). In your `SETTINGS_UPDATED` handler, check and clear this flag, returning immediately without executing side-effects.
+  2. **Execution Mutex**: Shield any debounced reactions with an execution mutex (`_isSyncActive = true; try { ... } finally { _isSyncActive = false; }`). Any events fired while the mutex is locked must be dropped.

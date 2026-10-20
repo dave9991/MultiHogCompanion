@@ -15,6 +15,7 @@
 | **ADR-MP-04** | DOM `stopImmediatePropagation` Hijacking | UI Event Bus | `namerag-hooks.js:426` | 🔴 **HIGH**: Silently suppresses upstream listeners. |
 | **ADR-MP-05** | In-Memory `stockPrompts` Mutation | Upstream Settings Object | `character-creator-sanitizer.js:25` | 🟡 **MODERATE**: In-place settings rewriting. |
 | **ADR-MP-06** | `window._mhcPendingFreshRestart` Global Flag | Window Global State | `adventure-chat.js:391` | 🟡 **MODERATE**: Cross-tick global semaphore. |
+| **ADR-MP-07** | `generateRaw` Prompt Macro Sanitization | Host Extension API | `character-creator-sanitizer.js:230` | 🟢 **LOW**: Wraps outgoing call object. |
 
 ---
 
@@ -206,6 +207,33 @@ SillyTavern introduces an atomic Chat Fork & Launch API that does not fire disjo
 
 ---
 
+### ADR-MP-07: Outgoing Prompt Macro Syntax Sanitizer (`generateRaw` Interception)
+
+* **Status:** Active / Low Risk
+* **Location:** [`character-creator-sanitizer.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/character-creator-sanitizer.js#L230) (`installMacroSyntaxSanitizer`)
+* **Patch Type:** Host API Wrapper (`globalThis.SillyTavern.getContext().generateRaw` & `generateRawData`)
+
+#### Context & Justification
+Upstream MultiHog's `character-creator.js` embeds literal negative instructions in its system prompts, such as:
+`- CRITICAL: Never output template macro strings such as {{char}}, {{user}}, or any other {{...}} placeholders. Always replace them with the actual character's name or a fitting proper name.`
+When upstream calls `sendStateRequest`, SillyTavern routes the prompt through `generateRawData()` $\to$ `createRawPrompt()` $\to$ `substituteParams()`.
+1. **MacroEngine Warning**: ST's Chevrotain parser treats `{{...}}` as invalid macro syntax, logging `MacroDiagnostics.js:198 [Macro] Warning: Parsing errors detected` on every QuickStart run.
+2. **Prompt Corruption**: `substituteParams()` expands `{{char}}` and `{{user}}` in that instruction into actual character/user names, accidentally instructing the LLM never to output the character's or player's real name!
+
+#### Mechanism
+1. Companion wraps `globalThis.SillyTavern.getContext` to intercept `ctx.generateRaw` and `ctx.generateRawData`.
+2. Outgoing `systemPrompt` and `prompt` strings are inspected for meta-instruction macro literals.
+3. `{{...}}`, `{{char}}`, and `{{user}}` in instruction contexts are neutralized with a zero-width space (`{\u200B{`), preventing Chevrotain parser errors and unintended parameter expansion while remaining 100% invisible to the downstream LLM.
+
+#### Blast Radius (What Breaks If Removed)
+* Users see console macro syntax warnings on every QuickStart / Instant Action run.
+* Downstream LLM character creator receives corrupted negative instructions forbidding real character names.
+
+#### Retirement Criteria
+Upstream MultiHog DnD escapes its meta-macro instructions or SillyTavern provides an official `raw: true` flag on `generateRaw` to bypass `substituteParams`.
+
+---
+
 ## 3. Impact & Dependency Matrix
 
 The following matrix illustrates how each monkey patch connects to events and features in `MultiHogCompanion`:
@@ -232,4 +260,7 @@ The following matrix illustrates how each monkey patch connects to events and fe
 
   [ADR-MP-06: Restart Flag] ──► Coordinates window._mhcPendingFreshRestart
                                  └─► Prevents partition wipe on adventure launch
+
+  [ADR-MP-07: Macro Sanitizer] ──► Wraps SillyTavern.getContext().generateRaw
+                                 └─► Neutralizes {{...}} and literal macros in instructions
 ```

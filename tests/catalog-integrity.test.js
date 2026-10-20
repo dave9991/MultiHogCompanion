@@ -72,6 +72,7 @@ const requiredAdrs = [
     'ADR-MP-04', // stopImmediatePropagation
     'ADR-MP-05', // stockPrompts
     'ADR-MP-06', // _mhcPendingFreshRestart
+    'ADR-MP-07', // generateRaw macro sanitizer
 ];
 
 for (const adr of requiredAdrs) {
@@ -97,7 +98,7 @@ const requiredCatalogTags = [
     'EVT-01', 'EVT-02', 'EVT-03', 'EVT-04', 'EVT-05', 'EVT-06',
     'EVT-07', 'EVT-08', 'EVT-09', 'EVT-10', 'EVT-11', 'EVT-12',
     'DOM-01a', 'DOM-01b', 'DOM-02', 'DOM-03', 'DOM-04', 'DOM-05', 'DOM-06',
-    'ADR-MP-01', 'ADR-MP-02', 'ADR-MP-03', 'ADR-MP-04', 'ADR-MP-05', 'ADR-MP-06'
+    'ADR-MP-01', 'ADR-MP-02', 'ADR-MP-03', 'ADR-MP-04', 'ADR-MP-05', 'ADR-MP-06', 'ADR-MP-07'
 ];
 
 const allJsCode = jsFiles.map(f => fs.readFileSync(f, 'utf8')).join('\n');

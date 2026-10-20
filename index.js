@@ -97,6 +97,7 @@ import {
 import {
     isValidCharacterName,
     sanitizeCharacterStockPrompt,
+    installMacroSyntaxSanitizer,
 } from './character-creator-sanitizer.js';
 
 const EXTENSION_NAME = 'multihog_companion';
@@ -2173,9 +2174,10 @@ jQuery(async () => {
         registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { getSettings, isPbtaActive: isPbtAActive, showToast });
     }
 
-    // 4. Register Event Listeners
+    // 4. Register Event Listeners & Runtime API Sanitizers
     initAdventureChatRenameGuard();
     initCyoaSafetyNet({ getSettings, isPbtaActive: isPbtAActive, showToast, eventSource, event_types });
+    installMacroSyntaxSanitizer();
 
     // [CATALOG: EVT-01]
     if (event_types.APP_READY) {

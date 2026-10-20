@@ -5,6 +5,9 @@ import {
     sanitizeCharacterStockPrompt,
     rectifyMemoCharacterName,
     determineEffectiveCharacterName,
+    sanitizeInstructionMacroLiterals,
+    sanitizeRawGenerationArgs,
+    installMacroSyntaxSanitizer,
 } from '../character-creator-sanitizer.js';
 
 console.log('--- Running Character Creator Sanitizer Test Suite ---');
@@ -91,5 +94,61 @@ const ctxBioOnly = {
 assert.strictEqual(determineEffectiveCharacterName(ctxBioOnly), 'Edmund Wilson', 'Recovers name from bio when draft is absent');
 
 console.log('✓ determineEffectiveCharacterName robustly identifies the true character name');
+
+// 6. sanitizeInstructionMacroLiterals & ADR-MP-07 tests
+console.log('Testing sanitizeInstructionMacroLiterals & installMacroSyntaxSanitizer...');
+const canonicalRule1 = '- CRITICAL: Never output template macro strings such as {{char}}, {{user}}, or any other {{...}} placeholders. Always replace them with the actual character name or a fitting proper name.';
+const cleanedRule1 = sanitizeInstructionMacroLiterals(canonicalRule1);
+assert.strictEqual(/\{\{(?!\u200B)/.test(cleanedRule1), false, 'Neutralizes all raw macros in canonical anti-macro instruction');
+assert.ok(cleanedRule1.includes('{\u200B{char}\u200B}'), 'Escaped {{char}} with zero-width space');
+assert.ok(cleanedRule1.includes('{\u200B{user}\u200B}'), 'Escaped {{user}} with zero-width space');
+assert.ok(cleanedRule1.includes('{\u200B{...}\u200B}'), 'Escaped {{...}} with zero-width space');
+
+const transcriptionRule = '  b) Replace every literal occurrence of {{char}} or {{Char}} in the text with the character actual name: Eldrin. This is mandatory.';
+const cleanedTrans = sanitizeInstructionMacroLiterals(transcriptionRule);
+assert.strictEqual(/\{\{(?!\u200B)/.test(cleanedTrans), false, 'Neutralizes raw macros in literal transcription instructions');
+
+const substitutionRule = '- If the card fits the setting fine (other than the {{char}} substitution), output it almost completely unchanged.';
+const cleanedSub = sanitizeInstructionMacroLiterals(substitutionRule);
+assert.strictEqual(/\{\{(?!\u200B)/.test(cleanedSub), false, 'Neutralizes raw macros in substitution mention');
+
+const rawEllipsisOnly = 'Some system text with {{...}} in it';
+assert.ok(sanitizeInstructionMacroLiterals(rawEllipsisOnly).includes('{\u200B{...}\u200B}'), 'Neutralizes standalone illegal {{...}}');
+
+// Verify legitimate macros are NOT modified if not part of meta-instructions
+const legitimatePrompt = 'Character name is {{char}} and user is {{user}}. Output description.';
+assert.strictEqual(sanitizeInstructionMacroLiterals(legitimatePrompt), legitimatePrompt, 'Preserves legitimate macros in standard generation prompts');
+
+// Verify sanitizeRawGenerationArgs
+const argsObj = {
+    systemPrompt: canonicalRule1,
+    prompt: 'Prompt body with {{...}} placeholder',
+    responseLength: 500,
+};
+const sanitizedArgs = sanitizeRawGenerationArgs(argsObj);
+assert.strictEqual(/\{\{(?!\u200B)/.test(sanitizedArgs.systemPrompt), false, 'Sanitizes systemPrompt in args object');
+assert.strictEqual(/\{\{(?!\u200B)/.test(sanitizedArgs.prompt), false, 'Sanitizes prompt in args object');
+assert.strictEqual(sanitizedArgs.responseLength, 500, 'Preserves other arguments');
+
+// Verify installMacroSyntaxSanitizer wraps getContext cleanly
+let calledGenerateRaw = false;
+const mockSillyTavern = {
+    getContext: () => ({
+        generateRaw: async (args) => {
+            calledGenerateRaw = true;
+            assert.strictEqual(/\{\{(?!\u200B)/.test(args.systemPrompt), false, 'generateRaw receives sanitized systemPrompt');
+            return 'OK';
+        },
+        generateRawData: async (args) => {
+            return { choices: [{ message: { content: 'OK' } }] };
+        },
+    }),
+};
+globalThis.SillyTavern = mockSillyTavern;
+assert.strictEqual(installMacroSyntaxSanitizer(), true, 'Installs macro syntax sanitizer');
+const ctx = globalThis.SillyTavern.getContext();
+await ctx.generateRaw({ systemPrompt: canonicalRule1 });
+assert.strictEqual(calledGenerateRaw, true, 'Wrapped generateRaw was called and intercepted');
+console.log('✓ sanitizeInstructionMacroLiterals and ADR-MP-07 runtime interception verified cleanly');
 
 console.log('--- ALL CHARACTER CREATOR SANITIZER TESTS PASSED CLEANLY! ---');

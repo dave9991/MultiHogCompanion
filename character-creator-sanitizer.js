@@ -148,4 +148,120 @@ export function determineEffectiveCharacterName(context = {}) {
     return null;
 }
 
+/**
+ * Neutralizes template macro placeholders inside system prompts and instructions
+ * where they are intended as literal examples/rules for the model, rather than
+ * dynamic macro variables to be expanded by SillyTavern's MacroEngine.
+ *
+ * Prevents:
+ * 1. MacroDiagnostics syntax error warnings caused by illegal {{...}} tokens.
+ * 2. Unintended substitution of {{char}} and {{user}} inside meta-instructions like
+ *    "Never output template macro strings such as {{char}}, {{user}}..." or
+ *    "Replace every literal occurrence of {{char}} in the text...".
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function sanitizeInstructionMacroLiterals(text) {
+    if (!text || typeof text !== 'string') return text;
+    let result = text;
+
+    // 1. Exact match for canonical MultiHog anti-macro rule in character-creator.js (lines 855, 1347, 1521)
+    result = result.replace(
+        /Never output template macro strings such as\s*\{\{char\}\},\s*\{\{user\}\},\s*or any other\s*(?:\{\{\.\.\.\}\}|\{\u200B\{\.\.\.\}\u200B})\s*placeholders/gi,
+        'Never output template macro strings such as {\u200B{char}\u200B}, {\u200B{user}\u200B}, or any other {\u200B{...}\u200B} placeholders'
+    );
+
+    // 2. Any invalid macro ellipsis tokens {{...}}
+    result = result.replace(/\{\{\s*\.{2,}\s*\}\}/g, '{\u200B{...}\u200B}');
+
+    // 3. Literal occurrence of {{char}} or {{Char}} in transcription instructions (line 1475)
+    result = result.replace(
+        /(literal occurrence of\s*)\{\{(char)\}\}(\s*or\s*)\{\{(char)\}\}/gi,
+        '$1{\u200B{$2}\u200B}$3{\u200B{$4}\u200B}'
+    );
+
+    // 4. Transcription instructions mentioning {{char}} / {{user}} substitution (line 1478)
+    result = result.replace(
+        /(\{\{(?:char|user)\}\})(\s+substitution)/gi,
+        (m, p1, p2) => {
+            const tag = p1.replace(/[{}]/g, '');
+            return '{\u200B{' + tag + '}\u200B}' + p2;
+        }
+    );
+
+    return result;
+}
+
+/**
+ * Sanitizes arguments passed to SillyTavern generateRaw / generateRawData.
+ * @param {object|any} args
+ * @returns {object|any}
+ */
+export function sanitizeRawGenerationArgs(args) {
+    if (!args) return args;
+    if (typeof args === 'object' && !Array.isArray(args)) {
+        let changed = false;
+        const sanitized = { ...args };
+        if (typeof sanitized.systemPrompt === 'string') {
+            const cleaned = sanitizeInstructionMacroLiterals(sanitized.systemPrompt);
+            if (cleaned !== sanitized.systemPrompt) {
+                sanitized.systemPrompt = cleaned;
+                changed = true;
+            }
+        }
+        if (typeof sanitized.prompt === 'string') {
+            const cleaned = sanitizeInstructionMacroLiterals(sanitized.prompt);
+            if (cleaned !== sanitized.prompt) {
+                sanitized.prompt = cleaned;
+                changed = true;
+            }
+        }
+        return changed ? sanitized : args;
+    }
+    return args;
+}
+
+/**
+ * Installs runtime monkey patch on SillyTavern.getContext().generateRaw and generateRawData.
+ * Intercepts outbound prompt strings to neutralize literal meta-macro examples before
+ * SillyTavern's createRawPrompt() -> substituteParams() triggers MacroEngine parser warnings.
+ */
+// [CATALOG: ADR-MP-07] See MONKEYPATCHES.md — Outgoing Prompt Macro Syntax Sanitizer (generateRaw Interception)
+export function installMacroSyntaxSanitizer() {
+    if (typeof globalThis.SillyTavern === 'undefined' || typeof globalThis.SillyTavern.getContext !== 'function') {
+        return false;
+    }
+
+    const origGetContext = globalThis.SillyTavern.getContext;
+    if (origGetContext._mhcMacroSanitizerActive) return true;
+
+    globalThis.SillyTavern.getContext = function (...args) {
+        const ctx = origGetContext.apply(this, args);
+        if (!ctx) return ctx;
+
+        if (typeof ctx.generateRaw === 'function' && !ctx.generateRaw._mhcSanitized) {
+            const origGenerateRaw = ctx.generateRaw;
+            ctx.generateRaw = async function (genArgs) {
+                return origGenerateRaw.call(this, sanitizeRawGenerationArgs(genArgs));
+            };
+            ctx.generateRaw._mhcSanitized = true;
+        }
+
+        if (typeof ctx.generateRawData === 'function' && !ctx.generateRawData._mhcSanitized) {
+            const origGenerateRawData = ctx.generateRawData;
+            ctx.generateRawData = async function (genArgs) {
+                return origGenerateRawData.call(this, sanitizeRawGenerationArgs(genArgs));
+            };
+            ctx.generateRawData._mhcSanitized = true;
+        }
+
+        return ctx;
+    };
+
+    globalThis.SillyTavern.getContext._mhcMacroSanitizerActive = true;
+    console.log('[MultiHog Companion] Outgoing prompt macro syntax sanitizer installed.');
+    return true;
+}
+
 

@@ -128,3 +128,52 @@ Defined in [`events.js#L30`](file:///home/dlittle/ai-stack/sillytavern-test/st-s
 * **Anti-Recursion Best Practice**:
   1. **Self-Write Absorption**: If your extension persists background state, set an in-flight flag (`_isSelfPersisting = true`). In your `SETTINGS_UPDATED` handler, check and clear this flag, returning immediately without executing side-effects.
   2. **Execution Mutex**: Shield any debounced reactions with an execution mutex (`_isSyncActive = true; try { ... } finally { _isSyncActive = false; }`). Any events fired while the mutex is locked must be dropped.
+
+---
+
+## 10. Generation Lifecycle: `GENERATION_STARTED`
+
+Defined in [`events.js#L23`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/events.js#L23) and emitted in [`script.js#L4240`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/script.js#L4240).
+
+* **Trigger**: Fired at the beginning of `Generate()` before token streaming or instruct assembly commences.
+* **Payload Signature**:
+  ```js
+  eventSource.on(event_types.GENERATION_STARTED, (type, params, dryRun) => {
+      // type: string ('normal'|'regenerate'|'swipe'|'continue'|'impersonate'|'quiet')
+      // params: object (generation options, abort signals, trigger flags)
+      // dryRun: boolean (true when ST is merely evaluating token budget without LLM calls)
+  });
+  ```
+* **Best Practice Filters**:
+  * **Dry-Run Check**: Always guard with `if (dryRun) return;` so token-calculation sweeps don't trigger state resets.
+  * **Quiet Prompt Check**: If your listener manages foreground UI or user turn state, check `if (type === 'quiet') return;` so that background micro-tasks from other extensions don't abort your foreground handlers.
+  * **In-Flight Cancellation**: Use this hook to immediately abort in-flight background tasks (like Stage 2 CYOA generation or speculative analysis) when the user initiates a new turn, swipe, or regenerate.
+
+---
+
+## 11. Stop Lifecycle: `GENERATION_STOPPED` and Post-Stop Hazards
+
+Defined in [`events.js#L24`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/events.js#L24) and emitted in [`script.js#L5559`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/script.js#L5559).
+
+* **Trigger**: Fired synchronously when the user clicks the UI Stop button (`#mes_stop`) or `stopGeneration()` is called programmatically.
+* **Payload**: No arguments emitted.
+* **The Post-Stop Follow-Up Hazard**:
+  When a user stops generation, SillyTavern halts streaming and commits the truncated partial message to the chat DOM. **Crucially, SillyTavern then proceeds to emit `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED` for that partial message!**
+* **Defensive Pattern**:
+  Extensions performing post-turn analysis or auto-repair (such as CYOA choice injection) must record a boolean stop flag (`_wasStopped = true`) on `GENERATION_STOPPED`. When the follow-up `CHARACTER_MESSAGE_RENDERED` fires for the partial text, inspect this flag to immediately abort, preventing unintended modifications to an aborted message.
+
+---
+
+## 12. Streaming Concurrency & `GENERATION_ENDED`
+
+Defined in [`events.js#L25`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/events.js#L25) and emitted in [`script.js#L3477`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/script.js#L3477).
+
+* **Trigger**: Fired when generation has concluded, streaming has ended, and `hideStopButton()` / `activateSendButtons()` runs.
+* **Payload Signature**:
+  ```js
+  eventSource.on(event_types.GENERATION_ENDED, (chatLength) => {
+      // chatLength: number (total count of messages in context.chat)
+  });
+  ```
+* **The Streaming Deferral Pattern**:
+  In SillyTavern, when streaming is enabled, `CHARACTER_MESSAGE_RENDERED` fires *early* (when the message DOM element is mounted, but tokens are still arriving). Extensions inspecting complete response text must check if streaming is active (`is_send_press || document.body.dataset.generating`). If streaming, defer analysis until `GENERATION_ENDED` fires. When batch mode (streaming OFF) is used, deduplicate via message index and swipe ID to prevent running the same turn analysis twice.

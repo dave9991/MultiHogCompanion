@@ -493,7 +493,9 @@ export function initCyoaSafetyNet({ getSettings, isPbtaActive, showToast, eventS
 
     // [CATALOG: EVT-09] See LISTENERS.md — CYOA Generation Guard (GENERATION_STARTED)
     if (et.GENERATION_STARTED) {
-        es.on(et.GENERATION_STARTED, () => {
+        es.on(et.GENERATION_STARTED, (type, params, dryRun) => {
+            if (dryRun) return;
+            if (type === 'quiet') return;
             _wasGenerationStopped = false;
             _lastAttemptedMessageId = -1;
             _lastAttemptedSwipeId = -1;

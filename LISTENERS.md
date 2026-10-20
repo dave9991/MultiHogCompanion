@@ -229,29 +229,45 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-09: `GENERATION_STARTED` (CYOA Guard)
-* **Trigger:** User clicks Send, Regenerate, or Swipe.
-* **Registered In:** `cyoa-safety-net.js`
-* **Handler:** Aborts in-flight Stage 2 CYOA pass; resets stop flags and tracking pointers.
-* **Blast Radius:** Swiping a message would leave previous Stage 2 generation running in the background.
-* **Status:** Clean abort handler.
+### EVT-09: `GENERATION_STARTED` (CYOA Foreground Generation Guard)
+* **Trigger:** Emitted when SillyTavern begins generation for Send, Regenerate, Swipe, Continue, or Impersonate.
+* **Registered In:** `cyoa-safety-net.js` (line 496)
+* **Payload Structure:** `(type: string, params: object, dryRun: boolean)`
+* **Handler:**
+  1. **Dry-Run Guard:** Ignores token calculation passes (`if (dryRun) return;`).
+  2. **Quiet Prompt Guard:** Ignores background API calls from other extensions (`if (type === 'quiet') return;`).
+  3. **Immediate Abort:** Calls `abortCyoaGeneration('generation_started')` to abort the `AbortController` of any in-flight background CYOA LLM request.
+  4. **State Reset:** Resets `_wasGenerationStopped = false`, `_lastAttemptedMessageId = -1`, `_lastAttemptedSwipeId = -1`.
+* **The "Ghost Swipe" Collision Hazard:** If a user receives a turn without buttons and quickly clicks Swipe or Regenerate, an in-flight background choice generation pass would otherwise finish seconds later and inject buttons meant for the previous abandoned swipe into the new swipe.
+* **Status:** Clean abort handler with dryRun and quiet filters.
 
 ---
 
-### EVT-10: `GENERATION_STOPPED` (CYOA Stop Guard)
-* **Trigger:** User clicks the Stop generation button in SillyTavern.
-* **Registered In:** `cyoa-safety-net.js`
-* **Handler:** Sets `_wasGenerationStopped = true`, aborts Stage 2 CYOA pass immediately.
-* **Blast Radius:** Clicking Stop would stop narrative text but allow Stage 2 to continue running.
-* **Status:** Clean abort handler.
+### EVT-10: `GENERATION_STOPPED` (CYOA Stop Guard & Aborted Message Shield)
+* **Trigger:** User clicks the Stop generation button in SillyTavern UI (`stopGeneration()` in `script.js`).
+* **Registered In:** `cyoa-safety-net.js` (line 508)
+* **Execution Priority:** Synchronous T+0ms upon stop emission.
+* **Handler:**
+  1. Sets `_wasGenerationStopped = true`.
+  2. Resets `_lastAttemptedMessageId = -1` and `_lastAttemptedSwipeId = -1`.
+  3. Aborts active background Stage 2 CYOA requests via `abortCyoaGeneration('generation_stopped')`.
+* **The "Truncated Message Choice Leak" Hazard:** When a user stops generation mid-turn, SillyTavern preserves the partial truncated message and still emits `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED`. Without the `_wasGenerationStopped` shield, the safety net would interpret the truncated text as "missing choices" and start an unwanted choice generation pass on an abandoned turn.
+* **Dual-Layer Stop Defense:** `EVT-10` handles stops during host narrative streaming (Stage 1), while [`DOM-06`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/cyoa-safety-net.js#L526) intercepts stop/cancel clicks during background CYOA generation (Stage 2).
+* **Blast Radius:** Clicking Stop would abort text streaming but allow background Stage 2 CYOA generation to continue and erroneously inject buttons into incomplete messages.
+* **Status:** Clean abort handler with aborted message shielding.
 
 ---
 
 ### EVT-11: `GENERATION_ENDED` (CYOA Fallback Completion Trigger)
-* **Trigger:** Generation pipeline concludes.
-* **Registered In:** `cyoa-safety-net.js`
-* **Handler:** Routes through `coordinateCyoaForMessage`. If `CHARACTER_MESSAGE_RENDERED` was deferred due to active streaming or follow-up tool calls, evaluates final settled message and repairs/generates choices as needed.
-* **Blast Radius:** Messages generated with streaming enabled might lack CYOA choice buttons if skipped.
+* **Trigger:** Generation and token streaming conclude (`hideStopButton()` called by `activateSendButtons()` in `script.js`).
+* **Registered In:** `cyoa-safety-net.js` (line 570)
+* **Payload Structure:** `(chatLength: number)`
+* **Handler:** Routes through `coordinateCyoaForMessage({ triggerSource: 'GENERATION_ENDED' })`.
+* **The Streaming Hand-off Protocol:**
+  1. **Streaming Hand-off:** When token streaming is active, `EVT-06` (`CHARACTER_MESSAGE_RENDERED`) fires early while `isNarratorGenerating()` is still `true`, causing it to defer execution. When streaming finally completes, `EVT-11` (`GENERATION_ENDED`) fires, evaluating the completely settled prose.
+  2. **Batch Deduplication:** In non-streaming batch mode, `EVT-06` evaluates the message first and records `_lastAttemptedMessageId = idx` and `_lastAttemptedSwipeId = swipeId`. When `EVT-11` fires milliseconds later, the deduplication guard detects the matching registers and exits immediately (0 duplicate work).
+  3. **Stop Guard:** If the user stopped generation, `EVT-10` sets `_wasGenerationStopped = true`, causing `EVT-11` to abort without injecting choices into truncated text.
+* **Blast Radius:** If removed, streaming responses will never receive CYOA buttons because `CHARACTER_MESSAGE_RENDERED` deferral would have no follow-up trigger.
 * **Optimization Status:** **OPTIMIZED (Phase 3)**. Tool-call guarded and deduplicated against `CHARACTER_MESSAGE_RENDERED`.
 
 ---

@@ -91,6 +91,18 @@ When `CHARACTER_MESSAGE_RENDERED(messageId, type)` fires, Companion executes two
   • Fallback: quiet prompt choice repair    ↳ Evolves narrative relationship text in lorebook
 ```
 
+### The Streaming Hand-off Protocol (`CHARACTER_MESSAGE_RENDERED` $\to$ `GENERATION_ENDED`)
+Because SillyTavern can operate with streaming enabled or disabled, choices cannot unconditionally evaluate on either event alone:
+
+* **When Streaming is ON**:
+  1. `CHARACTER_MESSAGE_RENDERED` (`EVT-06`) fires early while tokens are still streaming into the DOM.
+  2. `coordinateCyoaForMessage` detects `isNarratorGenerating() === true` and defers execution.
+  3. Streaming completes $\to$ SillyTavern calls `activateSendButtons()` $\to$ `hideStopButton()`.
+  4. `GENERATION_ENDED` (`EVT-11`) fires $\to$ `coordinateCyoaForMessage` now evaluates the settled complete prose.
+* **When Streaming is OFF (Batch Mode)**:
+  1. `CHARACTER_MESSAGE_RENDERED` evaluates the complete text immediately, setting `_lastAttemptedMessageId = idx` and `_lastAttemptedSwipeId = swipeId`.
+  2. `GENERATION_ENDED` fires right after. Its deduplication guard detects the matching registers and exits immediately with 0 duplicate work.
+
 ---
 
 ## 2. Race Conditions & The Hazard Matrix
@@ -105,6 +117,8 @@ Because SillyTavern is a single-page application with asynchronous operations, m
 | **UI Freeze on Hangs** | An intercepted button or action calls `event.stopImmediatePropagation()` and awaits an external service (e.g. NameRAG or local endpoint) that hangs or times out. | **Timeout Promise Race**: Always wrap async interception in `Promise.race([work, timeoutPromise(4000)])`. If it times out, fall back to stock behavior and emit a `toastr.warning()`. |
 | **DOM Mount Timing** | Attempting to bind click handlers or inspect settings elements before SillyTavern has mounted the extension drawer. | Use delegated event listeners on persistent roots (e.g. `$(document).on('click', '.selector', ...)`) or listen for `EXTENSION_SETTINGS_LOADED`. |
 | **Chat Rename Ordering** | SillyTavern calls `reloadCurrentChat()` *before* emitting `CHAT_RENAMED`. Upstream sees an unmigrated partition on `CHAT_CHANGED` and risks resetting state unless proof is re-armed *before* upstream's rename migration runs. | **`eventSource.makeFirst` Priority + Debounce**: `EVT-02` uses `makeFirst` to run synchronously at T+0ms and re-arm the partition proof. `EVT-03` uses standard FIFO + 150ms debounce to let upstream disk writes settle before lorebooks are scanned and cloned. |
+| **Ghost Swipe Collision** | While a background Stage 2 CYOA generation is running for message swipe $N-1$, the user swipes or clicks regenerate to start swipe $N$. The late-finishing background task commits buttons meant for $N-1$ onto the new swipe $N$. | **`GENERATION_STARTED` Abort Hook (`EVT-09`)**: Immediately severs the active `AbortController` and wipes `_lastAttemptedSwipeId` when foreground generation begins (`dryRun` and `quiet` filtered). |
+| **Truncated Message Choice Leak** | User clicks Stop mid-turn. SillyTavern preserves the incomplete narrative and proceeds to emit `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED`. Downstream choice logic would interpret the lack of choices as a failure and auto-generate buttons on an aborted turn. | **`GENERATION_STOPPED` Shield (`EVT-10`)**: Sets `_wasGenerationStopped = true` at T+0ms. `coordinateCyoaForMessage` drops choice processing on stopped turns unless explicitly forced. |
 
 ---
 

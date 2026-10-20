@@ -272,12 +272,23 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-12: `CHAT_COMPLETION_PROMPT_READY` (CYOA Prompt Sanitizer)
-* **Trigger:** SillyTavern constructs prompt payload right before sending to LLM.
-* **Registered In:** `cyoa-safety-net.js`
-* **Handler:** `stripCyoaFromOutgoingChat(eventData.chat, { stripActiveCyoa })`. In Safety Net mode, preserves active turn's `<CYOA_mode>` for fast single-stage generation while stripping historical `<choices>` and markdown choice lists from older turns. In Always Decoupled mode, strips `<CYOA_mode>` across all turns.
-* **Blast Radius:** Older choices and "What do you do?" lists would remain in chat history and poison new turn generation.
-* **Status:** Clean synchronous transform.
+### EVT-12: `CHAT_COMPLETION_PROMPT_READY` (Outgoing CYOA Prompt Sanitizer)
+* **Trigger:** SillyTavern constructs the prompt payload and completes token budgeting right before dispatching the HTTP request to the Chat Completion API (`openai.js:1610` and `script.js:3978`).
+* **Registered In:** [`cyoa-safety-net.js:544`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/cyoa-safety-net.js#L544)
+* **Payload Structure:**
+  ```js
+  eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
+      // eventData: { chat: Array<Message>, dryRun: boolean }
+      // chat: mutable array of message objects: [{ role, content/mes, ... }]
+      // dryRun: boolean (true when ST is calculating tokens without invoking LLM)
+  });
+  ```
+* **Handler:** Routes through `stripCyoaFromOutgoingChat(eventData.chat, { stripActiveCyoa })`.
+* **The "Context Poisoning" Hazard & Dual-Zone Sanitizer**:
+  1. **Historical Turn Sanitization ($1 \dots N-1$)**: When generating turn $N$, previous assistant turns in chat history often contain `<choices><button>...</button></choices>` blocks or markdown option lists (`What do you do? 1. Attack 2. Flee`). If left uncleaned in the context window, the LLM suffers severe context poisoning: it echoes stale choices verbatim, hallucinates broken HTML/XML tags mid-sentence, or gets trapped in repetitive decision loops. `EVT-12` cleans all historical choice markup from past turns.
+  2. **Active Turn Preservation ($N$)**: In MultiHog Companion's default single-stage fast pipeline (`safety_net` mode), the active user turn's `<CYOA_mode>` XML instructions are strictly **preserved** (`stripActiveCyoa: false`). This instructs the narrator model to output fresh choices directly on Stage 1. Only the legacy/experimental decoupled mode (`two_stage` / `always_decoupled`) strips `<CYOA_mode>` on the active turn.
+* **Blast Radius:** If unhandled, older interactive buttons and numbered lists remain in chat context, causing high prompt drift, hallucinated tags, and degraded narrator responses across ongoing campaigns.
+* **Optimization Status:** **OPTIMIZED (Phase 3)**. In-place synchronous array mutation; guards against `dryRun` and disabled CYOA; protects active prompt while scrubbing history.
 
 ---
 

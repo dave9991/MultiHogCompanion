@@ -177,3 +177,24 @@ Defined in [`events.js#L25`](file:///home/dlittle/ai-stack/sillytavern-test/st-s
   ```
 * **The Streaming Deferral Pattern**:
   In SillyTavern, when streaming is enabled, `CHARACTER_MESSAGE_RENDERED` fires *early* (when the message DOM element is mounted, but tokens are still arriving). Extensions inspecting complete response text must check if streaming is active (`is_send_press || document.body.dataset.generating`). If streaming, defer analysis until `GENERATION_ENDED` fires. When batch mode (streaming OFF) is used, deduplicate via message index and swipe ID to prevent running the same turn analysis twice.
+
+---
+
+## 13. Undocumented Outgoing Prompt Transform: `CHAT_COMPLETION_PROMPT_READY`
+
+Defined in [`events.js#L65`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/events.js#L65) and emitted in [`openai.js#L1610`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/openai.js#L1610) and [`script.js#L3978`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/script.js#L3978).
+
+* **Trigger**: Fired immediately after prompt assembly and token calculation, right before the JSON request body is dispatched to Chat Completion endpoints (OpenAI, Claude, OpenRouter, Mistral, Ollama, etc.).
+* **Payload Signature**:
+  ```js
+  eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
+      // eventData: { chat: Array<Message>, dryRun: boolean }
+      // chat: mutable array of message objects: [{ role, content/mes, ... }]
+      // dryRun: boolean (true when ST is measuring tokens without invoking LLM)
+  });
+  ```
+* **In-Place Mutation Contract**:
+  Unlike observation-only event listeners, `CHAT_COMPLETION_PROMPT_READY` acts as a **synchronous outgoing prompt pipeline filter**. SillyTavern provides the exact `eventData.chat` array that is serialized into the API payload. Extensions mutate `msg.mes` and `msg.content` directly in-place.
+* **Context Poisoning Prevention**:
+  This hook provides the only official mechanism to sanitize prompt context sent over the wire without altering persisted chat records (`.jsonl`) on disk. MultiHog Companion uses this hook (`EVT-12`) to scrub interactive XML (`<choices>`, `<button>`) and numbered decision lists from historical messages ($1 \dots N-1$), while leaving the active user prompt intact so the single-stage CYOA generator has complete instructions.
+

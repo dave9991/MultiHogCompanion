@@ -228,5 +228,37 @@ assert.strictEqual(ledgerAfter['Eldoria_NPCs::1'].initialSource, 'pre_existing',
 assert.strictEqual(ledgerAfter['Eldoria_NPCs::2'].initialSource, 'pre_existing', 'Must be marked pre_existing');
 console.log('✓ Pre-existing relationship values are strictly preserved and never wiped on chat switch');
 
+// Now add an NPC entry #3 that has NO existing values
+globalThis.fetch = async (url, options) => {
+    if (url === '/api/worldinfo/get') {
+        return {
+            ok: true,
+            json: async () => ({
+                entries: {
+                    1: { comment: 'Marta Okonkwo', content: 'Cyborg quartermaster with no known affiliations.' },
+                    2: { comment: 'Kaelen Thorne', content: 'Rogue scout wandering the borderlands.' },
+                    3: { comment: 'Theron Vex', content: 'Mysterious cloaked informant lurking in shadows.' },
+                },
+            }),
+        };
+    }
+    return { ok: true, json: async () => ({}) };
+};
+
+// Passive scan (allowLlmScan: false, simulated F5 / chat switch)
+const passiveScanResult = await scanAndInitUnsyncedNpcs({ allowLlmScan: false });
+assert.strictEqual(passiveScanResult.scanned, 3, 'Should scan 3 NPCs');
+assert.strictEqual(passiveScanResult.skipped, 2, 'Marta and Kaelen must be skipped as already initialized');
+assert.strictEqual(passiveScanResult.initialized, 1, 'Theron Vex must be initialized with passive default');
+
+assert.strictEqual(mockRpgTracker.npcRelationshipValues['Eldoria_NPCs::3'].friendship, 0, 'Theron friendship must default to 0');
+assert.strictEqual(mockRpgTracker.npcRelationshipValues['Eldoria_NPCs::3'].affection, 0, 'Theron affection must default to 0');
+
+const ledgerAfterPassive = getRelationshipSyncLedger(mockChatId);
+assert.strictEqual(ledgerAfterPassive['Eldoria_NPCs::3'].initialSource, 'default_neutral', 'Must be marked default_neutral');
+assert.strictEqual(ledgerAfterPassive['Eldoria_NPCs::3'].initialized, true, 'Must be marked initialized');
+console.log('✓ Passive scan initializes unrecorded NPCs with neutral baseline without triggering LLM calls');
+
 console.log('--- ALL RELATIONSHIP NARRATIVE SYNC TESTS PASSED CLEANLY! ---');
+
 

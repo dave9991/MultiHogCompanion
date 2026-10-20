@@ -220,7 +220,8 @@ function isTruncatedReasoningDump(text) {
     if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
     const hasStructuredPayload = /<(?:choices|button)\b/i.test(trimmed) ||
-        /(?:^|\n)[ \t]*\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(trimmed);
+        /(?:^|\n)[ \t]*\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(trimmed) ||
+        /\{[\s\S]*\}/.test(trimmed);
     if (hasStructuredPayload) return false;
     return /^(?:<think>|Here(?:'s| is) a thinking process|Thinking Process:|Let's think step by step|1\.\s+\*\*(?:Analyze|Understand|Evaluate)\b)/i.test(trimmed);
 }
@@ -247,8 +248,8 @@ export function extractTextFromApiResponse(data) {
             : (typeof msg?.reasoning === 'string' ? msg.reasoning.trim() : '');
 
         if (content && reasoning) {
-            // If content contains choice tags or Concierge directive blocks, it is the clean answer
-            if (/<(?:choices|button)\b/i.test(content) || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(content)) {
+            // If content contains choice tags, Concierge directive blocks, or JSON, it is the clean answer
+            if (/<(?:choices|button)\b/i.test(content) || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(content) || /\{[\s\S]*\}/.test(content)) {
                 return content;
             }
             // If reasoning contains choice tags while content does not, include reasoning
@@ -264,9 +265,14 @@ export function extractTextFromApiResponse(data) {
             if (directiveMatch) {
                 return directiveMatch[1].trim();
             }
+            // If the model placed JSON inside reasoning_content, extract it
+            const jsonMatch = reasoning.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                return jsonMatch[0].trim();
+            }
             // Do not leak unfinished chain-of-thought dumps when content was starved by token truncation
             if (isTruncatedReasoningDump(reasoning)) {
-                console.warn('[PbtA Concierge] Model exhausted output token budget inside reasoning_content before producing content.');
+                console.warn('[MultiHog Companion] Model exhausted output token budget inside reasoning_content before producing content.');
                 return '';
             }
             return reasoning;
@@ -371,14 +377,14 @@ export function resolveConciergeMaxTokens({ settings, messages, context } = {}) 
 /**
  * Send a request via SillyTavern default active connection.
  */
-async function sendViaDefault(context, settings, messages, { signal = null } = {}) {
+async function sendViaDefault(context, settings, messages, { signal = null, callerName = 'MultiHog Companion' } = {}) {
     const hasImage = hasImagePayload(messages);
 
     // Explicitly attach names to isolate from SillyTavern's active background character
     const isolatedMessages = messages.map(msg => {
         let name = msg.name;
         if (!name) {
-            if (msg.role === 'assistant') name = 'PbtA_Concierge';
+            if (msg.role === 'assistant') name = callerName.replace(/\s+/g, '_');
             else if (msg.role === 'user') name = 'Player';
             else if (msg.role === 'system') name = 'System';
         }
@@ -391,7 +397,7 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
             const data = await context.sendOpenAIRequest('quiet', isolatedMessages, signal);
             return extractTextFromApiResponse(data);
         }
-        console.warn('[PbtA Concierge] Images attached but main API may not support multimodal payloads. Attempting chat completion.');
+        console.warn(`[${callerName}] Images attached but main API may not support multimodal payloads. Attempting chat completion.`);
     }
 
     const responseLength = resolveConciergeMaxTokens({
@@ -406,7 +412,7 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
         const rawData = await context.generateRawData({
             prompt: isolatedMessages,
             quietToLoud: false,
-            quietName: 'PbtA Concierge',
+            quietName: callerName,
             instructOverride: false,
             responseLength: responseLength,
         });
@@ -414,7 +420,7 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
         if (extracted) {
             return extracted;
         }
-        console.warn('[PbtA Concierge] generateRawData returned empty content. Raw data:', rawData);
+        console.warn(`[${callerName}] generateRawData returned empty content. Raw data:`, rawData);
     }
 
     // 2. Fallback to generateRaw
@@ -423,13 +429,13 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
             return await context.generateRaw({
                 prompt: isolatedMessages,
                 quietToLoud: false,
-                quietName: 'PbtA Concierge',
+                quietName: callerName,
                 instructOverride: false,
                 trimNames: false,
                 responseLength: responseLength,
             });
         } catch (err) {
-            console.warn('[PbtA Concierge] generateRaw failed:', err?.message || err);
+            console.warn(`[${callerName}] generateRaw failed:`, err?.message || err);
             // If generateRaw throws 'No message generated', return empty string instead of crashing
             return '';
         }
@@ -443,10 +449,19 @@ async function sendViaDefault(context, settings, messages, { signal = null } = {
  *
  * @param {object} settings Connection settings (source, profile, ollama, openai, maxTokens)
  * @param {Array<{role: string, content: string|Array}>} messages
- * @param {AbortSignal|null} [signal]
+ * @param {AbortSignal|object|null} [signalOrOptions]
  * @returns {Promise<string>}
  */
-export async function sendRoutedLlmRequest(settings, messages, signal = null) {
+export async function sendRoutedLlmRequest(settings, messages, signalOrOptions = null) {
+    let signal = null;
+    let options = {};
+    if (signalOrOptions instanceof AbortSignal) {
+        signal = signalOrOptions;
+    } else if (signalOrOptions && typeof signalOrOptions === 'object') {
+        signal = signalOrOptions.signal || null;
+        options = signalOrOptions;
+    }
+    const callerName = options.callerName || 'MultiHog Companion';
     const context = SillyTavern.getContext();
 
     // Sanitize all outgoing messages to strip any straggling SillyTavern macros ({{user}}, {{persona}}, {{char}}, etc.)
@@ -483,7 +498,7 @@ export async function sendRoutedLlmRequest(settings, messages, signal = null) {
     }
 
     // 4. Default SillyTavern Connection
-    return await sendViaDefault(context, settings, sanitizedMessages, { signal });
+    return await sendViaDefault(context, settings, sanitizedMessages, { signal, callerName });
 }
 
 /**
@@ -495,5 +510,5 @@ export async function sendRoutedLlmRequest(settings, messages, signal = null) {
  */
 export async function sendConciergeRequest(messages, signal = null) {
     const settings = getConciergeConnectionSettings();
-    return await sendRoutedLlmRequest(settings, messages, signal);
+    return await sendRoutedLlmRequest(settings, messages, { signal, callerName: 'PbtA Concierge' });
 }

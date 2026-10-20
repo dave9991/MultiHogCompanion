@@ -58,7 +58,7 @@ function triggerSaveMetadata() {
 
 async function sendLlmPrompt(connSettings, messages) {
     const conn = await import('./concierge-connection.js');
-    return await conn.sendRoutedLlmRequest(connSettings, messages);
+    return await conn.sendRoutedLlmRequest(connSettings, messages, { callerName: 'Relationship Sync' });
 }
 
 // ── 1. MultiHog Tier Math (Percentage-of-Max Thresholds) ───────────────────────
@@ -336,9 +336,10 @@ export function isNarrativeSyncEnabled() {
  *
  * @param {object} [options]
  * @param {boolean} [options.forceAll=false]
+ * @param {boolean} [options.allowLlmScan=false] If false, seeds local ledger baselines without making LLM network calls
  * @returns {Promise<{ scanned: number, initialized: number, skipped: number }>}
  */
-export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
+export async function scanAndInitUnsyncedNpcs({ forceAll = false, allowLlmScan = false } = {}) {
     if (isSyncInProgress) {
         return { scanned: 0, initialized: 0, skipped: 0 };
     }
@@ -439,6 +440,32 @@ export async function scanAndInitUnsyncedNpcs({ forceAll = false } = {}) {
                     initialSource: 'pre_existing',
                 }, activeChatId);
                 skipped++;
+                continue;
+            }
+
+            // If active LLM scan is not permitted (e.g. background chat switch / page load),
+            // record neutral/existing baseline passively without making unprompted LLM requests.
+            if (!allowLlmScan) {
+                const initF = existingVal?.friendship ?? 0;
+                const initA = existingVal?.affection ?? 0;
+                if (!rpg.npcRelationshipValues[fullId]) {
+                    rpg.npcRelationshipValues[fullId] = {
+                        friendship: initF,
+                        affection: initA,
+                    };
+                }
+                updateRelationshipSyncLedger(fullId, {
+                    initialized: true,
+                    lastSyncedTier: {
+                        friendship: getFriendshipTier(initF).label,
+                        affection: getAffectionTier(initA).label,
+                    },
+                    lastFriendshipScore: initF,
+                    lastAffectionScore: initA,
+                    lastSyncedAt: Date.now(),
+                    initialSource: existingVal ? 'pre_existing' : 'default_neutral',
+                }, activeChatId);
+                initialized++;
                 continue;
             }
 

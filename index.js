@@ -1750,7 +1750,7 @@ async function initUI() {
                     const btn = $(this);
                     btn.prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> Scanning...');
                     try {
-                        const res = await scanAndInitUnsyncedNpcs({ forceAll: false });
+                        const res = await scanAndInitUnsyncedNpcs({ forceAll: false, allowLlmScan: true });
                         showToast('success', `Scanned ${res.scanned} NPCs: initialized ${res.initialized}, skipped ${res.skipped}.`, 'Relationship Narrative Sync');
                         updateRelationshipSyncUI();
                     } catch (err) {
@@ -1994,8 +1994,8 @@ async function runChatChangedCoordinator(targetChatId, token) {
         if (token !== _activeChatChangedToken) return;
 
         updateRelationshipSyncUI();
-        if (isAdventureActive()) {
-            scanAndInitUnsyncedNpcs().then(() => {
+        if (isAdventureActive() && s.enableRelationshipNarrativeSync !== false) {
+            scanAndInitUnsyncedNpcs({ allowLlmScan: false }).then(() => {
                 if (token === _activeChatChangedToken) {
                     updateRelationshipSyncUI();
                 }
@@ -2137,7 +2137,7 @@ jQuery(async () => {
             name: 'mhc-rel-sync',
             aliases: ['rel-sync'],
             callback: async () => {
-                const initRes = await scanAndInitUnsyncedNpcs({ forceAll: false });
+                const initRes = await scanAndInitUnsyncedNpcs({ forceAll: false, allowLlmScan: true });
                 const tierRes = await checkAndSyncTierCrossovers();
                 updateRelationshipSyncUI();
                 return `Relationship Sync: scanned ${initRes.scanned} (initialized ${initRes.initialized}), checked ${tierRes.checked} (tier evolved ${tierRes.updated}).`;
@@ -2256,17 +2256,20 @@ jQuery(async () => {
             const s = getSettings();
             if (s.enableLorebookSync && s.autoSyncOnRename) {
                 if (_chatRenamedTimer) clearTimeout(_chatRenamedTimer);
+                const targetChatId = detail?.newFileName
+                    ? String(detail.newFileName).replace(/\.jsonl$/i, '').trim()
+                    : undefined;
                 _chatRenamedTimer = setTimeout(async () => {
                     _chatRenamedTimer = null;
-                    await syncCampaignLorebooks({ isAuto: true });
+                    await syncCampaignLorebooks({ isAuto: true, chatId: targetChatId });
                     await updateLorebookSyncUI();
                 }, 150);
             }
         });
     }
     // [CATALOG: EVT-04]
-    eventSource.on(event_types.CHAT_CHANGED, () => {
-        const activeChatId = getActiveChatId();
+    eventSource.on(event_types.CHAT_CHANGED, (chatId) => {
+        const activeChatId = (chatId && typeof chatId === 'string') ? chatId : getActiveChatId();
         logRulesetEvent('CHAT_CHANGED', { activeChatId });
         if (typeof refreshConciergeActiveContext === 'function') {
             void refreshConciergeActiveContext().catch(() => {});

@@ -48,16 +48,31 @@ T+500ms:  [index.js] runChatChangedCoordinator(targetChatId, token) executes:
 ---
 
 ### Timeline: `CHAT_RENAMED` (The Early Hook Race)
-SillyTavern fires `CHAT_RENAMED` when a chat is saved with a new title. In upstream MultiHog, `onChatRenamedMigrate` immediately copies partition files from the old chat filename to the new chat filename.
+SillyTavern emits `CHAT_RENAMED` when a chat is saved with a new title.
+⚠️ **Critical Order of Operations**: In SillyTavern's `renameChat()` (`script.js`), it executes `await reloadCurrentChat()` *before* emitting `CHAT_RENAMED`. This means `CHAT_CHANGED` fires *first*, momentarily presenting an unmigrated partition to upstream MultiHog.
 
 ```
-T+0ms:    [adventure-chat.js] eventSource.makeFirst handler fires BEFORE upstream MultiHog!
-          Verifies window._mhcPendingFreshRestart proof.
-          Sets up rename tracking so old partitions aren't orphaned.
-T+5ms:    [Upstream MultiHog] onChatRenamedMigrate fires and migrates partition files.
-T+200ms:  [index.js] setTimeout fires:
-          syncCampaignLorebooks({ isAuto: true }) -> automatically renames bound lorebook.
-          updateLorebookSyncUI().
+T+0ms (pre): SillyTavern calls reloadCurrentChat() -> CHAT_CHANGED fires first.
+             Upstream MultiHog notes an unfamiliar partition key.
+─────────────────────────────────────────────────────────────────────────────
+T+0ms:       SillyTavern emits CHAT_RENAMED with payload: { avatarId, groupId, oldFileName, newFileName }
+             │
+             ├── [adventure-chat.js] (EVT-02 via eventSource.makeFirst)
+             │   ↳ Fires BEFORE upstream MultiHog!
+             │   ↳ Re-arms runtimeState.pendingUnseenChatReset = { oldId, newId }
+             │   ↳ Guarantees the pending restart proof is active.
+             │
+             ├── [Upstream MultiHog] (onChatRenamedMigrate via standard eventSource.on)
+             │   ↳ Fires SECOND.
+             │   ↳ Sees the armed proof and successfully migrates partition files on disk.
+             │
+             └── [index.js] (EVT-03 via standard eventSource.on)
+                 ↳ Fires THIRD.
+                 ↳ Captures detail.newFileName and arms a 150ms debounced settlement timer.
+─────────────────────────────────────────────────────────────────────────────
+T+150ms:     [index.js] Debounce timer fires after upstream async file writes settle:
+             syncCampaignLorebooks({ isAuto: true, chatId: targetChatId })
+             updateLorebookSyncUI().
 ```
 
 ---
@@ -102,56 +117,65 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 ## 3. Comprehensive Event Catalog
 
 ### EVT-01: `APP_READY`
-* **Trigger:** SillyTavern UI and all extensions have finished loading.
-* **Registered In:** `index.js` (line 2007)
+* **Trigger:** SillyTavern UI and all core/third-party extensions have finished loading and the loader overlay is dismissed.
+* **Registered In:** `index.js` (line 2182)
 * **Handler:** `setupImagineInterceptor()`
 * **Purpose:** Hijacks `/imagine` slash command callback to inject dynamic aspect ratios for image generation.
+* **Auto-Fire Guarantee:** In `events.js`, `APP_READY` is configured with `autoFireAfterEmit`. If this listener attaches after `APP_READY` has already fired, `eventSource.on` synchronously executes `setupImagineInterceptor()` immediately.
+* **Idempotency Guard:** `setupImagineInterceptor()` is invoked during both root `jQuery` evaluation and `APP_READY`. It guards against multiple wrappings via `if (imagineCmd._mhcIntercepted) return;`.
 * **Blast Radius:** If removed, `/imagine` will use stock square aspect ratios instead of matching the active scene/portrait dimensions.
 * **Status:** Clean single-shot initialization.
 
 ---
 
 ### EVT-02: `CHAT_RENAMED` (Adventure Rename Guard)
-* **Trigger:** Active chat is renamed.
+* **Trigger:** Active chat is renamed (`renameChat` in `script.js`).
 * **Registered In:** `adventure-chat.js` (line 466)
 * **Registration Method:** `eventSource.makeFirst` (falls back to `eventSource.on`)
-* **Purpose:** Synchronizes MultiHog restart proof metadata so that new chats created by Adventure Start or Concierge Campaign Launch migrate cleanly without losing partition links.
-* **Blast Radius:** MultiHog's native rename handler will treat the chat as an unknown partition, causing partition reset and loss of campaign state.
-* **Status:** Stable with `eventSource.makeFirst`.
+* **Execution Priority:** Guaranteed 1st (`makeFirst` unshifts before upstream MultiHog's listener).
+* **Payload Structure:** `{ avatarId, groupId, oldFileName, newFileName }`
+* **Purpose:** Synchronizes MultiHog restart proof metadata (`runtimeState.pendingUnseenChatReset = { oldId, newId }`) so that new chats created by Adventure Start or Concierge Campaign Launch migrate cleanly without losing partition links when upstream's `onChatRenamedMigrate` fires.
+* **Blast Radius:** Upstream MultiHog's native rename handler will treat the chat as an unknown partition, causing partition reset and loss of campaign state.
+* **Status:** Clean early-hook synchronization.
 
 ---
 
 ### EVT-03: `CHAT_RENAMED` (Lorebook Auto-Sync)
 * **Trigger:** Active chat is renamed.
-* **Registered In:** `index.js` (line 2036)
-* **Handler:** Async callback calling `syncCampaignLorebooks({ isAuto: true })`
-* **Purpose:** Automatically renames bound campaign lorebooks when chat name changes.
+* **Registered In:** `index.js` (line 2255)
+* **Execution Priority:** Standard FIFO (`eventSource.on`, debounced 150ms).
+* **Handler:** Captures `detail.newFileName` and debounces 150ms before calling `syncCampaignLorebooks({ isAuto: true, chatId: targetChatId })`.
+* **Purpose:** Automatically renames and migrates bound campaign lorebook stacks to match the new chat title after upstream disk migration finishes.
 * **Precondition:** `s.enableLorebookSync && s.autoSyncOnRename`
-* **Blast Radius:** Lorebooks retain old chat title and become detached.
-* **Status:** Active.
+* **Debounce Window:** 150ms delay allows upstream asynchronous file system operations to settle before Companion scans and clones lorebooks.
+* **Blast Radius:** Lorebooks retain old chat title and become detached from the renamed campaign.
+* **Status:** Active, deterministic with targetChatId parameter.
 
 ---
 
-### EVT-04: `CHAT_CHANGED` (Coordinator)
-* **Trigger:** User switches active chat or current chat is reloaded.
-* **Registered In:** `index.js` (lines 1888-1938, 2122-2135)
-* **Handler:** `runChatChangedCoordinator(activeChatId, token)`
-* **Purpose:** 
-  1. Synchronizes vitality and memo state (`scheduleSync`)
-  2. Updates Concierge context
-  3. Verifies projection integrity (quarantine damaged partitions)
-  4. Enforces ruleset consistency (PbtA vs D&D 5e stock prompt sanitization)
-  5. Updates UI badges, Lorebook UI, NameRAG adhoc prompt, and relationship sync
+### EVT-04: `CHAT_CHANGED` (Coordinator — Phase 2 Reconciled)
+* **Trigger:** User switches active chat or current chat is reloaded. Emitted by SillyTavern with `(getCurrentChatId())`.
+* **Registered In:** `index.js` (line 2271; coordinator defined at line 1960)
+* **Handler:** Captures `chatId`, arms a 500ms settlement window, increments `_activeChatChangedToken`, and invokes `runChatChangedCoordinator(activeChatId, token)`.
+* **Purpose (Phase 2 Reconciliation):**
+  1. Awaits 500ms so upstream MultiHog's debounced partition loading settles.
+  2. Verifies projection integrity via `checkTrackerProjectionIntegrity` (quarantines damaged partitions if foreign state leaks).
+  3. Enforces ruleset consistency via `ensureActiveChatRulesetConsistency` (cleanses D&D 5e prompts if stock chat, or hydrates PbtA cartridge if PbtA campaign).
+  4. Synchronizes live persona and portrait to current chat via `runSync('CHAT_CHANGED')`.
+  5. Updates UI badges, Lorebook Sync UI, NameRAG adhoc prompt, and relationship sync.
+* **Cancellation Guard:** Token checked on every continuation (`if (token !== _activeChatChangedToken) return;`). If the user rapidly switches chats again, pending work instantly aborts.
 * **Blast Radius:** Switching between D&D and PbtA campaigns will contaminate prompts; damaged partitions will not be quarantined; relationship tiers will not display.
-* **Optimization Status:** **OPTIMIZED (Phase 2)**. 5 arbitrary `setTimeout` calls replaced with a single deterministic sequence and token invalidation.
+* **Optimization Status:** **OPTIMIZED (Phase 2)**. Staggered `setTimeout` ladder eliminated; token invalidation prevents stale cross-chat overwrites.
 
 ---
 
-### EVT-05: `CHAT_CHANGED` (CYOA State Reset)
-* **Trigger:** User switches active chat or reloads.
-* **Registered In:** `cyoa-safety-net.js` (line 393)
-* **Handler:** Resets retry tracker, clears pending reminders, aborts active Stage 2 CYOA pass.
-* **Blast Radius:** CYOA generation from the previous chat could finish and append choices onto the *new* chat.
+### EVT-05: `CHAT_CHANGED` (CYOA State Reset — Phase 1 Immediate)
+* **Trigger:** User switches active chat or current chat is reloaded.
+* **Registered In:** `cyoa-safety-net.js` (line 516)
+* **Execution Priority:** Synchronous T+0ms (runs immediately without delay).
+* **Handler:** Resets retry tracker, clears pending reminders, aborts active Stage 2 CYOA pass via `abortCyoaGeneration('chat_changed')`.
+* **Purpose (Phase 1 Immediate Severance):** Instantly severs the AbortController for any in-flight background CYOA LLM generation or quiet prompt belonging to the *departing* chat.
+* **Blast Radius:** If removed or delayed, a background CYOA generation initiated in Chat A will finish seconds later and append button choices into Chat B's DOM.
 * **Status:** Clean state reset.
 
 ---

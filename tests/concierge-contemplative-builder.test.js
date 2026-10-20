@@ -490,4 +490,31 @@ directives:
         assert.equal(parsed.strengths.length, 1, 'Must not split (+2, +1, +1, 0, -1) on commas');
         assert.ok(parsed.strengths[0].includes('(+2, +1, +1, 0, -1)'));
     });
+
+    it('extractTextFromApiResponse extracts JSON payloads from reasoning models even when content is empty', () => {
+        const reasoningWithJson = {
+            choices: [{
+                message: {
+                    content: '',
+                    reasoning_content: `<think>\nLet's analyze the relationship between Marta and Silas.\nMarta is cautious but neutral.\n</think>\n{\n  "friendship": 5,\n  "affection": 0,\n  "reason": "Cautious acquaintance."\n}`,
+                },
+            }],
+        };
+        const extracted = extractTextFromApiResponse(reasoningWithJson);
+        assert.ok(extracted.includes('"friendship": 5'), 'Must successfully extract JSON from reasoning_content');
+        assert.ok(!extracted.includes('<think>'), 'Must extract clean JSON payload without thought markup');
+    });
+
+    it('extractTextFromApiResponse safely discards truncated reasoning dumps without structured payload', () => {
+        const truncatedReasoning = {
+            choices: [{
+                message: {
+                    content: '',
+                    reasoning_content: `<think>\nThinking about this character...\n1. Analyze the context\n2. `,
+                },
+            }],
+        };
+        const extracted = extractTextFromApiResponse(truncatedReasoning);
+        assert.strictEqual(extracted, '', 'Truncated reasoning without structured payload must return empty string');
+    });
 });

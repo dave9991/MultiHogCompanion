@@ -5,6 +5,15 @@ Because this extension augments the upstream MultiHog DnD Framework via event li
 
 ---
 
+## 0. Agent Orientation & Architecture Knowledge Base
+Before modifying code, designing features, or debugging async timing:
+* **Master Orientation Hub**: Consult [docs/ORIENTATION.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/ORIENTATION.md) for the three-tier architecture overview and reading map.
+* **Turn Lifecycle & Race Conditions**: Consult [docs/listeners-and-lifecycle.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/listeners-and-lifecycle.md) for event order, race conditions, and coordinator patterns.
+* **SillyTavern Host Contracts**: Consult [docs/host-sillytavern.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/host-sillytavern.md) for pointers to `SillyTavern-Docs` and `st-source`.
+* **Upstream MultiHog Framework**: Consult [docs/upstream-multihog.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/upstream-multihog.md) for pointers to upstream design docs, memo loops, and cartridges.
+
+---
+
 ## 1. Architectural Catalogs Are Mandatory
 Before adding, modifying, or removing any event listener, DOM delegation, or monkey patch:
 1. **Consult `LISTENERS.md`**: Review existing triggers, execution priority, and shared event timelines to prevent race conditions or duplicate handling.

@@ -68,9 +68,28 @@ A complete message turn in SillyTavern with MultiHog & Companion follows this de
 ```
 
 ### Why `CHARACTER_MESSAGE_RENDERED` over `MESSAGE_RECEIVED`
-`MESSAGE_RECEIVED` fires when the raw JSON response arrives from the server. However, DOM elements (message bubbles, action buttons, CYOA containers) may not yet be attached or painted. Attempting to query or attach elements during `MESSAGE_RECEIVED` leads to missing DOM nodes and `setTimeout` workarounds. 
+`MESSAGE_RECEIVED` fires when the raw JSON response arrives from the server. However, DOM elements (message bubbles, action buttons, CYOA containers) may not yet be attached or painted. Attempting to query or attach elements during `MESSAGE_RECEIVED` leads to missing DOM nodes and `setTimeout` workarounds (which upstream MultiHog attempted with `scheduleCyoaBind(50)`). 
 
 **Rule**: Always use `CHARACTER_MESSAGE_RENDERED` for DOM updates, button attachments, and post-turn analysis.
+
+### The Post-Turn Dual Pipeline
+When `CHARACTER_MESSAGE_RENDERED(messageId, type)` fires, Companion executes two independent, decoupled pipelines:
+
+```
+[ CHARACTER_MESSAGE_RENDERED(messageId, type) ]
+                        │
+    ┌───────────────────┴───────────────────┐
+    ▼                                       ▼
+[ Pipeline A: Narrative Choices ]       [ Pipeline B: Mechanical & Relationship Sync ]
+  • EVT-06 (cyoa-safety-net.js)           • EVT-07 (index.js)
+  • coordinateCyoaForMessage(messageId)   • if (type === 'first_message') return;
+  • Guards active token streaming         • if (!isAdventureActive()) return;
+  • Deduplicates msg/swipe ID             • T+400ms: scheduleSync('CHARACTER_MESSAGE_RENDERED')
+  • Happy Path: choices exist (0 cost)      ↳ Syncs persona & player portrait
+  • Local Repair: regex formats to        • T+600ms: checkAndSyncTierCrossovers()
+    buttons with 0 LLM calls                ↳ Checks NPC affinity scores against tier thresholds
+  • Fallback: quiet prompt choice repair    ↳ Evolves narrative relationship text in lorebook
+```
 
 ---
 

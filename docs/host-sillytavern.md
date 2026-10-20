@@ -98,3 +98,20 @@ While omitted from the official `Writing-Extensions.md` documentation, `CHAT_REN
   ```
 * **Execution Gotcha (`reloadCurrentChat()`)**:
   In `script.js`, SillyTavern awaits `reloadCurrentChat()` *before* emitting `CHAT_RENAMED`. This means `CHAT_CHANGED` fires first! Extensions reacting to chat switches will see the new ID before rename migrations have occurred. Handlers must sanitize `.jsonl` from filenames and handle inter-extension priority (via `eventSource.makeFirst` or debounce settlement timers).
+
+---
+
+## 8. Canonical Turn Events: `CHARACTER_MESSAGE_RENDERED`
+
+Defined in [`events.js#L49`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/events.js#L49) and emitted across [`script.js`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/script.js#L3741,L6634).
+
+* **Trigger**: Fired when an assistant response has finished rendering and is committed into the DOM.
+* **Payload Signature**:
+  ```js
+  eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId, type) => {
+      // messageId: number (0-indexed position in context.chat and DOM mesid)
+      // type: string|undefined (e.g. 'first_message', 'command', or undefined)
+  });
+  ```
+* **Why It Beats `MESSAGE_RECEIVED`**:
+  `MESSAGE_RECEIVED` fires when the raw network payload returns. DOM nodes, message containers, and buttons do not exist yet. Relying on `MESSAGE_RECEIVED` forces fragile `setTimeout` ladders. `CHARACTER_MESSAGE_RENDERED` guarantees DOM presence and is the canonical hook for buttons, UI decorations, and post-turn analysis.

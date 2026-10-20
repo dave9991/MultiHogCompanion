@@ -180,23 +180,31 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-06: `CHARACTER_MESSAGE_RENDERED` (CYOA Safety Net & Auto-Repair Dispatcher)
-* **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM.
-* **Registered In:** `cyoa-safety-net.js`
-* **Handler:** Routes through `coordinateCyoaForMessage`. Evaluates the settled assistant message:
-  1. **Happy Path:** If `<choices><button>...</button></choices>` already exist and character is alive, exits immediately (0 LLM overhead, 1-pass fast generation).
-  2. **Local Regex Repair:** If plain numbered markdown choices exist (`1. ... 2. ...`), automatically formats them into buttons via `tryRepairMarkdownChoices` with zero LLM calls.
-  3. **Fallback Generation:** If choices were completely skipped or truncated (or if downed without crisis options), launches Stage 2 fallback repair runner to append choices.
+### EVT-06: `CHARACTER_MESSAGE_RENDERED` (CYOA Safety Net & Auto-Repair Dispatcher — Pipeline A)
+* **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM. Emitted as `(messageId, type)`.
+* **Registered In:** `cyoa-safety-net.js` (line 555)
+* **Payload Structure:** `(messageId: number, type?: string)`
+* **Handler:** Routes through `coordinateCyoaForMessage(messageId)`. Evaluates the settled assistant message:
+  1. **Streaming Guard:** If narrator is still actively streaming tokens, defers execution.
+  2. **Deduplication:** Prevents multiple passes on the same message index and swipe ID.
+  3. **Happy Path:** If `<choices><button>...</button></choices>` already exist and character is healthy, exits immediately (0 LLM overhead, 1-pass fast generation).
+  4. **Local Regex Repair:** If plain numbered markdown choices exist (`1. ... 2. ...`), automatically formats them into buttons via `tryRepairMarkdownChoices` with zero LLM calls.
+  5. **Fallback Generation:** If choices were completely skipped or truncated (or if downed without crisis options), launches Stage 2 fallback repair runner via quiet prompt.
 * **Preconditions:** `cyoaMode !== 'disabled'`, not message 0, adventure active, CYOA expected, not a tool-call or smallsys message (`extra.isSmallSys`, `tool_invocations`).
 * **Blast Radius:** Omitted or plain markdown choices will not be automatically converted into interactive buttons; user must click manual repair.
 * **Optimization Status:** **OPTIMIZED (Phase 3)**. Unified reactive safety net with tool-message guarding and zero-cost local regex repairs.
 
 ---
 
-### EVT-07: `CHARACTER_MESSAGE_RENDERED` (Relationship & Vitality Sync)
-* **Trigger:** SillyTavern renders character message.
-* **Registered In:** `index.js` (line 2137)
-* **Handler:** Canonical assistant turn event: calls `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` and `checkAndSyncTierCrossovers`.
+### EVT-07: `CHARACTER_MESSAGE_RENDERED` (Relationship & Vitality Sync — Pipeline B)
+* **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM.
+* **Registered In:** `index.js` (line 2287)
+* **Payload Structure:** `(messageId: number, type?: string)`
+* **Handler:** Canonical assistant turn event:
+  1. **Greeting Guard:** Ignores `type === 'first_message'`.
+  2. **Clean Chat Guard:** Aborts if `!isAdventureActive()` to prevent polluting unstarted chats.
+  3. **T+400ms Sync:** Calls `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` to synchronize persona/player portrait and memo state.
+  4. **T+600ms Relationship Evolution:** Calls `checkAndSyncTierCrossovers()`, scanning if the narrator's turn altered NPC friendship/affection beyond tier thresholds (-150..+150), triggering narrative evolution in the lorebook and refreshing UI badges.
 * **Precondition:** `isAdventureActive()`
 * **Blast Radius:** Relationship tier progression and health synchronization will not update after LLM turns.
 * **Optimization Status:** **CANONICAL (Phase 2)**. Single message-turn listener; duplicate `MESSAGE_RECEIVED` removed.

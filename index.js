@@ -2284,7 +2284,8 @@ jQuery(async () => {
     });
     // [CATALOG: EVT-07]
     // Canonical assistant turn listener: executes once the message is committed to DOM
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId, type) => {
+        if (type === 'first_message') return;
         if (!isAdventureActive()) return;
         scheduleSync('CHARACTER_MESSAGE_RENDERED', 400);
         setTimeout(async () => {

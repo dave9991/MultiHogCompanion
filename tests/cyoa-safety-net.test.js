@@ -172,21 +172,27 @@ assert.ok(!testChat[0].mes.includes('<CYOA_mode>'), '<CYOA_mode> must be strippe
 assert.ok(!testChat[1].mes.includes('<choices>'), '<choices> block must be stripped from assistant message 1');
 assert.ok(!testChat[3].mes.includes('rt-cyoa-choices'), 'rt-cyoa-choices div must be stripped from assistant message 2');
 
-// Safety Net mode: keeps active turn <CYOA_mode>
+// Safety Net mode: keeps active turn <CYOA_mode> including examples and formatting rules
 const safetyNetChat = [
     {
         role: 'assistant',
-        mes: 'You stand in the mist.\n\n**What does Silas Vance do?**\n1. Search the dirt\n2. Call out\n\n*(Status: 32/32 HP)*\n*Level 8 | 06:30 PM, Day 1*',
+        mes: 'You stand in the mist.\n\n**What does Silas Vance do?**\n1. Search the dirt\n2. Call out\n\n<choices>\n<button>1. ⚔️ Attack</button>\n<button>2. 🛡️ Defend</button>\n</choices>\n\n*(Status: 32/32 HP)*\n*Level 8 | 06:30 PM, Day 1*',
     },
     {
         role: 'user',
-        mes: 'I search the dirt.\n\n<CYOA_mode>\nGenerate 5 numbered choices at the end.\n</CYOA_mode>',
+        mes: 'I search the dirt.\n\n<CYOA_mode>\n[END OF OUTPUT REQUIREMENT]\n- Enclose all choices inside a single <choices> XML block.\n- Prefix each choice text with a fitting emoji.\n\nExample 1 (high-stakes scenario):\n<choices>\n<button>1. 🎯 Fire with Dead-Eye Focus</button>\n</choices>\n\nSTRICT GENERATION ORDER:\n1. NARRATIVE-DECIDED\n</CYOA_mode>',
     },
 ];
 
 stripCyoaFromOutgoingChat(safetyNetChat, { stripActiveCyoa: false });
 assert.ok(safetyNetChat[1].mes.includes('<CYOA_mode>'), 'Safety net mode MUST keep active turn <CYOA_mode> for single-stage generation');
+assert.ok(safetyNetChat[1].mes.includes('- Enclose all choices inside a single <choices> XML block.'), 'Safety net mode MUST NOT corrupt instructions mentioning <choices>');
+assert.ok(safetyNetChat[1].mes.includes('- Prefix each choice text with a fitting emoji.'), 'Safety net mode MUST preserve emoji instructions');
+assert.ok(safetyNetChat[1].mes.includes('Example 1 (high-stakes scenario):'), 'Safety net mode MUST preserve style example headers');
+assert.ok(safetyNetChat[1].mes.includes('<button>1. 🎯 Fire with Dead-Eye Focus</button>'), 'Safety net mode MUST preserve active turn button examples');
+assert.ok(safetyNetChat[1].mes.includes('STRICT GENERATION ORDER:'), 'Safety net mode MUST preserve STRICT GENERATION ORDER');
 assert.ok(!safetyNetChat[0].mes.includes('What does Silas Vance do?'), 'Safety net mode MUST strip historical markdown choice list from prior turns');
+assert.ok(!safetyNetChat[0].mes.includes('<choices>'), 'Safety net mode MUST strip historical <choices> blocks from prior turns');
 assert.ok(safetyNetChat[0].mes.includes('You stand in the mist.'), 'Narrative prose must be preserved in older turns');
 
 console.log('✓ Prompt sanitization and single-stage retention verified');

@@ -123,7 +123,7 @@ export function stripCyoaFromOutgoingChat(chat, options = {}) {
                 cyoaModeXmlPattern.lastIndex = 0;
                 updated = updated.replace(cyoaModeXmlPattern, '').trim();
             }
-            if (choiceBlockPattern.test(updated)) {
+            if (shouldStripCyoaMode && choiceBlockPattern.test(updated)) {
                 choiceBlockPattern.lastIndex = 0;
                 updated = updated.replace(choiceBlockPattern, '').trim();
             }

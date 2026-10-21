@@ -194,18 +194,20 @@ console.log('✓ Prompt sanitization and single-stage retention verified');
 // ── 5. Lifecycle Coordination & Boundary Guards ─────────────────────────────
 console.log('5. Testing coordinateCyoaForMessage happy path & deduplication...');
 
+const coordinatorChat = [
+    { is_user: false, is_system: false, mes: 'Welcome to the tavern.', swipe_id: 0 },
+    {
+        is_user: false,
+        is_system: false,
+        mes: 'The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>',
+        swipes: ['The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>'],
+        swipe_id: 0,
+    },
+];
+
 globalThis.SillyTavern = {
     getContext: () => ({
-        chat: [
-            { is_user: false, is_system: false, mes: 'Welcome to the tavern.', swipe_id: 0 },
-            {
-                is_user: false,
-                is_system: false,
-                mes: 'The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>',
-                swipes: ['The goblin lunges at you!\n<choices>\n<button>1. Strike</button>\n</choices>'],
-                swipe_id: 0,
-            },
-        ],
+        chat: coordinatorChat,
         extensionSettings: {
             rpg_tracker: {
                 enabled: true,
@@ -240,6 +242,25 @@ const msg0Attempt = await coordinateCyoaForMessage({
     isPbtaActive: () => false,
 });
 assert.strictEqual(msg0Attempt, false, 'Message 0 must never trigger choice generation');
+
+// Level Up protocol guard (WRK-08)
+coordinatorChat.push({
+    mes: `---
+⬆ LEVEL UP — Now Level 4.
+Kael gains:
+- +6 Max HP
+→ Awaiting your choice before the story continues.
+---`,
+    is_user: false,
+    is_system: false,
+    swipe_id: 0,
+});
+const levelUpAttempt = await coordinateCyoaForMessage({
+    messageId: coordinatorChat.length - 1,
+    triggerSource: 'GENERATION_ENDED',
+    isPbtaActive: () => false,
+});
+assert.strictEqual(levelUpAttempt, false, 'Level Up protocol must pause and return false without triggering CYOA generation (WRK-08)');
 
 delete globalThis.SillyTavern;
 console.log('✓ coordinateCyoaForMessage happy path, health check, and boundary guards verified');

@@ -12,12 +12,18 @@ console.log('--- Running Architecture & Catalog Integrity Guard ---');
 // 1. Read Catalog Documents
 const listenersDocPath = path.join(extensionRoot, 'LISTENERS.md');
 const monkeyPatchesDocPath = path.join(extensionRoot, 'MONKEYPATCHES.md');
+const featuresDocPath = path.join(extensionRoot, 'FEATURES.md');
+const workaroundsDocPath = path.join(extensionRoot, 'WORKAROUNDS.md');
 
 assert.ok(fs.existsSync(listenersDocPath), 'LISTENERS.md must exist in extension root');
 assert.ok(fs.existsSync(monkeyPatchesDocPath), 'MONKEYPATCHES.md must exist in extension root');
+assert.ok(fs.existsSync(featuresDocPath), 'FEATURES.md must exist in extension root');
+assert.ok(fs.existsSync(workaroundsDocPath), 'WORKAROUNDS.md must exist in extension root');
 
 const listenersDoc = fs.readFileSync(listenersDocPath, 'utf8');
 const monkeyPatchesDoc = fs.readFileSync(monkeyPatchesDocPath, 'utf8');
+const featuresDoc = fs.readFileSync(featuresDocPath, 'utf8');
+const workaroundsDoc = fs.readFileSync(workaroundsDocPath, 'utf8');
 
 // 2. Scan all JS files in MultiHogCompanion (excluding tests and node_modules)
 const jsFiles = fs.readdirSync(extensionRoot)
@@ -82,6 +88,34 @@ for (const adr of requiredAdrs) {
     );
 }
 console.log(`✓ All ${requiredAdrs.length} Architectural Decision Records present in MONKEYPATCHES.md`);
+
+// 5b. Verify Feature Coverage in FEATURES.md
+console.log('Verifying Feature catalog coverage in FEATURES.md...');
+const requiredFeatures = [
+    'FEAT-01', 'FEAT-02', 'FEAT-03', 'FEAT-04',
+    'FEAT-05', 'FEAT-06', 'FEAT-07', 'FEAT-08',
+];
+for (const feat of requiredFeatures) {
+    assert.ok(
+        featuresDoc.includes(feat),
+        `Feature "${feat}" is missing from FEATURES.md!`
+    );
+}
+console.log(`✓ All ${requiredFeatures.length} primary features verified in FEATURES.md`);
+
+// 5c. Verify Workaround Coverage in WORKAROUNDS.md
+console.log('Verifying Workaround catalog coverage in WORKAROUNDS.md...');
+const requiredWorkarounds = [
+    'WRK-01', 'WRK-02', 'WRK-03', 'WRK-04',
+    'WRK-05', 'WRK-06', 'WRK-07', 'WRK-08',
+];
+for (const wrk of requiredWorkarounds) {
+    assert.ok(
+        workaroundsDoc.includes(wrk),
+        `Workaround "${wrk}" is missing from WORKAROUNDS.md!`
+    );
+}
+console.log(`✓ All ${requiredWorkarounds.length} upstream workarounds verified in WORKAROUNDS.md`);
 
 // 6. Verify that no arbitrary multi-step setTimeout ladders exist in index.js
 console.log('Verifying absence of arbitrary setTimeout ladders in index.js...');

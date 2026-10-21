@@ -15,11 +15,13 @@ Before modifying code, designing features, or debugging async timing:
 ---
 
 ## 1. Architectural Catalogs Are Mandatory
-Before adding, modifying, or removing any event listener, DOM delegation, or monkey patch:
-1. **Consult `LISTENERS.md`**: Review existing triggers, execution priority, and shared event timelines to prevent race conditions or duplicate handling.
-2. **Consult `MONKEYPATCHES.md`**: Review Architecture Decision Records (ADRs) to understand host surface, justification, blast radius, and safety fallbacks.
-3. **Keep Catalogs Synchronized**: Whenever you touch an event or patch, you MUST update both the code and the corresponding `.md` catalog entry.
-4. **Use Anchor Tags**: Every listener and monkey patch in code MUST have a corresponding tag comment:
+MultiHog Companion maintains a 4-quadrant catalog separating Intent from Mechanism:
+1. **Consult `FEATURES.md`**: Review additive systems and user capabilities (`FEAT-01` through `FEAT-08`).
+2. **Consult `WORKAROUNDS.md`**: Review upstream defect shims, host hazards, blast radii, and retirement criteria (`WRK-01` through `WRK-07`).
+3. **Consult `LISTENERS.md`**: Review event bus triggers, execution priority, and DOM delegations (`EVT-01` through `EVT-12`, `DOM-01` through `DOM-06`).
+4. **Consult `MONKEYPATCHES.md`**: Review Architecture Decision Records (`ADR-MP-01` through `ADR-MP-07`) for host surface, blast radius, and safety fallbacks.
+5. **Keep All 4 Catalogs Synchronized**: Whenever you touch a feature, workaround, event, or patch, update both the code and the corresponding `.md` catalog entries.
+6. **Use Anchor Tags**: Every listener and monkey patch in code MUST have a corresponding tag comment:
    * `// [CATALOG: EVT-XX] See LISTENERS.md — Description`
    * `// [CATALOG: DOM-XX] See LISTENERS.md — Description`
    * `// [CATALOG: ADR-MP-XX] See MONKEYPATCHES.md — Description`

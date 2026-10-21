@@ -5,6 +5,10 @@ import {
     extractChoicesMarkup,
     buildCyoaPrompt,
 } from '../cyoa-generator.js';
+import {
+    isLevelUpPending,
+    isProtagonistDead,
+} from '../cyoa-safety-net.js';
 
 describe('CYOA Choice Generator Edge Cases', () => {
 
@@ -124,6 +128,87 @@ Here are your available choices:
             rpgSettings: { cyoaConfig: { playstyle: 'cyoa_5' } }
         });
         assert.ok(prompt5.systemPrompt.includes('exactly 5 choices'));
+    });
+
+    it('accurately identifies pending level-up protocol to suppress CYOA button leakage (WRK-08)', () => {
+        // D&D 5e standard level-up protocol with ASI/Feat choices
+        const dndLevelUpASI = `
+The final hobgoblin collapses into the dust.
+---
+⬆ LEVEL UP — Now Level 4.
+Kaelen gains:
+- +6 Max HP (roll d10+2: 4+2=6)
+- BAB +1 (now +4)
+- +2 Skill Pts -> Athletics +1, Perception +1
+[Level 4]: ASI or Feat choice required.
+> Option A: +2 to one ability score (specify)
+> Option B: +1 to two ability scores (specify)
+> Option C: Take a feat (name it)
+→ Awaiting your choice before the story continues.
+---
+`;
+        assert.strictEqual(isLevelUpPending(dndLevelUpASI), true, 'Must detect standard D&D 5e level-up block');
+
+        // D&D 5e non-ASI level-up protocol
+        const dndLevelUpSimple = `
+---
+⬆ LEVEL UP — Now Level 2.
+Lyra gains:
+- +5 Max HP
+- Action Surge (1/short rest)
+→ Awaiting your choice before the story continues.
+---
+`;
+        assert.strictEqual(isLevelUpPending(dndLevelUpSimple), true, 'Must detect simple D&D 5e level-up block');
+
+        // PbtA 5-XP milestone advancement
+        const pbtaLevelUp = `
+You deliver the fatal blow to the monstrosity.
+*(Level Up! Choose an Advance: +1 to a Stat (max +3), a new Playbook Move, or erase a Condition)*
+*(Status: Harm 2/5) | (XP: 0/5)*
+`;
+        assert.strictEqual(isLevelUpPending(pbtaLevelUp), true, 'Must detect PbtA Level Up advancement notice');
+
+        // Standard narrative mentioning levels without protocol pause
+        const normalLevelStory = `
+You climb to the upper level of the cathedral. From up here, you can see the courtyard below.
+What do you do?
+`;
+        assert.strictEqual(isLevelUpPending(normalLevelStory), false, 'Must not false-positive on narrative mentions of level');
+    });
+
+    it('accurately identifies permanent protagonist death to suppress choices (WRK-08)', () => {
+        const deadMemo = `
+[CHARACTER]
+- Kaelen: 0/32 HP | AC: 16
+Status: Dead
+[/CHARACTER]
+`;
+        assert.strictEqual(isProtagonistDead(deadMemo), true, 'Must detect protagonist with Status: Dead');
+
+        const slainMemo = `
+[CHARACTER]
+- Silas: 0/5 HP | Harm: 5/5
+Status: Slain by the Dragon
+[/CHARACTER]
+`;
+        assert.strictEqual(isProtagonistDead(slainMemo), true, 'Must detect protagonist with Status: Slain');
+
+        const unconsciousMemo = `
+[CHARACTER]
+- Kaelen: 0/32 HP | AC: 16
+Status: Unconscious (Death Saves 1/3)
+[/CHARACTER]
+`;
+        assert.strictEqual(isProtagonistDead(unconsciousMemo), false, 'Unconscious protagonist is not dead (downed)');
+
+        const healthyMemo = `
+[CHARACTER]
+- Lyra: 28/28 HP | AC: 15
+Status: Healthy
+[/CHARACTER]
+`;
+        assert.strictEqual(isProtagonistDead(healthyMemo), false, 'Healthy protagonist is not dead');
     });
 
 });

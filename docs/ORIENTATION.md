@@ -45,6 +45,8 @@ Developing this extension requires understanding the interaction across three di
 
 | Task Domain | Primary Doc to Consult | Host / Upstream Pointer |
 | :--- | :--- | :--- |
+| **Additive Features & Capabilities** | [FEATURES.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/FEATURES.md) | High-level index of all Companion systems (`FEAT-01` $\dots$ `FEAT-08`) |
+| **Upstream Defects & Workarounds** | [WORKAROUNDS.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/WORKAROUNDS.md) | Defect registry, blast radius, and retirement criteria (`WRK-01` $\dots$ `WRK-07`) |
 | **Events, Lifecycle, Race Conditions** | [listeners-and-lifecycle.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/listeners-and-lifecycle.md) & [LISTENERS.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/LISTENERS.md) | `SillyTavern-Docs/For_Contributors/Writing-Extensions.md#events`<br>`st-source/public/scripts/events.js` |
 | **SillyTavern Host APIs & Contracts** | [host-sillytavern.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/host-sillytavern.md) | `SillyTavern-Docs/For_Contributors/Writing-Extensions.md`<br>`st-source/public/scripts/st-context.js` |
 | **MultiHog Upstream State & Turn Loop** | [upstream-multihog.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/upstream-multihog.md) | `extensions/SillyTavern-MultihogDnDFramework/docs/chat-ownership.md`<br>`extensions/SillyTavern-MultihogDnDFramework/docs/multihogDnDdoc.md` |

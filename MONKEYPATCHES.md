@@ -5,6 +5,31 @@
 
 ---
 
+## 0. The 4-Way Reference Web
+
+MultiHog Companion separates **Intent** from **Mechanism** across four synchronized catalogs:
+
+```
+┌─────────────────────────────────┬─────────────────────────────────┐
+│       WHAT ARE WE DOING?        │       HOW IS IT WIRED?          │
+│            (Intent)             │          (Mechanism)            │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ FEATURES.md                     │ LISTENERS.md                    │
+│ • User-facing capabilities      │ • Event Bus (eventSource.on)    │
+│ • Ruleset engine (PbtA)         │ • DOM Delegation ($(doc).on)    │
+│ • Concierge Session Zero        │ • Debounce & Settlement Timers  │
+│ • Relationship Narrative Sync   │ • Coordinator Pipelines         │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ WORKAROUNDS.md                  │ MONKEYPATCHES.md (This File)    │
+│ • Upstream defects & hazards    │ • ADRs for runtime hijacking    │
+│ • Why upstream is broken/risky  │ • window.fetch interception     │
+│ • Blast radius if unmitigated   │ • generateRaw API wrapping      │
+│ • Upstream retirement criteria  │ • In-memory settings rewriting  │
+└─────────────────────────────────┴─────────────────────────────────┘
+```
+
+---
+
 ## 1. Monkey Patch Classification Matrix
 
 | ADR ID | Target / Mechanism | Host Surface | Location | Fragility Rating |

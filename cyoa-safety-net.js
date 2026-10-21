@@ -192,6 +192,41 @@ export function isCyoaExpected(rpgSettings, isPbtaActive = false) {
 }
 
 /**
+ * Checks whether the text contains a pending level-up announcement or choice prompt
+ * that protocol requires to pause for user input without generating story choices.
+ *
+ * Catches:
+ * - Upstream D&D 5e: "⬆ LEVEL UP — Now Level [X]", "→ Awaiting your choice before the story continues."
+ * - PbtA ruleset: "*(Level Up! Choose an Advance: ...)*", "Level Up! Choose an Advance:"
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+// [CATALOG: WRK-08] See WORKAROUNDS.md — Level-Up & Permadeath Pause Protocol Shield
+export function isLevelUpPending(text) {
+    if (!text || typeof text !== 'string') return false;
+    if (/⬆\s*LEVEL UP|LEVEL UP\s*—\s*Now Level\b/i.test(text)) return true;
+    if (/Awaiting your (?:level-up\s+)?choice before the story continues/i.test(text)) return true;
+    if (/Level Up!\s*Choose an Advance\b/i.test(text)) return true;
+    return false;
+}
+
+/**
+ * Checks whether the protagonist is confirmed dead (not merely downed or dying) in the state memo.
+ * When dead, story choices and survival moves should be suppressed.
+ *
+ * @param {string} memoText
+ * @returns {boolean}
+ */
+// [CATALOG: WRK-08] See WORKAROUNDS.md — Level-Up & Permadeath Pause Protocol Shield
+export function isProtagonistDead(memoText) {
+    if (!memoText || typeof memoText !== 'string') return false;
+    const charMatch = memoText.match(/\[CHARACTER\]([\s\S]*?)(?:\[\/CHARACTER\]|(?=\n[ \t]*\[(?:PARTY|ENEMIES|COMBAT|LOCATION|INVENTORY|WORLD)\])|$)/i);
+    const scope = charMatch ? charMatch[1] : memoText;
+    return /Status\s*:.*?\b(Dead|Deceased|Slain|Killed)\b/i.test(scope);
+}
+
+/**
  * Checks whether the given text contains valid CYOA choice markup (<button> or <choices>).
  *
  * @param {string} text
@@ -411,6 +446,18 @@ export async function coordinateCyoaForMessage({
 
     if (!force && !isCyoaExpected(rpgSettings, pbtaActive)) return false;
 
+    // [CATALOG: WRK-08] See WORKAROUNDS.md — Level-Up & Permadeath Pause Protocol Shield
+    if (!force && isLevelUpPending(msg.mes)) {
+        console.log(`[MultiHog Companion] Level-up detected for message ${idx}; pausing CYOA generation as instructed by protocol.`);
+        return false;
+    }
+
+    const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
+    if (!force && isProtagonistDead(freshMemo)) {
+        console.log(`[MultiHog Companion] Protagonist is deceased for message ${idx}; suppressing CYOA choices.`);
+        return false;
+    }
+
     const currentSwipeId = msg.swipe_id ?? 0;
     if (!force && _lastAttemptedMessageId === idx && _lastAttemptedSwipeId === currentSwipeId) {
         return false;
@@ -418,7 +465,6 @@ export async function coordinateCyoaForMessage({
 
     // 1. Happy Path: Check if valid <choices><button>...</button></choices> already exist
     if (!force && hasCyoaChoices(msg.mes)) {
-        const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
         const isDowned = isProtagonistDowned(freshMemo, pbtaActive);
         if (!isDowned) {
             return false;

@@ -5,6 +5,31 @@
 
 ---
 
+## 0. The 4-Way Reference Web
+
+MultiHog Companion separates **Intent** from **Mechanism** across four synchronized catalogs:
+
+```
+┌─────────────────────────────────┬─────────────────────────────────┐
+│       WHAT ARE WE DOING?        │       HOW IS IT WIRED?          │
+│            (Intent)             │          (Mechanism)            │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ FEATURES.md                     │ LISTENERS.md (This File)        │
+│ • User-facing capabilities      │ • Event Bus (eventSource.on)    │
+│ • Ruleset engine (PbtA)         │ • DOM Delegation ($(doc).on)    │
+│ • Concierge Session Zero        │ • Debounce & Settlement Timers  │
+│ • Relationship Narrative Sync   │ • Coordinator Pipelines         │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ WORKAROUNDS.md                  │ MONKEYPATCHES.md                │
+│ • Upstream defects & hazards    │ • ADRs for runtime hijacking    │
+│ • Why upstream is broken/risky  │ • window.fetch interception     │
+│ • Blast radius if unmitigated   │ • generateRaw API wrapping      │
+│ • Upstream retirement criteria  │ • In-memory settings rewriting  │
+└─────────────────────────────────┴─────────────────────────────────┘
+```
+
+---
+
 ## 1. Shared Event Overlap & Execution Timeline Matrix
 
 The following matrix highlights events where **multiple files or upstream MultiHog** listen to the exact same event. Phase 2 resolved the primary race condition hotspots by replacing arbitrary `setTimeout` ladders with deterministic coordinators and deduplicating redundant listeners.

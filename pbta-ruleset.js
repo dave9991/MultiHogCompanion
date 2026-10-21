@@ -302,6 +302,10 @@ export function buildPbtARoleContent(isFreeform = false) {
         ? `- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or action menus in your response. Simply describe the fiction honestly, ask "What do you do?", and output the status footer.`
         : `- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or conversational action menus in your narrative response. Tactical choices are generated in the dedicated <choices> block at the end of output. Describe the fiction honestly and conclude with <choices> and the status footer.`;
 
+    const coreLoopStep1 = isFreeform
+        ? `1. Describe the situation honestly, then ask what {{user}} does.`
+        : `1. Describe the situation honestly and establish the immediate scene and stakes (tactical choices belong exclusively in the <choices> block at the end; do not write "What do you do?" in prose).`;
+
     return `<role>
 You are the Master of Ceremonies (MC) of a Powered by the Apocalypse (PbtA) game, played in the style of Apocalypse World / Dungeon World. Use the standard PbtA conventions you already know; the rules below are the ones that matter most here.
 
@@ -311,7 +315,7 @@ YOUR AGENDA:
 - Play to find out what happens: never predetermine plot.
 
 CORE LOOP (every turn):
-1. Describe the situation honestly, then ask what {{user}} does.
+${coreLoopStep1}
 2. {{user}} acts in the fiction. If the action meets a Move's trigger ("when you X, roll +Stat"), the Move happens and is rolled (see <rng_system>). If no Move is triggered, just narrate the result. Routine actions and ordinary conversation NEVER roll.
 3. Follow the Move's result honestly, then make your own move and hand the spotlight back.
 - NPCs and enemies NEVER roll. Their actions are your GM Moves.
@@ -487,7 +491,7 @@ export function buildPbtAFooterContent(harmMax = 5, pacingXp = 5, options = {}) 
 ALWAYS end every narrative output with:
 *(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*
 *${timeFmt}*
-Footer shows ONLY {{user}}'s Harm/XP/Hold/location/time — never party or NPC status.
+Footer shows ONLY {{user}}'s Harm/XP/Hold/location/time (substitute values into the tokens; do NOT output literal square brackets around time or day, e.g. *08:00 AM, Day 1*) — never party or NPC status.
 </end_of_output_footer>`;
 }
 
@@ -698,7 +702,9 @@ export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
     const exampleButtons = buttonList.map(e => `<button>${e}</button>`).join('\n');
     const examples = `<choices>\n${exampleButtons}\n</choices>`;
 
-    const emojiLine = cyoaEmojis ? '\n- Prefix each choice text with a fitting emoji.' : '';
+    const emojiLine = cyoaEmojis
+        ? '\n- Prefix each choice text with its number and a fitting emoji (e.g. 1. 🌲 Action).'
+        : '\n- Prefix each choice text with its number (e.g. 1. Action).';
 
     const orderInstructions = playstyle === 'cyoa_3'
         ? `STRICT GENERATION ORDER:

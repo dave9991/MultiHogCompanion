@@ -19,18 +19,19 @@ assert.ok(/SOFT MOVES/.test(role) && /HARD MOVES/.test(role), 'role separates so
 assert.ok(/THE ESCALATION LADDER/.test(role), 'role specifies the escalation ladder');
 assert.ok(/SINGLE-TURN FLUID RESOLUTION/.test(role), 'role specifies single-turn fluid choice resolution');
 assert.ok(/NEVER halt the game mid-turn to ask meta-questions/.test(role), 'role forbids mid-turn meta pauses');
-assert.ok(/NO CHOICES OR MENUS IN NARRATIVE/.test(role), 'role forbids narrative choice menus');
+assert.ok(!/NO CHOICES OR MENUS IN NARRATIVE/.test(role), 'role eliminates decoupled CYOA remnant');
 assert.ok(!/frame the dilemma for the NEXT turn's CYOA choices/.test(role), 'role does not mention CYOA choices');
 assert.ok(/NPCs and enemies NEVER roll/.test(role), 'role states NPCs never roll');
 assert.ok(/Routine actions and ordinary conversation NEVER roll/.test(role), 'role states trigger rule');
+assert.ok(/ALWAYS visibly print the roll inline right before narrating its consequence/.test(role), 'role mandates inline roll printing before consequence');
 assert.ok(/Prioritize fictional realism and established danger over artificial game balance/.test(role), 'role emphasizes realism over balance');
 assert.ok(/Bleed-in:/i.test(role) && /Hostile Initiative:/i.test(role) && /Organic Intersection:/i.test(role) && /Asymmetric Knowledge:/i.test(role), 'role specifies the 4 macro world progression rules');
 assert.ok(/Persistent Named NPCs:/i.test(role), 'role enforces named NPC persistence');
 
 // Test role mode variation (freeform vs CYOA)
 const freeformRole = buildPbtARoleContent(true);
-assert.ok(/ask "What do you do\?"/.test(freeformRole), 'freeform role asks what you do');
-assert.ok(/Tactical choices are generated in the dedicated <choices> block/.test(role), 'CYOA role directs choices to block');
+assert.ok(/ask what {{user}} does/.test(freeformRole), 'freeform role asks what user does');
+assert.ok(/tactical choices belong exclusively in the <choices> block/.test(role), 'CYOA role directs choices to block');
 
 const rng = buildPbtARngContent();
 assert.ok(/2d6 → 3 \+ 5 = 8/.test(rng), 'rng documents queue line format');
@@ -38,7 +39,12 @@ assert.ok(/10\+ Strong Hit/.test(rng) && /7–9 Weak Hit/.test(rng) && /6- Miss/
 assert.ok(/Make a HARD MOVE/.test(rng), 'rng strictly maps 6- Miss to a Hard Move');
 assert.ok(/NO ROUNDABOUT SUCCESS AFTER A FAIL/.test(rng), 'rng mandates anti-softballing rule');
 assert.ok(/no unearned bailouts or cosmetic softening/.test(rng), 'rng mandates no bailouts on 6- Miss');
+assert.ok(/ROLL FORMAT \(strict\):/.test(rng), 'rng has ROLL FORMAT (strict) block');
 assert.ok(/2d6 \[Roll: Die1 \+ Die2 = Sum\] \+ Mod = Total → Strong Hit \| Weak Hit \| Miss/.test(rng), 'rng specifies strict roll format');
+assert.ok(/Cast a Spell \[Arcana\]: 2d6 \[Roll: 2 \+ 1 = 3\] - 1 = 2 → Miss/.test(rng), 'rng includes concrete Miss example');
+assert.ok(/Hack & Slash \[Might\]: 2d6 \[Roll: 3 \+ 4 = 7\] \+ 1 = 8 → Weak Hit/.test(rng), 'rng includes concrete Weak Hit example');
+assert.ok(/Volley \[Agility\]: 2d6 \[Roll: 5 \+ 5 = 10\] \+ 1 = 11 → Strong Hit/.test(rng), 'rng includes concrete Strong Hit example');
+assert.ok(/MANDATORY: NEVER hide, omit, or calculate rolls silently in thought/.test(rng), 'rng commands visible roll output');
 assert.ok(/Forward:/.test(rng) && /Hold:/.test(rng), 'rng defines forward and hold');
 assert.ok(!/-3 to \+3/.test(rng), 'modifier range is consistent');
 
@@ -49,10 +55,8 @@ assert.ok(/RESOURCE & RANGE REJECTIONS/.test(combatContent), 'combat includes re
 
 // Constraints builder insights
 const freeformConstraints = buildPbtAConstraintsContent(true);
-assert.ok(/Conclude the scene with "What do you do\?" and the status footer/.test(freeformConstraints), 'freeform constraints conclude with what do you do');
 const cyoaConstraints = buildPbtAConstraintsContent(false);
-assert.ok(/choices belong exclusively inside the <choices><button>/.test(cyoaConstraints), 'cyoa constraints restrict choices to button block');
-assert.ok(/do NOT repeat "What do you do\?"/.test(cyoaConstraints), 'cyoa constraints forbid repeating what do you do in prose');
+assert.ok(!/<output_constraints>/.test(cyoaConstraints), 'constraints eliminates decoupled CYOA remnant output_constraints');
 assert.ok(/NO ROUNDABOUT SUCCESS AFTER A FAIL/.test(cyoaConstraints), 'constraints include anti-softballing guardrail');
 assert.ok(/intimate strike at far range/i.test(cyoaConstraints), 'constraints enforce weapon tag range rejections');
 assert.ok(/exhausted resource, 0 uses, or 0 Hold/i.test(cyoaConstraints), 'constraints enforce 0 hold/uses rejections');

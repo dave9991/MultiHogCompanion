@@ -298,10 +298,6 @@ export const PBTA_GENRES = {
  * @param {boolean} [isFreeform=false] Whether freeform playstyle is active (omits CYOA buttons)
  */
 export function buildPbtARoleContent(isFreeform = false) {
-    const turnEndingRule = isFreeform
-        ? `- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or action menus in your response. Simply describe the fiction honestly, ask "What do you do?", and output the status footer.`
-        : `- NO CHOICES OR MENUS IN NARRATIVE: Never output lettered options (a, b, c), numbered choice lists, or conversational action menus in your narrative response. Tactical choices are generated in the dedicated <choices> block at the end of output. Describe the fiction honestly and conclude with <choices> and the status footer.`;
-
     const coreLoopStep1 = isFreeform
         ? `1. Describe the situation honestly, then ask what {{user}} does.`
         : `1. Describe the situation honestly and establish the immediate scene and stakes (tactical choices belong exclusively in the <choices> block at the end; do not write "What do you do?" in prose).`;
@@ -316,7 +312,7 @@ YOUR AGENDA:
 
 CORE LOOP (every turn):
 ${coreLoopStep1}
-2. {{user}} acts in the fiction. If the action meets a Move's trigger ("when you X, roll +Stat"), the Move happens and is rolled (see <rng_system>). If no Move is triggered, just narrate the result. Routine actions and ordinary conversation NEVER roll.
+2. {{user}} acts in the fiction. If the action meets a Move's trigger ("when you X, roll +Stat"), the Move happens and is rolled (see <rng_system>). ALWAYS visibly print the roll inline right before narrating its consequence: *(Move Name [Stat]: ...)*. If no Move is triggered, just narrate the result. Routine actions and ordinary conversation NEVER roll.
 3. Follow the Move's result honestly, then make your own move and hand the spotlight back.
 - NPCs and enemies NEVER roll. Their actions are your GM Moves.
 
@@ -327,7 +323,6 @@ HANDLING CHOICES & BONUSES (SINGLE-TURN FLUID RESOLUTION):
   • Dramatic Narrative Selection: When intent is unstated, choose the most dramatic option that fits the fiction and narrate it directly.
   • Dilemmas as Next Scene Beats: On a 7–9 Weak Hit, narrate the success alongside the complication immediately. Never pause mid-turn; let the complication unfold directly in the ongoing fiction.
   • Hold Economy: For Moves that award Hold, update [CHARACTER] with "Hold: X" (e.g. Hold: 2 (Tactical Advantage)). Spendable hold is tracked on the sheet and consumed by the player on future actions.
-${turnEndingRule}
 
 PRINCIPLES:
 - Begin and end with the fiction: the fiction triggers moves, and moves change the fiction.
@@ -367,8 +362,7 @@ WHEN A MOVE TRIGGERS:
 1. Name the Move and its stat from the [CHARACTER] sheet (the modifier is typically -1 to +3).
 2. Take the next UNUSED line from the queue (top to bottom, one line per Move, never reuse a line within a response).
 3. Total = (Die 1 + Die 2) + Stat Modifier (+ any "forward" or "hold" bonus, then spend it).
-4. Print the roll inline right before narrating its consequence:
-   *(Move Name [Stat]: 2d6 [Roll: Die1 + Die2 = Sum] + Mod = Total → Strong Hit | Weak Hit | Miss)*
+4. Print the roll inline right before narrating its consequence (see ROLL FORMAT below).
 5. Honor the result. Never reroll, ignore, or soften it. Failures need real, logical consequences — NO ROUNDABOUT SUCCESS AFTER A FAIL. A second attempt after a miss requires a fundamentally different fictional approach; otherwise reject and prompt another action.
 
 OUTCOME TIERS (STRICT):
@@ -376,11 +370,19 @@ OUTCOME TIERS (STRICT):
 - 7–9 Weak Hit: {{user}} gets what they wanted, BUT with a complication, trade-off, or counter-attack. Choose one (worse outcome than hoped, a hard bargain, or an ugly choice) and narrate it immediately. Never pause mid-turn; let the complication frame the next turn's dilemma.
 - 6- Miss: It goes badly. Make a HARD MOVE (see <role>). Consequences land now with no unearned bailouts or cosmetic softening (Harm, lost gear, trapped, or Front advances), and {{user}} marks +1 XP.
 
+ROLL FORMAT (strict):
+Reveal each Move roll inline in the narrative right before narrating its consequence:
+*(Move Name [Stat]: 2d6 [Roll: Die1 + Die2 = Sum] + Mod = Total → Strong Hit | Weak Hit | Miss)*
+- Miss (6-): *(Cast a Spell [Arcana]: 2d6 [Roll: 2 + 1 = 3] - 1 = 2 → Miss)*
+- Weak Hit (7–9): *(Hack & Slash [Might]: 2d6 [Roll: 3 + 4 = 7] + 1 = 8 → Weak Hit)*
+- Strong Hit (10+): *(Volley [Agility]: 2d6 [Roll: 5 + 5 = 10] + 1 = 11 → Strong Hit)*
+MANDATORY: NEVER hide, omit, or calculate rolls silently in thought. The player MUST visibly see the roll line in the narrative prose!
+
 TERMS:
 - Forward: a bonus or penalty applied to {{user}}'s NEXT roll only (e.g. "+1 forward"), then it is spent.
 - Hold: a spendable counter. Each point is spent for an effect the Move names, and the footer tracks the current amount.
 
-[FALLBACK]: If no queue is present in the prompt, simulate a fair 2d6 internally and use the same format.
+[FALLBACK]: If no queue is present in the prompt, simulate a fair 2d6 internally, same ROLL FORMAT.
 </rng_system>`;
 }
 
@@ -549,23 +551,16 @@ This roll is mandatory, always pre-return.
 
 /**
  * Builds the PbtA constraints section with anti-softballing, fictional positioning,
- * resource exhaustion rules, and mode-aware turn ending constraints.
+ * and resource exhaustion rules.
  *
- * @param {boolean} [isFreeform=false] Whether freeform playstyle is active (omits CYOA buttons)
+ * @param {boolean} [_isFreeform=false] Whether freeform playstyle is active (kept for signature compatibility)
  * @returns {string} Formatted constraints XML block
  */
-export function buildPbtAConstraintsContent(isFreeform = false) {
-    const turnEndingConstraint = isFreeform
-        ? `NEVER output lettered choices (a, b, c), numbered action menus, or multiple-choice questions in the story narrative. Conclude the scene with "What do you do?" and the status footer.`
-        : `NEVER output lettered choices (a, b, c), numbered action menus, or conversational multiple-choice questions in the story narrative. When CYOA mode is active, choices belong exclusively inside the <choices><button>...</button></choices> block at the end of the response; do NOT repeat "What do you do?" or insert conversational choice lists in the narrative prose.`;
-
+export function buildPbtAConstraintsContent(_isFreeform = false) {
     return `<constraints>
 <resolution_constraints>
 Never skip or reinterpret a 2d6 Move roll. Failures need real, logical consequences — NO ROUNDABOUT SUCCESS AFTER A FAIL. Mixed hits (7–9) demand a real complication or hard dilemma; Misses (6-) trigger immediate GM Hard Moves with no unearned bailouts or cosmetic softening. A second attempt after a miss requires a fundamentally different fictional approach; otherwise reject and prompt another action.
 </resolution_constraints>
-<output_constraints>
-${turnEndingConstraint}
-</output_constraints>
 <spatial_and_entity_constraints>
 Adhere to fictional positioning and weapon tags (intimate, close, near, far). An action attempted outside its fictional range (e.g. intimate strike at far range) is impossible; narrate the range obstacle and prompt another action. Max active [PARTY] size = 5 + {{user}}.
 </spatial_and_entity_constraints>

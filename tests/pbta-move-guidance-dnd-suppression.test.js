@@ -82,9 +82,8 @@ test('4. buildPbtACartridge suppresses base D&D constraints and installs clean P
 
     // Verify constraints snippet does NOT contain 5e disadvantage penalty
     assert.ok(constraintsSnippet.content.includes('NEVER impose D&D "disadvantage"'), 'Must explicitly forbid disadvantage in constraints snippet');
-    // Verify constraints snippet contains output_constraints forbidding choices in narrative
-    assert.ok(constraintsSnippet.content.includes('<output_constraints>'), 'Must have output_constraints');
-    assert.ok(constraintsSnippet.content.includes('NEVER output lettered choices'), 'Must forbid lettered choices in narrative');
+    // Verify decoupled CYOA output_constraints remnant is cleanly removed
+    assert.ok(!constraintsSnippet.content.includes('<output_constraints>'), 'Must not have decoupled CYOA output_constraints remnant');
 
     const unsuppressedSnippet = constraintsSnippet.content.replace(/NEVER impose D&D "disadvantage"[^\n]*/gi, '');
     assert.ok(!/disadvantage/i.test(unsuppressedSnippet), 'No unsuppressed disadvantage in PbtA constraints snippet');

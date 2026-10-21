@@ -372,10 +372,18 @@ OUTCOME TIERS (STRICT):
 
 ROLL FORMAT (strict):
 Reveal each Move roll inline in the narrative right before narrating its consequence:
+MANDATORY SYNTAX: Always wrap the entire roll line in single asterisks and parentheses: *(Move Name [Stat]: ...)*. This is required for SillyTavern theme colorization. NEVER use bold **Roll:**, NEVER write plain unitalicized text, and NEVER omit the Move name or Stat!
 *(Move Name [Stat]: 2d6 [Roll: Die1 + Die2 = Sum] + Mod = Total → Strong Hit | Weak Hit | Miss)*
-- Miss (6-): *(Cast a Spell [Arcana]: 2d6 [Roll: 2 + 1 = 3] - 1 = 2 → Miss)*
-- Weak Hit (7–9): *(Hack & Slash [Might]: 2d6 [Roll: 3 + 4 = 7] + 1 = 8 → Weak Hit)*
-- Strong Hit (10+): *(Volley [Agility]: 2d6 [Roll: 5 + 5 = 10] + 1 = 11 → Strong Hit)*
+
+- Miss (6-):
+  *(Cast a Spell [Arcana]: 2d6 [Roll: 2 + 1 = 3] - 1 = 2 → Miss)*
+  *(Defy Danger [Agility]: 2d6 [Roll: 1 + 3 = 4] + 1 = 5 → Miss)*
+- Weak Hit (7–9):
+  *(Hack & Slash [Might]: 2d6 [Roll: 3 + 4 = 7] + 1 = 8 → Weak Hit)*
+  *(Defy Danger [Heart]: 2d6 [Roll: 3 + 5 = 8] + 0 = 8 → Weak Hit)*
+- Strong Hit (10+):
+  *(Volley [Agility]: 2d6 [Roll: 5 + 5 = 10] + 1 = 11 → Strong Hit)*
+  *(Spout Lore [Wits]: 2d6 [Roll: 4 + 5 = 9] + 2 = 11 → Strong Hit)*
 MANDATORY: NEVER hide, omit, or calculate rolls silently in thought. The player MUST visibly see the roll line in the narrative prose!
 
 TERMS:
@@ -493,7 +501,7 @@ export function buildPbtAFooterContent(harmMax = 5, pacingXp = 5, options = {}) 
 ALWAYS end every narrative output with:
 *(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*
 *${timeFmt}*
-Footer shows ONLY {{user}}'s Harm/XP/Hold/location/time (substitute values into the tokens; do NOT output literal square brackets around time or day, e.g. *08:00 AM, Day 1*) — never party or NPC status.
+Footer shows ONLY {{user}}'s Harm/XP/Hold/location/time (substitute values into the tokens; do NOT output literal square brackets around time or day, e.g. *08:00 AM, Day 1*) — never party or NPC status, and do not append story narration after the time line.
 </end_of_output_footer>`;
 }
 
@@ -770,7 +778,9 @@ You must generate exactly 5 choices following narrative context:
 
     return `[INTERACTIVE CHOICE BUTTONS]
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for the user. NEVER forget the choices.
-- Output sequence: (1) Scene narrative -> (2) <choices> block -> (3) Status footer.
+- Output sequence: (1) Scene narrative -> (2) Status footer -> (3) <choices> block.
+- All narrative prose, dialogue, and suspense/cliffhanger beats belong exclusively in (1).
+- The <choices> block in (3) must immediately follow the status footer in (2) with NO text, thoughts, or parentheticals placed between or after them.
 - Enclose all choices inside a single <choices> XML block.
 - Wrap every single choice in a <button> tag.${emojiLine}
 - NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), Armor Class ("vs AC 15"), or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ Full Success | 7–9 Mixed Success | 6- Miss).

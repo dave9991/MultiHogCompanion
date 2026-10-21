@@ -42,8 +42,13 @@ assert.ok(/no unearned bailouts or cosmetic softening/.test(rng), 'rng mandates 
 assert.ok(/ROLL FORMAT \(strict\):/.test(rng), 'rng has ROLL FORMAT (strict) block');
 assert.ok(/2d6 \[Roll: Die1 \+ Die2 = Sum\] \+ Mod = Total → Strong Hit \| Weak Hit \| Miss/.test(rng), 'rng specifies strict roll format');
 assert.ok(/Cast a Spell \[Arcana\]: 2d6 \[Roll: 2 \+ 1 = 3\] - 1 = 2 → Miss/.test(rng), 'rng includes concrete Miss example');
+assert.ok(/Defy Danger \[Agility\]: 2d6 \[Roll: 1 \+ 3 = 4\] \+ 1 = 5 → Miss/.test(rng), 'rng includes additional Defy Danger Miss example');
 assert.ok(/Hack & Slash \[Might\]: 2d6 \[Roll: 3 \+ 4 = 7\] \+ 1 = 8 → Weak Hit/.test(rng), 'rng includes concrete Weak Hit example');
+assert.ok(/Defy Danger \[Heart\]: 2d6 \[Roll: 3 \+ 5 = 8\] \+ 0 = 8 → Weak Hit/.test(rng), 'rng includes additional Defy Danger Weak Hit example');
 assert.ok(/Volley \[Agility\]: 2d6 \[Roll: 5 \+ 5 = 10\] \+ 1 = 11 → Strong Hit/.test(rng), 'rng includes concrete Strong Hit example');
+assert.ok(/Spout Lore \[Wits\]: 2d6 \[Roll: 4 \+ 5 = 9\] \+ 2 = 11 → Strong Hit/.test(rng), 'rng includes additional Spout Lore Strong Hit example');
+assert.ok(/MANDATORY SYNTAX: Always wrap the entire roll line in single asterisks and parentheses/.test(rng), 'rng specifies mandatory asterisks for theme colorization');
+assert.ok(/NEVER use bold \*\*Roll:\*\*/.test(rng), 'rng explicitly forbids bold Roll: output');
 assert.ok(/MANDATORY: NEVER hide, omit, or calculate rolls silently in thought/.test(rng), 'rng commands visible roll output');
 assert.ok(/Forward:/.test(rng) && /Hold:/.test(rng), 'rng defines forward and hold');
 assert.ok(!/-3 to \+3/.test(rng), 'modifier range is consistent');
@@ -98,5 +103,7 @@ assert.strictEqual(footerPrompt.content, footer24h, 'cartridge footer prompt con
 // Test CYOA prompt stance, hold, and dilemma integration
 assert.ok(/STANCE, HOLD & DILEMMA INTEGRATION/.test(cartridge.payload.cyoaConfig.customPromptText), 'cartridge CYOA prompt includes stance, hold, and dilemma instructions');
 assert.ok(/STANCE-LOADED CHOICES/.test(cartridge.payload.cyoaConfig.customPromptText), 'cartridge CYOA prompt includes stance-loaded choice instruction');
+assert.ok(/Output sequence: \(1\) Scene narrative -> \(2\) Status footer -> \(3\) <choices> block/.test(cartridge.payload.cyoaConfig.customPromptText), 'cartridge CYOA prompt enforces narrative -> footer -> choices output sequence');
+assert.ok(/must immediately follow the status footer in \(2\) with NO text, thoughts, or parentheticals/.test(cartridge.payload.cyoaConfig.customPromptText), 'cartridge CYOA prompt forbids text between footer and choices');
 
 console.log('--- ALL PBTA CORE RULES PROMPT TESTS PASSED CLEANLY! ---');

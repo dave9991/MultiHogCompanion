@@ -422,8 +422,8 @@ export async function coordinateCyoaForMessage({
     }
     const resolvedGetSettings = typeof getSettings === 'function' ? getSettings : _getSettings;
     const s = typeof resolvedGetSettings === 'function' ? resolvedGetSettings() : {};
-    const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
-    if (!force && cyoaMode === 'disabled') return false;
+    const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'on_demand' : 'disabled');
+    if (!force && (cyoaMode === 'disabled' || s.enableDecoupledCyoa === false)) return false;
 
     // Defer if narrator is still actively streaming
     if (triggerSource === 'CHARACTER_MESSAGE_RENDERED' && isNarratorGenerating()) {
@@ -596,40 +596,18 @@ export function initCyoaSafetyNet({ getSettings, isPbtaActive, showToast, eventS
     if (et.CHAT_COMPLETION_PROMPT_READY) {
         es.on(et.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
             const s = getSettings();
-            const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
-            if (cyoaMode === 'disabled') return;
+            const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'on_demand' : 'disabled');
+            if (cyoaMode === 'disabled' || s.enableDecoupledCyoa === false) return;
             if (Array.isArray(eventData?.chat)) {
                 stripCyoaFromOutgoingChat(eventData.chat, {
-                    stripActiveCyoa: cyoaMode === 'two_stage' || cyoaMode === 'always_decoupled',
+                    stripActiveCyoa: false,
                 });
             }
         });
     }
 
-    // [CATALOG: EVT-06] See LISTENERS.md — CYOA Safety Net & Auto-Repair Dispatcher (CHARACTER_MESSAGE_RENDERED)
-    if (et.CHARACTER_MESSAGE_RENDERED) {
-        es.on(et.CHARACTER_MESSAGE_RENDERED, (messageId) => {
-            void coordinateCyoaForMessage({
-                messageId,
-                triggerSource: 'CHARACTER_MESSAGE_RENDERED',
-                getSettings,
-                isPbtaActive,
-                showToast,
-            });
-        });
-    }
-
-    // [CATALOG: EVT-11] See LISTENERS.md — CYOA Fallback Completion Trigger (GENERATION_ENDED)
-    if (et.GENERATION_ENDED) {
-        es.on(et.GENERATION_ENDED, async () => {
-            await coordinateCyoaForMessage({
-                triggerSource: 'GENERATION_ENDED',
-                getSettings,
-                isPbtaActive,
-                showToast,
-            });
-        });
-    }
+    // [CATALOG: EVT-06] See LISTENERS.md — Retired for CYOA: automatic background dispatch eliminated in favor of On-Demand Wand action (DOM-07). (Active in index.js for Relationship Sync)
+    // [CATALOG: EVT-11] See LISTENERS.md — Retired: background auto-trigger eliminated in favor of On-Demand Wand action (DOM-07).
 }
 
 /**

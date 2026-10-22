@@ -38,12 +38,12 @@ The following matrix highlights events where **multiple files or upstream MultiH
 | :--- | :--- | :--- | :--- |
 | **`CHAT_CHANGED`** | • `cyoa-safety-net.js`<br>• `index.js` (`runChatChangedCoordinator`)<br>• *Upstream MultiHog* | 1. `cyoa-guardian` (sync abort)<br>2. Upstream `onChatChanged` (async state reload)<br>3. `index.js` (Debounced 500ms settlement window -> deterministic sequential coordinator with token invalidation) | 🟢 **RESOLVED**: Arbitrary `setTimeout` ladder eliminated; token invalidation prevents stale cross-chat overwrites. |
 | **`CHAT_RENAMED`** | • `adventure-chat.js`<br>• `index.js`<br>• *Upstream MultiHog* | 1. `adventure-chat.js` (`eventSource.makeFirst`)<br>2. Upstream `onChatRenamedMigrate`<br>3. `index.js` (`setTimeout` 200ms) | 🟡 **MODERATE**: Relies on `eventSource.makeFirst` monkey patch to beat upstream migration. |
-| **`CHARACTER_MESSAGE_RENDERED`** | • `cyoa-safety-net.js` (`coordinateCyoaForMessage`)<br>• `index.js` (canonical assistant turn listener)<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (unified Stage 2 CYOA dispatcher)<br>2. `index.js` (schedules tier crossover check) | 🟢 **RESOLVED**: Canonical assistant turn trigger. Deduplicated against `GENERATION_ENDED`. |
+| **`CHARACTER_MESSAGE_RENDERED`** | • `index.js` (canonical assistant turn listener)<br>• *Upstream MultiHog* | 1. `index.js` (schedules tier crossover check)<br>2. *(CYOA auto-dispatch retired in favor of DOM-07 Wand action)* | 🟢 **RESOLVED**: Canonical assistant turn trigger for Relationship Sync. Automated CYOA background trigger retired. |
 | **`MESSAGE_RECEIVED`** | • *Upstream MultiHog* | 1. Upstream `onMapArchitectAssistantMessage` | 🟢 **REMOVED**: Redundant Companion listener removed; consolidated into `CHARACTER_MESSAGE_RENDERED`. |
 | **`SETTINGS_UPDATED`** | • `index.js` (`runSettingsUpdatedCoordinator`)<br>• *Upstream MultiHog* | 1. `index.js` (Debounced 600ms settlement window with `_isSettingsSyncActive` mutex gate) | 🟢 **RESOLVED**: Re-entrancy loop eliminated; 4 nested timeouts collapsed into single atomic pass. |
 | **`GENERATION_STARTED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts Stage 2 pass) | 🟢 **LOW**: Clean state-reset hook. |
 | **`GENERATION_STOPPED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts Stage 2 pass) | 🟢 **LOW**: Clean abort handler. |
-| **`GENERATION_ENDED`** | • `cyoa-safety-net.js` (`coordinateCyoaForMessage`)<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (fail-safe completion trigger) | 🟢 **RESOLVED**: Unified dispatcher ensures Stage 2 runs only once per message turn. |
+| **`GENERATION_ENDED`** | • *Upstream MultiHog* | *(Companion CYOA auto-dispatch retired in favor of DOM-07 Wand action)* | 🟢 **RETIRED (Companion)**: Automated background trigger replaced with deterministic on-demand Wand/Slash execution. |
 | **`CHAT_COMPLETION_PROMPT_READY`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. Upstream prompt injection<br>2. `cyoa-safety-net.js` (prompt CYOA stripping) | 🟢 **LOW**: Pure synchronous array transform. |
 | **`APP_READY`** | • `index.js` (`setupImagineInterceptor`)<br>• *Upstream MultiHog* | 1. Companion wraps `/imagine` callback | 🟢 **LOW**: Run-once initialization. |
 
@@ -205,19 +205,13 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-06: `CHARACTER_MESSAGE_RENDERED` (CYOA Safety Net & Auto-Repair Dispatcher — Pipeline A)
+### EVT-06: `CHARACTER_MESSAGE_RENDERED` (Relationship Narrative Sync / Canonical Assistant Turn)
 * **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM. Emitted as `(messageId, type)`.
-* **Registered In:** `cyoa-safety-net.js` (line 555)
+* **Registered In:** `index.js:2331` (Relationship Narrative Sync & Persona Alignment)
 * **Payload Structure:** `(messageId: number, type?: string)`
-* **Handler:** Routes through `coordinateCyoaForMessage(messageId)`. Evaluates the settled assistant message:
-  1. **Streaming Guard:** If narrator is still actively streaming tokens, defers execution.
-  2. **Deduplication:** Prevents multiple passes on the same message index and swipe ID.
-  3. **Happy Path:** If `<choices><button>...</button></choices>` already exist and character is healthy, exits immediately (0 LLM overhead, 1-pass fast generation).
-  4. **Local Regex Repair:** If plain numbered markdown choices exist (`1. ... 2. ...`), automatically formats them into buttons via `tryRepairMarkdownChoices` with zero LLM calls.
-  5. **Fallback Generation:** If choices were completely skipped or truncated (or if downed without crisis options), launches Stage 2 fallback repair runner via quiet prompt.
-* **Preconditions:** `cyoaMode !== 'disabled'`, not message 0, adventure active, CYOA expected, not a tool-call or smallsys message (`extra.isSmallSys`, `tool_invocations`).
-* **Blast Radius:** Omitted or plain markdown choices will not be automatically converted into interactive buttons; user must click manual repair.
-* **Optimization Status:** **OPTIMIZED (Phase 3)**. Unified reactive safety net with tool-message guarding and zero-cost local regex repairs.
+* **Handler:** Schedules `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` to evaluate NPC relationship tier crossovers and active persona synchronization.
+* **Architecture Evolution:** The automated CYOA background dispatcher in `cyoa-safety-net.js` was **retired** in favor of [`DOM-07`](#4-dom-event-delegation-registry-documenton) (Wand Menu & Slash Commands), eliminating race conditions with tool-calling and reasoning models.
+* **Optimization Status:** **OPTIMIZED (Phase 3)**. Dedicated strictly to narrative relationship milestones and persona alignment.
 
 ---
 
@@ -283,17 +277,10 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-11: `GENERATION_ENDED` (CYOA Fallback Completion Trigger)
+### EVT-11: `GENERATION_ENDED` [RETIRED] (Formerly CYOA Fallback Completion Trigger)
 * **Trigger:** Generation and token streaming conclude (`hideStopButton()` called by `activateSendButtons()` in `script.js`).
-* **Registered In:** `cyoa-safety-net.js` (line 570)
-* **Payload Structure:** `(chatLength: number)`
-* **Handler:** Routes through `coordinateCyoaForMessage({ triggerSource: 'GENERATION_ENDED' })`.
-* **The Streaming Hand-off Protocol:**
-  1. **Streaming Hand-off:** When token streaming is active, `EVT-06` (`CHARACTER_MESSAGE_RENDERED`) fires early while `isNarratorGenerating()` is still `true`, causing it to defer execution. When streaming finally completes, `EVT-11` (`GENERATION_ENDED`) fires, evaluating the completely settled prose.
-  2. **Batch Deduplication:** In non-streaming batch mode, `EVT-06` evaluates the message first and records `_lastAttemptedMessageId = idx` and `_lastAttemptedSwipeId = swipeId`. When `EVT-11` fires milliseconds later, the deduplication guard detects the matching registers and exits immediately (0 duplicate work).
-  3. **Stop Guard:** If the user stopped generation, `EVT-10` sets `_wasGenerationStopped = true`, causing `EVT-11` to abort without injecting choices into truncated text.
-* **Blast Radius:** If removed, streaming responses will never receive CYOA buttons because `CHARACTER_MESSAGE_RENDERED` deferral would have no follow-up trigger.
-* **Optimization Status:** **OPTIMIZED (Phase 3)**. Tool-call guarded and deduplicated against `CHARACTER_MESSAGE_RENDERED`.
+* **Status:** 🔴 **RETIRED**. The automated background CYOA fallback completion hook was decommissioned to eliminate collisions with multi-turn tool calling and reasoning models. CYOA formatting and choice formulation are now driven on-demand via the Wand Menu (`DOM-07`) and slash commands (`/cyoafix`, `/cyoagen`).
+* **Anchor Preserved:** `[CATALOG: EVT-11]` preserved in codebase for architectural traceability.
 
 ---
 

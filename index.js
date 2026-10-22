@@ -1770,31 +1770,38 @@ async function initUI() {
 
         await initRelationshipSyncUI();
 
-        // ── 7. CYOA Safety Net & Choice Engine Controls ──
+        // ── 7. CYOA Choice Engine Controls (On-Demand) ──
         const cyoaEnableCb = $('#mhc_cyoa_enable, #mhc_cyoa_auto_retry_enable');
-        const cyoaModeSelect = $('#mhc_cyoa_mode_select');
+        const cyoaBadge = $('#mhc_cyoa_badge');
         const isCyoaEnabled = current.enableDecoupledCyoa !== false && current.cyoaMode !== 'disabled';
         cyoaEnableCb.prop('checked', isCyoaEnabled);
 
-        let activeMode = current.cyoaMode || (current.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
-        if (activeMode === 'always_decoupled') activeMode = 'two_stage';
-        if (cyoaModeSelect.length) {
-            cyoaModeSelect.val(activeMode === 'disabled' ? 'safety_net' : activeMode);
-            cyoaModeSelect.prop('disabled', !isCyoaEnabled);
-        }
+        const updateCyoaBadge = (enabled) => {
+            if (cyoaBadge.length) {
+                if (enabled) {
+                    cyoaBadge.text('On-Demand (Wand)').css({
+                        background: 'rgba(80,180,120,0.2)',
+                        color: '#88ffbb',
+                        borderColor: 'rgba(80,180,120,0.35)',
+                    });
+                } else {
+                    cyoaBadge.text('Disabled').css({
+                        background: 'rgba(255,100,100,0.15)',
+                        color: '#ff9999',
+                        borderColor: 'rgba(255,100,100,0.3)',
+                    });
+                }
+            }
+        };
+        updateCyoaBadge(isCyoaEnabled);
 
         cyoaEnableCb.on('change', function () {
             const checked = $(this).is(':checked');
-            cyoaModeSelect.prop('disabled', !checked);
+            updateCyoaBadge(checked);
             updateSettings({
                 enableDecoupledCyoa: checked,
-                cyoaMode: checked ? (cyoaModeSelect.val() || 'safety_net') : 'disabled',
+                cyoaMode: checked ? 'on_demand' : 'disabled',
             });
-        });
-
-        cyoaModeSelect.on('change', function () {
-            const selectedMode = $(this).val();
-            updateSettings({ cyoaMode: selectedMode });
         });
 
         const cyoaTokensInput = $('#mhc_cyoa_max_tokens');

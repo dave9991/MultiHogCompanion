@@ -20,6 +20,7 @@ import {
     registerCyoaSlashCommands,
     repairOrGenerateChoicesForMessage,
     regenerateCyoaChoicesForMessage,
+    handleWandCyoaFixOrReroll,
     isNarratorGenerating,
 } from '../cyoa-safety-net.js';
 
@@ -326,4 +327,67 @@ assert.strictEqual(slashError, null, 'cyoaretry must never throw ReferenceError'
 delete globalThis.SillyTavern;
 
 console.log('✓ registerCyoaSlashCommands and execution verified');
+
+// ── 7. Wand Menu CYOA Fix / Reroll Action (DOM-07) ──────────────────────────
+console.log('7. Testing handleWandCyoaFixOrReroll safety guards & behavior...');
+
+const toasts = [];
+const mockToast = (type, msg) => toasts.push({ type, msg });
+
+// A. Rejects when no chat is present
+globalThis.SillyTavern = { getContext: () => ({ chat: [] }) };
+const emptyChatRes = await handleWandCyoaFixOrReroll({ showToast: mockToast });
+assert.strictEqual(emptyChatRes, false, 'Must fail safely when chat is empty');
+assert.ok(toasts.some(t => t.type === 'warning' && t.msg.includes('No messages in chat')), 'Must emit toast on empty chat');
+toasts.length = 0;
+
+// B. Rejects when latest message is a toolcall system card
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chat: [
+            { is_user: false, is_system: false, mes: 'The chamber is dark.' },
+            { is_user: false, is_system: true, extra: { isSmallSys: true, tool_invocations: [{ id: '1' }] }, mes: 'Tool calls: Map Architect' },
+        ],
+    }),
+};
+const toolcallRejectRes = await handleWandCyoaFixOrReroll({ showToast: mockToast });
+assert.strictEqual(toolcallRejectRes, false, 'Must fail safely and reject toolcall system card');
+assert.ok(toasts.some(t => t.type === 'warning' && t.msg.includes('not a settled narrator response')), 'Must warn user on toolcall card');
+toasts.length = 0;
+
+// C. Rejects when latest message is an intermediary thinking message with no narration
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chat: [
+            { is_user: false, is_system: false, mes: '   ', extra: { reasoning: 'Thinking for 4 minutes...' } },
+        ],
+    }),
+};
+const emptyThoughtRejectRes = await handleWandCyoaFixOrReroll({ showToast: mockToast });
+assert.strictEqual(emptyThoughtRejectRes, false, 'Must reject assistant turn with empty narrative prose');
+assert.ok(toasts.some(t => t.type === 'warning' && t.msg.includes('not a settled narrator response')), 'Must warn user on empty thought turn');
+toasts.length = 0;
+
+// D. Fast Path: Automatically converts plain numbered markdown choices to buttons
+const testDChat = [
+    {
+        is_user: false,
+        is_system: false,
+        mes: 'The bugbear groans as your blow lands!\n\n1. Strike with your warhammer\n2. Raise your shield and brace',
+    },
+];
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chat: testDChat,
+    }),
+};
+const repairRes = await handleWandCyoaFixOrReroll({ showToast: mockToast });
+assert.strictEqual(repairRes, true, 'Must successfully auto-repair numbered choices into buttons');
+assert.ok(toasts.some(t => t.type === 'success' && t.msg.includes('Converted markdown choices into CYOA buttons')), 'Must emit success toast on auto-repair');
+assert.ok(testDChat[0].mes.includes('<choices>'), 'Repaired message must contain <choices> block');
+assert.ok(testDChat[0].mes.includes('<button>1. Strike with your warhammer</button>'), 'Repaired message must contain formatted buttons');
+toasts.length = 0;
+
+delete globalThis.SillyTavern;
+console.log('✓ handleWandCyoaFixOrReroll safety guards and auto-repair verified');
 console.log('--- ALL CYOA SAFETY NET TESTS PASSED CLEANLY! ---');

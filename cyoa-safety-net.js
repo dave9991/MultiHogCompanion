@@ -49,6 +49,13 @@ let _getSettings = () => {
  */
 export function isNarratorGenerating() {
     if (typeof document !== 'undefined') {
+        if (typeof $ !== 'undefined') {
+            try {
+                if ($('#mes_stop, .mes_stop').is(':visible')) {
+                    return true;
+                }
+            } catch (_) {}
+        }
         const stopBtn = document.querySelector('#mes_stop, .mes_stop');
         if (stopBtn && stopBtn.style.display !== 'none' && stopBtn.offsetParent !== null) {
             return true;
@@ -355,7 +362,7 @@ export async function applyRepairedMessage(messageId, repairedText) {
 
         if (typeof ctx.updateMessageBlock === 'function') {
             ctx.updateMessageBlock(messageId, chat[messageId]);
-        } else {
+        } else if (typeof document !== 'undefined') {
             const mesTextEl = document.querySelector(`#chat .mes[mesid="${messageId}"] .mes_text`);
             if (mesTextEl && typeof ctx.messageFormatting === 'function') {
                 mesTextEl.innerHTML = ctx.messageFormatting(repairedText, chat[messageId].name, chat[messageId].is_system, chat[messageId].is_user);
@@ -782,3 +789,59 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { ge
         helpString: '<div>Converts plain-text numbered choices into buttons, or generates them via choice generator if missing.</div>',
     }));
 }
+
+/**
+ * Interactive trigger from the SillyTavern wand menu (#mhc_wand_cyoa_fix_reroll).
+ * Strictly operates on the latest message in chat (chat[chat.length - 1]).
+ * Fails safely if the latest message is not a settled narrator response.
+ *
+ * @param {object} [options={}]
+ * @param {Function} [options.getSettings]
+ * @param {boolean|Function} [options.isPbtaActive]
+ * @param {Function} [options.showToast]
+ * @returns {Promise<boolean>}
+ */
+export async function handleWandCyoaFixOrReroll({ getSettings, isPbtaActive, showToast } = {}) {
+    const resolvedGetSettings = typeof getSettings === 'function' ? getSettings : _getSettings;
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const chat = ctx?.chat;
+
+    if (!Array.isArray(chat) || chat.length === 0) {
+        if (showToast) showToast('warning', 'No messages in chat to format or reroll choices.', 'CYOA Engine');
+        return false;
+    }
+
+    if (isNarratorGenerating()) {
+        if (showToast) showToast('info', 'Please wait until the narrator finishes generating.', 'CYOA Engine');
+        return false;
+    }
+
+    const idx = chat.length - 1;
+    const msg = chat[idx];
+
+    // Safety guard: must be a settled narrator/assistant message with narrative text.
+    // Rejects user messages, system/toolcall cards, and intermediary empty-thought assistant turns.
+    if (!msg || msg.is_user || msg.is_system || msg.extra?.isSmallSys || msg.extra?.tool_invocations || !msg.mes || !msg.mes.trim()) {
+        if (showToast) showToast('warning', 'Latest message is not a settled narrator response.', 'CYOA Engine');
+        return false;
+    }
+
+    // Fast Path: Check if plain numbered markdown choices can be converted to buttons (0 tokens, 0 latency)
+    const repaired = tryRepairMarkdownChoices(msg.mes);
+    if (repaired) {
+        const ok = await applyRepairedMessage(idx, repaired);
+        if (ok && showToast) {
+            showToast('success', 'Converted markdown choices into CYOA buttons! 🧭', 'CYOA Engine');
+        }
+        return ok;
+    }
+
+    // Reroll / Generate Path: Choices missing or re-rolling existing buttons
+    return await regenerateCyoaChoicesForMessage({
+        messageId: idx,
+        isPbtaActive,
+        showToast,
+        getSettings: resolvedGetSettings,
+    });
+}
+

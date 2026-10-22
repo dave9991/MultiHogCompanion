@@ -70,6 +70,7 @@ import {
     registerCyoaSlashCommands,
     regenerateCyoaChoicesForMessage,
     repairOrGenerateChoicesForMessage,
+    handleWandCyoaFixOrReroll,
     tryRepairMarkdownChoices,
     applyRepairedMessage,
 } from './cyoa-safety-net.js';
@@ -1810,10 +1811,34 @@ async function initUI() {
         $('#mhc_cyoa_manual_repair_btn').on('click', async function () {
             await repairOrGenerateChoicesForMessage({ isPbtaActive: isPbtAActive(), showToast });
         });
+
+        initWandMenu();
     } catch (err) {
         console.error('[MultiHog Companion] Failed to load UI template:', err);
     }
 }
+
+/**
+ * Injects the MultiHog Companion CYOA Fix / Reroll button into SillyTavern's Wand menu.
+ */
+export function initWandMenu() {
+    if (typeof document === 'undefined') return;
+    const wandContainer = document.getElementById('extensionsMenu');
+    if (!wandContainer) return;
+
+    if (!document.getElementById('mhc_wand_cyoa_fix_reroll')) {
+        const btn = document.createElement('div');
+        btn.id = 'mhc_wand_cyoa_fix_reroll';
+        btn.classList.add('list-group-item', 'flex-container', 'flexGap5');
+        btn.title = 'Convert markdown choices to buttons or reroll fresh CYOA choices';
+        btn.innerHTML = `
+            <div class="fa-solid fa-compass extensionsMenuExtensionButton"></div>
+            <span>Fix / Reroll CYOA Choices</span>
+        `;
+        wandContainer.appendChild(btn);
+    }
+}
+
 
 // ── PbtA Detection & State Recovery ──────────────────────────────────────────────
 export {
@@ -2250,6 +2275,23 @@ jQuery(async () => {
             void runPreflightSanitizer.call(this, e);
         }
     });
+
+    // Wand menu initialization & click delegation
+    initWandMenu();
+    $(document).off('click.mhc_wand_cyoa', '#mhc_wand_cyoa_fix_reroll, #extensionsMenuButton');
+    // [CATALOG: DOM-07] See LISTENERS.md — Wand Menu CYOA Fix/Reroll Trigger
+    $(document).on('click.mhc_wand_cyoa', '#mhc_wand_cyoa_fix_reroll, #extensionsMenuButton', async function (e) {
+        if (this.id === 'extensionsMenuButton') {
+            initWandMenu();
+            return;
+        }
+        await handleWandCyoaFixOrReroll({
+            getSettings,
+            isPbtaActive: isPbtAActive,
+            showToast,
+        });
+    });
+
 
     let _chatRenamedTimer = null;
     // [CATALOG: EVT-03]

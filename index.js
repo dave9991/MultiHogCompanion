@@ -1770,55 +1770,7 @@ async function initUI() {
 
         await initRelationshipSyncUI();
 
-        // ── 7. CYOA Choice Engine Controls (On-Demand) ──
-        const cyoaEnableCb = $('#mhc_cyoa_enable, #mhc_cyoa_auto_retry_enable');
-        const cyoaBadge = $('#mhc_cyoa_badge');
-        const isCyoaEnabled = current.enableDecoupledCyoa !== false && current.cyoaMode !== 'disabled';
-        cyoaEnableCb.prop('checked', isCyoaEnabled);
-
-        const updateCyoaBadge = (enabled) => {
-            if (cyoaBadge.length) {
-                if (enabled) {
-                    cyoaBadge.text('On-Demand (Wand)').css({
-                        background: 'rgba(80,180,120,0.2)',
-                        color: '#88ffbb',
-                        borderColor: 'rgba(80,180,120,0.35)',
-                    });
-                } else {
-                    cyoaBadge.text('Disabled').css({
-                        background: 'rgba(255,100,100,0.15)',
-                        color: '#ff9999',
-                        borderColor: 'rgba(255,100,100,0.3)',
-                    });
-                }
-            }
-        };
-        updateCyoaBadge(isCyoaEnabled);
-
-        cyoaEnableCb.on('change', function () {
-            const checked = $(this).is(':checked');
-            updateCyoaBadge(checked);
-            updateSettings({
-                enableDecoupledCyoa: checked,
-                cyoaMode: checked ? 'on_demand' : 'disabled',
-            });
-        });
-
-        const cyoaTokensInput = $('#mhc_cyoa_max_tokens');
-        cyoaTokensInput.val(current.cyoaMaxTokens || 0);
-        cyoaTokensInput.on('change', function () {
-            const val = parseInt($(this).val(), 10) || 0;
-            updateSettings({ cyoaMaxTokens: val });
-        });
-
-        $('#mhc_cyoa_regen_btn').on('click', async function () {
-            await regenerateCyoaChoicesForMessage({ isPbtaActive: isPbtAActive(), showToast });
-        });
-
-        $('#mhc_cyoa_manual_repair_btn').on('click', async function () {
-            await repairOrGenerateChoicesForMessage({ isPbtaActive: isPbtAActive(), showToast });
-        });
-
+        // ── 7. Wand Menu Integration (On-Demand CYOA Choice Fix/Reroll) ──
         initWandMenu();
     } catch (err) {
         console.error('[MultiHog Companion] Failed to load UI template:', err);
@@ -1901,17 +1853,10 @@ function buildPbtA2d6Block(lineCount = 12) {
 function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
     if (!Array.isArray(chat)) return;
 
-    // 1. CYOA Safety Net / Standalone Prompt Sanitization
-    const s = getSettings();
-    const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'safety_net' : 'disabled');
-    if (cyoaMode === 'two_stage' || cyoaMode === 'always_decoupled') {
-        // Strip <CYOA_mode> instructions & past choice blocks so narrator generates pure prose
-        stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: true });
-    } else if (cyoaMode === 'safety_net') {
-        // Safety net mode: Keep active <CYOA_mode> in prompt for single-stage generation,
-        // but strip historical choices & markdown "What do you do?" lists from older context.
-        stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: false });
-    }
+    // 1. CYOA Prompt Sanitization
+    // Preserve active <CYOA_mode> in prompt for single-stage generation,
+    // but strip historical choices & markdown lists from older turns.
+    stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: false });
 
     // 2. PbtA RNG Queue replacement
     if (!isPbtAActive()) return;

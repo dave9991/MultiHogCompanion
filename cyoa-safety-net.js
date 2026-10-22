@@ -422,8 +422,7 @@ export async function coordinateCyoaForMessage({
     }
     const resolvedGetSettings = typeof getSettings === 'function' ? getSettings : _getSettings;
     const s = typeof resolvedGetSettings === 'function' ? resolvedGetSettings() : {};
-    const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'on_demand' : 'disabled');
-    if (!force && (cyoaMode === 'disabled' || s.enableDecoupledCyoa === false)) return false;
+    if (!force && s.enableDecoupledCyoa === false) return false;
 
     // Defer if narrator is still actively streaming
     if (triggerSource === 'CHARACTER_MESSAGE_RENDERED' && isNarratorGenerating()) {
@@ -595,9 +594,6 @@ export function initCyoaSafetyNet({ getSettings, isPbtaActive, showToast, eventS
     // [CATALOG: EVT-12] See LISTENERS.md — CYOA Outgoing Prompt Sanitizer (CHAT_COMPLETION_PROMPT_READY)
     if (et.CHAT_COMPLETION_PROMPT_READY) {
         es.on(et.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
-            const s = getSettings();
-            const cyoaMode = s.cyoaMode || (s.enableDecoupledCyoa !== false ? 'on_demand' : 'disabled');
-            if (cyoaMode === 'disabled' || s.enableDecoupledCyoa === false) return;
             if (Array.isArray(eventData?.chat)) {
                 stripCyoaFromOutgoingChat(eventData.chat, {
                     stripActiveCyoa: false,

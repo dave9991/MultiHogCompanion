@@ -128,7 +128,7 @@ Upstream MultiHog uses a `generate_interceptor` to inject its RPG state prompt b
 1. Registered in `manifest.json`: `"generate_interceptor": "mhcGenerationInterceptor"`.
 2. Exported to `globalThis.mhcGenerationInterceptor`.
 3. SillyTavern calls this function with the outgoing `chat` array before prompt compilation.
-4. Executes `stripCyoaFromOutgoingChat(chat, { stripActiveCyoa })` according to `cyoaMode` and passes the sanitized chat to the generator.
+4. Executes `stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: false })` to strip historical choice markup from past turns while preserving active instructions intact, and passes the sanitized chat to the generator.
 
 #### Blast Radius (What Breaks If Removed)
 * Stale CYOA markdown buttons (`[1] Attack [2] Flee`) and previous "What do you do?" lists remain in chat history context sent to the LLM, causing the LLM to hallucinate synthetic button syntax or repeat conversational questions in prose.

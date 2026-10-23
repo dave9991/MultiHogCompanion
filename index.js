@@ -450,30 +450,42 @@ export async function syncPersonaToChat(chatId, persona) {
 
 /**
  * Retrieve player character portrait src from Multihog settings.
+ * Prioritizes customPortraits (where manual uploads, replacements, and newly assigned portraits reside),
+ * matching upstream MultiHog's resolvePortraitSrcForPlayerCharacter lookup sequence,
+ * then falls back to pbtaCampaignDossier or playerCharacter objects.
  */
-function getMultihogPlayerPortrait(chatId, charName) {
+export function getMultihogPlayerPortrait(chatId, charName) {
     const s = getRpgSettings();
     if (!s) return null;
 
     const candidateIds = getCandidateChatIds(chatId);
+    const candidateNames = [];
+    if (charName) candidateNames.push(charName);
 
-    // 1. Check pbtaCampaignDossier or playerCharacter portraitSrc across candidate partitions
+    // Also collect names from character blocks or playerCharacter across candidate partitions
     for (const cid of candidateIds) {
-        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc;
-        if (dossierPortrait) return dossierPortrait;
-        const pcPortrait = s.chatStates?.[cid]?.playerCharacter?.portraitSrc;
-        if (pcPortrait) return pcPortrait;
+        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
+        if (pcName && !candidateNames.includes(pcName)) candidateNames.push(pcName);
+        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name;
+        if (protoName && !candidateNames.includes(protoName)) candidateNames.push(protoName);
+    }
+    const owner = String(s.chatStateProjectionOwner || '').trim();
+    const isOwnerMatch = !owner || candidateIds.some(cid => cid === owner);
+    if (isOwnerMatch && s.playerCharacter?.name && !candidateNames.includes(s.playerCharacter.name)) {
+        candidateNames.push(s.playerCharacter.name);
     }
 
-    const charVariants = getNameMatchingVariants(charName);
+    const charVariants = [...new Set(candidateNames.flatMap(n => getNameMatchingVariants(n)))];
 
-    const lookupInMap = (map) => {
+    const lookupInMap = (map, { allowGenericFallback = false } = {}) => {
         if (!map || typeof map !== 'object') return null;
 
-        // Exact match
-        if (charName && map[charName]) return map[charName];
+        // 1. Exact match on candidate character names
+        for (const name of candidateNames) {
+            if (map[name]) return map[name];
+        }
 
-        // Case-insensitive / normalized search across name variants
+        // 2. Case-insensitive / normalized search across name variants
         const keys = Object.keys(map);
         for (const k of keys) {
             const keyVariants = getNameMatchingVariants(k);
@@ -482,35 +494,38 @@ function getMultihogPlayerPortrait(chatId, charName) {
             }
         }
 
-        // Substring / prefix match
-        for (const k of keys) {
-            const keyVariants = getNameMatchingVariants(k);
-            for (const cv of charVariants) {
-                if (cv.length < 2) continue;
-                for (const kv of keyVariants) {
-                    if (kv.length < 2) continue;
-                    if (cv.startsWith(kv) || kv.startsWith(cv)) {
-                        return map[k];
-                    }
-                }
-            }
+        // 3. Fallback for generic PC keys ONLY when explicitly allowed (e.g. partition scope)
+        if (allowGenericFallback) {
+            if (map['CHARACTER']) return map['CHARACTER'];
+            if (map['PC']) return map['PC'];
         }
 
-        if (map['CHARACTER']) return map['CHARACTER'];
-        if (map['PC']) return map['PC'];
         return null;
     };
 
-    // 2. Check all partition customPortraits
+    // 1. Check chat partition customPortraits FIRST (holds user manual uploads and replaced portraits)
     for (const cid of candidateIds) {
         const part = s.chatStates?.[cid]?.customPortraits;
-        const res = lookupInMap(part);
+        const res = lookupInMap(part, { allowGenericFallback: true });
         if (res) return res;
     }
 
-    // 3. Check live customPortraits
-    const live = lookupInMap(s.customPortraits);
+    // 2. Check live customPortraits (exact/variant match ONLY, no generic CHARACTER/PC fallback to prevent cross-chat bleed)
+    const live = lookupInMap(s.customPortraits, { allowGenericFallback: false });
     if (live) return live;
+
+    // 3. Check pbtaCampaignDossier or playerCharacter portraitSrc across candidate partitions
+    for (const cid of candidateIds) {
+        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc;
+        if (dossierPortrait) return dossierPortrait;
+        const pcPortrait = s.chatStates?.[cid]?.playerCharacter?.portraitSrc;
+        if (pcPortrait) return pcPortrait;
+    }
+
+    // 4. Check live playerCharacter portrait if projection owner matches or unset
+    if (isOwnerMatch && s.playerCharacter?.portraitSrc) {
+        return s.playerCharacter.portraitSrc;
+    }
 
     return null;
 }
@@ -596,13 +611,13 @@ export async function uploadImageToPersona(avatarId, imageSrc) {
 
 /**
  * Sync portrait from Multihog into SillyTavern persona.
- * Skips execution if the portrait is already recorded as synced.
+ * Skips execution if the portrait is already recorded as synced unless opts.force is true.
  */
-async function syncPortraitToPersona(chatId, persona, portraitSrc) {
+async function syncPortraitToPersona(chatId, persona, portraitSrc, opts = {}) {
     const ctx = SillyTavern.getContext();
     const meta = ctx.chatMetadata?.multihog_companion || {};
 
-    if (meta.synced_portrait === portraitSrc && meta.synced_persona === persona.avatar) {
+    if (!opts.force && meta.synced_portrait === portraitSrc && meta.synced_persona === persona.avatar) {
         return false;
     }
 
@@ -838,7 +853,7 @@ export async function runSync(reason = '') {
 
         if (!persona && settings.enablePortraitSync) {
             const ctx = SillyTavern.getContext();
-            let powerUser = ctx.powerUser;
+            let powerUser = ctx.powerUser || ctx.power_user || (typeof window !== 'undefined' ? window.power_user : null);
             if (!powerUser) {
                 try {
                     const pu = await import('../../../power-user.js');
@@ -862,7 +877,8 @@ export async function runSync(reason = '') {
         if (settings.enablePortraitSync) {
             const portraitSrc = getMultihogPlayerPortrait(chatId, charName);
             if (portraitSrc) {
-                const portraitChanged = await syncPortraitToPersona(chatId, persona, portraitSrc);
+                const isManual = reason === 'manual_button' || reason === 'slash_command';
+                const portraitChanged = await syncPortraitToPersona(chatId, persona, portraitSrc, { force: isManual });
                 if (portraitChanged) didWork = true;
             }
         }

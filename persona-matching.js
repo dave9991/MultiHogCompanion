@@ -172,4 +172,131 @@ export function extractNameFromMemo(memo) {
     return null;
 }
 
+/**
+ * Helper to resolve candidate chat IDs for partition lookup.
+ * @param {string} [chatId]
+ * @returns {string[]}
+ */
+export function getCandidateChatIds(chatId) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    let raw = [];
+    if (chatId) {
+        raw = [chatId];
+    } else {
+        const stChatId = ctx?.getCurrentChatId?.() || ctx?.chatId || ctx?.chatMetadata?.chat_id || null;
+        if (stChatId) {
+            raw = [
+                ctx?.getCurrentChatId?.(),
+                ctx?.chatId,
+                ctx?.chatMetadata?.chat_id,
+            ];
+        } else {
+            raw = [
+                (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
+            ];
+        }
+    }
+    const filtered = raw.filter(Boolean).map(String);
+    const expanded = [];
+    for (const id of filtered) {
+        expanded.push(id);
+        if (id.endsWith('.jsonl')) {
+            expanded.push(id.slice(0, -6));
+        } else {
+            expanded.push(`${id}.jsonl`);
+        }
+    }
+    return [...new Set(expanded)];
+}
+
+/**
+ * Retrieve player character portrait src from Multihog settings.
+ * Prioritizes customPortraits (where manual uploads, replacements, and newly assigned portraits reside),
+ * matching upstream MultiHog's resolvePortraitSrcForPlayerCharacter lookup sequence,
+ * then falls back to pbtaCampaignDossier or playerCharacter objects.
+ *
+ * @param {string} chatId
+ * @param {string} [charName]
+ * @param {object} [providedRpgSettings]
+ * @returns {string|null}
+ */
+export function getMultihogPlayerPortrait(chatId, charName, providedRpgSettings = null) {
+    const s = providedRpgSettings || (typeof globalThis._rpgSettings !== 'undefined'
+        ? globalThis._rpgSettings
+        : (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null));
+    if (!s) return null;
+
+    const candidateIds = getCandidateChatIds(chatId);
+    const candidateNames = [];
+    if (charName) candidateNames.push(charName);
+
+    // Also collect names from character blocks or playerCharacter across candidate partitions
+    for (const cid of candidateIds) {
+        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
+        if (pcName && !candidateNames.includes(pcName)) candidateNames.push(pcName);
+        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name;
+        if (protoName && !candidateNames.includes(protoName)) candidateNames.push(protoName);
+    }
+    const owner = String(s.chatStateProjectionOwner || '').trim();
+    const isOwnerMatch = !owner || candidateIds.some(cid => cid === owner);
+    if (isOwnerMatch && s.playerCharacter?.name && !candidateNames.includes(s.playerCharacter.name)) {
+        candidateNames.push(s.playerCharacter.name);
+    }
+
+    const charVariants = [...new Set(candidateNames.flatMap(n => getNameMatchingVariants(n)))];
+
+    const lookupInMap = (map, { allowGenericFallback = false } = {}) => {
+        if (!map || typeof map !== 'object') return null;
+
+        // 1. Exact match on candidate character names
+        for (const name of candidateNames) {
+            if (map[name]) return map[name];
+        }
+
+        // 2. Case-insensitive / normalized search across name variants
+        const keys = Object.keys(map);
+        for (const k of keys) {
+            const keyVariants = getNameMatchingVariants(k);
+            if (charVariants.some(cv => keyVariants.includes(cv))) {
+                return map[k];
+            }
+        }
+
+        // 3. Fallback for generic PC keys ONLY when explicitly allowed (e.g. partition scope)
+        if (allowGenericFallback) {
+            if (map['CHARACTER']) return map['CHARACTER'];
+            if (map['PC']) return map['PC'];
+        }
+
+        return null;
+    };
+
+    // 1. Check chat partition customPortraits FIRST (holds user manual uploads and replaced portraits)
+    for (const cid of candidateIds) {
+        const part = s.chatStates?.[cid]?.customPortraits;
+        const res = lookupInMap(part, { allowGenericFallback: true });
+        if (res) return res;
+    }
+
+    // 2. Check live customPortraits (exact/variant match ONLY, no generic CHARACTER/PC fallback to prevent cross-chat bleed)
+    const live = lookupInMap(s.customPortraits, { allowGenericFallback: false });
+    if (live) return live;
+
+    // 3. Check pbtaCampaignDossier or playerCharacter portraitSrc across candidate partitions
+    for (const cid of candidateIds) {
+        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc;
+        if (dossierPortrait) return dossierPortrait;
+        const pcPortrait = s.chatStates?.[cid]?.playerCharacter?.portraitSrc;
+        if (pcPortrait) return pcPortrait;
+    }
+
+    // 4. Check live playerCharacter portrait if projection owner matches or unset
+    if (isOwnerMatch && s.playerCharacter?.portraitSrc) {
+        return s.playerCharacter.portraitSrc;
+    }
+
+    return null;
+}
+
+
 

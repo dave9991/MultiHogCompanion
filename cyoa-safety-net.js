@@ -591,17 +591,7 @@ export function initCyoaSafetyNet({ getSettings, isPbtaActive, showToast, eventS
         }, true);
     }
 
-    // [CATALOG: EVT-12] See LISTENERS.md — CYOA Outgoing Prompt Sanitizer (CHAT_COMPLETION_PROMPT_READY)
-    if (et.CHAT_COMPLETION_PROMPT_READY) {
-        es.on(et.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
-            if (Array.isArray(eventData?.chat)) {
-                stripCyoaFromOutgoingChat(eventData.chat, {
-                    stripActiveCyoa: false,
-                });
-            }
-        });
-    }
-
+    // [CATALOG: EVT-12] See LISTENERS.md — Retired: Outgoing CYOA prompt scrubbing eliminated to defer to upstream MultiHog native CYOA prompt management.
     // [CATALOG: EVT-06] See LISTENERS.md — Retired for CYOA: automatic background dispatch eliminated in favor of On-Demand Wand action (DOM-07). (Active in index.js for Relationship Sync)
     // [CATALOG: EVT-11] See LISTENERS.md — Retired: background auto-trigger eliminated in favor of On-Demand Wand action (DOM-07).
 }

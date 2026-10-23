@@ -36,7 +36,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 | :--- | :--- | :--- | :--- | :--- |
 | **ADR-MP-01** | `window.fetch` Interception | Network API | `pbta-companion-bridge.js:165` | 🔴 **HIGH**: Global network interceptor. |
 | **ADR-MP-02** | `/imagine` Slash Command Callback Wrapping | Command Parser | `index.js:1070` | 🟡 **MODERATE**: Wrapped object property. |
-| **ADR-MP-03** | SillyTavern `generate_interceptor` | LLM Prompt Pipeline | `index.js:1854` | 🟢 **LOW**: Official SillyTavern manifest hook. |
+| **ADR-MP-03** | PbtA 2d6 RNG Queue Injection (`generate_interceptor`) | LLM Prompt Pipeline | `index.js:1944` | 🟢 **LOW**: Official SillyTavern manifest hook. |
 | **ADR-MP-04** | DOM `stopImmediatePropagation` Hijacking | UI Event Bus | `namerag-hooks.js:426` | 🔴 **HIGH**: Silently suppresses upstream listeners. |
 | **ADR-MP-05** | In-Memory `stockPrompts` Mutation | Upstream Settings Object | `character-creator-sanitizer.js:25` | 🟡 **MODERATE**: In-place settings rewriting. |
 | **ADR-MP-06** | `window._mhcPendingFreshRestart` Global Flag | Window Global State | `adventure-chat.js:391` | 🟡 **MODERATE**: Cross-tick global semaphore. |
@@ -112,33 +112,38 @@ SillyTavern adds native support for contextual resolution hooks in slash command
 
 ---
 
-### ADR-MP-03: SillyTavern Pipeline Generation Interceptor (`generate_interceptor`)
+### ADR-MP-03: SillyTavern Pipeline Generation Interceptor (`generate_interceptor`) — PbtA 2d6 RNG Injection
 
 * **Status:** Active / Clean
-* **Location:** [`index.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js#L1796-L1855) (`mhcGenerationInterceptor`)
+* **Location:** [`index.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js#L1944-L1982) (`mhcGenerationInterceptor`)
 * **Patch Type:** SillyTavern Pipeline Hook (Registered via `manifest.json` and `globalThis`)
 
 #### Context & Justification
-Upstream MultiHog uses a `generate_interceptor` to inject its RPG state prompt before generation. Companion requires a secondary pass to:
-1. Strip stale CYOA button markdown and conversational "What do you do?" lists from older chat turns so the LLM context remains clean.
-2. In Safety Net mode (recommended), preserve the active turn's `<CYOA_mode>` block so the narrator generates single-stage choices directly without extra latency.
-3. In Two-Stage mode, strip `<CYOA_mode>` across all turns to enforce dedicated choice generation.
+Upstream MultiHog registers a `generate_interceptor` (at `loading_order: 20`) to inject its RPG state prompt and a polyhedral RNG queue into the prompt context before generation. MultiHog's RNG queue injects lines containing D&D 5e dice (`d20/d4/d6/d8/d10/d12`).
+
+When running a Powered by the Apocalypse (PbtA) cartridge ([`FEAT-01`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)), game mechanics rely exclusively on pre-paired 2d6 rolls (snake eyes to boxcars: 2–12). Upstream MultiHog hardcodes polyhedral lines and offers **no cartridge API, ruleset hook, or configuration for custom dice formats**. Without intervention, the narrator model either wastes tokens parsing irrelevant polyhedral dice, hallucinates rolls, or misinterprets d20 values for 2d6 moves.
+
+Companion registers a secondary interceptor (at `loading_order: 30`) to inspect outgoing user messages and replace MultiHog's polyhedral RNG queue with a clean, pre-paired 2d6 block.
+
+*(Note: Earlier iterations also executed historical CYOA button scrubbing. That functionality was retired to respect upstream MultiHog's native `cyoaConfig.stripOldChoicesFromPrompt`, eliminate fragile natural language regexes from outgoing chat context, and strictly adhere to the principle of making only necessary changes to the host framework.)*
 
 #### Mechanism
-1. Registered in `manifest.json`: `"generate_interceptor": "mhcGenerationInterceptor"`.
+1. Registered in `manifest.json`: `"generate_interceptor": "mhcGenerationInterceptor"` with `"loading_order": 30` (guaranteeing it executes after MultiHog's interceptor at 20).
 2. Exported to `globalThis.mhcGenerationInterceptor`.
-3. SillyTavern calls this function with the outgoing `chat` array before prompt compilation.
-4. Executes `stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: false })` to strip historical choice markup from past turns while preserving active instructions intact, and passes the sanitized chat to the generator.
+3. SillyTavern calls this function with the outgoing mutable `chat` array before prompt compilation.
+4. **Early Exit Guard:** If `!Array.isArray(chat) || !isPbtAActive()`, returns immediately in $O(1)$ without inspecting or mutating messages. Standard D&D 5e campaigns are completely unaffected.
+5. **2d6 RNG Replacement:** When PbtA is active, searches the last 3 messages for upstream MultiHog's polyhedral `[RNG_QUEUE ...]` block and replaces it with `buildPbtA2d6Block()`, providing 12 pre-paired 2d6 rolls (`1: 2d6 → 3 + 5 = 8`).
 
 #### Blast Radius (What Breaks If Removed)
-* Stale CYOA markdown buttons (`[1] Attack [2] Flee`) and previous "What do you do?" lists remain in chat history context sent to the LLM, causing the LLM to hallucinate synthetic button syntax or repeat conversational questions in prose.
-* Dynamic CYOA steering instructions are not delivered to the narrator model.
+* PbtA campaigns receive MultiHog's default polyhedral RNG queue (`d20/d4/d6/d8/d10/d12`) instead of paired 2d6 rolls.
+* Zero-touch dice resolution breaks in PbtA, wasting tokens and forcing the LLM to either consume multiple lines per roll or hallucinate dice results.
 
 #### Fragility & Code Smell Analysis
-* Uses SillyTavern's official extension contract. Very low fragility.
+* Uses SillyTavern's official extension contract (`generate_interceptor` + `loading_order`). Very low fragility.
+* Only executes when `isPbtAActive()` is true; strictly touches the `[RNG_QUEUE ...]` tag in the latest user message and never alters narrative story prose.
 
 #### Retirement Criteria
-Upstream MultiHog's CYOA subsystem natively strips past choices from outgoing prompt context.
+Upstream MultiHog provides a pluggable RNG queue provider or native cartridge-based dice format configuration (e.g. 2d6).
 
 ---
 
@@ -275,8 +280,8 @@ The following matrix illustrates how each monkey patch connects to events and fe
   [ADR-MP-02: /imagine]     ──► Wraps SlashCommandParser
                                  └─► Intercepts image dimension flags
 
-  [ADR-MP-03: gen_intercep] ──► Registered via manifest.json
-                                 └─► Strips CYOA prompt noise before LLM
+  [ADR-MP-03: gen_intercep] ──► Registered via manifest.json (loading_order: 30)
+                                 └─► Replaces polyhedral RNG queue with PbtA 2d6 block
 
   [ADR-MP-04: NameRAG DOM]  ──► Hijacks #rt-quickstart-roll-name
                                  └─► Prevents native roll; queries NameRAG

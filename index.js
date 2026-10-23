@@ -66,7 +66,6 @@ import {
 } from './relationship-narrative-sync.js';
 import {
     initCyoaSafetyNet,
-    stripCyoaFromOutgoingChat,
     registerCyoaSlashCommands,
     regenerateCyoaChoicesForMessage,
     repairOrGenerateChoicesForMessage,
@@ -1942,15 +1941,7 @@ function buildPbtA2d6Block(lineCount = 12) {
  * Registered on globalThis via the manifest's generate_interceptor field.
  */
 function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
-    if (!Array.isArray(chat)) return;
-
-    // 1. CYOA Prompt Sanitization
-    // Preserve active <CYOA_mode> in prompt for single-stage generation,
-    // but strip historical choices & markdown lists from older turns.
-    stripCyoaFromOutgoingChat(chat, { stripActiveCyoa: false });
-
-    // 2. PbtA RNG Queue replacement
-    if (!isPbtAActive()) return;
+    if (!Array.isArray(chat) || !isPbtAActive()) return;
 
     // MultiHog prepends its RNG block into the last user message's content.
     // Find it and replace with our clean 2d6 block.
@@ -1987,7 +1978,7 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
     }
 }
 
-// [CATALOG: ADR-MP-03]
+// [CATALOG: ADR-MP-03] See MONKEYPATCHES.md — SillyTavern Pipeline Generation Interceptor (PbtA 2d6 RNG Injection)
 // Register the interceptor on globalThis so SillyTavern can call it.
 globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
 

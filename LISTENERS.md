@@ -44,7 +44,7 @@ The following matrix highlights events where **multiple files or upstream MultiH
 | **`GENERATION_STARTED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts Stage 2 pass) | 🟢 **LOW**: Clean state-reset hook. |
 | **`GENERATION_STOPPED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts Stage 2 pass) | 🟢 **LOW**: Clean abort handler. |
 | **`GENERATION_ENDED`** | • *Upstream MultiHog* | *(Companion CYOA auto-dispatch retired in favor of DOM-07 Wand action)* | 🟢 **RETIRED (Companion)**: Automated background trigger replaced with deterministic on-demand Wand/Slash execution. |
-| **`CHAT_COMPLETION_PROMPT_READY`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. Upstream prompt injection<br>2. `cyoa-safety-net.js` (prompt CYOA stripping) | 🟢 **LOW**: Pure synchronous array transform. |
+| **`CHAT_COMPLETION_PROMPT_READY`** | • *Upstream MultiHog* | *(Companion CYOA prompt stripping retired in favor of native upstream pruning)* | 🟢 **RETIRED (Companion)**: Decommissioned to defer to upstream MultiHog's native choice pruning and avoid fragile regex parsing of story prose. |
 | **`APP_READY`** | • `index.js` (`setupImagineInterceptor`)<br>• *Upstream MultiHog* | 1. Companion wraps `/imagine` callback | 🟢 **LOW**: Run-once initialization. |
 
 ---
@@ -284,23 +284,10 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ---
 
-### EVT-12: `CHAT_COMPLETION_PROMPT_READY` (Outgoing CYOA Prompt Sanitizer)
+### EVT-12: `CHAT_COMPLETION_PROMPT_READY` [RETIRED] (Formerly Outgoing CYOA Prompt Sanitizer)
 * **Trigger:** SillyTavern constructs the prompt payload and completes token budgeting right before dispatching the HTTP request to the Chat Completion API (`openai.js:1610` and `script.js:3978`).
-* **Registered In:** [`cyoa-safety-net.js:544`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/cyoa-safety-net.js#L544)
-* **Payload Structure:**
-  ```js
-  eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
-      // eventData: { chat: Array<Message>, dryRun: boolean }
-      // chat: mutable array of message objects: [{ role, content/mes, ... }]
-      // dryRun: boolean (true when ST is calculating tokens without invoking LLM)
-  });
-  ```
-* **Handler:** Routes through `stripCyoaFromOutgoingChat(eventData.chat, { stripActiveCyoa })`.
-* **The "Context Poisoning" Hazard & Dual-Zone Sanitizer**:
-  1. **Historical Turn Sanitization ($1 \dots N-1$)**: When generating turn $N$, previous assistant turns in chat history often contain `<choices><button>...</button></choices>` blocks or markdown option lists (`What do you do? 1. Attack 2. Flee`). If left uncleaned in the context window, the LLM suffers severe context poisoning: it echoes stale choices verbatim, hallucinates broken HTML/XML tags mid-sentence, or gets trapped in repetitive decision loops. `EVT-12` cleans all historical choice markup from past turns.
-  2. **Active Turn Preservation ($N$)**: In MultiHog Companion's default single-stage fast pipeline (`safety_net` mode), the active user turn's `<CYOA_mode>` XML instructions are strictly **preserved** (`stripActiveCyoa: false`). This instructs the narrator model to output fresh choices directly on Stage 1. Only the legacy/experimental decoupled mode (`two_stage` / `always_decoupled`) strips `<CYOA_mode>` on the active turn.
-* **Blast Radius:** If unhandled, older interactive buttons and numbered lists remain in chat context, causing high prompt drift, hallucinated tags, and degraded narrator responses across ongoing campaigns.
-* **Optimization Status:** **OPTIMIZED (Phase 3)**. In-place synchronous array mutation; guards against `dryRun` and disabled CYOA; protects active prompt while scrubbing history.
+* **Status:** 🔴 **RETIRED**. Decommissioned along with ADR-MP-03's CYOA stripping to defer to upstream MultiHog's native choice pruning (`cyoaConfig.stripOldChoicesFromPrompt`). Eliminates fragile regular expression parsing of natural language story prose and aligns with the on-demand Wand/Slash CYOA model (`DOM-07`).
+* **Anchor Preserved:** `[CATALOG: EVT-12]` preserved in codebase for architectural traceability.
 
 ---
 

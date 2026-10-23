@@ -38,7 +38,7 @@
 | **WRK-03** | **Stock D&D Settings Pollution & Prompt Bleed** | 🟡 **MODERATE**: Upstream shares single global `stockPrompts` object. | [`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)<br>Standard D&D Play | [`ADR-MP-05 (stockPrompts)`](./MONKEYPATCHES.md#adr-mp-05-in-memory-upstream-settings-cleansing-stockprompts-mutation)<br>[`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator)<br>[`DOM-01a / DOM-01b`](./LISTENERS.md#dom-01a) | High (Upstream scopes prompts by chat). |
 | **WRK-04** | **Chat Rename Inversion & Partition Reset Race** | 🔴 **CRITICAL**: ST reloads chat before firing `CHAT_RENAMED`. | [`FEAT-05 (Lorebook Sync)`](./FEATURES.md#feat-05-dynamic-campaign-lorebook-sync) | [`ADR-MP-06 (Restart Flag)`](./MONKEYPATCHES.md#adr-mp-06-window_mhcpendingfreshrestart-cross-tick-launch-semaphore)<br>[`EVT-02 (makeFirst)`](./LISTENERS.md#evt-02-chat_renamed-early-hook-priority-partition-proof-re-arm)<br>[`EVT-03 (Debounce)`](./LISTENERS.md#evt-03-chat_renamed-debounced-campaign-lorebook-sync) | Low (Core ST event ordering contract). |
 | **WRK-05** | **Unstarted Chat Premature Sync & LLM Triggering** | 🟡 **MODERATE**: Upstream runs background passes on blank chats. | [`FEAT-04 (Rel Sync)`](./FEATURES.md#feat-04-relationship-narrative-sync)<br>[`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine) | [`unstarted-chat-sync-guard.js`](./unstarted-chat-sync-guard.js)<br>[`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator) | High (Upstream adds `isAdventureActive()` check). |
-| **WRK-06** | **Historical CYOA Context Poisoning** | 🟡 **MODERATE**: Host LLM hallucinates stale buttons from history. | [`FEAT-03 (CYOA Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback) | [`EVT-12 (Prompt Ready)`](./LISTENERS.md#evt-12-chat_completion_prompt_ready-outgoing-cyoa-prompt-sanitizer) | Medium (SillyTavern context builder filter). |
+| **WRK-06** | **Historical CYOA Context Poisoning [RETIRED]** | ⚪ **RETIRED**: Defer to upstream MultiHog's native `stripOldChoicesFromPrompt`. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | Retired ([`EVT-12`](./LISTENERS.md#evt-12-chat_completion_prompt_ready-retired-formerly-outgoing-cyoa-prompt-sanitizer)) | Retired (Upstream native feature). |
 | **WRK-07** | **Truncated Message Stop Button Choice Injection** | 🟡 **MODERATE**: ST emits message rendered on user stop click. | [`FEAT-03 (CYOA Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback) | [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-abort-hook-for-background-cyoa)<br>[`DOM-06 (Capture Stop)`](./LISTENERS.md#dom-06) | Low (SillyTavern event design choice). |
 | **WRK-08** | **Level-Up & Permadeath Pause Protocol Shield** | 🟡 **MODERATE**: Upstream protocol commands narrative pause without choices. | [`FEAT-03 (CYOA Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback) | [`cyoa-safety-net.js`](./cyoa-safety-net.js) (`isLevelUpPending`, `isProtagonistDead`) | Medium (Upstream includes explicit turn pause flag). |
 
@@ -154,28 +154,20 @@ Upstream MultiHog explicitly checks `isAdventureActive()` before triggering back
 
 ---
 
-### WRK-06: Historical CYOA Context Poisoning (Host LLM Hallucination Trap)
+### WRK-06: Historical CYOA Context Poisoning (Host LLM Hallucination Trap) [RETIRED]
 
-* **Target Surface:** SillyTavern Chat History Context Window (`cyoa-safety-net.js`)
-* **Associated Feature:** [`FEAT-03 (CYOA Fast Single-Stage Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback)
-* **Associated Mechanisms:** [`EVT-12 (CHAT_COMPLETION_PROMPT_READY)`](./LISTENERS.md#evt-12-chat_completion_prompt_ready-outgoing-cyoa-prompt-sanitizer)
+* **Target Surface:** SillyTavern Chat History Context Window
+* **Status:** 🔴 **RETIRED**.
+* **Associated Feature:** [`FEAT-03 (CYOA On-Demand Choice Engine & Instant Auto-Repair)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair)
+* **Associated Mechanisms:** Retired ([`EVT-12`](./LISTENERS.md#evt-12-chat_completion_prompt_ready-retired-formerly-outgoing-cyoa-prompt-sanitizer), formerly part of `ADR-MP-03`).
 
-#### The Host LLM Hazard
-When generating turn $N$, previous assistant turns ($1 \dots N-1$) in chat history retain `<choices><button>...</button></choices>` blocks and numbered option lists (`What do you do? 1. Attack 2. Flee`). The LLM sees these past choices in its context window and:
-1. Echoes stale buttons verbatim instead of creating choices for the latest narrative beat.
-2. Hallucinates broken XML/HTML tags mid-prose.
-3. Suffers prompt drift from outdated decision prompts.
+#### Upstream Resolution & Retirement
+Upstream MultiHog provides built-in context pruning via `cyoaConfig.stripOldChoicesFromPrompt` ([`cyoa-prompt-history.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/src/features/cyoa-prompt-history.js)). Furthermore, MultiHog Companion's CYOA subsystem transitioned to a purely on-demand architecture (Wand Menu `DOM-07` and slash commands `/cyoafix` / `/cyoagen`), eliminating automated background multi-stage pipelines. 
 
-#### Companion Mitigation
-`EVT-12` (`CHAT_COMPLETION_PROMPT_READY`) acts as an in-place outgoing prompt sanitizer:
-* **Active Turn ($N$):** Preserves `<CYOA_mode>` XML instructions so the narrator produces single-stage choices.
-* **Historical Turns ($1 \dots N-1$):** Scrubs all buttons, choice tags, and markdown bullet lists so the context seen by the narrator is pure literary prose.
-
-#### Blast Radius If Removed
-The model repeatedly outputs broken button tags mid-sentence, hallucinates duplicate options, and degrades narrator prose quality across long campaigns.
-
-#### Retirement Criteria
-SillyTavern provides a built-in interactive markup stripping filter for chat history context.
+Companion retired its runtime regex prompt-stripping interceptors to:
+1. Defer to upstream MultiHog's native handling of CYOA prompt history.
+2. Eliminate fragile regular expressions matching conversational prose (`What do you do?`) that risked mutilating legitimate story narrative and dialogue.
+3. Keep Companion strictly adhering to the architectural principle of **only making necessary changes to the host framework**.
 
 ---
 

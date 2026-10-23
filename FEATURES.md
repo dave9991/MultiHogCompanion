@@ -114,7 +114,8 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 ### FEAT-06: NameRAG Diverse Protagonist & NPC Generator
 * **Overview:** Replaces generic or repetitive character names in MultiHog's Character Creator and QuickStart with culturally rich, fantasy, sci-fi, and historical candidates from a local NameRAG vector database.
 * **Core Capabilities:**
-  * **Contextual Candidate Scoring:** Generates diverse protagonist names matched to chosen genre, species, and archetype.
+  * **Contextual Candidate Scoring:** Generates diverse protagonist names matched to chosen genre, species, and archetype. Inspects active character inputs (QuickStart setup instructions, Character Creator background, appearance, traits, and gender filters) to query specific character vibes rather than generic genre lists.
+  * **XML Container Standardization:** Emits GM ad-hoc guidance inside strict `<name_generation>...</name_generation>` containers to conform with MultiHog's system prompt architecture.
   * **Resilient Offline Fallback:** If the local NameRAG service is offline or hangs, falls back to upstream MultiHog's native generator within 4 seconds and warns the user via toast.
 * **Associated Workarounds:**
   * [`WRK-02 (Character Creator Macro Poisoning)`](./WORKAROUNDS.md#wrk-02-character-creator-macro-poisoning--ast-syntax-errors-upstream-prompt-defect) — Sanitizes outgoing prompts.

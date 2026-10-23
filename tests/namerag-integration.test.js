@@ -13,6 +13,10 @@ import {
     buildQueryFromPlaceholderContext,
     resolveDossierNamePlaceholders,
     rollNameRagCandidate,
+    normalizeGenderFilter,
+    detectGenderFromText,
+    cleanContextKeywords,
+    buildContextAwareQuery,
 } from '../namerag-hooks.js';
 import { buildConciergeSystemPrompt, buildConciergeBuilderPrompt } from '../concierge-prompt.js';
 
@@ -89,14 +93,46 @@ assert.deepStrictEqual(parseNameRagOutput(''), []);
 assert.deepStrictEqual(parseNameRagOutput('{ invalid json'), []);
 console.log('✓ Malformed and empty payloads handle gracefully without throwing');
 
-// 3. Test buildGenreQuery
-console.log('Testing buildGenreQuery mapping...');
+// 3. Test buildGenreQuery & Context-Aware Query Builders
+console.log('Testing buildGenreQuery & buildContextAwareQuery mapping...');
 assert.ok(buildGenreQuery('fantasy').includes('fantasy'));
 assert.ok(buildGenreQuery('fantasy', 'necromancer').includes('necromancer'));
 assert.ok(buildGenreQuery('scifi').includes('cyberpunk'));
 assert.ok(buildGenreQuery('western').includes('frontier'));
 assert.ok(buildGenreQuery('horror').includes('occult'));
-console.log('✓ Genre queries correctly mapped with optional archetype hints');
+
+// 3b. Test normalizeGenderFilter and detectGenderFromText
+assert.strictEqual(normalizeGenderFilter('Male'), 'M');
+assert.strictEqual(normalizeGenderFilter('Female'), 'F');
+assert.strictEqual(normalizeGenderFilter('non-binary'), 'Dual');
+assert.strictEqual(normalizeGenderFilter('unknown'), undefined);
+
+assert.strictEqual(detectGenderFromText('A young female ranger from the mountains'), 'F');
+assert.strictEqual(detectGenderFromText('An old male blacksmith with a scarred arm'), 'M');
+assert.strictEqual(detectGenderFromText('An androgynous rogue lurking in shadows'), 'Dual');
+
+// 3c. Test cleanContextKeywords & buildContextAwareQuery
+const dirtyInstructions = 'A 28-year-old female ranger with a crossbow, starting in a storm-battered frontier town';
+const cleanWords = cleanContextKeywords(dirtyInstructions);
+assert.ok(cleanWords.includes('ranger'));
+assert.ok(cleanWords.includes('crossbow'));
+assert.ok(cleanWords.includes('frontier'));
+assert.ok(!cleanWords.includes('with'));
+assert.ok(!cleanWords.includes('starting'));
+
+const contextQuery = buildContextAwareQuery({
+    genre: 'fantasy',
+    classHint: 'ranger',
+    contextText: dirtyInstructions,
+});
+assert.ok(contextQuery.includes('fantasy'));
+assert.ok(contextQuery.includes('ranger'));
+assert.ok(contextQuery.includes('crossbow'));
+
+// When contextText is empty, falls back to genre query
+const emptyContextQuery = buildContextAwareQuery({ genre: 'fantasy', classHint: 'sorcerer' });
+assert.strictEqual(emptyContextQuery, buildGenreQuery('fantasy', 'sorcerer'));
+console.log('✓ Context-aware queries and gender filters accurately extract character details');
 
 // 4. Test Ad-Hoc GM Guidance Injection in customSyspromptLibrary
 console.log('Testing syncNameRagAdhocSysprompt...');
@@ -125,6 +161,8 @@ assert.ok(entry, 'Ad-hoc NameRAG prompt snippet should be present');
 assert.strictEqual(entry.enabled, true);
 assert.strictEqual(entry.scope, 'global', 'Scope should be explicitly global');
 assert.strictEqual(entry.globalEnabled, true, 'globalEnabled should be true');
+assert.ok(entry.content.startsWith('<name_generation>'), 'Snippet must be enclosed in <name_generation> tags');
+assert.ok(entry.content.endsWith('</name_generation>'), 'Snippet must close with </name_generation> tags');
 assert.ok(entry.content.includes('search_names'));
 assert.ok(entry.content.includes('Elidor'));
 assert.strictEqual(refreshed, true, 'Refresh callback should have fired');

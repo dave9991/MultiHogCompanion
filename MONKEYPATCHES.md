@@ -144,8 +144,8 @@ Upstream MultiHog's CYOA subsystem natively strips past choices from outgoing pr
 
 ### ADR-MP-04: Upstream DOM Event Hijacking via `stopImmediatePropagation` (NameRAG)
 
-* **Status:** Active / Hardened (Phase 2)
-* **Location:** [`namerag-hooks.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/namerag-hooks.js#L440-L545) (`setupMultiHogRollHooks`)
+* **Status:** Active / Hardened (Context-Aware)
+* **Location:** [`namerag-hooks.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/namerag-hooks.js#L525-L650) (`setupMultiHogRollHooks`)
 * **Patch Type:** DOM Event Suppression & Replacement via jQuery Delegation
 
 #### Context & Justification
@@ -157,7 +157,8 @@ The user wanted dynamic, genre-aware names generated via the local NameRAG servi
 2. When a button is clicked and NameRAG is enabled in Companion settings:
    - Calls `e.stopImmediatePropagation()` and `e.preventDefault()`.
    - Disables the button and renders a spinner (`<i class="fa-solid fa-spinner fa-spin"></i>`).
-   - Queries NameRAG API with the active genre wrapped in a 4-second timeout promise (`timeoutMs: 4000`).
+   - Extracts character context (QuickStart setup instructions, Character Creator background, appearance, traits, class, and gender filters).
+   - Queries NameRAG API with the context-aware query wrapped in a 4-second timeout promise (`timeoutMs: 4000`).
    - If NameRAG succeeds: populates the candidate name into the input field and triggers `input`.
    - If NameRAG times out, is offline, or returns empty: gracefully invokes the local offline genre name generator, populates the input, and displays a non-intrusive warning toast: *"NameRAG service unavailable; rolled standard name"*.
    - In the `finally` block: always restores the button's original HTML and re-enables it.

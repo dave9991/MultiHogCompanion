@@ -29,6 +29,77 @@ const GENRE_QUERY_MAP = {
 };
 
 /**
+ * Normalizes user-entered gender strings into standard NameRAG filters ('M', 'F', 'Dual').
+ * @param {string} val
+ * @returns {string|undefined}
+ */
+export function normalizeGenderFilter(val) {
+    if (!val || typeof val !== 'string') return undefined;
+    const clean = val.trim().toLowerCase();
+    if (/^(m|male|man|boy|he|him|masculine)$/i.test(clean)) return 'M';
+    if (/^(f|female|woman|girl|she|her|feminine)$/i.test(clean)) return 'F';
+    if (/^(nb|non-binary|enby|unisex|dual|androgynous|they|them|neutral)$/i.test(clean)) return 'Dual';
+    return undefined;
+}
+
+/**
+ * Detects obvious gender references in character instructions/concepts.
+ * @param {string} text
+ * @returns {string|undefined}
+ */
+export function detectGenderFromText(text) {
+    if (!text || typeof text !== 'string') return undefined;
+    if (/\b(female|woman|girl|she|her|feminine)\b/i.test(text)) return 'F';
+    if (/\b(male|man|boy|he|him|masculine)\b/i.test(text)) return 'M';
+    if (/\b(non-binary|enby|unisex|androgynous|they|them)\b/i.test(text)) return 'Dual';
+    return undefined;
+}
+
+/**
+ * Extracts evocative keywords from freeform character descriptions,
+ * stripping common field prefixes and stopwords.
+ * @param {string} text
+ * @param {number} [maxWords=15]
+ * @returns {string}
+ */
+export function cleanContextKeywords(text, maxWords = 15) {
+    if (!text || typeof text !== 'string') return '';
+    const stopWords = new Set([
+        'and', 'the', 'for', 'with', 'from', 'this', 'that', 'into', 'upon', 'about',
+        'having', 'starting', 'starts', 'start', 'will', 'would', 'could', 'should',
+        'character', 'player', 'years', 'year', 'old', 'e.g', 'etc', 'like', 'some',
+    ]);
+    return text
+        .replace(/\b(playbook|role|species|demeanor|background|relationship|notes|attacks|weakness|gear|bio|appearance|traits|abilities|additional):\s*/gi, ' ')
+        .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()))
+        .slice(0, maxWords)
+        .join(' ');
+}
+
+/**
+ * Constructs a rich NameRAG search query from character context if available,
+ * gracefully falling back to genre archetype pools when no details are provided.
+ * @param {object} opts
+ * @param {string} [opts.genre='fantasy']
+ * @param {string} [opts.classHint='']
+ * @param {string} [opts.contextText='']
+ * @returns {string}
+ */
+export function buildContextAwareQuery({ genre = 'fantasy', classHint = '', contextText = '' } = {}) {
+    const cleanedContext = cleanContextKeywords(contextText);
+    if (!cleanedContext) {
+        return buildGenreQuery(genre, classHint);
+    }
+    const genreWord = (genre || 'fantasy').replace(/_/g, ' ');
+    const parts = [genreWord];
+    if (classHint) parts.push(classHint);
+    parts.push(cleanedContext);
+    return parts.join(' ').trim();
+}
+
+/**
  * Resolves a search query from a genre key and optional class/vibe hints.
  * @param {string} genre
  * @param {string} [classHint]
@@ -40,19 +111,29 @@ export function buildGenreQuery(genre = 'fantasy', classHint = '') {
 }
 
 /**
- * Fetches a single random NameRAG candidate for a genre/class.
+ * Fetches a single random NameRAG candidate for a genre/class and optional context.
  * Falls back to offline pools if unavailable.
  * @param {string} genre
  * @param {string} [classHint]
- * @returns {Promise<{ name: string, vibe?: string }>}
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs=4000]
+ * @param {string} [options.contextText] Freeform backstory, instructions, or appearance text
+ * @param {string} [options.gender] 'M', 'F', or 'Dual'
+ * @returns {Promise<{ name: string, vibe?: string, source: string, error?: string }>}
  */
-export async function rollNameRagCandidate(genre = 'fantasy', classHint = '', { timeoutMs = 4000 } = {}) {
-    const query = buildGenreQuery(genre, classHint);
+export async function rollNameRagCandidate(genre = 'fantasy', classHint = '', options = {}) {
+    const timeoutMs = options.timeoutMs ?? 4000;
+    const contextText = options.contextText || '';
+    const gender = options.gender || null;
+    const query = buildContextAwareQuery({ genre, classHint, contextText });
     let errorOccurred = false;
     let errorMessage = '';
 
     try {
-        const searchPromise = searchNames({ query, limit: 6 });
+        const searchOpts = { query, limit: 6 };
+        if (gender) searchOpts.gender = gender;
+
+        const searchPromise = searchNames(searchOpts);
         let timeoutHandle;
         const timeoutPromise = new Promise((_, reject) => {
             timeoutHandle = setTimeout(() => reject(new Error('NameRAG query timed out')), timeoutMs);
@@ -347,9 +428,11 @@ export async function syncNameRagAdhocSysprompt(enabled, onRefreshOrCtx, maybeCt
     settings.customSyspromptLibrary = settings.customSyspromptLibrary || [];
     const existingIndex = settings.customSyspromptLibrary.findIndex((p) => p.id === NAMERAG_SYSPROMPT_ID);
 
-    const promptContent = `When introducing new named characters, NPCs, merchants, or adversaries:
+    const promptContent = `<name_generation>
+When introducing new named characters, NPCs, merchants, or adversaries:
 - If function tools are available, you may invoke \`search_names\` with the character's archetype or vibe (e.g. query: "cynical dwarven fence", limit: 5) to select an authentic, evocative name.
-- Avoid repetitive or cliché LLM default names (e.g., Elidor, Silas, Lyra, Vance, Aurelia, Malachi). Select varied names authentic to the culture and setting.`;
+- Avoid repetitive or cliché LLM default names (e.g., Elidor, Silas, Lyra, Vance, Aurelia, Malachi). Select varied names authentic to the culture and setting.
+</name_generation>`;
 
     if (enabled) {
         if (existingIndex >= 0) {
@@ -460,7 +543,9 @@ export function setupMultiHogRollHooks(isNameRagActive, { showToast } = {}) {
             const root = btn.closest('#rt-quickstart, .rt-quickstart, #rpg-tracker-quickstart');
             const activeGenreBtn = root.find('.rt-quickstart-genre-btn.active, .rt-quickstart-genre-btn[aria-pressed="true"]');
             const genre = activeGenreBtn.data('genre') || activeGenreBtn.attr('data-genre') || root.find('#rt-quickstart-genre').val() || 'fantasy';
-            const candidate = await rollNameRagCandidate(genre);
+            const instructions = root.find('#rt-quickstart-instructions').val() || '';
+            const gender = detectGenderFromText(instructions);
+            const candidate = await rollNameRagCandidate(genre, '', { contextText: instructions, gender });
             const input = root.find('#rt-quickstart-name');
             input.val(candidate.name).trigger('input');
             if (candidate.source !== 'namerag' && typeof showToast === 'function') {
@@ -491,8 +576,20 @@ export function setupMultiHogRollHooks(isNameRagActive, { showToast } = {}) {
         try {
             const panel = btn.closest('#rpg-tracker-char-creator');
             const genre = panel.find('#rt-cr-genre').val() || 'fantasy';
-            const classHint = panel.find('#rt-cr-class').val() || '';
-            const candidate = await rollNameRagCandidate(genre, classHint);
+            const classHint = (panel.find('#rt-cr-class-other').is(':visible') && panel.find('#rt-cr-class-other').val())
+                ? panel.find('#rt-cr-class-other').val()
+                : (panel.find('#rt-cr-class').val() || '');
+            const rawGender = panel.find('#rt-cr-gender').val() || '';
+            const gender = normalizeGenderFilter(rawGender) || detectGenderFromText(rawGender);
+            const contextText = [
+                panel.find('#rt-cr-background').val(),
+                panel.find('#rt-cr-appearance').val(),
+                panel.find('#rt-cr-traits').val(),
+                panel.find('#rt-cr-abilities').val(),
+                panel.find('#rt-cr-additional').val(),
+            ].filter(Boolean).join(' ');
+
+            const candidate = await rollNameRagCandidate(genre, classHint, { contextText, gender });
             const input = panel.find('#rt-cr-name');
             input.val(candidate.name).trigger('input');
             if (candidate.source !== 'namerag' && typeof showToast === 'function') {
@@ -523,7 +620,11 @@ export function setupMultiHogRollHooks(isNameRagActive, { showToast } = {}) {
         try {
             const container = btn.closest('.rt-onboarding-panel, #rpg-tracker-onboarding, body');
             const genre = container.find('#rt-onboarding-genre, select[name="genre"]').val() || 'fantasy';
-            const candidate = await rollNameRagCandidate(genre);
+            const contextText = container.find('textarea, input[type="text"]:not(#rt-ob-rolled-name):not(#rt-onboarding-name)')
+                .map((_, el) => $(el).val()).get().filter(Boolean).join(' ');
+            const gender = detectGenderFromText(contextText);
+
+            const candidate = await rollNameRagCandidate(genre, '', { contextText, gender });
             const input = container.find('#rt-ob-rolled-name, #rt-onboarding-name');
             input.val(candidate.name).trigger('input');
             if (candidate.source !== 'namerag' && typeof showToast === 'function') {
@@ -553,7 +654,9 @@ export function setupMultiHogRollHooks(isNameRagActive, { showToast } = {}) {
             try {
                 const activeGenreBtn = root.find('.rt-quickstart-genre-btn.active, .rt-quickstart-genre-btn[aria-pressed="true"]');
                 const genre = activeGenreBtn.data('genre') || activeGenreBtn.attr('data-genre') || root.find('#rt-quickstart-genre').val() || 'fantasy';
-                const candidate = await rollNameRagCandidate(genre);
+                const instructions = root.find('#rt-quickstart-instructions').val() || '';
+                const gender = detectGenderFromText(instructions);
+                const candidate = await rollNameRagCandidate(genre, '', { contextText: instructions, gender });
                 nameInput.val(candidate.name).trigger('input');
                 if (candidate.source !== 'namerag' && typeof showToast === 'function') {
                     showToast('warning', 'NameRAG service unavailable; rolled standard name.', 'NameRAG Roll');

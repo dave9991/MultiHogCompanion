@@ -117,4 +117,28 @@ test('Portrait Sync - Resolution Priority & Precedence', async (t) => {
         // Should NOT return the global CHARACTER portrait, but should find Vesper's portraitSrc
         assert.strictEqual(resolved, 'http://correct/vesper.png');
     });
+
+    await t.test('7. Cache buster URL manipulation preserves type and file query params on thumbnails', () => {
+        const updateSrcWithCacheBust = (src) => {
+            if (!src) return src;
+            try {
+                const dummyBase = 'http://st.local';
+                const parsed = new URL(src, dummyBase);
+                parsed.searchParams.set('t', '123456');
+                if (src.startsWith('http://') || src.startsWith('https://')) {
+                    return parsed.href;
+                }
+                return parsed.pathname + parsed.search;
+            } catch (_) {
+                const sep = src.includes('?') ? '&' : '?';
+                return `${src}${sep}t=123456`;
+            }
+        };
+
+        const original = '/thumbnail?type=persona&file=1792076243144-LyleHolloway.png';
+        const updated = updateSrcWithCacheBust(original);
+        assert.strictEqual(updated, '/thumbnail?type=persona&file=1792076243144-LyleHolloway.png&t=123456');
+        assert.ok(updated.includes('type=persona'), 'Must preserve type parameter');
+        assert.ok(updated.includes('file='), 'Must preserve file parameter');
+    });
 });

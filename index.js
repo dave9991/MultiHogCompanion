@@ -583,19 +583,41 @@ export async function uploadImageToPersona(avatarId, imageSrc) {
 
     // Force DOM repaint with timestamp cache buster
     try {
-        const bustParam = `?t=${Date.now()}`;
-        const selector = `.mes[is_user="true"] .avatar img, #avatar, #user_avatar_block img, .persona_avatar_element, img[src*="${avatarId}"]`;
+        const updateSrcWithCacheBust = (src) => {
+            if (!src) return src;
+            try {
+                const dummyBase = 'http://st.local';
+                const parsed = new URL(src, dummyBase);
+                parsed.searchParams.set('t', String(Date.now()));
+                if (src.startsWith('http://') || src.startsWith('https://')) {
+                    return parsed.href;
+                }
+                return parsed.pathname + parsed.search;
+            } catch (_) {
+                const sep = src.includes('?') ? '&' : '?';
+                return `${src}${sep}t=${Date.now()}`;
+            }
+        };
+
+        // Target ONLY elements belonging to this avatar, avoiding indiscriminate selection of #user_avatar_block
+        const safeAvatarId = (avatarId || '').replace(/"/g, '\\"');
+        const selector = [
+            `.mes[is_user="true"] .avatar img`,
+            `#avatar`,
+            `#user_avatar_block [data-avatar-id="${safeAvatarId}"] img`,
+            `img[src*="${safeAvatarId}"]`,
+            `#quickPersonaImg`,
+        ].join(', ');
+
         if (typeof $ !== 'undefined') {
             $(selector).each(function () {
                 const currentSrc = $(this).attr('src') || '';
-                const baseSrc = currentSrc.split('?')[0];
-                $(this).attr('src', `${baseSrc}${bustParam}`);
+                $(this).attr('src', updateSrcWithCacheBust(currentSrc));
             });
         } else if (typeof document !== 'undefined') {
             document.querySelectorAll(selector).forEach(el => {
                 const currentSrc = el.getAttribute('src') || '';
-                const baseSrc = currentSrc.split('?')[0];
-                el.setAttribute('src', `${baseSrc}${bustParam}`);
+                el.setAttribute('src', updateSrcWithCacheBust(currentSrc));
             });
         }
     } catch (_) {}

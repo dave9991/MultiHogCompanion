@@ -93,7 +93,7 @@ console.log(`✓ All ${requiredAdrs.length} Architectural Decision Records prese
 console.log('Verifying Feature catalog coverage in FEATURES.md...');
 const requiredFeatures = [
     'FEAT-01', 'FEAT-02', 'FEAT-03', 'FEAT-04',
-    'FEAT-05', 'FEAT-06', 'FEAT-07', 'FEAT-08',
+    'FEAT-05', 'FEAT-06', 'FEAT-07', 'FEAT-08', 'FEAT-09',
 ];
 for (const feat of requiredFeatures) {
     assert.ok(

@@ -42,6 +42,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 | **FEAT-06** | **NameRAG Diverse Protagonist & NPC Generator** | [`namerag-hooks.js`](./namerag-hooks.js) | [`WRK-02`](./WORKAROUNDS.md#wrk-02-character-creator-macro-poisoning--ast-syntax-errors-upstream-prompt-defect) | [`DOM-02`](./LISTENERS.md#dom-02)<br>[`DOM-03`](./LISTENERS.md#dom-03)<br>[`DOM-04`](./LISTENERS.md#dom-04)<br>[`DOM-05`](./LISTENERS.md#dom-05) | [`ADR-MP-04`](./MONKEYPATCHES.md#adr-mp-04-dom-stopimmediatepropagation-hijacking-namerag-injection) |
 | **FEAT-07** | **Media & Aspect-Ratio Bridge** | [`aspect-ratio-bridge.js`](./aspect-ratio-bridge.js) | None | [`EVT-01`](./LISTENERS.md#evt-01-app_ready) | [`ADR-MP-02`](./MONKEYPATCHES.md#adr-mp-02-imagine-slash-command-callback-wrapping) |
 | **FEAT-08** | **Partition History Integrity Guard** | [`history-integrity-guard.js`](./history-integrity-guard.js) | None | Slash Command `/mhc-history-check` | None (Direct File / Storage Inspection) |
+| **FEAT-09** | **D&D 5e & PbtA Unified Subfooter Alignment Engine** | [`dnd-fixes.js`](./dnd-fixes.js)<br>[`pbta-ruleset.js`](./pbta-ruleset.js) | None | [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator) | None (Pure MultiHog Settings API) |
 
 ---
 
@@ -136,3 +137,14 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
   * **SHA-256 Checksum Verification:** Detects corrupt or zero-byte history pointers before upstream attempts a damaged partition write.
   * **Persistence Quarantine:** If a partition is damaged, displays a quarantine warning and blocks accidental data overwrites until restored.
 * **Associated Mechanisms:** `/mhc-history-check` Slash Command and startup health probe.
+
+---
+
+### FEAT-09: D&D 5e & PbtA Unified Subfooter Alignment Engine
+* **Overview:** Resolves the architectural deadlock between `<end_of_output_footer>` and `<CYOA_mode>` where both directives demand terminal placement at the end of the narrator's response.
+* **Core Capabilities:**
+  * **Parent-Child Subfooter Architecture:** Concludes narrative prose with the status footer while explicitly permitting trailing subfooters, and designates `<CYOA_mode>` as `[SUBFOOTER: INTERACTIVE CHOICES]`.
+  * **Zero Prompt Leakage:** When CYOA is turned off, the status footer contains zero mentions of "CYOA", "choices", or buttons, preventing hallucinated choice generation during freeform play.
+  * **100% Native MultiHog Overrides:** Stored directly in MultiHog's `customSyspromptLibrary` (`unlocked_base`) and `cyoaConfig.customPromptText` with zero monkeypatching.
+  * **Transparent Controls:** Dedicated drawer under the Ruleset tab with real-time status (`● Applied` / `○ Stock Default`), enabled toggle, and one-click `[Reapply Fixes]` / `[Revert to Stock]` actions.
+* **Associated Mechanisms:** Pure MultiHog Settings API and [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator).

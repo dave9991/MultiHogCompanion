@@ -136,6 +136,37 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- ── D&D 5e Fixes: Subfooter Alignment ── -->
+                <div class="inline-drawer mhc-dnd-fixes-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                    <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
+                        <label class="checkbox_label" title="Enable native D&amp;D 5e subfooter prompt alignment to eliminate LLM CoT footer vs. choice deadlocks" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                            <input id="mhc_dnd_subfooter_fix_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
+                            <span style="font-size: 0.9em;"><b>⚔️ D&amp;D Fixes:</b> Subfooter Alignment</span>
+                        </label>
+                        <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand D&amp;D fix details">
+                            <span id="mhc_dnd_subfooter_fix_status" style="font-size: 0.7em; font-weight: bold; padding: 1px 6px; border-radius: 3px; border: 1px solid rgba(80,180,120,0.35); background: rgba(80,180,120,0.2); color: #88ffbb; white-space: nowrap;">● Applied</span>
+                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
+                        </div>
+                    </div>
+
+                    <div class="inline-drawer-content" style="display: none; padding-top: 10px;">
+                        <p style="font-size: 0.82em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
+                            Harmonizes the D&amp;D status footer and CYOA interactive choices. Establishes a parent-child relationship (<code>Narrative &rarr; Status Footer &rarr; Choices Subfooter</code>) so reasoning LLMs (Qwen, Claude Thinking, DeepSeek) never deadlock over which section terminates the turn. Leaves the footer 100% clean when CYOA is turned off.
+                        </p>
+
+                        <div style="display: flex; gap: 8px; margin-top: 8px;">
+                            <button type="button" id="mhc_dnd_reapply_fixes_btn" class="menu_button interactable" style="flex: 1; font-size: 0.8em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;">
+                                <i class="fa-solid fa-rotate-right"></i>
+                                <span>Reapply Fixes</span>
+                            </button>
+                            <button type="button" id="mhc_dnd_revert_stock_btn" class="menu_button interactable" style="flex: 1; font-size: 0.8em; padding: 4px 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;">
+                                <i class="fa-solid fa-arrow-rotate-left"></i>
+                                <span>Revert to Stock</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- ============================================================== -->

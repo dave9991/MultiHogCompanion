@@ -100,6 +100,11 @@ import {
     sanitizeCharacterStockPrompt,
     installMacroSyntaxSanitizer,
 } from './character-creator-sanitizer.js';
+import {
+    isDndSubfooterAlignmentApplied,
+    applyDndSubfooterAlignment,
+    revertDndSubfooterAlignment,
+} from './dnd-fixes.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 
@@ -109,6 +114,7 @@ const DEFAULT_SETTINGS = {
     enablePersonaSync: true,
     enablePortraitSync: true,
     showToasts: true,
+    enableDndSubfooterFix: true,
     enableAspectRatioBridge: true,
     aspectRatioPreset: 'sd15',
     sceneWidth: 672,
@@ -1640,6 +1646,53 @@ async function initUI() {
             }
         });
 
+        // ── D&D 5e Fixes: Subfooter Alignment Controls ──
+        $('#mhc_dnd_subfooter_fix_enable').closest('label').on('click', function (e) {
+            e.stopPropagation();
+        });
+
+        const dndFixCb = $('#mhc_dnd_subfooter_fix_enable');
+        dndFixCb.prop('checked', current.enableDndSubfooterFix !== false);
+
+        dndFixCb.on('change', async function () {
+            const enabled = $(this).is(':checked');
+            updateSettings({ enableDndSubfooterFix: enabled });
+            if (enabled) {
+                if (!isPbtAActive()) {
+                    await applyDndSubfooterAlignment();
+                    showToast('success', 'D&D 5e Subfooter Alignment applied! ⚔️', 'D&D Fixes');
+                }
+            } else {
+                await revertDndSubfooterAlignment();
+                showToast('info', 'Reverted D&D prompts to stock factory defaults.', 'D&D Fixes');
+            }
+            updateDndSubfooterFixUI();
+        });
+
+        $('#mhc_dnd_reapply_fixes_btn').on('click', async function () {
+            const btn = $(this);
+            btn.prop('disabled', true);
+            try {
+                await applyDndSubfooterAlignment();
+                showToast('success', 'Reapplied D&D 5e Subfooter Alignment! ⚔️', 'D&D Fixes');
+                updateDndSubfooterFixUI();
+            } finally {
+                btn.prop('disabled', false);
+            }
+        });
+
+        $('#mhc_dnd_revert_stock_btn').on('click', async function () {
+            const btn = $(this);
+            btn.prop('disabled', true);
+            try {
+                await revertDndSubfooterAlignment();
+                showToast('info', 'Reverted D&D prompts to stock factory defaults.', 'D&D Fixes');
+                updateDndSubfooterFixUI();
+            } finally {
+                btn.prop('disabled', false);
+            }
+        });
+
         // ── 5. Name Diversity Engine (NameRAG) Controls ──
         async function initNameRagUI() {
             try {
@@ -1903,11 +1956,39 @@ globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
 // ── Ruleset Status Badge ────────────────────────────────────────────────────────
 
 /**
+ * Updates the D&D 5e Subfooter Alignment UI status badge.
+ */
+function updateDndSubfooterFixUI() {
+    const badge = $('#mhc_dnd_subfooter_fix_status');
+    if (!badge.length) return;
+
+    const rpgSettings = getRpgSettings();
+    const applied = isDndSubfooterAlignmentApplied(rpgSettings);
+
+    if (applied) {
+        badge.text('● Applied');
+        badge.css({
+            background: 'rgba(80,180,120,0.2)',
+            color: '#88ffbb',
+            borderColor: 'rgba(80,180,120,0.35)',
+        });
+    } else {
+        badge.text('○ Stock Default');
+        badge.css({
+            background: 'rgba(255,255,255,0.06)',
+            color: '#cccccc',
+            borderColor: 'rgba(255,255,255,0.15)',
+        });
+    }
+}
+
+/**
  * Update the status badge in the settings panel to show the active ruleset.
  */
 function updateRulesetBadge() {
     const badge = document.getElementById('mhc_ruleset_status');
     const summary = document.getElementById('mhc_pbta_summary_line');
+    updateDndSubfooterFixUI();
     if (!badge) return;
 
     const current = getSettings();
@@ -1956,6 +2037,12 @@ async function runChatChangedCoordinator(targetChatId, token) {
         if (token !== _activeChatChangedToken) return;
 
         // 4. Synchronize UI badges & Lorebook status
+        if (!isPbtAActive(targetChatId) && getSettings().enableDndSubfooterFix !== false) {
+            const rpgSettings = getRpgSettings();
+            if (rpgSettings && !isDndSubfooterAlignmentApplied(rpgSettings)) {
+                await applyDndSubfooterAlignment({ rpgSettings });
+            }
+        }
         updateRulesetBadge();
         updateLorebookSyncUI();
 

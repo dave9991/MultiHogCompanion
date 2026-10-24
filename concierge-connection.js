@@ -206,7 +206,71 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
     }
 
     const data = await res.json();
-    return data.message?.content || '';
+    return stripThinkingContent(data.message?.content || '', { preserveChoices: true });
+}
+
+/**
+ * Strips model thinking/reasoning blocks and tokens from text.
+ * Handles:
+ * - <think>...</think>, <thought>...</thought>, <thinking>...</thinking>, <reasoning>...</reasoning>
+ * - Unclosed thinking tags (e.g. <think>... to end-of-string)
+ * - Markdown thought fences (```thought ... ```)
+ * - Leading conversational thinking preambles (Thinking Process:, Thoughts:, etc.)
+ *
+ * @param {string} text Raw text possibly containing model reasoning/thoughts
+ * @param {object} [options]
+ * @param {boolean} [options.preserveChoices=false] If true and choice tags (<choices>, <button>) are inside, preserves the choices.
+ * @returns {string} Clean text with reasoning removed
+ */
+export function stripThinkingContent(text, { preserveChoices = false } = {}) {
+    if (!text || typeof text !== 'string') return '';
+
+    let cleaned = text;
+
+    // Handle XML-style thinking tags: <think>, <thought>, <thinking>, <reasoning>
+    const thinkTagPattern = /<(think|thought|thinking|reasoning)\b[^>]*>([\s\S]*?)(?:<\/\1\s*>|$)/gi;
+    cleaned = cleaned.replace(thinkTagPattern, (_fullMatch, _tag, innerContent) => {
+        if (preserveChoices && /<(?:choices|button)\b/i.test(innerContent)) {
+            return innerContent.replace(/^<(?:think|thought|thinking|reasoning)\b[^>]*>/i, '');
+        }
+        return '';
+    });
+
+    // Handle markdown thought fences: ```thought ... ``` or ```thinking ... ```
+    cleaned = cleaned.replace(/```(?:thought|thinking|reasoning)\b[\s\S]*?(?:```|$)/gi, '');
+
+    // Strip common leading thinking preambles if at the start of text
+    cleaned = cleaned.replace(/^(?:Here(?:'s| is) (?:a |the )?thinking process[^:\n]*:?|Thinking Process:|Let's think step by step:?|Thought:|Thoughts:)\s*/i, '');
+
+    return cleaned.trim();
+}
+
+/**
+ * Checks whether text is an unfinished chain-of-thought reasoning dump
+ * with no final structured directive block, JSON, CYOA markup, or narrative deliverable.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isReasoningDump(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+
+    // If it starts with a thinking tag or thinking preamble:
+    if (/^<(?:think|thought|thinking|reasoning)\b/i.test(trimmed)) {
+        const stripped = stripThinkingContent(trimmed);
+        return stripped.length < 20;
+    }
+
+    if (/^(?:Here(?:'s| is) (?:a |the )?thinking process|Thinking Process:|Let's think step by step|1\.\s*(?:\*\*)?(?:Analyze|Understand|Evaluate|Plan)\b)/i.test(trimmed)) {
+        const hasStructuredPayload = /<(?:choices|button)\b/i.test(trimmed) ||
+            /(?:^|\n)[ \t]*\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(trimmed) ||
+            /\{[\s\S]*\}/.test(trimmed);
+        if (!hasStructuredPayload) return true;
+    }
+
+    return false;
 }
 
 /**
@@ -217,13 +281,7 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
  * @returns {boolean}
  */
 function isTruncatedReasoningDump(text) {
-    if (!text || typeof text !== 'string') return false;
-    const trimmed = text.trim();
-    const hasStructuredPayload = /<(?:choices|button)\b/i.test(trimmed) ||
-        /(?:^|\n)[ \t]*\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(trimmed) ||
-        /\{[\s\S]*\}/.test(trimmed);
-    if (hasStructuredPayload) return false;
-    return /^(?:<think>|Here(?:'s| is) a thinking process|Thinking Process:|Let's think step by step|1\.\s+\*\*(?:Analyze|Understand|Evaluate)\b)/i.test(trimmed);
+    return isReasoningDump(text);
 }
 
 /**
@@ -236,7 +294,7 @@ function isTruncatedReasoningDump(text) {
  */
 export function extractTextFromApiResponse(data) {
     if (!data) return '';
-    if (typeof data === 'string') return data;
+    if (typeof data === 'string') return stripThinkingContent(data, { preserveChoices: true });
 
     // Check chat completion choices (OpenAI-compatible)
     const choice = data.choices?.[0];
@@ -250,15 +308,15 @@ export function extractTextFromApiResponse(data) {
         if (content && reasoning) {
             // If content contains choice tags, Concierge directive blocks, or JSON, it is the clean answer
             if (/<(?:choices|button)\b/i.test(content) || /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]/i.test(content) || /\{[\s\S]*\}/.test(content)) {
-                return content;
+                return stripThinkingContent(content, { preserveChoices: true });
             }
             // If reasoning contains choice tags while content does not, include reasoning
             if (/<(?:choices|button)\b/i.test(reasoning)) {
-                return `${reasoning}\n${content}`;
+                return stripThinkingContent(`${reasoning}\n${content}`, { preserveChoices: true });
             }
-            return content;
+            return stripThinkingContent(content, { preserveChoices: true });
         }
-        if (content) return content;
+        if (content) return stripThinkingContent(content, { preserveChoices: true });
         if (reasoning) {
             // If the model placed a structured Concierge directive inside reasoning_content, extract from that directive onward
             const directiveMatch = reasoning.match(/(?:^|\n)[ \t]*(\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\][\s\S]*)$/i);
@@ -270,38 +328,49 @@ export function extractTextFromApiResponse(data) {
             if (jsonMatch) {
                 return jsonMatch[0].trim();
             }
+            // If reasoning contains choice tags, extract them
+            if (/<(?:choices|button)\b/i.test(reasoning)) {
+                return stripThinkingContent(reasoning, { preserveChoices: true });
+            }
             // Do not leak unfinished chain-of-thought dumps when content was starved by token truncation
-            if (isTruncatedReasoningDump(reasoning)) {
+            if (isReasoningDump(reasoning)) {
                 console.warn('[MultiHog Companion] Model exhausted output token budget inside reasoning_content before producing content.');
                 return '';
             }
-            return reasoning;
+            // If reasoning has no structured payload and looks like pure reasoning, reject rather than leak
+            const cleanedReasoning = stripThinkingContent(reasoning);
+            if (!cleanedReasoning || isReasoningDump(cleanedReasoning)) {
+                console.warn('[MultiHog Companion] Pure reasoning dump detected in reasoning_content with no deliverable content.');
+                return '';
+            }
+            return cleanedReasoning;
         }
     }
 
     // Direct Ollama format
     if (data.message?.content) {
-        return data.message.content;
+        return stripThinkingContent(data.message.content, { preserveChoices: true });
     }
 
     // Direct Anthropic / generic content array
     if (Array.isArray(data.content)) {
-        return data.content
+        const joined = data.content
             .filter(p => p && (p.type === 'text' || typeof p.text === 'string'))
             .map(p => p.text || '')
             .join('\n\n');
+        return stripThinkingContent(joined, { preserveChoices: true });
     }
     if (typeof data.content === 'string') {
-        return data.content;
+        return stripThinkingContent(data.content, { preserveChoices: true });
     }
 
     // Kobold format
     if (Array.isArray(data.results) && data.results[0]?.text) {
-        return data.results[0].text;
+        return stripThinkingContent(data.results[0].text, { preserveChoices: true });
     }
 
-    if (data.text) return data.text;
-    if (data.response) return data.response;
+    if (data.text) return stripThinkingContent(data.text, { preserveChoices: true });
+    if (data.response) return stripThinkingContent(data.response, { preserveChoices: true });
 
     return '';
 }

@@ -6,6 +6,7 @@
  */
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
+import { stripThinkingContent } from './concierge-connection.js';
 
 /**
  * Creates a clean default Campaign Dossier object.
@@ -286,8 +287,8 @@ export function inferStartingNpcRelationships(roleOrNpc = '', relText = '') {
  */
 export function stripConciergeStateBlocks(text) {
     if (!text) return '';
-    return text
-        .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
+    const withoutThoughts = stripThinkingContent(text);
+    return withoutThoughts
         .replace(/\[UPDATE_DOSSIER\][\s\S]*?(?:\[\/UPDATE_DOSSIER\]|$)/gi, '')
         .replace(/\[CONCIERGE_STATE\][\s\S]*?(?:\[\/CONCIERGE_STATE\]|$)/gi, '')
         .replace(/\[CONTEMPLATION\][\s\S]*?(?:\[\/CONTEMPLATION\]|$)/gi, '')

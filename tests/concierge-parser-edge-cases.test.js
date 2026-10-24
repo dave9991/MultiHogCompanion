@@ -30,6 +30,19 @@ playbook: Ranger
         assert.ok(!stripped.includes('[UPDATE_DOSSIER]'), 'Must strip unclosed dossier directive');
         assert.ok(!stripped.includes('[NPC:Lyra]'), 'Must strip NPC block');
         assert.match(stripped, /Hello adventurer! I have drafted Lyra into your companion roster\./);
+
+        // Alternative thinking tags (<thought>, <thinking>, <reasoning>) & markdown fences
+        const altThoughts = `<thought>Internal deliberation</thought>
+<thinking>Formulating reply</thinking>
+<reasoning>Setting tone to dramatic</reasoning>
+\`\`\`thought
+More thoughts
+\`\`\`
+Greetings, traveller! Are you prepared for the descent?`;
+        const altStripped = stripConciergeStateBlocks(altThoughts);
+        assert.ok(!altStripped.includes('<thought>') && !altStripped.includes('<thinking>') && !altStripped.includes('<reasoning>'), 'All alternative thinking tags stripped');
+        assert.ok(!altStripped.includes('Internal deliberation') && !altStripped.includes('More thoughts'), 'Thinking content stripped');
+        assert.strictEqual(altStripped, 'Greetings, traveller! Are you prepared for the descent?');
     });
 
     it('gracefully recovers entity mutations from truncated LLM output', () => {

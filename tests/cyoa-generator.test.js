@@ -179,6 +179,22 @@ const resUnclosed = extractChoicesMarkup(unclosedThinkWithChoices);
 assert.ok(resUnclosed.includes('<choices>'), 'Must salvage choices even from unclosed think block');
 assert.ok(resUnclosed.includes('<button>1. ⚔️ Attack</button>'));
 
+// 3c2. Alternative thinking tags (<thinking>, <reasoning>, <thought>)
+const altThinkingCyoa = `<thinking>
+Evaluating tactical positioning...
+</thinking>
+<reasoning>
+Need 3 viable moves.
+</reasoning>
+<choices>
+<button>1. ⚔️ Flank enemy</button>
+<button>2. 🛡️ Take cover</button>
+</choices>`;
+const resAltThinking = extractChoicesMarkup(altThinkingCyoa);
+assert.ok(!resAltThinking.includes('<thinking>') && !resAltThinking.includes('<reasoning>'), 'Must strip <thinking> and <reasoning> tags');
+assert.ok(!resAltThinking.includes('Evaluating tactical positioning'), 'Must strip thinking content');
+assert.ok(resAltThinking.includes('<button>1. ⚔️ Flank enemy</button>'), 'Must preserve choices');
+
 // 3d. Markdown numbered list repair
 const markdownList = `
 Here are the choices:

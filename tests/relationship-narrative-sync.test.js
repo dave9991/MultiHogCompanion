@@ -79,6 +79,24 @@ assert.strictEqual(parsedOver.affection, -150, 'Affection should clamp to -150')
 // Handling invalid / garbage response
 assert.strictEqual(parseDirectionAResponse('I think they are friends.'), null);
 assert.strictEqual(parseDirectionAResponse(null), null);
+
+// Reasoning models: In-band thinking tags with scratchpad braces before final JSON
+const reasoningAResp = `<think>
+Let's analyze Marta and Silas.
+Could starting bond be { "friendship": 0, "affection": 0 }? No, they served together in the Siege.
+I will set friendship to 35.
+</think>
+\`\`\`json
+{
+  "friendship": 35,
+  "affection": 0,
+  "reason": "Served together in the Siege."
+}
+\`\`\``;
+const parsedReasoningA = parseDirectionAResponse(reasoningAResp);
+assert.ok(parsedReasoningA, 'Should successfully parse final JSON even with scratchpad in thinking block');
+assert.strictEqual(parsedReasoningA.friendship, 35);
+assert.strictEqual(parsedReasoningA.affection, 0);
 console.log('✓ Direction A prompt builder and robust response parser verified');
 
 // ── 3. Direction B: Prompt & Narrative Rewrite Parsing ────────────────────────
@@ -114,6 +132,47 @@ const withPreamble = `Here is the updated lorebook entry for Marta Okonkwo:
 Marta Okonkwo remains the dedicated quartermaster of the depot, fiercely protective of Silas Vance after their shared battles.`;
 const parsedPreamble = parseDirectionBResponse(withPreamble);
 assert.ok(!parsedPreamble.startsWith('Here is'), 'Conversational preamble must be stripped');
+
+// Reasoning models: In-band thinking tokens followed by clean narrative
+const withThinkingTokens = `<think>
+The protagonist Silas Vance repaired Marta's cybernetic arm and helped defend the depot.
+Her friendship is now in CLOSE FRIEND tier (+70).
+I should keep her cyborg background intact and update her demeanor to be warm and trusting toward Silas.
+</think>
+Marta Okonkwo is a stern cyborg quartermaster who guards the supply depot. Following their shared battle against the scavengers, she considers Silas Vance one of her closest and most dependable allies.`;
+const parsedThinkingB = parseDirectionBResponse(withThinkingTokens);
+assert.ok(parsedThinkingB, 'Must parse clean narrative when prefixed with <think>');
+assert.ok(!parsedThinkingB.includes('<think>'), 'Must strip <think> tag');
+assert.ok(!parsedThinkingB.includes('Her friendship is now in CLOSE FRIEND tier'), 'Must strip thinking content');
+assert.ok(parsedThinkingB.startsWith('Marta Okonkwo is a stern cyborg'), 'Narrative begins with character bio');
+
+// Reasoning models: Multiple thinking tags (<thought>, <thinking>)
+const withAltThinking = `<thought>Pondering relationship update...</thought>
+<thinking>Refining demeanor...</thinking>
+Marta Okonkwo is a stern cyborg quartermaster who now deeply trusts Silas Vance with depot security.`;
+const parsedAlt = parseDirectionBResponse(withAltThinking);
+assert.ok(parsedAlt, 'Must parse narrative with <thought> and <thinking> tags');
+assert.ok(!parsedAlt.includes('<thought>') && !parsedAlt.includes('<thinking>'), 'All thinking tags stripped');
+assert.ok(parsedAlt.startsWith('Marta Okonkwo'), 'Clean bio preserved');
+
+// Truncated reasoning dump: Model used all tokens inside <think> and produced no bio
+const truncatedDump = `<think>
+I need to rewrite the lorebook entry for Marta Okonkwo.
+Let's analyze the relationship logs:
+1. Silas repaired her arm (+25)
+2. Silas defended the depot (+25)
+Total score is 70...`;
+const parsedDump = parseDirectionBResponse(truncatedDump);
+assert.strictEqual(parsedDump, null, 'Must reject truncated reasoning dump to prevent polluting lorebook with thoughts');
+
+// Pure monologue thinking dump without tags
+const monologueDump = `Thinking Process:
+1. Understand the character and friendship tier.
+2. Silas Vance is now a close friend.
+3. Marta was an isolated loner.`;
+const parsedMonologue = parseDirectionBResponse(monologueDump);
+assert.strictEqual(parsedMonologue, null, 'Must reject conversational thinking monologue');
+
 console.log('✓ Direction B prompt builder and clean markdown text parser verified');
 
 // ── 4. Ledger & Guardrails ────────────────────────────────────────────────────

@@ -8,7 +8,7 @@
  *   to extract a clean 400-word Setting Brief.
  */
 
-import { sendConciergeRequest } from './concierge-connection.js';
+import { sendConciergeRequest, stripThinkingContent } from './concierge-connection.js';
 import { resolveCardMacros } from './concierge-card-reader.js';
 
 const DIRECT_FEED_WORD_LIMIT = 4000;
@@ -127,7 +127,7 @@ Output ONLY the structured Setting Brief.`;
 
     try {
         const brief = await sendConciergeRequest(messages);
-        return brief.trim();
+        return stripThinkingContent(brief).trim();
     } catch (err) {
         console.warn('[PbtA Concierge] World Archivist pass failed, falling back to extractive summary:', err);
         return entryBlocks.slice(0, 5).join('\n\n');

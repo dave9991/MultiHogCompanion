@@ -13,6 +13,7 @@
  */
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
+import { stripThinkingContent } from './concierge-connection.js';
 
 let _activeCyoaAbortController = null;
 let _isGenerating = false;
@@ -232,21 +233,8 @@ Generate the ${choiceCount} choices now inside <choices>...</choices>:`;
 export function extractChoicesMarkup(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
 
-    // 0. Strip reasoning/thinking tokens (<think>...</think>, <thought>...</thought>)
-    let text = rawText
-        .replace(/<think\b[^>]*>[\s\S]*?(?:<\/think\s*>|$)/gi, (m) => {
-            if (/<(?:choices|button)\b/i.test(m)) {
-                return m.replace(/^<think\b[^>]*>/i, '');
-            }
-            return '';
-        })
-        .replace(/<thought\b[^>]*>[\s\S]*?(?:<\/thought\s*>|$)/gi, (m) => {
-            if (/<(?:choices|button)\b/i.test(m)) {
-                return m.replace(/^<thought\b[^>]*>/i, '');
-            }
-            return '';
-        })
-        .trim();
+    // 0. Strip reasoning/thinking tokens (<think>, <thought>, <thinking>, <reasoning>)
+    let text = stripThinkingContent(rawText, { preserveChoices: true });
 
     // Strip markdown code block wrappers (e.g. ```xml ... ``` or ```html ... ``` or ``` ... ```)
     text = text.replace(/^```[a-z]*\s*/i, '').replace(/\s*```$/i, '').trim();

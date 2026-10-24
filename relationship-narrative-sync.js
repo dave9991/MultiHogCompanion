@@ -18,6 +18,7 @@
  */
 
 import { isAdventureActive } from './adventure-chat.js';
+import { stripThinkingContent, isReasoningDump } from './concierge-connection.js';
 
 const EXTENSION_NAME = 'multihog_companion';
 
@@ -137,7 +138,7 @@ CRITICAL EVALUATION RULES:
    - Friendship: -150 to +150 (Hostile = -100, Distrustful = -40, Neutral/Stranger = 0, Amicable = +25, Friendly = +50, Devoted Ally = +100)
    - Affection: -150 to +150 (Revulsion = -100, Indifferent = 0, Flirtatious/Crush = +30, Deep Romance = +80)
 
-Respond strictly in valid JSON format:
+Respond strictly in valid JSON format. Do NOT include thinking tags (<think>), chain-of-thought contemplation, or commentary:
 {
   "friendship": <integer -150 to 150>,
   "affection": <integer -150 to 150>,
@@ -160,12 +161,14 @@ Evaluate ${safeNpc}'s starting friendship and affection toward ${safePc}:`;
 
 /**
  * Direction A: Parses the JSON response from the evaluator model.
+ * Strips reasoning/thinking tags before matching JSON to prevent scratchpad braces from being parsed.
  * @param {string} rawText
  * @returns {{ friendship: number, affection: number, reason: string } | null}
  */
 export function parseDirectionAResponse(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
-    const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
+    const cleanText = stripThinkingContent(rawText);
+    const jsonMatch = cleanText.match(/\{[\s\S]*?\}/) || rawText.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) return null;
     try {
         const parsed = JSON.parse(jsonMatch[0]);
@@ -209,7 +212,7 @@ REWRITE RULES:
 3. NEW ATTITUDE TARGETS:
    - Friendship Standing: ${targetFriendshipTier.label} (${targetFriendshipTier.hint})
    - Affection Standing: ${targetAffectionTier.label} (${targetAffectionTier.hint})
-4. FORMAT: Output ONLY the updated lorebook entry text. Do NOT wrap in markdown code blocks (\`\`\`), do NOT include conversational greetings or meta commentary.`;
+4. FORMAT: Output ONLY the finished updated lorebook entry text. Do NOT wrap in markdown code blocks (\`\`\`), do NOT include conversational greetings, meta commentary, or thinking tags (<think>).`;
 
     const userPrompt = `NPC NAME: ${safeNpc}
 PROTAGONIST: ${safePc}
@@ -230,17 +233,26 @@ Write the cohesive updated lorebook entry for ${safeNpc}:`;
 
 /**
  * Direction B: Parses and cleans the rewritten lorebook text.
+ * Strips reasoning tokens, code fences, and conversational preambles.
+ * Rejects pure reasoning dumps to prevent thinking leakage into world info.
  * @param {string} rawText
  * @returns {string | null}
  */
 export function parseDirectionBResponse(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
-    let clean = rawText.trim();
+    if (isReasoningDump(rawText)) {
+        return null;
+    }
+    let clean = stripThinkingContent(rawText);
     // Strip markdown code fences if model enclosed response in them
-    clean = clean.replace(/^```(?:markdown)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    clean = clean.replace(/^```(?:markdown|text)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
     // Strip conversational lead-ins
     clean = clean.replace(/^(?:Here is (?:the|an) updated (?:lorebook )?entry[^:\n]*:\s*)+/i, '').trim();
-    return clean.length >= 20 ? clean : null;
+    // Reject pure reasoning dumps or responses that were only thought monologue
+    if (isReasoningDump(clean) || clean.length < 20) {
+        return null;
+    }
+    return clean;
 }
 
 // ── 3. Connection & State Helpers ─────────────────────────────────────────────

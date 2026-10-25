@@ -1639,13 +1639,22 @@ export function initWandMenu() {
             || (typeof document !== 'undefined' ? document.getElementById('rpg-tracker-memo')?.value : null)
             || '';
         import('./level-up-runner.js').then(({ evaluateLevelUpEligibility }) => {
-            const status = evaluateLevelUpEligibility(curMemo);
+            const s = getSettings();
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+            const chatId = ctx?.getCurrentChatId?.() || ctx?.chatId || s.currentChatId || 'default';
+            const pbtaActive = isPbtaChat(chatId, rpgSettings, s) || isPbtAActive(chatId, rpgSettings, s);
+            const pacingXp = s.pbtaCampaignDossier?.[chatId]?.config?.pacingXp
+                || s.companionDossier?.[chatId]?.config?.pacingXp;
+            const status = evaluateLevelUpEligibility(curMemo, pbtaActive ? 'pbta' : null, { pacingXp });
             if (status.eligible) {
                 levelUpBtn.title = 'Milestone reached! Open Level-Up Desk to advance character';
                 levelUpBtn.setAttribute('data-is-level-up', 'true');
+                const labelText = status.ruleset === 'pbta'
+                    ? '⚡ Playbook Advance Available'
+                    : `⬆ Level Up Available (Lvl ${status.currentLevel} → ${status.nextLevel})`;
                 levelUpBtn.innerHTML = `
                     <div class="fa-solid fa-circle-arrow-up extensionsMenuExtensionButton" style="color: #fbbf24;"></div>
-                    <span>⬆ Level Up Available (Lvl ${status.currentLevel} → ${status.nextLevel})</span>
+                    <span>${labelText}</span>
                 `;
             } else {
                 levelUpBtn.title = 'Review build, tweak feats, or adjust stats with the Leveling Concierge';
@@ -1680,7 +1689,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
         || s.currentMemo
         || '';
 
-    const { ensureChatDossier, persistCompanionDossier, syncDossierToWorldInfoBook } = await import('./level-up-scaffold.js');
+    const { ensureChatDossier, persistCompanionDossier, syncDossierToWorldInfoBook, isDossierPbta } = await import('./level-up-scaffold.js');
     const { getCanonicalDndProgression, hasProgressionBlueprint, generateProgressionBlueprintViaConcierge, blueprintMatchesClass } = await import('./level-up-blueprint.js');
     const { evaluateLevelUpEligibility, decorateXpBarsForLevelUp } = await import('./level-up-runner.js');
     const { openLevelUpModal } = await import('./level-up-ui.js');
@@ -1688,11 +1697,13 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     const dossier = ensureChatDossier(chatId, s, { memo: currentMemo });
     const isPbta = isPbtaChat(chatId, rpgSettings, s)
         || isPbtAActive(chatId, rpgSettings, s)
-        || dossier.meta?.systemKey === 'pbta'
-        || !!dossier.protagonist?.isPbta
-        || !!dossier.protagonist?.playbook;
+        || isDossierPbta(dossier);
 
-    const eligibility = evaluateLevelUpEligibility(currentMemo, isPbta ? 'pbta' : dossier.meta?.systemKey);
+    const eligibility = evaluateLevelUpEligibility(
+        currentMemo,
+        isPbta ? 'pbta' : (dossier.meta?.systemKey || 'dnd5e'),
+        { pacingXp: dossier.config?.pacingXp },
+    );
 
     let blueprintPromise = null;
 
@@ -1700,7 +1711,10 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     if (isPbta) {
         dossier.progressionBlueprint = null;
         if (dossier.meta) {
-            dossier.meta.systemKey = 'pbta';
+            const existingSysKey = (dossier.meta.systemKey || '').toLowerCase();
+            if (!existingSysKey || existingSysKey === 'dnd5e') {
+                dossier.meta.systemKey = 'pbta';
+            }
             if (!dossier.meta.systemLabel || dossier.meta.systemLabel.includes('5e')) {
                 dossier.meta.systemLabel = 'PbtA Narrative Engine';
             }

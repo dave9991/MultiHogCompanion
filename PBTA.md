@@ -47,6 +47,16 @@ Whenever your character triggers a Move in the narrative, the Ref (LLM) resolves
 * **Interactive Faction Pills:** Factions in `[FACTIONS]` render as `((PILLS)) Faction Name: Standing (Standing), Agenda (Fictional goals...)`, tinting `(+) Allied` (green) and `(-) Hostile` (red) with hoverable agenda tooltips.
 * **Adversary Attacks:** In combat, monster attacks display as hoverable pills with damage tags like `(close, 2 Harm)` revealed on mouse-over.
 
+### 6. Playbook Advancement & Tuning Desk (`FEAT-10`)
+* **XP Rollover (`0/5` or custom pacing dial):** Marking XP on a **6- Miss** or end-of-session milestone fills your `[CHARACTER]` XP track. When XP reaches threshold, the XP bar pulses gold and the Wand Menu shows **⚡ Playbook Advance Available**.
+* **Structured PbtA Advancement Picker:** Opening the Advancement Desk presents the 5 canonical PbtA playbook advances with per-character usage caps (`advancesTaken`):
+  * **Increase a Playbook Stat by +1 (max +3)** (`max 2 times`)
+  * **Take a New Move from Your Playbook** (`max 4 times`, pre-populated from the active genre's move catalog or custom entry)
+  * **Take a Move from Another Playbook** (`max 2 times`, cross-genre signature moves adapted to your character's stats)
+  * **Increase Max Harm Capacity by +1** (`max 1 time`, automatically updating the descending tandem `cur/max HP` vitality bar)
+  * **Increase Armor by +1 (max 3)** (`max 1 time`)
+* **Playbook Guide Concierge & Respec Mode:** At any time, you can open the desk in **Playbook Tuning (Respec)** mode to adjust Harm Capacity, Armor, or Playbook Stats (`[SET_STAT: StatName | +Value]`), or collaborate with the PbtA Playbook Guide to draft custom fiction-first moves formatted automatically as interactive `((PILLS)) Moves:`.
+
 ---
 
 ## 🎭 Genre Stat Presets

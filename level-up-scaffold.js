@@ -8,6 +8,24 @@
  */
 
 import { getCandidateChatIds } from './persona-matching.js';
+import { PBTA_GENRES, splitTopLevelPillItems, splitPbtaMovesLine } from './pbta-ruleset.js';
+
+/**
+ * Derives the canonical D&D 5e Hit Die ('d6' | 'd8' | 'd10' | 'd12') from a class name.
+ *
+ * @param {string} className
+ * @param {string} [fallback='d8']
+ * @returns {string}
+ */
+export function deriveHitDieForClass(className, fallback = 'd8') {
+    if (!className || typeof className !== 'string') return fallback;
+    const cLower = className.toLowerCase();
+    if (/\bbarbarian\b/.test(cLower)) return 'd12';
+    if (/\b(fighter|paladin|ranger)\b/.test(cLower)) return 'd10';
+    if (/\b(wizard|sorcerer)\b/.test(cLower)) return 'd6';
+    if (/\b(bard|cleric|druid|monk|rogue|warlock|artificer)\b/.test(cLower)) return 'd8';
+    return fallback;
+}
 
 /**
  * Extracts and parses key character sheet properties from a State Memo [CHARACTER] block.
@@ -103,34 +121,29 @@ export function parseCharacterBlockFromMemo(memoText) {
         }
 
         // Moves ((PILLS)) Moves: ...
-        const movesMatch = raw.match(/(?:\(\(PILLS\)\)\s*)?Moves\s*:\s*([^\n\r]+)/i);
-        if (movesMatch) {
-            result.moves = movesMatch[1]
-                .split(/,(?![^(\[]*[)\]])/)
-                .map(m => m.trim().replace(/^\(\(PILL\)\)\s*/i, ''))
-                .filter(Boolean);
+        const movesMatch = raw.match(/(?:\(\(PILLS\)\)\s*)?Moves\s*:\s*([^\n\r]*)/i);
+        if (movesMatch && movesMatch[1].trim()) {
+            result.moves = splitPbtaMovesLine(movesMatch[1]);
         } else {
             result.moves = [];
         }
 
         // Conditions ((PILLS)) Conditions: ...
-        const condMatch = raw.match(/(?:\(\(PILLS\)\)\s*)?Conditions\s*:\s*([^\n\r]+)/i);
-        if (condMatch) {
-            result.conditions = condMatch[1]
-                .split(/,(?![^(\[]*[)\]])/)
+        const condMatch = raw.match(/(?:\(\(PILLS\)\)\s*)?Conditions\s*:\s*([^\n\r]*)/i);
+        if (condMatch && condMatch[1].trim()) {
+            result.conditions = splitTopLevelPillItems(condMatch[1])
                 .map(c => c.trim().replace(/^\(\(PILL\)\)\s*/i, ''))
-                .filter(Boolean);
+                .filter(c => c && !/^none$/i.test(c));
         } else {
             result.conditions = [];
         }
 
         // Gear ((PILLS)) Gear: ...
-        const gearMatch = raw.match(/(?:\(\(PILLS\)\)\s*)?Gear\s*:\s*([^\n\r]+)/i);
-        if (gearMatch) {
-            result.gear = gearMatch[1]
-                .split(/,(?![^(\[]*[)\]])/)
+        const gearMatch = raw.match(/(?:\(\(PILLS\)\)\s*)?Gear\s*:\s*([^\n\r]*)/i);
+        if (gearMatch && gearMatch[1].trim()) {
+            result.gear = splitTopLevelPillItems(gearMatch[1])
                 .map(g => g.trim().replace(/^\(\(PILL\)\)\s*/i, ''))
-                .filter(Boolean);
+                .filter(g => g && !/^none$/i.test(g));
         } else {
             result.gear = [];
         }
@@ -155,19 +168,13 @@ export function parseCharacterBlockFromMemo(memoText) {
         if (hdMatch) {
             result.hitDie = hdMatch[1].toLowerCase().replace(/^\d+/, '');
         } else {
-            // Derive reasonable default hit die from class
-            const cLower = result.class.toLowerCase();
-            if (cLower.includes('barbarian')) result.hitDie = 'd12';
-            else if (cLower.includes('fighter') || cLower.includes('paladin') || cLower.includes('ranger')) result.hitDie = 'd10';
-            else if (cLower.includes('wizard') || cLower.includes('sorcerer')) result.hitDie = 'd6';
-            else result.hitDie = 'd8';
+            result.hitDie = deriveHitDieForClass(result.class);
         }
 
         // 4. Features / Traits / Abilities
         const featMatch = raw.match(/(?:Features|Traits|Abilities)\s*:\s*([^\n\r]+)/i);
         if (featMatch) {
-            result.features = featMatch[1]
-                .split(/,(?![^(\[]*[)\]])/)
+            result.features = splitTopLevelPillItems(featMatch[1])
                 .map(f => f.trim())
                 .filter(Boolean);
         } else {
@@ -224,9 +231,10 @@ export function parseAbilitiesBlockFromMemo(memoText) {
  */
 export function isDossierPbta(dossier) {
     if (!dossier) return false;
-    if (dossier.meta?.systemKey === 'pbta') return true;
+    const sysKey = (dossier.meta?.systemKey || '').toLowerCase();
+    if (sysKey === 'pbta' || Boolean(sysKey && PBTA_GENRES[sysKey])) return true;
     if (dossier.protagonist?.isPbta || dossier.protagonist?.playbook || dossier.protagonist?.harm) return true;
-    if (dossier.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse/i.test(dossier.meta.systemLabel)) return true;
+    if (dossier.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel)) return true;
     return false;
 }
 
@@ -362,7 +370,12 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
         const pbtaMode = isDossierPbta(dossier) || /Harm\s*:\s*\d+\/\d+/i.test(liveMemo || '');
         if (pbtaMode) {
             dossier.meta = dossier.meta || {};
-            dossier.meta.systemKey = 'pbta';
+            const existingKey = (dossier.meta.systemKey || '').toLowerCase();
+            if (existingKey && PBTA_GENRES[existingKey]) {
+                dossier.meta.genre = dossier.meta.genre || existingKey;
+            } else {
+                dossier.meta.systemKey = 'pbta';
+            }
             if (!dossier.meta.systemLabel || dossier.meta.systemLabel.includes('5e')) {
                 dossier.meta.systemLabel = 'PbtA Narrative Engine';
             }
@@ -392,7 +405,7 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
                         playbook: isPbtaProtagonist ? (parsed.playbook || dossier.protagonist?.playbook || parsed.class) : undefined,
                         isPbta: isPbtaProtagonist,
                         level: isPbtaProtagonist ? null : (parsed.level || dossier.protagonist?.level || 1),
-                        hitDie: isPbtaProtagonist ? null : (parsed.hitDie || dossier.protagonist?.hitDie || 'd8'),
+                        hitDie: isPbtaProtagonist ? null : (parsed.hitDie || dossier.protagonist?.hitDie || deriveHitDieForClass(parsed.class || dossier.protagonist?.class)),
                         hp: isPbtaProtagonist ? null : {
                             current: parsed.currentHp || dossier.protagonist?.hp?.current || 10,
                             max: parsed.maxHp || dossier.protagonist?.hp?.max || 10,

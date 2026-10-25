@@ -1157,3 +1157,185 @@ test('Level-Up System: Phase 2 — XP table to 20, level cap, class-match, spell
     );
     assert.strictEqual(respecProposal.spellSlots, null);
 });
+
+test('Level-Up System: Phase 3 — PbtA Advancement Picker, Move Parser, Genre Stats & Empty Moves Safety', async () => {
+    const { splitPbtaMovesLine, formatMoveAsPill } = await import('../pbta-ruleset.js');
+    const {
+        resolvePbtaGenreKey,
+        getCanonicalPbtaStats,
+        buildPbtaAdvanceOptions,
+        applyPbtaAdvanceSelection,
+    } = await import('../level-up-runner.js');
+
+    // 1. Bug P8: splitPbtaMovesLine preserves commas inside (...) even when [...] is nested inside (...)
+    const pillMove1 = formatMoveAsPill('Read a Sitch [+Wits]: When you read a charged situation (10+ hold 3, 7-9 hold 1), ask questions.');
+    const pillMove2 = formatMoveAsPill('Pack Alpha [+Heart]: Command your crew (grant +1 forward [or +2 on a 10+], clear 1 Stress).');
+    const combinedMovesLine = `${pillMove1}, ${pillMove2}, Hack the Planet: When you jack in, roll+Tech`;
+    const splitMoves = splitPbtaMovesLine(combinedMovesLine);
+    assert.strictEqual(splitMoves.length, 3, `Expected 3 moves, got ${splitMoves.length}: ${JSON.stringify(splitMoves)}`);
+    assert.ok(splitMoves[0].startsWith('Read a Sitch'), 'First move preserved intact');
+    assert.ok(splitMoves[0].includes('10+ hold 3, 7-9 hold 1'), 'Commas inside parens with nested brackets preserved');
+    assert.ok(splitMoves[1].startsWith('Pack Alpha'), 'Second move preserved intact');
+    assert.ok(splitMoves[2].includes('When you jack in, roll+Tech'), 'Unparenthesized continuation clause merged into preceding move');
+
+    // 2. Bug P5 & P4: evaluateLevelUpEligibility does not misclassify D&D memos with Harm: and honors custom pacingXp
+    const dndWithHarmNote = `[CHARACTER]\nKael (Cleric): 24/24 HP\nLevel: 3\nConditions: Harm: 1/4 curse\n[/CHARACTER]\n[XP]\nTotal: 2,700 / 2,700 XP (Level 3)\n[/XP]`;
+    const dndEval = evaluateLevelUpEligibility(dndWithHarmNote, 'dnd5e');
+    assert.strictEqual(dndEval.ruleset, 'dnd5e', 'Explicit dnd5e ruleset must never be overridden by Harm: substring');
+    assert.strictEqual(dndEval.eligible, true);
+    assert.strictEqual(dndEval.nextLevel, 4);
+
+    const pbtaCustomPacingMemo = `[CHARACTER]\nNova (Netrunner): 6/6 HP\nHarm: 0/6 | Armor: 1 | XP: 6\n[/CHARACTER]`;
+    const pbtaIneligibleAt7 = evaluateLevelUpEligibility(pbtaCustomPacingMemo, 'pbta', { pacingXp: 7 });
+    assert.strictEqual(pbtaIneligibleAt7.eligible, false, '6 XP should not be eligible when pacingXp is 7');
+    assert.strictEqual(pbtaIneligibleAt7.maxThreshold, 7);
+    const pbtaEligibleAt6 = evaluateLevelUpEligibility(pbtaCustomPacingMemo, 'pbta', { pacingXp: 6 });
+    assert.strictEqual(pbtaEligibleAt6.eligible, true, '6 XP should be eligible when pacingXp is 6');
+
+    // 3. Bug P2: Genre resolution and deduplicated canonical stats (scifi -> Synth, Chrome, Grit, Void, Pulse)
+    const scifiDossier = {
+        meta: { systemKey: 'scifi', systemLabel: 'Cyberpunk / Sci-Fi PbtA' },
+        config: { pacingXp: 6, harmMax: 5 },
+        protagonist: {
+            name: 'Nova',
+            playbook: 'Neural-Jockey',
+            isPbta: true,
+            harm: { current: 1, max: 5, armor: 1 },
+            stats: { SYNTH: 1, Synth: 1, CHROME: 2, Chrome: 2, GRIT: 0, VOID: -1, PULSE: 1 },
+            moves: [],
+            advancesTaken: ['stat_boost'],
+        },
+    };
+    assert.strictEqual(resolvePbtaGenreKey(scifiDossier), 'scifi');
+    const canonStats = getCanonicalPbtaStats(scifiDossier.protagonist.stats, 'scifi');
+    assert.deepStrictEqual(Object.keys(canonStats), ['Synth', 'Chrome', 'Grit', 'Void', 'Pulse'], 'Must deduplicate UPPERCASE/TitleCase stats into canonical genre order');
+    assert.strictEqual(canonStats.Chrome, 2);
+
+    // 4. Bug P3: PbtA Advancement Picker options, usage caps, and selection application
+    const scifiProposal = formulateLevelUpProposal(scifiDossier, null, null, { isRespec: false });
+    assert.strictEqual(scifiProposal.genreKey, 'scifi');
+    assert.strictEqual(scifiProposal.pacingXp, 6);
+    assert.ok(Array.isArray(scifiProposal.advanceOptions) && scifiProposal.advanceOptions.length === 5);
+
+    const statBoostOpt = scifiProposal.advanceOptions.find(o => o.id === 'stat_boost');
+    assert.strictEqual(statBoostOpt.used, 1, 'Tracks previously taken stat_boost advance');
+    assert.strictEqual(statBoostOpt.remaining, 1);
+    assert.strictEqual(statBoostOpt.exhausted, false);
+
+    // Apply stat_boost (+1 Chrome -> 3) and commit to a memo where Moves: is empty (Bug P1)
+    const emptyMovesMemo = `[CHARACTER]\nNova (Neural-Jockey): 4/5 HP\nHarm: 1/5 | Armor: 1 | XP: 6/6\nStats: Synth +1, Chrome +2, Grit +0, Void -1, Pulse +1\n((PILLS)) Moves:\n[/CHARACTER]`;
+    scifiProposal.pbtaAdvance = { type: 'stat_boost', stat: 'Chrome', amount: 1 };
+    applyPbtaAdvanceSelection(scifiProposal, scifiProposal.pbtaAdvance);
+    assert.strictEqual(scifiProposal.stats.Chrome, 3);
+    assert.strictEqual(scifiProposal.advancesTaken.filter(x => x === 'stat_boost').length, 2, 'Idempotent advance tracking');
+
+    // Add a playbook move as well and verify empty Moves: line is populated
+    scifiProposal.newFeatures.push('System Override [+Synth]: Hack enemy cyberware on 10+');
+    const scifiCommit = applyLevelUpCommit({
+        chatId: 'scifi_chat',
+        currentMemo: emptyMovesMemo,
+        proposal: scifiProposal,
+        isRespec: false,
+    });
+    assert.strictEqual(scifiCommit.success, true);
+    assert.ok(scifiCommit.updatedMemo.includes('Chrome +3'), 'Stats line updated in-place with +3 Chrome');
+    assert.ok(scifiCommit.updatedMemo.includes('((PILLS)) Moves: System Override'), 'Empty Moves: line populated with pill-formatted move');
+    assert.ok(scifiCommit.updatedMemo.includes('(Hack enemy cyberware on 10+)'), 'Move description wrapped in pill parens');
+    assert.ok(scifiCommit.updatedMemo.includes('XP: 0/6'), 'Custom pacingXp threshold preserved on XP reset');
+
+    // 5. Bug P1: Commit when Moves: line is completely missing from [CHARACTER] AND harm_capacity advance updates tandem HP
+    const missingMovesMemo = `[CHARACTER]\nNova (Neural-Jockey): 4/5 HP\nHarm: 1/5 | Armor: 1 | XP: 6/6\nStats: Synth +1, Chrome +3, Grit +0, Void -1, Pulse +1\n[/CHARACTER]`;
+    const harmProposal = formulateLevelUpProposal(scifiDossier, null, null, {
+        isRespec: false,
+        pbtaAdvance: { type: 'harm_capacity', amount: 1 },
+    });
+    harmProposal.newFeatures = ['Void Step [+Void] (Slip through subspace)'];
+    const harmCommit = applyLevelUpCommit({
+        chatId: 'scifi_chat',
+        currentMemo: missingMovesMemo,
+        proposal: harmProposal,
+        isRespec: false,
+    });
+    assert.strictEqual(harmCommit.success, true);
+    assert.ok(harmCommit.updatedMemo.includes('Harm: 1/6 | Armor: 1'), 'Harm max increased from 5 to 6');
+    assert.ok(harmCommit.updatedMemo.includes('5/6 HP'), 'Tandem descending HP updated from 4/5 to 5/6');
+    assert.ok(harmCommit.updatedMemo.includes('((PILLS)) Moves: Void Step'), 'Missing Moves: line inserted after Stats:');
+});
+
+test('Level-Up System: Phase 4 — All 12 Core SRD Classes, Word-Boundary Lookup, Exact Removal & Fallback Toast', async () => {
+    const {
+        CORE_DND_PROGRESSIONS,
+        classifyFeatureNoise,
+        generateProgressionBlueprintViaConcierge,
+    } = await import('../level-up-blueprint.js');
+    const { matchesFeatureRemovalTarget } = await import('../level-up-runner.js');
+    const { deriveHitDieForClass } = await import('../level-up-scaffold.js');
+
+    // 1. All 12 SRD core classes present, normalized, and free of bookkeeping noise
+    const expectedClasses = {
+        fighter: 'd10',
+        rogue: 'd8',
+        wizard: 'd6',
+        cleric: 'd8',
+        barbarian: 'd12',
+        paladin: 'd10',
+        bard: 'd8',
+        druid: 'd8',
+        monk: 'd8',
+        ranger: 'd10',
+        sorcerer: 'd6',
+        warlock: 'd8',
+    };
+    for (const [key, expectedDie] of Object.entries(expectedClasses)) {
+        assert.ok(CORE_DND_PROGRESSIONS[key], `Missing canonical progression for ${key}`);
+        const prog = getCanonicalDndProgression(key);
+        assert.ok(prog, `getCanonicalDndProgression("${key}") must resolve`);
+        assert.strictEqual(prog.hitDie, expectedDie, `${key} hitDie must be ${expectedDie}`);
+        assert.strictEqual(deriveHitDieForClass(key), expectedDie, `deriveHitDieForClass("${key}") must be ${expectedDie}`);
+        assert.strictEqual(Object.keys(prog.levels).length, 20, `${key} must have 20 levels`);
+        for (let lvl = 1; lvl <= 20; lvl++) {
+            const entry = prog.levels[String(lvl)];
+            assert.ok(Array.isArray(entry.features), `${key} L${lvl} features must be an array`);
+            for (const f of entry.features) {
+                assert.strictEqual(classifyFeatureNoise(f), null, `${key} L${lvl} feature "${f}" must not be bookkeeping noise`);
+            }
+        }
+    }
+
+    // Verify new caster classes carry structured spellSlots
+    assert.deepStrictEqual(getCanonicalDndProgression('Bard').levels['5'].spellSlots, { 1: 4, 2: 3, 3: 2 });
+    assert.deepStrictEqual(getCanonicalDndProgression('Druid').levels['3'].spellSlots, { 1: 4, 2: 2 });
+    assert.deepStrictEqual(getCanonicalDndProgression('Sorcerer').levels['5'].spellSlots, { 1: 4, 2: 3, 3: 2 });
+    assert.deepStrictEqual(getCanonicalDndProgression('Warlock').levels['5'].spellSlots, { 3: 2 });
+    assert.deepStrictEqual(getCanonicalDndProgression('Ranger').levels['5'].spellSlots, { 1: 4, 2: 2 });
+
+    // 2. Word-boundary matching prevents false positives ("Bombardier" !== "Bard")
+    assert.strictEqual(getCanonicalDndProgression('College of Lore Bard')?.className, 'Bard');
+    assert.strictEqual(getCanonicalDndProgression('Way of Shadow Monk')?.className, 'Monk');
+    assert.strictEqual(getCanonicalDndProgression('Bombardier'), null, '"Bombardier" must not false-match "bard"');
+
+    // 3. Exact feature removal target matching (Bug #14: removing "Rage" must never delete "Mindless Rage" or "Enrage")
+    assert.strictEqual(matchesFeatureRemovalTarget('Rage (2/day, +2 dmg)', 'Rage'), true);
+    assert.strictEqual(matchesFeatureRemovalTarget('Rage (2/day, +2 dmg)', 'Rage (2/day, +2 dmg)'), true);
+    assert.strictEqual(matchesFeatureRemovalTarget('Mindless Rage (Immune to charm/fear while raging)', 'Rage'), false);
+    assert.strictEqual(matchesFeatureRemovalTarget('Enrage (Bonus action)', 'Rage'), false);
+
+    // 4. Fallback warning toast on LLM failure (Bug #10 & GEMINI.md Rule 3)
+    const warnings = [];
+    const prevToastr = globalThis.toastr;
+    globalThis.toastr = {
+        warning: (msg, title) => warnings.push({ msg, title }),
+    };
+    try {
+        const fallbackBp = await generateProgressionBlueprintViaConcierge({
+            character: { name: 'Vex', class: 'Chronomancer', hitDie: 'd6' },
+        });
+        assert.ok(fallbackBp && fallbackBp.levels && Object.keys(fallbackBp.levels).length === 20, 'Fallback blueprint must still return 20 valid levels');
+        assert.strictEqual(fallbackBp.className, 'Chronomancer');
+        assert.strictEqual(fallbackBp.hitDie, 'd6');
+        assert.strictEqual(warnings.length, 1, 'Must emit a non-intrusive toastr.warning when Concierge blueprint generation falls back');
+        assert.ok(warnings[0].msg.includes('Chronomancer'), 'Warning toast mentions the affected class');
+    } finally {
+        globalThis.toastr = prevToastr;
+    }
+});

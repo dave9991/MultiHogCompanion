@@ -1285,6 +1285,35 @@ export function splitTopLevelPillItems(str, { splitCommas = true } = {}) {
 }
 
 /**
+ * Splits a PbtA `Moves:` line into individual move strings without splitting
+ * inside parenthesized descriptions (even when they contain `[...]` inner brackets)
+ * and without splitting unparenthesized move prose at continuation clauses
+ * (e.g. "Move Name: When you X, roll +Stat. On a 10+, do Y, on a 7-9, do Z").
+ *
+ * @param {string} str
+ * @returns {string[]}
+ */
+export function splitPbtaMovesLine(str) {
+    if (!str || typeof str !== 'string') return [];
+    const rawParts = splitTopLevelPillItems(str, { splitCommas: true })
+        .map(s => s.trim().replace(/^\(\(PILL\)\)\s*/i, '').trim())
+        .filter(Boolean);
+
+    const continuationRe = /^(?:[a-z]|on\s+a\s+\d|roll\s*[+\-]|choose\s+(?:one|two|three|\d)|deal\s+|take\s+|gain\s+|hold\s+\d|spend\s+\d|you\s+|your\s+|it\s+|they\s+|or\s+|and\s+|but\s+|while\s+|instead\b|[+-]\d)/i;
+    const merged = [];
+    for (const part of rawParts) {
+        if (/^none$/i.test(part)) continue;
+        const prev = merged.length > 0 ? merged[merged.length - 1] : null;
+        if (prev && !prev.endsWith(')') && continuationRe.test(part)) {
+            merged[merged.length - 1] = `${prev}, ${part}`;
+        } else {
+            merged.push(part);
+        }
+    }
+    return merged;
+}
+
+/**
  * Formats a general pill item ("Name: Desc" -> "Name (Desc)") without matching colons deep inside prose.
  * @param {string} item
  * @returns {string}

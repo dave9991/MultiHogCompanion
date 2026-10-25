@@ -32,7 +32,7 @@ export const CORE_DND_PROGRESSIONS = {
         levels: {
             1: { features: ['Fighting Style', 'Second Wind (1d10+Level HP 1/rest)'], profBonus: 2 },
             2: { features: ['Action Surge (1 extra action 1/rest)'], profBonus: 2 },
-            3: { features: ['Martial Mastery (Critical hit on 19–20)'], profBonus: 2 },
+            3: { features: ['Martial Mastery (Critical hit on 19–20)'], subclass: true, profBonus: 2 },
             4: { features: ['Ability Score Improvement (or Feat)'], asi: true, profBonus: 2 },
             5: { features: ['Extra Attack (1 additional attack)'], profBonus: 3 },
             6: { features: ['Ability Score Improvement (or Feat)'], asi: true, profBonus: 3 },
@@ -59,7 +59,7 @@ export const CORE_DND_PROGRESSIONS = {
         levels: {
             1: { features: ['Expertise (2 skills)', 'Sneak Attack (1d6)', 'Thieves Cant'], profBonus: 2 },
             2: { features: ['Cunning Action (Dash/Disengage/Hide as Bonus Action)'], profBonus: 2 },
-            3: { features: ['Skirmish Tactics (Fast Hands & Infiltration)', 'Sneak Attack (2d6)'], profBonus: 2 },
+            3: { features: ['Skirmish Tactics (Fast Hands & Infiltration)', 'Sneak Attack (2d6)'], subclass: true, profBonus: 2 },
             4: { features: ['Ability Score Improvement (or Feat)'], asi: true, profBonus: 2 },
             5: { features: ['Uncanny Dodge (Halve incoming attack damage)', 'Sneak Attack (3d6)'], profBonus: 3 },
             6: { features: ['Expertise (2 additional skills)'], profBonus: 3 },
@@ -84,9 +84,9 @@ export const CORE_DND_PROGRESSIONS = {
         hitDie: 'd6',
         primaryStats: ['INT', 'CON', 'DEX'],
         levels: {
-            1: { features: ['Spellcasting (Cantrips + Level 1 Slots: 2)', 'Arcane Recovery'], profBonus: 2 },
-            2: { features: ['Arcane Savant (Halve gold/time to scribe spells, Sculpt Spells)', 'Level 1 Slots: 3'], profBonus: 2 },
-            3: { features: ['Level 2 Spell Slots (2 slots)'], profBonus: 2 },
+            1: { features: ['Spellcasting (Cantrips + Level 1 Slots: 2)', 'Arcane Recovery'], spellSlots: { 1: 2 }, profBonus: 2 },
+            2: { features: ['Arcane Savant (Halve gold/time to scribe spells, Sculpt Spells)'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
+            3: { features: ['Arcane Tradition Mastery'], spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
             4: { features: ['Ability Score Improvement (or Feat)', 'Cantrip Learned'], asi: true, profBonus: 2 },
             5: { features: ['Level 3 Spell Slots (2 slots)'], profBonus: 3 },
             6: { features: ['Potent Cantrip (Cantrip deals half damage on successful save)'], profBonus: 3 },
@@ -111,9 +111,9 @@ export const CORE_DND_PROGRESSIONS = {
         hitDie: 'd8',
         primaryStats: ['WIS', 'CON', 'STR'],
         levels: {
-            1: { features: ['Divine Favor (Bonus heavy armor proficiency)', 'Spellcasting (Level 1: 2 slots)'], profBonus: 2 },
-            2: { features: ['Channel Divinity (1/rest)', 'Radiance of the Dawn & Turn Undead'], profBonus: 2 },
-            3: { features: ['Level 2 Spell Slots (2 slots)'], profBonus: 2 },
+            1: { features: ['Divine Favor (Bonus heavy armor proficiency)', 'Spellcasting (Level 1: 2 slots)'], subclass: true, spellSlots: { 1: 2 }, profBonus: 2 },
+            2: { features: ['Channel Divinity (1/rest)', 'Radiance of the Dawn & Turn Undead'], spellSlots: { 1: 3 }, profBonus: 2 },
+            3: { features: ['Divine Domain Doctrines'], spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
             4: { features: ['Ability Score Improvement (or Feat)', 'Cantrip Learned'], asi: true, profBonus: 2 },
             5: { features: ['Destroy Undead (CR 1/2)', 'Level 3 Spell Slots (2 slots)'], profBonus: 3 },
             6: { features: ['Blessed Healer (Healing spells also restore your HP)', 'Channel Divinity (2/rest)'], profBonus: 3 },
@@ -140,7 +140,7 @@ export const CORE_DND_PROGRESSIONS = {
         levels: {
             1: { features: ['Rage (2/day, +2 dmg)', 'Unarmored Defense (10+DEX+CON)'], profBonus: 2 },
             2: { features: ['Reckless Attack (Advantage on attacks)', 'Danger Sense'], profBonus: 2 },
-            3: { features: ['Primal Instincts (Advantage on initiative & +1 Rage damage)', 'Rage (3/day)'], profBonus: 2 },
+            3: { features: ['Primal Instincts (Advantage on initiative & +1 Rage damage)', 'Rage (3/day)'], subclass: true, profBonus: 2 },
             4: { features: ['Ability Score Improvement (or Feat)'], asi: true, profBonus: 2 },
             5: { features: ['Extra Attack (1)', 'Fast Movement (+10 ft)'], profBonus: 3 },
             6: { features: ['Mindless Rage (Immune to charm/fear while raging)', 'Rage (4/day)'], profBonus: 3 },
@@ -166,8 +166,8 @@ export const CORE_DND_PROGRESSIONS = {
         primaryStats: ['STR', 'CHA', 'CON'],
         levels: {
             1: { features: ['Divine Sense (1+CHA/day)', 'Lay on Hands (5 x Level HP pool)'], profBonus: 2 },
-            2: { features: ['Fighting Style', 'Divine Smite', 'Spellcasting (Level 1: 2 slots)'], profBonus: 2 },
-            3: { features: ['Divine Grace (Channel Divinity: Sacred Weapon & Turn Unholy)', 'Divine Health'], profBonus: 2 },
+            2: { features: ['Fighting Style', 'Divine Smite', 'Spellcasting (Level 1: 2 slots)'], spellSlots: { 1: 2 }, profBonus: 2 },
+            3: { features: ['Divine Grace (Channel Divinity: Sacred Weapon & Turn Unholy)', 'Divine Health'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
             4: { features: ['Ability Score Improvement (or Feat)'], asi: true, profBonus: 2 },
             5: { features: ['Extra Attack (1)', 'Level 2 Spell Slots (2 slots)'], profBonus: 3 },
             6: { features: ['Aura of Protection (+CHA to all saves for allies within 10 ft)'], profBonus: 3 },
@@ -185,6 +185,168 @@ export const CORE_DND_PROGRESSIONS = {
             18: { features: ['Aura Expansion (Auras extend to 30 ft)'], profBonus: 6 },
             19: { features: ['Ability Score Improvement (or Feat)'], asi: true, profBonus: 6 },
             20: { features: ['Holy Champion Avatar (Radiant flight & empowered strike)'], profBonus: 6 },
+        },
+    },
+    bard: {
+        className: 'Bard',
+        hitDie: 'd8',
+        primaryStats: ['CHA', 'DEX', 'CON'],
+        levels: {
+            1: { features: ['Bardic Inspiration (d6, CHA/long rest)', 'Spellcasting'], spellSlots: { 1: 2 }, profBonus: 2 },
+            2: { features: ['Jack of All Trades (+1/2 prof to non-proficient checks)', 'Song of Rest (d6)'], spellSlots: { 1: 3 }, profBonus: 2 },
+            3: { features: ['Bardic College Specialization: Cutting Words & Bonus Lore', 'Expertise (2 skills)'], subclass: true, spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
+            4: { features: [], asi: true, spellSlots: { 1: 4, 2: 3 }, profBonus: 2 },
+            5: { features: ['Bardic Inspiration (d8)', 'Font of Inspiration (Regain on short rest)'], spellSlots: { 1: 4, 2: 3, 3: 2 }, profBonus: 3 },
+            6: { features: ['Countercharm (Advantage vs Frightened/Charmed for allies)', 'Additional Magical Secrets (2 spells from any class)'], spellSlots: { 1: 4, 2: 3, 3: 3 }, profBonus: 3 },
+            7: { features: ['Resonant Performance (Allies inspired gain temp HP equal to CHA mod)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 1 }, profBonus: 3 },
+            8: { features: [], asi: true, spellSlots: { 1: 4, 2: 3, 3: 3, 4: 2 }, profBonus: 3 },
+            9: { features: ['Song of Rest (d8)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 }, profBonus: 4 },
+            10: { features: ['Bardic Inspiration (d10)', 'Expertise (2 additional skills)', 'Magical Secrets (2 spells)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2 }, profBonus: 4 },
+            11: { features: ['Silver Tongue (Minimum roll of 10 on Persuasion/Deception)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 }, profBonus: 4 },
+            12: { features: [], asi: true, profBonus: 4 },
+            13: { features: ['Song of Rest (d10)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1 }, profBonus: 5 },
+            14: { features: ['Peerless Skill (Add Bardic Inspiration die to your own ability checks)', 'Magical Secrets (2 spells)'], profBonus: 5 },
+            15: { features: ['Bardic Inspiration (d12)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1 }, profBonus: 5 },
+            16: { features: [], asi: true, profBonus: 5 },
+            17: { features: ['Song of Rest (d12)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1, 9: 1 }, profBonus: 6 },
+            18: { features: ['Magical Secrets (2 spells from any class)'], spellSlots: { 5: 3 }, profBonus: 6 },
+            19: { features: [], asi: true, spellSlots: { 6: 2 }, profBonus: 6 },
+            20: { features: ['Superior Inspiration (Regain 1 Bardic Inspiration on initiative if at 0)'], spellSlots: { 7: 2 }, profBonus: 6 },
+        },
+    },
+    druid: {
+        className: 'Druid',
+        hitDie: 'd8',
+        primaryStats: ['WIS', 'CON', 'DEX'],
+        levels: {
+            1: { features: ['Druidic', 'Spellcasting'], spellSlots: { 1: 2 }, profBonus: 2 },
+            2: { features: ['Wild Shape (2/rest, CR 1/2)', 'Druid Circle Specialization: Natural Recovery'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
+            3: { features: ['Circle Spells (Always-prepared terrain magic)'], spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
+            4: { features: ['Wild Shape Improvement (Swim speed)'], asi: true, spellSlots: { 1: 4, 2: 3 }, profBonus: 2 },
+            5: { features: ['Primal Communion (Advantage on Nature/Survival in wild terrain)'], spellSlots: { 1: 4, 2: 3, 3: 2 }, profBonus: 3 },
+            6: { features: ['Land Stride (Ignore nonmagical difficult terrain)', 'Primal Strike (Beast attacks count as magical)'], spellSlots: { 1: 4, 2: 3, 3: 3 }, profBonus: 3 },
+            7: { features: ['Elemental Affinity (Resistance to poison and nature hazards)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 1 }, profBonus: 3 },
+            8: { features: ['Wild Shape Improvement (Flying speed, CR 1)'], asi: true, spellSlots: { 1: 4, 2: 3, 3: 3, 4: 2 }, profBonus: 3 },
+            9: { features: ['Verdant Ward (Allies within 10 ft gain +2 to saves vs nature/elemental effects)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 }, profBonus: 4 },
+            10: { features: ['Nature Ward (Immune to poison/disease and charm/fear from elementals or fey)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2 }, profBonus: 4 },
+            11: { features: ['Elemental Wild Shape (Expend 2 Wild Shapes to become an Elemental)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 }, profBonus: 4 },
+            12: { features: [], asi: true, profBonus: 4 },
+            13: { features: ['Primal Sanctuary (Beasts and plants hesitate to attack you)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1 }, profBonus: 5 },
+            14: { features: ['Thousand Forms (Cast Alter Self at will)'], profBonus: 5 },
+            15: { features: [' Elder Grove Mastery'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1 }, profBonus: 5 },
+            16: { features: [], asi: true, profBonus: 5 },
+            17: { features: ['Awakened Wilds'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1, 9: 1 }, profBonus: 6 },
+            18: { features: ['Timeless Body', 'Beast Spells (Cast spells while in Wild Shape)'], spellSlots: { 5: 3 }, profBonus: 6 },
+            19: { features: [], asi: true, spellSlots: { 6: 2 }, profBonus: 6 },
+            20: { features: ['Archdruid (Unlimited Wild Shape)'], spellSlots: { 7: 2 }, profBonus: 6 },
+        },
+    },
+    monk: {
+        className: 'Monk',
+        hitDie: 'd8',
+        primaryStats: ['DEX', 'WIS', 'CON'],
+        levels: {
+            1: { features: ['Unarmored Defense (10+DEX+WIS)', 'Martial Arts (1d4 unarmed strike, bonus unarmed attack)'], profBonus: 2 },
+            2: { features: ['Ki (2 points/short rest: Flurry of Blows, Patient Defense, Step of the Wind)', 'Unarmored Movement (+10 ft)'], profBonus: 2 },
+            3: { features: ['Monastic Tradition: Open Hand Technique (Knock prone or push on Flurry)', 'Deflect Missiles'], subclass: true, profBonus: 2 },
+            4: { features: ['Slow Fall (Reduce falling damage by 5 x Level)'], asi: true, profBonus: 2 },
+            5: { features: ['Extra Attack (1)', 'Stunning Strike (1 Ki: CON save or stunned)', 'Martial Arts (1d6)'], profBonus: 3 },
+            6: { features: ['Ki-Empowered Strikes (Unarmed strikes count as magical)', 'Wholeness of Body (Heal 3 x Level HP 1/day)', 'Unarmored Movement (+15 ft)'], profBonus: 3 },
+            7: { features: ['Evasion (No damage on DEX save success)', 'Stillness of Mind (End charmed or frightened)'], profBonus: 3 },
+            8: { features: [], asi: true, profBonus: 3 },
+            9: { features: ['Unarmored Movement Improvement (Run across vertical surfaces and liquids)'], profBonus: 4 },
+            10: { features: ['Purity of Body (Immune to disease and poison)', 'Unarmored Movement (+20 ft)'], profBonus: 4 },
+            11: { features: ['Tranquility (Sanctuary effect after long rest)', 'Martial Arts (1d8)'], profBonus: 4 },
+            12: { features: [], asi: true, profBonus: 4 },
+            13: { features: ['Tongue of the Sun and Moon (Understand all spoken languages)'], profBonus: 5 },
+            14: { features: ['Diamond Soul (Proficiency in all saving throws; spend 1 Ki to reroll)', 'Unarmored Movement (+25 ft)'], profBonus: 5 },
+            15: { features: ['Timeless Body (No frailty from old age; need no food or water)'], profBonus: 5 },
+            16: { features: [], asi: true, profBonus: 5 },
+            17: { features: ['Quivering Palm (3 Ki: lethal vibrations)', 'Martial Arts (1d10)'], profBonus: 6 },
+            18: { features: ['Empty Body (4 Ki: Invisible and resistant to all damage except force)', 'Unarmored Movement (+30 ft)'], profBonus: 6 },
+            19: { features: [], asi: true, profBonus: 6 },
+            20: { features: ['Perfect Self (Regain 4 Ki on initiative if at 0 Ki)'], profBonus: 6 },
+        },
+    },
+    ranger: {
+        className: 'Ranger',
+        hitDie: 'd10',
+        primaryStats: ['DEX', 'WIS', 'CON'],
+        levels: {
+            1: { features: ['Favored Enemy (Advantage on tracking & lore)', 'Natural Explorer (Deft Explorer)'], profBonus: 2 },
+            2: { features: ['Fighting Style', 'Spellcasting (Hunter\'s Mark)'], spellSlots: { 1: 2 }, profBonus: 2 },
+            3: { features: ['Ranger Conclave Specialization: Colossus Slayer (+1d8 to wounded targets)', 'Primeval Awareness'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
+            4: { features: [], asi: true, profBonus: 2 },
+            5: { features: ['Extra Attack (1)'], spellSlots: { 1: 4, 2: 2 }, profBonus: 3 },
+            6: { features: ['Favored Enemy & Greater Explorer Improvement (+5 ft speed, climb/swim)'], profBonus: 3 },
+            7: { features: ['Defensive Tactics (Multiattack Defense & Escape the Horde)'], spellSlots: { 1: 4, 2: 3 }, profBonus: 3 },
+            8: { features: ['Land\'s Stride (Ignore nonmagical difficult terrain)'], asi: true, profBonus: 3 },
+            9: { features: ['Conclave Mastery'], spellSlots: { 1: 4, 2: 3, 3: 2 }, profBonus: 4 },
+            10: { features: ['Hide in Plain Sight (Nature\'s Veil: turn invisible as bonus action)'], profBonus: 4 },
+            11: { features: ['Multiattack (Volley or Whirlwind Attack)'], spellSlots: { 1: 4, 2: 3, 3: 3 }, profBonus: 4 },
+            12: { features: [], asi: true, profBonus: 4 },
+            13: { features: ['Apex Tracker'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 1 }, profBonus: 5 },
+            14: { features: ['Vanish (Hide as a bonus action; cannot be tracked nonmagically)'], profBonus: 5 },
+            15: { features: ['Superior Hunter\'s Defense (Uncanny Dodge or Stand Against the Tide)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 2 }, profBonus: 5 },
+            16: { features: [], asi: true, profBonus: 5 },
+            17: { features: ['Wilderness Paragon'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 }, profBonus: 6 },
+            18: { features: ['Feral Senses (Detect invisible creatures within 30 ft)'], profBonus: 6 },
+            19: { features: [], asi: true, spellSlots: { 5: 2 }, profBonus: 6 },
+            20: { features: ['Foe Slayer (Add WIS modifier to attack or damage roll 1/turn)'], profBonus: 6 },
+        },
+    },
+    sorcerer: {
+        className: 'Sorcerer',
+        hitDie: 'd6',
+        primaryStats: ['CHA', 'CON', 'DEX'],
+        levels: {
+            1: { features: ['Spellcasting', 'Sorcerous Origin: Draconic Resilience (13+DEX AC & +1 HP/lvl)'], subclass: true, spellSlots: { 1: 2 }, profBonus: 2 },
+            2: { features: ['Font of Magic (Sorcery Points equal to Level; Flexible Casting)'], spellSlots: { 1: 3 }, profBonus: 2 },
+            3: { features: ['Metamagic (2 options: Twinned Spell, Quickened Spell, Careful Spell, Subtle Spell)'], spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
+            4: { features: [], asi: true, spellSlots: { 1: 4, 2: 3 }, profBonus: 2 },
+            5: { features: ['Magical Guidance (Spend 1 Sorcery Point to reroll a failed ability check)'], spellSlots: { 1: 4, 2: 3, 3: 2 }, profBonus: 3 },
+            6: { features: ['Elemental Affinity (Add CHA mod to elemental spell damage & gain resistance)'], spellSlots: { 1: 4, 2: 3, 3: 3 }, profBonus: 3 },
+            7: { features: ['Arcane Surge'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 1 }, profBonus: 3 },
+            8: { features: [], asi: true, spellSlots: { 1: 4, 2: 3, 3: 3, 4: 2 }, profBonus: 3 },
+            9: { features: ['Bloodline Conduit'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 }, profBonus: 4 },
+            10: { features: ['Metamagic (1 additional option)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2 }, profBonus: 4 },
+            11: { features: ['High Sorcery'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 }, profBonus: 4 },
+            12: { features: [], asi: true, profBonus: 4 },
+            13: { features: ['Origin Focus'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1 }, profBonus: 5 },
+            14: { features: ['Draconic Wings (At-will flying speed equal to walking speed)'], profBonus: 5 },
+            15: { features: ['Sovereign Arcana'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1 }, profBonus: 5 },
+            16: { features: [], asi: true, profBonus: 5 },
+            17: { features: ['Metamagic (1 additional option)'], spellSlots: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1, 9: 1 }, profBonus: 6 },
+            18: { features: ['Draconic Presence (Spend 5 Sorcery Points for 60 ft awe/fear aura)'], spellSlots: { 5: 3 }, profBonus: 6 },
+            19: { features: [], asi: true, spellSlots: { 6: 2 }, profBonus: 6 },
+            20: { features: ['Sorcerous Restoration (Regain 4 Sorcery Points on every short rest)'], spellSlots: { 7: 2 }, profBonus: 6 },
+        },
+    },
+    warlock: {
+        className: 'Warlock',
+        hitDie: 'd8',
+        primaryStats: ['CHA', 'CON', 'DEX'],
+        levels: {
+            1: { features: ['Otherworldly Patron: Dark One\'s Blessing (CHA+Level temp HP on kill)', 'Pact Magic (Short Rest Slots)'], subclass: true, spellSlots: { 1: 1 }, profBonus: 2 },
+            2: { features: ['Eldritch Invocations (2 invocations: Agonizing Blast, Devil\'s Sight)'], spellSlots: { 1: 2 }, profBonus: 2 },
+            3: { features: ['Pact Boon (Pact of the Blade, Chain, or Tome)'], spellSlots: { 2: 2 }, profBonus: 2 },
+            4: { features: [], asi: true, profBonus: 2 },
+            5: { features: ['Eldritch Invocations (3 total)'], spellSlots: { 3: 2 }, profBonus: 3 },
+            6: { features: ['Dark One\'s Own Luck (Add d10 to an ability check or saving throw 1/rest)'], profBonus: 3 },
+            7: { features: ['Eldritch Invocations (4 total)'], spellSlots: { 4: 2 }, profBonus: 3 },
+            8: { features: [], asi: true, profBonus: 3 },
+            9: { features: ['Eldritch Invocations (5 total)'], spellSlots: { 5: 2 }, profBonus: 4 },
+            10: { features: ['Fiendish Resilience (Choose 1 damage resistance after each rest)'], profBonus: 4 },
+            11: { features: ['Mystic Arcanum (6th-level spell 1/long rest)'], spellSlots: { 5: 3 }, profBonus: 4 },
+            12: { features: ['Eldritch Invocations (6 total)'], asi: true, profBonus: 4 },
+            13: { features: ['Mystic Arcanum (7th-level spell 1/long rest)'], profBonus: 5 },
+            14: { features: ['Hurl Through Hell (Banish hit target for 10d10 psychic damage 1/long rest)'], profBonus: 5 },
+            15: { features: ['Mystic Arcanum (8th-level spell 1/long rest)', 'Eldritch Invocations (7 total)'], profBonus: 5 },
+            16: { features: [], asi: true, profBonus: 5 },
+            17: { features: ['Mystic Arcanum (9th-level spell 1/long rest)'], spellSlots: { 5: 4 }, profBonus: 6 },
+            18: { features: ['Eldritch Invocations (8 total)'], profBonus: 6 },
+            19: { features: [], asi: true, profBonus: 6 },
+            20: { features: ['Eldritch Master (Spend 1 minute to regain all Pact Magic slots 1/long rest)'], profBonus: 6 },
         },
     },
 };
@@ -350,8 +512,10 @@ export function getCanonicalDndProgression(className) {
     if (!className || typeof className !== 'string') return null;
     const lower = className.trim().toLowerCase();
 
+    // Prefer exact word-boundary match so e.g. "Bombardier" does not match "bard"
     for (const [key, prog] of Object.entries(CORE_DND_PROGRESSIONS)) {
-        if (lower.includes(key)) {
+        const wordRe = new RegExp(`\\b${key}\\b`, 'i');
+        if (wordRe.test(lower)) {
             return normalizeBlueprint(JSON.parse(JSON.stringify(prog)));
         }
     }
@@ -536,8 +700,20 @@ export async function generateProgressionBlueprintViaConcierge({ character = {},
         if (parsed) {
             return parsed;
         }
+        if (typeof toastr !== 'undefined' && typeof toastr.warning === 'function') {
+            toastr.warning(
+                `Could not parse custom 1–20 table for "${character.class || 'Adventurer'}"; loaded balanced standard progression instead.`,
+                'Class Codex Fallback',
+            );
+        }
     } catch (err) {
         console.warn('[MultiHog Companion] Concierge blueprint generation error:', err);
+        if (typeof toastr !== 'undefined' && typeof toastr.warning === 'function') {
+            toastr.warning(
+                `Concierge unavailable (${err?.message || 'network timeout'}); loaded balanced standard progression for "${character.class || 'Adventurer'}".`,
+                'Class Codex Fallback',
+            );
+        }
     }
 
     // High quality balanced fallback if network or LLM fails

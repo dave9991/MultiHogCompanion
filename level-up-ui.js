@@ -10,10 +10,11 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, ensureNamedFeature } from './level-up-runner.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection } from './level-up-runner.js';
 import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, normalizeBlueprint, normalizeLevelEntry } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
+import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
 
 let _activeModalElement = null;
 
@@ -72,12 +73,14 @@ export function openLevelUpModal({
 }) {
     closeLevelUpModal();
 
+    const sysKeyLower = (dossier?.meta?.systemKey || '').toLowerCase();
     const isPbta = !!(
-        dossier?.meta?.systemKey === 'pbta'
+        sysKeyLower === 'pbta'
+        || (sysKeyLower && PBTA_GENRES[sysKeyLower])
         || dossier?.protagonist?.isPbta
         || dossier?.protagonist?.playbook
         || dossier?.protagonist?.harm
-        || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse/i.test(dossier.meta.systemLabel))
+        || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel))
     );
 
     // Normalize on load so previously stored/LLM blueprints never show HP/ASI/slot bookkeeping as features
@@ -115,6 +118,88 @@ export function openLevelUpModal({
     const stage2Title = isPbta
         ? (isRespec ? `🔄 Playbook Tuning Desk — ${proposal.characterName}` : `⚡ Playbook Advancement Desk — ${proposal.characterName}`)
         : (isRespec ? `🔄 Respec & Tuning Desk — ${proposal.characterName}` : `⬆ Level Up Available — ${proposal.characterName} (Level ${proposal.currentLevel} ➔ ${proposal.targetLevel})`);
+
+    const pbtaStatNames = (Array.isArray(proposal.statNames) && proposal.statNames.length > 0)
+        ? proposal.statNames
+        : Object.keys(proposal.stats || {});
+    const pbtaStatNamesStr = pbtaStatNames.length > 0
+        ? pbtaStatNames.join(', ')
+        : 'Might, Agility, Wits, Heart, Arcana';
+
+    // PbtA Advancement Picker markup (when advancing a PbtA playbook)
+    let pbtaAdvanceSection = '';
+    if (isPbta && !isRespec && Array.isArray(proposal.advanceOptions)) {
+        const firstAvailable = proposal.advanceOptions.find(o => !o.exhausted)?.id || proposal.advanceOptions[0]?.id || 'stat_boost';
+        const optionRowsHtml = proposal.advanceOptions.map(opt => {
+            const isChecked = opt.id === firstAvailable && !opt.exhausted;
+            const disabledAttr = opt.exhausted ? 'disabled' : '';
+            let detailHtml = '';
+            if (opt.id === 'stat_boost') {
+                const statOpts = pbtaStatNames.map(s => {
+                    const cur = Number(proposal.stats?.[s] ?? 0);
+                    const maxed = cur >= 3;
+                    const curStr = cur >= 0 ? `+${cur}` : String(cur);
+                    const nextVal = Math.min(3, cur + 1);
+                    const nextStr = nextVal >= 0 ? `+${nextVal}` : String(nextVal);
+                    return `<option value="${escapeHtml(s)}" ${maxed ? 'disabled' : ''}>${escapeHtml(s)} (${curStr} ➔ ${maxed ? 'Max +3' : nextStr})</option>`;
+                }).join('');
+                detailHtml = `
+                <div class="mhc-pbta-adv-detail" data-adv-detail="stat_boost" style="margin: 6px 0 4px 24px; ${isChecked ? '' : 'display:none;'}">
+                    <label style="font-size: 0.85em; color: #94a3b8; margin-right: 6px;">Select Stat:</label>
+                    <select id="mhc_pbta_stat_select" class="text_pole" style="width: auto; display: inline-block;">${statOpts}</select>
+                </div>`;
+            } else if (opt.id === 'playbook_move') {
+                const moveOpts = (opt.suggestedMoves || []).map((m, i) =>
+                    `<option value="${escapeHtml(m)}" ${i === 0 ? 'selected' : ''}>${escapeHtml(m.split('(')[0].trim())}</option>`
+                ).join('');
+                const initialMove = opt.suggestedMoves?.[0] || '';
+                detailHtml = `
+                <div class="mhc-pbta-adv-detail" data-adv-detail="playbook_move" style="margin: 6px 0 4px 24px; display: ${isChecked ? 'flex' : 'none'}; flex-direction: column; gap: 6px;">
+                    <select id="mhc_pbta_move_select" class="text_pole">
+                        ${moveOpts}
+                        <option value="custom">Custom Move (write below or ask Playbook Guide)</option>
+                    </select>
+                    <input type="text" id="mhc_pbta_custom_move_input" class="text_pole" value="${escapeHtml(initialMove)}" placeholder="Move Name [+Stat] (When [trigger], roll +[Stat]...)" />
+                </div>`;
+            } else if (opt.id === 'cross_playbook_move') {
+                const crossOpts = (opt.suggestedMoves || []).map((m, i) =>
+                    `<option value="${escapeHtml(m)}" ${i === 0 ? 'selected' : ''}>${escapeHtml(m.split('(')[0].trim())}</option>`
+                ).join('');
+                const initialCross = opt.suggestedMoves?.[0] || '';
+                detailHtml = `
+                <div class="mhc-pbta-adv-detail" data-adv-detail="cross_playbook_move" style="margin: 6px 0 4px 24px; display: ${isChecked ? 'flex' : 'none'}; flex-direction: column; gap: 6px;">
+                    <select id="mhc_pbta_cross_move_select" class="text_pole">
+                        ${crossOpts}
+                        <option value="custom">Custom Cross-Playbook Move</option>
+                    </select>
+                    <input type="text" id="mhc_pbta_custom_cross_move_input" class="text_pole" value="${escapeHtml(initialCross)}" placeholder="Move Name [+Stat] (When [trigger], roll +[Stat]...)" />
+                </div>`;
+            }
+
+            return `
+            <div class="mhc-pbta-advance-option ${opt.exhausted ? 'mhc-adv-exhausted' : ''}" data-adv-id="${escapeHtml(opt.id)}" style="padding: 4px 0; ${opt.exhausted ? 'opacity: 0.5;' : ''}">
+                <label class="mhc-radio-label" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                    <span>
+                        <input type="radio" name="mhc_pbta_advance_pick" value="${escapeHtml(opt.id)}" ${isChecked ? 'checked' : ''} ${disabledAttr} />
+                        <strong>${escapeHtml(opt.label)}</strong>
+                    </span>
+                    <span class="mhc-advance-usage-badge" style="font-size: 0.8em; color: #94a3b8;">${opt.exhausted ? 'Max Reached' : `${opt.used}/${opt.maxTimes} taken`}</span>
+                </label>
+                ${detailHtml}
+            </div>`;
+        }).join('');
+
+        pbtaAdvanceSection = `
+        <div class="mhc-card-section" id="mhc-pbta-advance-picker-card">
+            <div class="mhc-section-title" style="justify-content: space-between;">
+                <span><i class="fa-solid fa-bolt" style="color: #fbbf24;"></i> Choose Your Playbook Advance</span>
+                <span style="font-size: 0.8em; color: #9ca3af;">Advances Taken: ${(proposal.advancesTaken || []).length}</span>
+            </div>
+            <div class="mhc-asi-radio-group" id="mhc-pbta-advance-options">
+                ${optionRowsHtml}
+            </div>
+        </div>`;
+    }
 
     // ASI / Feat markup if due
     let asiSection = '';
@@ -173,8 +258,8 @@ export function openLevelUpModal({
     // Stage 2 Subbadges HTML
     const stage2SubBadgesHtml = isPbta ? `
         <span class="mhc-badge-class"><i class="fa-solid fa-book-sparkles"></i> Playbook: ${escapeHtml(proposal.playbookName || proposal.className)}</span>
-        <span class="mhc-badge-hitdie" style="border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;"><i class="fa-solid fa-heart-crack"></i> Harm Capacity: ${proposal.harm?.max || 4}</span>
-        <span class="mhc-badge-hitdie" style="border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;"><i class="fa-solid fa-shield"></i> Armor: ${proposal.harm?.armor ?? 1}</span>
+        <span class="mhc-badge-hitdie" id="mhc-pbta-harm-badge" style="border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;"><i class="fa-solid fa-heart-crack"></i> Harm Capacity: ${proposal.harm?.max || 4}</span>
+        <span class="mhc-badge-hitdie" id="mhc-pbta-armor-badge" style="border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;"><i class="fa-solid fa-shield"></i> Armor: ${proposal.harm?.armor ?? 1}</span>
         <span class="mhc-badge-mode">${isRespec ? 'Tuning & Respec' : 'Playbook Advance'}</span>
     ` : `
         <span class="mhc-badge-class" id="mhc-stage2-class-badge"><i class="fa-solid fa-shield-halved"></i> ${escapeHtml(proposal.className)}</span>
@@ -182,27 +267,47 @@ export function openLevelUpModal({
         <span class="mhc-badge-mode">${isRespec ? 'Tuning & Respec' : `Advancing to Level ${proposal.targetLevel}`}</span>
     `;
 
+    const pbtaStatsBarHtml = isPbta ? `
+        <div class="mhc-pbta-stats-bar" id="mhc-pbta-stats-row" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
+            ${pbtaStatNames.map(s => {
+                const v = Number(proposal.stats?.[s] ?? 0);
+                const disp = v >= 0 ? `+${v}` : String(v);
+                return isRespec ? `
+                <label class="mhc-hp-pill" style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;">
+                    <span class="mhc-hp-label">${escapeHtml(s)}:</span>
+                    <input type="number" class="text_pole mhc-pbta-stat-input" data-stat="${escapeHtml(s)}" min="-2" max="3" value="${v}" style="width: 48px; padding: 2px 4px; text-align: center;" />
+                </label>` : `
+                <div class="mhc-hp-pill" data-stat-pill="${escapeHtml(s)}" style="padding: 3px 8px;">
+                    <span class="mhc-hp-label">${escapeHtml(s)}:</span>
+                    <span class="mhc-hp-val" data-stat-val="${escapeHtml(s)}">${disp}</span>
+                </div>`;
+            }).join('')}
+        </div>
+    ` : '';
+
     // Vitality card HTML
     const vitalitySectionHtml = isPbta ? `
     <div class="mhc-card-section">
-        <div class="mhc-section-title"><i class="fa-solid fa-heart-pulse"></i> Harm & Resilience Clocks</div>
-        <div class="mhc-hp-row">
+        <div class="mhc-section-title"><i class="fa-solid fa-heart-pulse"></i> Harm, Armor &amp; Playbook Stats</div>
+        <div class="mhc-hp-row" style="flex-wrap: wrap; gap: 8px;">
             <div class="mhc-hp-pill">
                 <span class="mhc-hp-label">Harm Track:</span>
-                <span class="mhc-hp-val" id="mhc-new-hp-display" style="color: ${(proposal.harm?.current || 0) > 0 ? '#f87171' : '#4ade80'};">${proposal.harm?.current || 0} / ${proposal.harm?.max || 4}</span>
+                <span class="mhc-hp-val" id="mhc-new-hp-display" style="color: ${(proposal.harm?.current || 0) > 0 ? '#f87171' : '#4ade80'};">${proposal.harm?.current || 0} / <span id="mhc-pbta-harm-max-val">${proposal.harm?.max || 4}</span></span>
             </div>
-            <div class="mhc-hp-pill" style="border-color: rgba(59, 130, 246, 0.35);">
+            <label class="mhc-hp-pill" style="border-color: rgba(239, 68, 68, 0.35); display: inline-flex; align-items: center; gap: 4px;">
+                <span class="mhc-hp-label">Max Harm:</span>
+                <input type="number" id="mhc_pbta_harm_max_input" class="text_pole" min="2" max="8" value="${proposal.harm?.max || 4}" style="width: 48px; padding: 2px 4px; text-align: center;" />
+            </label>
+            <label class="mhc-hp-pill" style="border-color: rgba(59, 130, 246, 0.35); display: inline-flex; align-items: center; gap: 4px;">
                 <span class="mhc-hp-label">Armor:</span>
-                <span class="mhc-hp-val">${proposal.harm?.armor ?? 1}</span>
-            </div>
+                <input type="number" id="mhc_pbta_armor_input" class="text_pole" min="0" max="4" value="${proposal.harm?.armor ?? 1}" style="width: 48px; padding: 2px 4px; text-align: center;" />
+            </label>
             <div class="mhc-hp-pill" style="border-color: rgba(255, 255, 255, 0.15);">
                 <span class="mhc-hp-label">Status:</span>
                 <span class="mhc-hp-val" style="font-size: 0.9em; font-weight: 500;">${escapeHtml(proposal.status || 'Healthy')}</span>
             </div>
-            <div class="mhc-hp-toggle-group">
-                <span style="font-size: 0.85em; color: #9ca3af; align-self: center;"><i class="fa-solid fa-lock"></i> Playbook Harm Clock Active</span>
-            </div>
         </div>
+        ${pbtaStatsBarHtml}
     </div>
     ` : `
     <div class="mhc-card-section">
@@ -286,7 +391,7 @@ export function openLevelUpModal({
     if (isPbta) {
         stage2QuickChipsHtml = `
         <button class="mhc-chip" data-prompt="Suggest a new Playbook Move fitting my archetype with a 10+, 7-9, and 6- trigger">🔄 Suggest new Move</button>
-        <button class="mhc-chip" data-prompt="Help me rebalance my stats (Might, Agility, Wits, Heart, Arcana) within the -1 to +3 range">⚡ Rebalance stats</button>
+        <button class="mhc-chip" data-prompt="Help me rebalance my stats (${escapeHtml(pbtaStatNamesStr)}) within the -1 to +3 range">⚡ Rebalance stats</button>
         <button class="mhc-chip" data-prompt="Review my active conditions, harm capacity, and gear">📜 Review conditions & harm</button>
         `;
     } else if (isRespec) {
@@ -440,6 +545,9 @@ export function openLevelUpModal({
                 <div class="mhc-advancement-cards-col">
                     <!-- Vitality / Harm Section -->
                     ${vitalitySectionHtml}
+
+                    <!-- PbtA Advancement Picker (when advancing a playbook) -->
+                    ${pbtaAdvanceSection}
 
                     <!-- Class Features & Active Traits / Moves -->
                     <div class="mhc-card-section">
@@ -1063,8 +1171,9 @@ GUIDELINES (D&D LITE PHILOSOPHY):
     const manualPerkInput = modal.querySelector('#mhc_manual_perk_input');
     const manualPerkAddBtn = modal.querySelector('#mhc_manual_perk_add_btn');
     const handleManualAdd = () => {
-        const val = manualPerkInput?.value?.trim();
-        if (val) {
+        const rawVal = manualPerkInput?.value?.trim();
+        if (rawVal) {
+            const val = isPbta ? formatMoveAsPill(rawVal) : rawVal;
             proposal.newFeatures = proposal.newFeatures || [];
             const key = extractFeatureKey(val);
             const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === key);
@@ -1090,8 +1199,8 @@ GUIDELINES (D&D LITE PHILOSOPHY):
     let initialGreeting = '';
     if (isPbta) {
         initialGreeting = isRespec
-            ? `Greetings, ${proposal.characterName}! Welcome to your Playbook Tuning Desk. You are walking the path of ${proposal.playbookName || proposal.className}. Here we can review your Playbook Moves, rebalance stats (-1 to +3: Might, Agility, Wits, Heart, Arcana), customize techniques, or adjust gear and conditions without D&D level constraints. How would you like to refine your playbook?`
-            : `Greetings, ${proposal.characterName}! You have reached the milestone to advance your Playbook as ${proposal.playbookName || proposal.className}. I am at your service to suggest new Playbook Moves, advance your stats, or clear conditions for your journey.`;
+            ? `Greetings, ${proposal.characterName}! Welcome to your Playbook Tuning Desk. You are walking the path of ${proposal.playbookName || proposal.className}. Here we can review your Playbook Moves, rebalance stats (-1 to +3: ${pbtaStatNamesStr}), customize techniques, or adjust gear and conditions without D&D level constraints. How would you like to refine your playbook?`
+            : `Greetings, ${proposal.characterName}! You have reached the milestone to advance your Playbook as ${proposal.playbookName || proposal.className}. Choose a Playbook Advance on the left, or ask me to craft custom Playbook Moves, advance your stats (${pbtaStatNamesStr}), or review your journey.`;
     } else {
         initialGreeting = isRespec
             ? `Greetings, ${proposal.characterName}! Welcome to the Respec & Tuning Desk. You are currently Level ${proposal.currentLevel}. Here we can review your traits, rebalance your combat techniques, customize abilities, or tweak your build without advancing your level. How would you like to refine your character?`
@@ -1143,12 +1252,14 @@ Active Conditions: ${(proposal.conditions || []).join(', ') || 'None'}
 
 STRICT PbtA ARCHITECTURAL RULES:
 1. PURE PbtA RULES ONLY: Disadvantage DOES NOT EXIST in PbtA. There are NO D&D levels (1-20), NO Hit Dice (d6, d8, d10, d12), NO HP rolls, NO Armor Class (AC), NO DC saving throws, and NO spell slots. NEVER use D&D terminology.
-2. Moves & Mechanics: All moves must have a clear fictional trigger, specify which stat to roll (-1 to +3: Might, Agility, Wits, Heart, Arcana), and detail outcomes for 10+ (strong hit), 7-9 (weak hit / compromise), and 6- (miss / GM move). You may use "+1 forward" or "-1 forward" or "hold".
+2. Moves & Mechanics: All moves must have a clear fictional trigger, specify which stat to roll (-1 to +3: ${pbtaStatNamesStr}), and detail outcomes for 10+ (strong hit), 7-9 (weak hit / compromise), and 6- (miss / GM move). You may use "+1 forward" or "-1 forward" or "hold".
 3. Dynamic Move Tweaking: When suggesting or granting a new move, emit:
-   [ADD_FEATURE: Move Name: When [trigger], roll +[STAT]. On a 10+, [strong hit]. On a 7-9, [weak hit].]
+   [ADD_FEATURE: Move Name [+STAT] (When [trigger], roll +[STAT]. On a 10+, [strong hit]. On a 7-9, [weak hit].)]
 4. Move Removal: If the user asks to remove a move, emit:
    [REMOVE_FEATURE: Move Name]
-5. Concise & Atmospheric: Keep your response evocative, narrative, mechanically sharp, and under 130 words.`
+5. Stat Updates: If the user asks to adjust a stat (between -2 and +3), emit:
+   [SET_STAT: StatName | +Value]
+6. Concise & Atmospheric: Keep your response evocative, narrative, mechanically sharp, and under 130 words.`
         : `You are the Level-Up Concierge and RPG systems architect for "${proposal.characterName}", a Level ${proposal.currentLevel} ${proposal.className} advancing to Level ${proposal.targetLevel}.
 Character Stats: ${JSON.stringify(dossier?.protagonist?.stats || {})}
 Hit Die: ${proposal.hitDie}
@@ -1197,7 +1308,8 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             // [ADD_FEATURE: ...]
             const addMatches = [...reply.matchAll(/\[ADD_FEATURE:\s*([^\]]+)\]/gi)];
             for (const match of addMatches) {
-                const feat = match[1].trim();
+                const rawFeat = match[1].trim();
+                const feat = isPbta ? formatMoveAsPill(rawFeat) : rawFeat;
                 if (feat) {
                     const key = extractFeatureKey(feat);
                     const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === key);
@@ -1205,7 +1317,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                         proposal.newFeatures[idx] = feat;
                     } else {
                         proposal.newFeatures.push(feat);
-                        if (typeof toastr !== 'undefined') toastr.info(feat, 'Added New Trait');
+                        if (typeof toastr !== 'undefined') toastr.info(feat, isPbta ? 'Added New Move' : 'Added New Trait');
                     }
                 }
             }
@@ -1215,7 +1327,8 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             for (const match of updateMatches) {
                 const featureName = match[1].trim();
                 const targetKey = extractFeatureKey(featureName);
-                const newText = ensureNamedFeature(featureName, match[2].trim());
+                const rawNewText = ensureNamedFeature(featureName, match[2].trim());
+                const newText = isPbta ? formatMoveAsPill(rawNewText) : rawNewText;
                 const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
                 if (idx >= 0) {
                     proposal.newFeatures[idx] = newText;
@@ -1224,13 +1337,27 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 }
             }
 
+            // [SET_STAT: StatName | Value] (PbtA stat tuning)
+            if (isPbta && proposal.stats) {
+                const statMatches = [...reply.matchAll(/\[SET_STAT:\s*([^|\]]+)\|\s*([+-]?\d+)\s*\]/gi)];
+                for (const match of statMatches) {
+                    const statRaw = match[1].trim();
+                    const statVal = Math.max(-2, Math.min(3, parseInt(match[2], 10)));
+                    const matchKey = Object.keys(proposal.stats).find(k => k.toLowerCase() === statRaw.toLowerCase()) || statRaw;
+                    if (!isNaN(statVal)) {
+                        proposal.stats[matchKey] = statVal;
+                        const statInput = modal.querySelector(`.mhc-pbta-stat-input[data-stat="${matchKey}"]`);
+                        if (statInput) statInput.value = String(statVal);
+                        const statDisp = modal.querySelector(`[data-stat-val="${matchKey}"]`);
+                        if (statDisp) statDisp.textContent = statVal >= 0 ? `+${statVal}` : String(statVal);
+                    }
+                }
+            }
+
             // [REMOVE_FEATURE: ...]
             const removeMatches = [...reply.matchAll(/\[REMOVE_FEATURE:\s*([^\]]+)\]/gi)];
             for (const match of removeMatches) {
-                const targetKey = extractFeatureKey(match[1]);
-                proposal.newFeatures = proposal.newFeatures.filter(f => {
-                    return extractFeatureKey(f) !== targetKey && !f.toLowerCase().includes(targetKey);
-                });
+                proposal.newFeatures = proposal.newFeatures.filter(f => !matchesFeatureRemovalTarget(f, match[1]));
             }
 
             // [ADD_ABILITY: ...]
@@ -1267,10 +1394,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             // [REMOVE_ABILITY: ...]
             const removeAbilityMatches = [...reply.matchAll(/\[REMOVE_ABILITY:\s*([^\]]+)\]/gi)];
             for (const match of removeAbilityMatches) {
-                const targetKey = extractFeatureKey(match[1]);
-                proposal.activeAbilities = proposal.activeAbilities.filter(a => {
-                    return extractFeatureKey(a) !== targetKey && !a.toLowerCase().includes(targetKey);
-                });
+                proposal.activeAbilities = proposal.activeAbilities.filter(a => !matchesFeatureRemovalTarget(a, match[1]));
             }
 
             // [MOVE_TO_ABILITIES: Name]
@@ -1309,6 +1433,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
 
             const cleanReply = reply
                 .replace(/\[(?:ADD|REMOVE|UPDATE|MOVE_TO)_(?:FEATURE|ABILITY|ABILITIES|FEATURES):[^\]]+\]/gi, '')
+                .replace(/\[SET_STAT:[^\]]+\]/gi, '')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
             stage2ChatHistory.push({ role: 'assistant', content: cleanReply || reply });
@@ -1473,9 +1598,107 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
         }
     });
 
+    // PbtA Harm, Armor, Stats & Advance Picker controls
+    if (isPbta) {
+        const harmMaxInput = modal.querySelector('#mhc_pbta_harm_max_input');
+        const armorInput = modal.querySelector('#mhc_pbta_armor_input');
+        const harmMaxValEl = modal.querySelector('#mhc-pbta-harm-max-val');
+        const harmBadgeEl = modal.querySelector('#mhc-pbta-harm-badge');
+        const armorBadgeEl = modal.querySelector('#mhc-pbta-armor-badge');
+
+        harmMaxInput?.addEventListener('change', () => {
+            const v = Math.max(2, Math.min(8, parseInt(harmMaxInput.value, 10) || 4));
+            harmMaxInput.value = String(v);
+            proposal.harm = proposal.harm || { current: 0, max: 4, armor: 1 };
+            proposal.harm.max = v;
+            if (harmMaxValEl) harmMaxValEl.textContent = String(v);
+            if (harmBadgeEl) harmBadgeEl.innerHTML = `<i class="fa-solid fa-heart-crack"></i> Harm Capacity: ${v}`;
+        });
+
+        armorInput?.addEventListener('change', () => {
+            const v = Math.max(0, Math.min(4, parseInt(armorInput.value, 10) || 0));
+            armorInput.value = String(v);
+            proposal.harm = proposal.harm || { current: 0, max: 4, armor: 1 };
+            proposal.harm.armor = v;
+            if (armorBadgeEl) armorBadgeEl.innerHTML = `<i class="fa-solid fa-shield"></i> Armor: ${v}`;
+        });
+
+        modal.querySelectorAll('.mhc-pbta-stat-input').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const statName = inp.getAttribute('data-stat');
+                const v = Math.max(-2, Math.min(3, parseInt(inp.value, 10) || 0));
+                inp.value = String(v);
+                if (statName && proposal.stats) {
+                    proposal.stats[statName] = v;
+                }
+            });
+        });
+
+        // Toggle detail sub-panels when switching PbtA Advance radio options
+        const advRadios = modal.querySelectorAll('input[name="mhc_pbta_advance_pick"]');
+        advRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                const chosen = modal.querySelector('input[name="mhc_pbta_advance_pick"]:checked')?.value;
+                modal.querySelectorAll('.mhc-pbta-adv-detail').forEach(det => {
+                    const id = det.getAttribute('data-adv-detail');
+                    det.style.display = id === chosen ? (id === 'stat_boost' ? 'block' : 'flex') : 'none';
+                });
+            });
+        });
+
+        const pbtaMoveSelect = modal.querySelector('#mhc_pbta_move_select');
+        const pbtaCustomMoveInput = modal.querySelector('#mhc_pbta_custom_move_input');
+        pbtaMoveSelect?.addEventListener('change', () => {
+            if (!pbtaCustomMoveInput) return;
+            if (pbtaMoveSelect.value === 'custom') {
+                pbtaCustomMoveInput.value = '';
+                pbtaCustomMoveInput.focus();
+            } else {
+                pbtaCustomMoveInput.value = pbtaMoveSelect.value;
+            }
+        });
+
+        const pbtaCrossSelect = modal.querySelector('#mhc_pbta_cross_move_select');
+        const pbtaCustomCrossInput = modal.querySelector('#mhc_pbta_custom_cross_move_input');
+        pbtaCrossSelect?.addEventListener('change', () => {
+            if (!pbtaCustomCrossInput) return;
+            if (pbtaCrossSelect.value === 'custom') {
+                pbtaCustomCrossInput.value = '';
+                pbtaCustomCrossInput.focus();
+            } else {
+                pbtaCustomCrossInput.value = pbtaCrossSelect.value;
+            }
+        });
+    }
+
     // Confirm & Apply Advancement
     const confirmBtn = modal.querySelector('#mhc-confirm-apply-btn');
     confirmBtn?.addEventListener('click', () => {
+        if (isPbta && !isRespec) {
+            const selectedAdvType = modal.querySelector('input[name="mhc_pbta_advance_pick"]:checked')?.value;
+            if (selectedAdvType === 'stat_boost') {
+                const statVal = modal.querySelector('#mhc_pbta_stat_select')?.value || pbtaStatNames[0];
+                proposal.pbtaAdvance = { type: 'stat_boost', stat: statVal, amount: 1 };
+            } else if (selectedAdvType === 'playbook_move') {
+                const moveVal = modal.querySelector('#mhc_pbta_custom_move_input')?.value?.trim()
+                    || (modal.querySelector('#mhc_pbta_move_select')?.value !== 'custom' ? modal.querySelector('#mhc_pbta_move_select')?.value : '')
+                    || '';
+                proposal.pbtaAdvance = { type: 'playbook_move', move: moveVal };
+            } else if (selectedAdvType === 'cross_playbook_move') {
+                const crossVal = modal.querySelector('#mhc_pbta_custom_cross_move_input')?.value?.trim()
+                    || (modal.querySelector('#mhc_pbta_cross_move_select')?.value !== 'custom' ? modal.querySelector('#mhc_pbta_cross_move_select')?.value : '')
+                    || '';
+                proposal.pbtaAdvance = { type: 'cross_playbook_move', move: crossVal };
+            } else if (selectedAdvType === 'harm_capacity') {
+                proposal.pbtaAdvance = { type: 'harm_capacity', amount: 1 };
+            } else if (selectedAdvType === 'armor_training') {
+                proposal.pbtaAdvance = { type: 'armor_training', amount: 1 };
+            }
+            if (proposal.pbtaAdvance) {
+                applyPbtaAdvanceSelection(proposal, proposal.pbtaAdvance);
+            }
+        }
+
         const selectedAsiRadio = modal.querySelector('input[name="mhc_asi_pick"]:checked')?.value;
         let asiChoice = null;
         if (selectedAsiRadio === 'optionA') {
@@ -1514,6 +1737,8 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 if (isPbta) {
                     dossier.protagonist.moves = [...(proposal.newFeatures || [])];
                     if (proposal.harm) dossier.protagonist.harm = { ...proposal.harm };
+                    if (proposal.stats) dossier.protagonist.stats = { ...proposal.stats };
+                    if (Array.isArray(proposal.advancesTaken)) dossier.protagonist.advancesTaken = [...proposal.advancesTaken];
                 } else {
                     if (!isRespec) {
                         dossier.protagonist.level = proposal.targetLevel;

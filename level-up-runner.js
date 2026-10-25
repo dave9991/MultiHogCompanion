@@ -9,6 +9,7 @@
 
 import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList } from './level-up-blueprint.js';
 import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
+import { PBTA_GENRES, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
 
 /**
  * Extracts the canonical identity key of a feature or ability (text before '(', ':', or '[').
@@ -75,6 +76,275 @@ export function ensureNamedFeature(rawName, rawText) {
 }
 
 /**
+ * Checks whether a feature or ability string matches a removal directive target by exact canonical key
+ * (preventing substring collisions like removing "Rage" from deleting "Enrage" or "Mindless Rage").
+ *
+ * @param {string} item Existing feature or ability string.
+ * @param {string} rawTarget Target string from [REMOVE_FEATURE: ...] or [REMOVE_ABILITY: ...].
+ * @returns {boolean}
+ */
+export function matchesFeatureRemovalTarget(item, rawTarget) {
+    if (!item || !rawTarget) return false;
+    const itemKey = extractFeatureKey(item);
+    const targetKey = extractFeatureKey(rawTarget);
+    if (!itemKey || !targetKey) return false;
+    if (itemKey === targetKey) return true;
+    return String(item).trim().toLowerCase() === String(rawTarget).trim().toLowerCase();
+}
+
+/**
+ * Canonical PbtA advancement choices and their per-character usage caps.
+ */
+export const PBTA_ADVANCE_CATALOG = [
+    { id: 'stat_boost', label: 'Increase a Stat by +1 (max +3)', maxTimes: 2 },
+    { id: 'playbook_move', label: 'Take a New Move from Your Playbook', maxTimes: 4 },
+    { id: 'cross_playbook_move', label: 'Take a Move from Another Playbook', maxTimes: 2 },
+    { id: 'harm_capacity', label: 'Increase Max Harm Capacity by +1', maxTimes: 1 },
+    { id: 'armor_training', label: 'Increase Armor by +1 (max 3)', maxTimes: 1 },
+];
+
+/**
+ * Resolves the active PbtA genre key ('fantasy', 'scifi', 'horror', etc.) from a dossier.
+ *
+ * @param {object} dossier
+ * @returns {string}
+ */
+export function resolvePbtaGenreKey(dossier) {
+    const candidates = [dossier?.meta?.genre, dossier?.meta?.systemKey]
+        .filter(Boolean)
+        .map(s => String(s).trim().toLowerCase());
+    for (const c of candidates) {
+        if (PBTA_GENRES[c]) return c;
+    }
+    const label = (dossier?.meta?.systemLabel || '').toLowerCase();
+    if (label) {
+        const byLabel = Object.values(PBTA_GENRES).find(g =>
+            label.includes(g.id.toLowerCase()) ||
+            g.label.toLowerCase().includes(label) ||
+            label.includes(g.label.split(' ')[0].toLowerCase())
+        );
+        if (byLabel) return byLabel.id;
+    }
+    const rawStats = dossier?.protagonist?.stats || dossier?.stats || {};
+    const statKeysLower = new Set(Object.keys(rawStats).map(k => k.toLowerCase()));
+    if (statKeysLower.size > 0) {
+        let bestGenre = null;
+        let bestHits = 0;
+        for (const g of Object.values(PBTA_GENRES)) {
+            const hits = g.stats.filter(s => statKeysLower.has(s.toLowerCase())).length;
+            if (hits > bestHits) {
+                bestHits = hits;
+                bestGenre = g.id;
+            }
+        }
+        if (bestGenre && bestHits >= 2) return bestGenre;
+    }
+    return 'fantasy';
+}
+
+/**
+ * Deduplicates PbtA stats case-insensitively into canonical TitleCase keys
+ * (eliminating duplicate 'AGILITY' + 'Agility' pairs from memo parsing).
+ *
+ * @param {object} statsObj Raw stats map.
+ * @param {string} [genreKey='fantasy'] Active PbtA genre key.
+ * @returns {Record<string, number>}
+ */
+export function getCanonicalPbtaStats(statsObj, genreKey = 'fantasy') {
+    const genreStats = PBTA_GENRES[genreKey]?.stats || PBTA_GENRES.fantasy.stats;
+    const canonicalNameByLower = new Map(genreStats.map(s => [s.toLowerCase(), s]));
+    const out = {};
+    if (statsObj && typeof statsObj === 'object') {
+        const seenLower = new Map();
+        for (const [rawKey, rawVal] of Object.entries(statsObj)) {
+            const num = Number(rawVal);
+            if (!Number.isFinite(num)) continue;
+            const lower = rawKey.trim().toLowerCase();
+            if (!lower) continue;
+            const preferred = canonicalNameByLower.get(lower)
+                || (rawKey !== rawKey.toUpperCase() ? rawKey.trim() : (rawKey.charAt(0).toUpperCase() + rawKey.slice(1).toLowerCase()));
+            if (!seenLower.has(lower) || rawKey === preferred) {
+                seenLower.set(lower, { key: preferred, val: num });
+            }
+        }
+        for (const { key, val } of seenLower.values()) {
+            out[key] = val;
+        }
+    }
+    if (Object.keys(out).length === 0) {
+        const defaults = [2, 1, 1, 0, -1];
+        genreStats.forEach((s, idx) => {
+            out[s] = defaults[idx] ?? 0;
+        });
+    }
+    return out;
+}
+
+/**
+ * Expands a short PBTA_GENRES move template ("Move Name (+Stat) — trigger")
+ * into a complete PbtA move pill with 10+ and 7-9 outcomes, remapping the stat
+ * to one of the character's actual stats if needed.
+ *
+ * @param {string} rawTemplate
+ * @param {string[]} charStatNames
+ * @returns {string}
+ */
+function expandGenreMoveTemplate(rawTemplate, charStatNames = []) {
+    const m = String(rawTemplate || '').match(/^([^(—–]+?)\s*\(([^)]+)\)\s*[—–-]\s*(.+)$/);
+    if (!m) return formatMoveAsPill(rawTemplate);
+    const moveName = m[1].trim();
+    const rawStatTag = m[2].trim();
+    const trigger = m[3].trim().replace(/\.$/, '');
+    const statWord = rawStatTag.replace(/[^A-Za-z]/g, '');
+    const matchedStat = charStatNames.find(s => s.toLowerCase() === statWord.toLowerCase())
+        || charStatNames[0]
+        || statWord
+        || 'Stat';
+    return formatMoveAsPill(
+        `${moveName} (+${matchedStat}): When you ${trigger}, roll +${matchedStat}. On a 10+, you succeed cleanly and press your advantage. On a 7-9, it works, but choose a compromise, cost, or hard bargain.`
+    );
+}
+
+/**
+ * Builds the structured PbtA Advance options for a character, enforcing usage caps
+ * from `advancesTaken` and generating genre-appropriate playbook and cross-playbook moves.
+ *
+ * @param {object} dossier Campaign dossier.
+ * @param {object} [proposal=null] Current proposal (or protagonist fallback).
+ * @returns {Array<object>}
+ */
+export function buildPbtaAdvanceOptions(dossier, proposal = null) {
+    const char = dossier?.protagonist || {};
+    const genreKey = proposal?.genreKey || resolvePbtaGenreKey(dossier);
+    const stats = getCanonicalPbtaStats(proposal?.stats || char.stats, genreKey);
+    const statNames = Object.keys(stats);
+    const harm = proposal?.harm || char.harm || { current: 0, max: 4, armor: 1 };
+    const currentMoves = proposal?.newFeatures || char.moves || char.startingMoves || [];
+    const ownedMoveKeys = new Set(currentMoves.map(m => extractFeatureKey(m)));
+    const advancesTaken = Array.isArray(proposal?.advancesTaken)
+        ? proposal.advancesTaken
+        : (Array.isArray(char.advancesTaken) ? char.advancesTaken : []);
+
+    const usedCounts = {};
+    for (const entry of advancesTaken) {
+        const id = typeof entry === 'string' ? entry : entry?.type;
+        if (id) usedCounts[id] = (usedCounts[id] || 0) + 1;
+    }
+
+    const activeGenre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const topStat = statNames[0] || 'Might';
+    const secondStat = statNames[1] || topStat;
+
+    // Playbook moves: genre moves + signature archetype moves not yet owned
+    const rawPlaybookTemplates = [
+        ...(activeGenre.moves || []),
+        `Signature Mastery (+${topStat}) — bring your playbook's signature discipline to bear under extreme pressure`,
+        `Veteran Instincts (+${secondStat}) — read the hidden danger before a trap or ambush springs`,
+        `Unbreakable Resolve (+${topStat}) — stand your ground and shield an ally from an incoming blow`,
+    ];
+    const suggestedPlaybookMoves = rawPlaybookTemplates
+        .map(t => expandGenreMoveTemplate(t, statNames))
+        .filter(m => !ownedMoveKeys.has(extractFeatureKey(m)));
+
+    // Cross-playbook moves: sample iconic moves from other genres mapped to the character's stats
+    const otherGenres = Object.values(PBTA_GENRES).filter(g => g.id !== activeGenre.id);
+    const suggestedCrossMoves = [];
+    for (const g of otherGenres) {
+        if (g.moves && g.moves[0]) {
+            const expanded = expandGenreMoveTemplate(g.moves[0], statNames);
+            if (!ownedMoveKeys.has(extractFeatureKey(expanded))) {
+                suggestedCrossMoves.push(expanded);
+            }
+        }
+        if (suggestedCrossMoves.length >= 6) break;
+    }
+
+    const eligibleStats = statNames.filter(s => (stats[s] ?? 0) < 3);
+
+    return PBTA_ADVANCE_CATALOG.map(def => {
+        const used = usedCounts[def.id] || 0;
+        let exhausted = used >= def.maxTimes;
+        if (def.id === 'stat_boost' && eligibleStats.length === 0) exhausted = true;
+        if (def.id === 'harm_capacity' && (harm.max || 4) >= 8) exhausted = true;
+        if (def.id === 'armor_training' && (harm.armor ?? 0) >= 3) exhausted = true;
+
+        return {
+            ...def,
+            used,
+            remaining: Math.max(0, def.maxTimes - used),
+            exhausted,
+            ...(def.id === 'stat_boost' ? {
+                eligibleStats,
+                stats,
+            } : {}),
+            ...(def.id === 'playbook_move' ? {
+                suggestedMoves: suggestedPlaybookMoves,
+            } : {}),
+            ...(def.id === 'cross_playbook_move' ? {
+                suggestedMoves: suggestedCrossMoves,
+            } : {}),
+        };
+    });
+}
+
+/**
+ * Applies a chosen PbtA advance to a proposal object (idempotent).
+ *
+ * @param {object} proposal
+ * @param {object} advanceSelection
+ * @returns {object}
+ */
+export function applyPbtaAdvanceSelection(proposal, advanceSelection) {
+    if (!proposal || !advanceSelection || !advanceSelection.type) return proposal;
+    if (advanceSelection.applied) return proposal;
+
+    const type = advanceSelection.type;
+    if (type === 'stat_boost') {
+        const stat = advanceSelection.stat;
+        if (stat && proposal.stats && typeof proposal.stats === 'object') {
+            const matchKey = Object.keys(proposal.stats).find(k => k.toLowerCase() === stat.toLowerCase()) || stat;
+            const curVal = Number(proposal.stats[matchKey] ?? 0);
+            const nextVal = Math.min(3, curVal + (Number(advanceSelection.amount) || 1));
+            proposal.stats[matchKey] = nextVal;
+            advanceSelection.stat = matchKey;
+            advanceSelection.newValue = nextVal;
+        }
+    } else if (type === 'playbook_move' || type === 'cross_playbook_move') {
+        const rawMove = (advanceSelection.move || '').trim();
+        if (rawMove) {
+            const pillMove = formatMoveAsPill(rawMove);
+            proposal.newFeatures = Array.isArray(proposal.newFeatures) ? proposal.newFeatures : [];
+            const key = extractFeatureKey(pillMove);
+            const existingIdx = proposal.newFeatures.findIndex(m => extractFeatureKey(m) === key);
+            if (existingIdx >= 0) {
+                proposal.newFeatures[existingIdx] = pillMove;
+            } else {
+                proposal.newFeatures.push(pillMove);
+            }
+            advanceSelection.move = pillMove;
+        }
+    } else if (type === 'harm_capacity') {
+        proposal.harm = proposal.harm || { current: 0, max: 4, armor: 1 };
+        const delta = Number(advanceSelection.amount) || 1;
+        proposal.harm.max = Math.min(8, (Number(proposal.harm.max) || 4) + delta);
+        if (proposal.hpChange) {
+            proposal.hpChange.newMax = proposal.harm.max;
+            proposal.hpChange.gain = delta;
+        }
+    } else if (type === 'armor_training') {
+        proposal.harm = proposal.harm || { current: 0, max: 4, armor: 1 };
+        const delta = Number(advanceSelection.amount) || 1;
+        proposal.harm.armor = Math.min(3, (Number(proposal.harm.armor) || 0) + delta);
+    }
+
+    proposal.advancesTaken = Array.isArray(proposal.advancesTaken) ? proposal.advancesTaken : [];
+    proposal.advancesTaken.push(type);
+    advanceSelection.applied = true;
+    proposal.pbtaAdvance = advanceSelection;
+    return proposal;
+}
+
+/**
  * Evaluates whether the character has accumulated sufficient XP to advance a level.
  *
  * @param {string} memoText State memo text.
@@ -89,13 +359,23 @@ export function ensureNamedFeature(rawName, rawText) {
  *   surplusXp: number
  * }}
  */
-export function evaluateLevelUpEligibility(memoText, ruleset = 'dnd5e') {
-    const isPbta = ruleset === 'pbta' || /Harm\s*:\s*\d+\/\d+/i.test(memoText || '');
+export function evaluateLevelUpEligibility(memoText, ruleset = null, options = {}) {
+    const text = memoText || '';
+    const charBlockMatch = text.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
+    const charScope = charBlockMatch ? charBlockMatch[1] : text;
+    const hasDndXpBlock = /\[XP\][\s\S]*?\[\/XP\]/i.test(text) || /\bLevel\s*:\s*\d+/i.test(charScope);
+
+    // Explicit ruleset wins; when omitted (null/undefined), auto-detect PbtA only if Harm is present and D&D Level/[XP] is not
+    const isPbta = ruleset === 'pbta'
+        || Boolean(ruleset && PBTA_GENRES[String(ruleset).toLowerCase()])
+        || (ruleset !== 'dnd5e' && !hasDndXpBlock && /Harm\s*:\s*\d+\/\d+/i.test(charScope));
 
     if (isPbta) {
-        const xpMatch = (memoText || '').match(/XP:\s*(\d+)(?:\/(\d+))?/i);
+        const xpMatch = charScope.match(/XP:\s*(\d+)(?:\s*\/\s*(\d+))?/i)
+            || text.match(/XP:\s*(\d+)(?:\s*\/\s*(\d+))?/i);
         const cur = xpMatch ? parseInt(xpMatch[1], 10) : 0;
-        const max = xpMatch && xpMatch[2] ? parseInt(xpMatch[2], 10) : 5;
+        const fallbackMax = Number(options?.pacingXp) > 0 ? Number(options.pacingXp) : 5;
+        const max = xpMatch && xpMatch[2] ? parseInt(xpMatch[2], 10) : fallbackMax;
         const eligible = cur >= max && max > 0;
         return {
             eligible,
@@ -173,18 +453,28 @@ export function evaluateLevelUpEligibility(memoText, ruleset = 'dnd5e') {
 export function formulateLevelUpProposal(dossier, blueprint, targetLevel, options = {}) {
     const isRespec = !!options.isRespec;
     const char = dossier?.protagonist || (dossier?.features || dossier?.name ? dossier : {});
+    const sysKeyLower = (dossier?.meta?.systemKey || '').toLowerCase();
     const isPbta = options.isPbta
-        || dossier?.meta?.systemKey === 'pbta'
+        || sysKeyLower === 'pbta'
+        || Boolean(sysKeyLower && PBTA_GENRES[sysKeyLower])
         || !!char.isPbta
         || !!char.playbook
         || !!char.harm
-        || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse/i.test(dossier.meta.systemLabel));
+        || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel));
 
     if (isPbta) {
+        const genreKey = resolvePbtaGenreKey(dossier);
         const playbookName = char.playbook || char.class || 'Protagonist';
-        const harm = char.harm || { current: 0, max: 4, armor: char.armor || 1 };
+        const rawHarm = char.harm || { current: 0, max: dossier?.config?.harmMax || 4, armor: char.armor ?? 1 };
+        const harm = {
+            current: Number(rawHarm.current) || 0,
+            max: Number(rawHarm.max) || Number(dossier?.config?.harmMax) || 4,
+            armor: rawHarm.armor !== undefined ? Number(rawHarm.armor) : (Number(char.armor) || 1),
+        };
         const conditions = Array.isArray(char.conditions) ? [...char.conditions] : [];
-        const stats = char.stats || {};
+        const stats = getCanonicalPbtaStats(char.stats, genreKey);
+        const pacingXp = Number(dossier?.config?.pacingXp) > 0 ? Number(dossier.config.pacingXp) : 5;
+        const advancesTaken = Array.isArray(char.advancesTaken) ? [...char.advancesTaken] : [];
 
         let moves = [];
         if (Array.isArray(char.moves) && char.moves.length > 0) {
@@ -196,11 +486,13 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
         }
 
         // Clean out any accidental D&D artifact strings
-        moves = moves.filter(m => !/HP\s*Gain\s*:/i.test(m) && !/Hit\s*Die/i.test(m));
+        moves = sanitizeFeatureList(moves).filter(m => !/HP\s*Gain\s*:|Hit\s*Die|\bSpell\s*Slots?\b|\bExtra\s*Attack\b/i.test(m));
 
-        return {
+        const baseProposal = {
             isPbta: true,
             isRespec,
+            genreKey,
+            pacingXp,
             characterName: char.name || 'Hero',
             className: playbookName,
             playbookName,
@@ -210,6 +502,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
             harm,
             conditions,
             stats,
+            statNames: Object.keys(stats),
             status: char.status || 'Healthy',
             hpChange: {
                 oldMax: harm.max,
@@ -218,10 +511,14 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
                 mode: 'pbta',
             },
             newFeatures: moves,
+            advancesTaken,
+            pbtaAdvance: options.pbtaAdvance || null,
             isAsi: false,
             asiOptions: null,
             partyChanges: [],
         };
+        baseProposal.advanceOptions = buildPbtaAdvanceOptions(dossier, baseProposal);
+        return baseProposal;
     }
 
     const conMod = Math.floor(((char.stats?.CON ?? 10) - 10) / 2);
@@ -343,26 +640,78 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
     }
 
     if (proposal.isPbta) {
+        // Apply structured PbtA advance selection if present and not yet applied
+        if (!isRespec && proposal.pbtaAdvance && !proposal.pbtaAdvance.applied) {
+            applyPbtaAdvanceSelection(proposal, proposal.pbtaAdvance);
+        }
+
         let updatedMemo = currentMemo;
         const charMatch = updatedMemo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
         if (charMatch) {
             let charBlock = charMatch[1];
-            // If moves were modified
-            if (Array.isArray(proposal.newFeatures)) {
-                const movesStr = proposal.newFeatures.join(', ');
-                if (/(?:\(\(PILLS\)\)\s*)?Moves\s*:/i.test(charBlock)) {
-                    charBlock = charBlock.replace(
-                        /((?:\(\(PILLS\)\)\s*)?Moves\s*:)[^\n\r]+/i,
-                        `$1 ${movesStr}`
-                    );
+
+            // 1. Update Stats in-place if modified
+            if (proposal.stats && typeof proposal.stats === 'object' && Object.keys(proposal.stats).length > 0) {
+                const canonStats = getCanonicalPbtaStats(proposal.stats, proposal.genreKey);
+                if (/^\s*(?:Stats|Attr|Attributes)\s*:/im.test(charBlock)) {
+                    charBlock = charBlock.replace(/^(\s*(?:Stats|Attr|Attributes)\s*:\s*)([^\n\r]*)/im, (full, prefix, lineBody) => {
+                        let updatedLine = lineBody;
+                        for (const [statName, val] of Object.entries(canonStats)) {
+                            const statRe = new RegExp(`(\\b${statName}\\s*[:=]?\\s*)([+-]?\\d+)`, 'i');
+                            const m = updatedLine.match(statRe);
+                            if (m && parseInt(m[2], 10) !== Number(val)) {
+                                const formattedVal = Number(val) > 0 ? `+${val}` : String(val);
+                                updatedLine = updatedLine.replace(statRe, `$1${formattedVal}`);
+                            }
+                        }
+                        return `${prefix}${updatedLine}`;
+                    });
+                } else {
+                    const statsStr = Object.entries(canonStats)
+                        .map(([k, v]) => `${k} ${Number(v) >= 0 ? '+' : ''}${v}`)
+                        .join(', ');
+                    charBlock = `${charBlock.trimEnd()}\nStats: ${statsStr}\n`;
                 }
             }
-            // Update Harm & Armor if present in proposal
+
+            // 2. Normalize and commit Moves (handles existing, empty, or missing Moves: line)
+            if (Array.isArray(proposal.newFeatures)) {
+                const normalizedMoves = deduplicateFeatures(
+                    proposal.newFeatures.map(m => formatMoveAsPill(m)).filter(Boolean)
+                );
+                proposal.newFeatures = normalizedMoves;
+                const movesStr = normalizedMoves.join(', ');
+                if (/(?:\(\(PILLS\)\)\s*)?Moves\s*:/i.test(charBlock)) {
+                    charBlock = charBlock.replace(
+                        /((?:\(\(PILLS\)\)\s*)?Moves\s*:)[^\n\r]*/i,
+                        movesStr ? `$1 ${movesStr}` : '$1 None'
+                    );
+                } else if (movesStr) {
+                    if (/^\s*(?:Stats|Attr|Attributes)\s*:[^\n\r]*/im.test(charBlock)) {
+                        charBlock = charBlock.replace(
+                            /^(\s*(?:Stats|Attr|Attributes)\s*:[^\n\r]*)/im,
+                            `$1\n((PILLS)) Moves: ${movesStr}`
+                        );
+                    } else {
+                        charBlock = `${charBlock.trimEnd()}\n((PILLS)) Moves: ${movesStr}\n`;
+                    }
+                }
+            }
+
+            // 3. Update Harm, tandem HP, & Armor if present in proposal
             if (proposal.harm) {
+                const curHarm = Number(proposal.harm.current) || 0;
+                const maxHarm = Number(proposal.harm.max) || 4;
                 if (/Harm\s*:\s*\d+\/\d+/i.test(charBlock)) {
                     charBlock = charBlock.replace(
                         /Harm\s*:\s*\d+\/\d+/i,
-                        `Harm: ${proposal.harm.current}/${proposal.harm.max}`
+                        `Harm: ${curHarm}/${maxHarm}`
+                    );
+                    // Keep descending tandem HP on the header line synchronized when maxHarm/curHarm changes
+                    const curHp = Math.max(0, maxHarm - curHarm);
+                    charBlock = charBlock.replace(
+                        /(\d+)\s*\/\s*(\d+)\s*HP/i,
+                        `${curHp}/${maxHarm} HP`
                     );
                 }
                 if (/Armor\s*:\s*\d+/i.test(charBlock) && proposal.harm.armor !== undefined) {
@@ -372,17 +721,29 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
                     );
                 }
             }
+
+            // 4. Advance XP inside [CHARACTER] if not respec
+            if (!isRespec && /XP:\s*\d+(?:\s*\/\s*\d+)?/i.test(charBlock)) {
+                const xpMatch = charBlock.match(/XP:\s*(\d+)(?:\s*\/\s*(\d+))?/i);
+                if (xpMatch) {
+                    const cur = parseInt(xpMatch[1], 10) || 0;
+                    const max = xpMatch[2] ? parseInt(xpMatch[2], 10) : (Number(proposal.pacingXp) || 5);
+                    const nextCur = Math.max(0, cur - max);
+                    charBlock = charBlock.replace(/XP:\s*\d+(?:\s*\/\s*\d+)?/i, `XP: ${nextCur}/${max}`);
+                }
+            }
+
             updatedMemo = updatedMemo.replace(charMatch[0], `[CHARACTER]${charBlock}[/CHARACTER]`);
         }
 
-        // Advance XP if not respec
-        if (!isRespec) {
-            const xpMatch = updatedMemo.match(/XP:\s*(\d+)(?:\/(\d+))?/i);
+        // Fallback: if XP was outside [CHARACTER], advance it there
+        if (!isRespec && (!charMatch || !/XP:\s*\d+/i.test(charMatch[1]))) {
+            const xpMatch = updatedMemo.match(/XP:\s*(\d+)(?:\s*\/\s*(\d+))?/i);
             if (xpMatch) {
                 const cur = parseInt(xpMatch[1], 10) || 0;
-                const max = parseInt(xpMatch[2], 10) || 5;
+                const max = xpMatch[2] ? parseInt(xpMatch[2], 10) : (Number(proposal.pacingXp) || 5);
                 const nextCur = Math.max(0, cur - max);
-                updatedMemo = updatedMemo.replace(/XP:\s*\d+(?:\/\d+)?/i, `XP: ${nextCur}/${max}`);
+                updatedMemo = updatedMemo.replace(/XP:\s*\d+(?:\s*\/\s*\d+)?/i, `XP: ${nextCur}/${max}`);
             }
         }
 
@@ -391,10 +752,14 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
             rpgSettings.currentMemo = updatedMemo;
             if (rpgSettings.chatStates && chatId && rpgSettings.chatStates[chatId]) {
                 rpgSettings.chatStates[chatId].currentMemo = updatedMemo;
-                const proto = rpgSettings.chatStates[chatId].pbtaCampaignDossier?.protagonist;
-                if (proto) {
-                    proto.moves = [...(proposal.newFeatures || [])];
-                    if (proposal.harm) proto.harm = { ...proposal.harm };
+                for (const key of ['pbtaCampaignDossier', 'companionDossier']) {
+                    const proto = rpgSettings.chatStates[chatId][key]?.protagonist;
+                    if (proto) {
+                        proto.moves = [...(proposal.newFeatures || [])];
+                        if (proposal.harm) proto.harm = { ...proposal.harm };
+                        if (proposal.stats) proto.stats = { ...getCanonicalPbtaStats(proposal.stats, proposal.genreKey) };
+                        if (Array.isArray(proposal.advancesTaken)) proto.advancesTaken = [...proposal.advancesTaken];
+                    }
                 }
             }
             if (typeof document !== 'undefined') {
@@ -483,8 +848,7 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
                 if (hasFeaturesLine) {
                     const match = charBlock.match(/((?:Features|Traits|Abilities)\s*:\s*)([^\n\r]*)/i);
                     if (match) {
-                        const existingFeats = match[2]
-                            .split(/,(?![^(\[]*[)\]])/)
+                        const existingFeats = splitTopLevelPillItems(match[2])
                             .map(f => f.trim())
                             .filter(Boolean);
                         const existingKeys = new Set(existingFeats.map(f => extractFeatureKey(f)));

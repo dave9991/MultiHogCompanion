@@ -10,7 +10,7 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection } from './level-up-runner.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection, extractConciergeDirectives, splitTopLevelDirectives } from './level-up-runner.js';
 import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, parseBlueprintFromResponse, normalizeBlueprint, normalizeLevelEntry, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
@@ -821,6 +821,8 @@ export function openLevelUpModal({
     /**
      * Applies roadmap-level directives ([UPDATE_LEVEL], [SET_HIT_DIE], [SET_CLASS_NAME], or a full JSON blueprint block)
      * from a Concierge reply in either Stage 1 or Stage 2.
+     * Uses robust bracket-depth parsing so directives with internal brackets (e.g. [Trait] or [⚡ Ability])
+     * are parsed completely rather than truncating at the first inner bracket.
      */
     function applyBlueprintDirectivesFromReply(reply) {
         if (!activeBlueprint || !activeBlueprint.levels || typeof reply !== 'string') return false;
@@ -840,55 +842,57 @@ export function openLevelUpModal({
             }
         }
 
-        // 2. Parse [UPDATE_LEVEL: <level> | <features or None>]
-        const updateMatches = [...reply.matchAll(/\[UPDATE_LEVEL:\s*(\d+)\s*\|\s*([^\]]*)\]/gi)];
-        for (const match of updateMatches) {
-            const lvlStr = match[1];
-            const featsRaw = (match[2] || '').trim();
-            const lvlNum = parseInt(lvlStr, 10);
-            if (!(lvlNum >= 1 && lvlNum <= 20)) continue;
-            const isClear = !featsRaw || /^(?:none|empty|clear|asi(?:\s*only)?|-|—)$/i.test(featsRaw);
-            const feats = isClear
-                ? []
-                : featsRaw
-                    .split(';')
-                    .map(f => f.trim())
-                    .filter(f => f && !/^(?:none|empty|clear|-|—)$/i.test(f));
-            const entry = normalizeLevelEntry({ ...(activeBlueprint.levels[lvlStr] || {}), features: feats }, lvlNum);
-            if (!entry.spellSlots) delete entry.spellSlots;
-            activeBlueprint.levels[lvlStr] = entry;
-            modified = true;
-            if (typeof toastr !== 'undefined') toastr.info(entry.features.join(', ') || 'Cleared (ASI / Milestone)', `Level ${lvlStr} Updated`);
-        }
-
-        // 3. Parse [SET_HIT_DIE: <d6|d8|d10|d12>]
-        const hdMatch = reply.match(/\[SET_HIT_DIE:\s*(d6|d8|d10|d12)\]/i);
-        if (hdMatch) {
-            const newHd = hdMatch[1].toLowerCase();
-            activeBlueprint.hitDie = newHd;
-            proposal.hitDie = newHd;
-            if (bpHitDieSelect) bpHitDieSelect.value = newHd;
-            const badge1 = modal.querySelector('#mhc-blueprint-badge-hitdie');
-            if (badge1) badge1.textContent = newHd;
-            const badge2 = modal.querySelector('#mhc-stage2-hitdie-badge');
-            if (badge2) badge2.innerHTML = `<i class="fa-solid fa-dice-d20"></i> Hit Die: ${escapeHtml(newHd)}`;
-            modified = true;
-            if (typeof toastr !== 'undefined') toastr.info(`Hit Die set to ${newHd}`, 'Hit Die Updated');
-        }
-
-        // 4. Parse [SET_CLASS_NAME: <name>]
-        const nameMatch = reply.match(/\[SET_CLASS_NAME:\s*([^\]]+)\]/i);
-        if (nameMatch) {
-            const newName = nameMatch[1].trim();
-            activeBlueprint.className = newName;
-            proposal.className = newName;
-            if (bpClassNameInput) bpClassNameInput.value = newName;
-            const badge1 = modal.querySelector('#mhc-blueprint-badge-class');
-            if (badge1) badge1.textContent = newName;
-            const badge2 = modal.querySelector('#mhc-stage2-class-badge');
-            if (badge2) badge2.innerHTML = `<i class="fa-solid fa-shield-halved"></i> ${escapeHtml(newName)}`;
-            modified = true;
-            if (typeof toastr !== 'undefined') toastr.info(`Class renamed to ${newName}`, 'Class Updated');
+        // 2. Parse bracket-safe directives
+        const { directives } = extractConciergeDirectives(reply);
+        for (const dir of directives) {
+            if (dir.tag === 'UPDATE_LEVEL') {
+                const pipeIdx = dir.payload.indexOf('|');
+                if (pipeIdx > 0) {
+                    const lvlStr = dir.payload.slice(0, pipeIdx).trim();
+                    const featsRaw = dir.payload.slice(pipeIdx + 1).trim();
+                    const lvlNum = parseInt(lvlStr, 10);
+                    if (lvlNum >= 1 && lvlNum <= 20) {
+                        const isClear = !featsRaw || /^(?:none|empty|clear|asi(?:\s*only)?|-|—)$/i.test(featsRaw);
+                        const feats = isClear
+                            ? []
+                            : splitTopLevelDirectives(featsRaw, ';')
+                                .map(f => f.trim())
+                                .filter(f => f && !/^(?:none|empty|clear|-|—)$/i.test(f));
+                        const entry = normalizeLevelEntry({ ...(activeBlueprint.levels[lvlStr] || {}), features: feats }, lvlNum);
+                        if (!entry.spellSlots) delete entry.spellSlots;
+                        activeBlueprint.levels[lvlStr] = entry;
+                        modified = true;
+                        if (typeof toastr !== 'undefined') toastr.info(entry.features.join(', ') || 'Cleared (ASI / Milestone)', `Level ${lvlStr} Updated`);
+                    }
+                }
+            } else if (dir.tag === 'SET_HIT_DIE') {
+                const hdMatch = dir.payload.match(/^(d6|d8|d10|d12)\b/i);
+                if (hdMatch) {
+                    const newHd = hdMatch[1].toLowerCase();
+                    activeBlueprint.hitDie = newHd;
+                    proposal.hitDie = newHd;
+                    if (bpHitDieSelect) bpHitDieSelect.value = newHd;
+                    const badge1 = modal.querySelector('#mhc-blueprint-badge-hitdie');
+                    if (badge1) badge1.textContent = newHd;
+                    const badge2 = modal.querySelector('#mhc-stage2-hitdie-badge');
+                    if (badge2) badge2.innerHTML = `<i class="fa-solid fa-dice-d20"></i> Hit Die: ${escapeHtml(newHd)}`;
+                    modified = true;
+                    if (typeof toastr !== 'undefined') toastr.info(`Hit Die set to ${newHd}`, 'Hit Die Updated');
+                }
+            } else if (dir.tag === 'SET_CLASS_NAME') {
+                const newName = dir.payload.trim();
+                if (newName) {
+                    activeBlueprint.className = newName;
+                    proposal.className = newName;
+                    if (bpClassNameInput) bpClassNameInput.value = newName;
+                    const badge1 = modal.querySelector('#mhc-blueprint-badge-class');
+                    if (badge1) badge1.textContent = newName;
+                    const badge2 = modal.querySelector('#mhc-stage2-class-badge');
+                    if (badge2) badge2.innerHTML = `<i class="fa-solid fa-shield-halved"></i> ${escapeHtml(newName)}`;
+                    modified = true;
+                    if (typeof toastr !== 'undefined') toastr.info(`Class renamed to ${newName}`, 'Class Updated');
+                }
+            }
         }
 
         if (modified) {
@@ -952,13 +956,8 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
             stage1Input?.focus();
 
             applyBlueprintDirectivesFromReply(reply);
-
-            const cleanReply = reply
-                .replace(/```(?:json)?[\s\S]*?```/gi, '')
-                .replace(/\[(?:UPDATE_LEVEL|SET_HIT_DIE|SET_CLASS_NAME):[^\]]*\]/gi, '')
-                .replace(/\n{3,}/g, '\n\n')
-                .trim();
-            stage1ChatHistory.push({ role: 'assistant', content: cleanReply || reply });
+            const { cleanedText } = extractConciergeDirectives(reply);
+            stage1ChatHistory.push({ role: 'assistant', content: cleanedText || reply });
             renderStage1Chat();
         } catch (err) {
             console.error('[MultiHog Companion] Stage 1 Concierge error:', err);
@@ -1410,123 +1409,100 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             if (conciergeSendBtn) conciergeSendBtn.disabled = false;
             conciergeInput?.focus();
 
-            // [ADD_FEATURE: ...]
-            const addMatches = [...reply.matchAll(/\[ADD_FEATURE:\s*([^\]]+)\]/gi)];
-            for (const match of addMatches) {
-                const rawFeat = match[1].trim();
-                const feat = isPbta ? formatMoveAsPill(rawFeat) : formatTraitAsPill(rawFeat);
-                if (feat) {
-                    const key = extractFeatureKey(feat);
-                    const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === key);
-                    if (idx >= 0) {
-                        proposal.newFeatures[idx] = feat;
-                    } else {
-                        proposal.newFeatures.push(feat);
-                        if (typeof toastr !== 'undefined') toastr.info(feat, isPbta ? 'Added New Move' : 'Added New Trait');
+            const { directives, cleanedText } = extractConciergeDirectives(reply);
+
+            for (const dir of directives) {
+                if (dir.tag === 'ADD_FEATURE') {
+                    const rawFeat = dir.payload.trim();
+                    const feat = isPbta ? formatMoveAsPill(rawFeat) : formatTraitAsPill(rawFeat);
+                    if (feat) {
+                        const key = extractFeatureKey(feat);
+                        const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === key);
+                        if (idx >= 0) {
+                            proposal.newFeatures[idx] = feat;
+                        } else {
+                            proposal.newFeatures.push(feat);
+                            if (typeof toastr !== 'undefined') toastr.info(feat, isPbta ? 'Added New Move' : 'Added New Trait');
+                        }
                     }
-                }
-            }
-
-            // [UPDATE_FEATURE: Name | Description]
-            const updateMatches = [...reply.matchAll(/\[UPDATE_FEATURE:\s*([^|\]]+)\|\s*([^\]]+)\]/gi)];
-            for (const match of updateMatches) {
-                const featureName = match[1].trim();
-                const targetKey = extractFeatureKey(featureName);
-                const rawNewText = ensureNamedFeature(featureName, match[2].trim());
-                const newText = isPbta ? formatMoveAsPill(rawNewText) : formatTraitAsPill(rawNewText);
-                const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
-                if (idx >= 0) {
-                    proposal.newFeatures[idx] = newText;
-                } else {
-                    proposal.newFeatures.push(newText);
-                }
-            }
-
-            // [SET_STAT: StatName | Value] (PbtA stat tuning)
-            if (isPbta && proposal.stats) {
-                const statMatches = [...reply.matchAll(/\[SET_STAT:\s*([^|\]]+)\|\s*([+-]?\d+)\s*\]/gi)];
-                for (const match of statMatches) {
-                    const statRaw = match[1].trim();
-                    const statVal = Math.max(-2, Math.min(3, parseInt(match[2], 10)));
-                    const matchKey = Object.keys(proposal.stats).find(k => k.toLowerCase() === statRaw.toLowerCase()) || statRaw;
-                    if (!isNaN(statVal)) {
-                        proposal.stats[matchKey] = statVal;
-                        const statInput = modal.querySelector(`.mhc-pbta-stat-input[data-stat="${matchKey}"]`);
-                        if (statInput) statInput.value = String(statVal);
-                        const statDisp = modal.querySelector(`[data-stat-val="${matchKey}"]`);
-                        if (statDisp) statDisp.textContent = statVal >= 0 ? `+${statVal}` : String(statVal);
+                } else if (dir.tag === 'UPDATE_FEATURE') {
+                    const pipeIdx = dir.payload.indexOf('|');
+                    if (pipeIdx > 0) {
+                        const featureName = dir.payload.slice(0, pipeIdx).trim();
+                        const targetKey = extractFeatureKey(featureName);
+                        const rawNewText = ensureNamedFeature(featureName, dir.payload.slice(pipeIdx + 1).trim());
+                        const newText = isPbta ? formatMoveAsPill(rawNewText) : formatTraitAsPill(rawNewText);
+                        const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
+                        if (idx >= 0) {
+                            proposal.newFeatures[idx] = newText;
+                        } else {
+                            proposal.newFeatures.push(newText);
+                        }
                     }
-                }
-            }
-
-            // [REMOVE_FEATURE: ...]
-            const removeMatches = [...reply.matchAll(/\[REMOVE_FEATURE:\s*([^\]]+)\]/gi)];
-            for (const match of removeMatches) {
-                proposal.newFeatures = proposal.newFeatures.filter(f => !matchesFeatureRemovalTarget(f, match[1]));
-            }
-
-            // [ADD_ABILITY: ...]
-            proposal.activeAbilities = proposal.activeAbilities || [];
-            const addAbilityMatches = [...reply.matchAll(/\[ADD_ABILITY:\s*([^\]]+)\]/gi)];
-            for (const match of addAbilityMatches) {
-                const ab = formatTraitAsPill(match[1].trim());
-                if (ab) {
-                    const key = extractFeatureKey(ab);
-                    const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === key);
-                    if (idx >= 0) {
-                        proposal.activeAbilities[idx] = ab;
-                    } else {
-                        proposal.activeAbilities.push(ab);
-                        if (typeof toastr !== 'undefined') toastr.info(ab, 'Added Active Ability');
+                } else if (dir.tag === 'SET_STAT' && isPbta && proposal.stats) {
+                    const pipeIdx = dir.payload.indexOf('|');
+                    if (pipeIdx > 0) {
+                        const statRaw = dir.payload.slice(0, pipeIdx).trim();
+                        const statVal = Math.max(-2, Math.min(3, parseInt(dir.payload.slice(pipeIdx + 1).trim(), 10)));
+                        const matchKey = Object.keys(proposal.stats).find(k => k.toLowerCase() === statRaw.toLowerCase()) || statRaw;
+                        if (!isNaN(statVal)) {
+                            proposal.stats[matchKey] = statVal;
+                            const statInput = modal.querySelector(`.mhc-pbta-stat-input[data-stat="${matchKey}"]`);
+                            if (statInput) statInput.value = String(statVal);
+                            const statDisp = modal.querySelector(`[data-stat-val="${matchKey}"]`);
+                            if (statDisp) statDisp.textContent = statVal >= 0 ? `+${statVal}` : String(statVal);
+                        }
                     }
-                }
-            }
-
-            // [UPDATE_ABILITY: Name | Description]
-            const updateAbilityMatches = [...reply.matchAll(/\[UPDATE_ABILITY:\s*([^|\]]+)\|\s*([^\]]+)\]/gi)];
-            for (const match of updateAbilityMatches) {
-                const abilityName = match[1].trim();
-                const targetKey = extractFeatureKey(abilityName);
-                const newText = formatTraitAsPill(ensureNamedFeature(abilityName, match[2].trim()));
-                const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
-                if (idx >= 0) {
-                    proposal.activeAbilities[idx] = newText;
-                } else {
-                    proposal.activeAbilities.push(newText);
-                }
-            }
-
-            // [REMOVE_ABILITY: ...]
-            const removeAbilityMatches = [...reply.matchAll(/\[REMOVE_ABILITY:\s*([^\]]+)\]/gi)];
-            for (const match of removeAbilityMatches) {
-                proposal.activeAbilities = proposal.activeAbilities.filter(a => !matchesFeatureRemovalTarget(a, match[1]));
-            }
-
-            // [MOVE_TO_ABILITIES: Name]
-            const moveToAbilitiesMatches = [...reply.matchAll(/\[MOVE_TO_ABILITIES:\s*([^\]]+)\]/gi)];
-            for (const match of moveToAbilitiesMatches) {
-                const targetKey = extractFeatureKey(match[1]);
-                const foundIdx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
-                if (foundIdx >= 0) {
-                    const movedItem = proposal.newFeatures.splice(foundIdx, 1)[0];
-                    if (!proposal.activeAbilities.some(a => extractFeatureKey(a) === targetKey)) {
-                        proposal.activeAbilities.push(movedItem);
+                } else if (dir.tag === 'REMOVE_FEATURE') {
+                    proposal.newFeatures = proposal.newFeatures.filter(f => !matchesFeatureRemovalTarget(f, dir.payload));
+                } else if (dir.tag === 'ADD_ABILITY') {
+                    proposal.activeAbilities = proposal.activeAbilities || [];
+                    const ab = formatTraitAsPill(dir.payload.trim());
+                    if (ab) {
+                        const key = extractFeatureKey(ab);
+                        const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === key);
+                        if (idx >= 0) {
+                            proposal.activeAbilities[idx] = ab;
+                        } else {
+                            proposal.activeAbilities.push(ab);
+                            if (typeof toastr !== 'undefined') toastr.info(ab, 'Added Active Ability');
+                        }
                     }
-                    if (typeof toastr !== 'undefined') toastr.info(movedItem, 'Relocated to Active Powers');
-                }
-            }
-
-            // [MOVE_TO_FEATURES: Name]
-            const moveToFeaturesMatches = [...reply.matchAll(/\[MOVE_TO_FEATURES:\s*([^\]]+)\]/gi)];
-            for (const match of moveToFeaturesMatches) {
-                const targetKey = extractFeatureKey(match[1]);
-                const foundIdx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
-                if (foundIdx >= 0) {
-                    const movedItem = proposal.activeAbilities.splice(foundIdx, 1)[0];
-                    if (!proposal.newFeatures.some(f => extractFeatureKey(f) === targetKey)) {
-                        proposal.newFeatures.push(movedItem);
+                } else if (dir.tag === 'UPDATE_ABILITY') {
+                    const pipeIdx = dir.payload.indexOf('|');
+                    if (pipeIdx > 0) {
+                        const abilityName = dir.payload.slice(0, pipeIdx).trim();
+                        const targetKey = extractFeatureKey(abilityName);
+                        const newText = formatTraitAsPill(ensureNamedFeature(abilityName, dir.payload.slice(pipeIdx + 1).trim()));
+                        const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
+                        if (idx >= 0) {
+                            proposal.activeAbilities[idx] = newText;
+                        } else {
+                            proposal.activeAbilities.push(newText);
+                        }
                     }
-                    if (typeof toastr !== 'undefined') toastr.info(movedItem, 'Relocated to Passive Traits');
+                } else if (dir.tag === 'REMOVE_ABILITY') {
+                    proposal.activeAbilities = proposal.activeAbilities.filter(a => !matchesFeatureRemovalTarget(a, dir.payload));
+                } else if (dir.tag === 'MOVE_TO_ABILITIES') {
+                    const targetKey = extractFeatureKey(dir.payload);
+                    const foundIdx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
+                    if (foundIdx >= 0) {
+                        const movedItem = proposal.newFeatures.splice(foundIdx, 1)[0];
+                        if (!proposal.activeAbilities.some(a => extractFeatureKey(a) === targetKey)) {
+                            proposal.activeAbilities.push(movedItem);
+                        }
+                        if (typeof toastr !== 'undefined') toastr.info(movedItem, 'Relocated to Active Powers');
+                    }
+                } else if (dir.tag === 'MOVE_TO_FEATURES') {
+                    const targetKey = extractFeatureKey(dir.payload);
+                    const foundIdx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
+                    if (foundIdx >= 0) {
+                        const movedItem = proposal.activeAbilities.splice(foundIdx, 1)[0];
+                        if (!proposal.newFeatures.some(f => extractFeatureKey(f) === targetKey)) {
+                            proposal.newFeatures.push(movedItem);
+                        }
+                        if (typeof toastr !== 'undefined') toastr.info(movedItem, 'Relocated to Passive Traits');
+                    }
                 }
             }
 
@@ -1540,14 +1516,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             renderPerksList();
             renderAbilitiesList();
 
-            const cleanReply = reply
-                .replace(/```(?:json)?[\s\S]*?```/gi, '')
-                .replace(/\[(?:ADD|REMOVE|UPDATE|MOVE_TO)_(?:FEATURE|ABILITY|ABILITIES|FEATURES):[^\]]+\]/gi, '')
-                .replace(/\[(?:UPDATE_LEVEL|SET_HIT_DIE|SET_CLASS_NAME):[^\]]*\]/gi, '')
-                .replace(/\[SET_STAT:[^\]]+\]/gi, '')
-                .replace(/\n{3,}/g, '\n\n')
-                .trim();
-            stage2ChatHistory.push({ role: 'assistant', content: cleanReply || reply });
+            stage2ChatHistory.push({ role: 'assistant', content: cleanedText || reply });
             renderStage2Chat();
         } catch (err) {
             console.error('[MultiHog Companion] Concierge chat error:', err);

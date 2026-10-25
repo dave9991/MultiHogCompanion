@@ -428,7 +428,7 @@ export function formatTraitAsPill(raw) {
     if (!s) return '';
 
     let explicitKind = null;
-    const tagMatch = s.match(/^\[\s*(ABILITY|TRAIT)\s*\]\s*/i);
+    const tagMatch = s.match(/^[\[(]\s*(?:⚡\s*)?(ABILITY|TRAIT)\s*:?\s*[\])]\s*/i);
     if (tagMatch) {
         explicitKind = tagMatch[1].toLowerCase() === 'ability' ? 'ability' : 'trait';
         s = s.slice(tagMatch[0].length).trim();
@@ -542,7 +542,7 @@ export function formatTraitAsPill(raw) {
 export function classifyFeatureKind(feat) {
     if (typeof feat !== 'string' || !feat.trim()) return 'trait';
     const raw = feat.trim();
-    const explicitPrefix = raw.match(/^\[\s*(ABILITY|TRAIT)\s*\]\s*/i);
+    const explicitPrefix = raw.match(/^[\[(]\s*(?:⚡\s*)?(ABILITY|TRAIT)\s*:?\s*[\])]\s*/i);
     if (explicitPrefix) {
         return explicitPrefix[1].toLowerCase() === 'ability' ? 'ability' : 'trait';
     }

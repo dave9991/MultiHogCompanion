@@ -1409,6 +1409,8 @@ test('Level-Up System: Trait vs Ability Classification, Roadmap Badges, Codex Sy
     const {
         mergeUpgradedFeatures,
         collapseCodexProgression,
+        extractConciergeDirectives,
+        splitTopLevelDirectives,
     } = await import('../level-up-runner.js');
     const { openLevelUpModal, closeLevelUpModal } = await import('../level-up-ui.js');
 
@@ -1571,4 +1573,33 @@ test('Level-Up System: Trait vs Ability Classification, Roadmap Badges, Codex Sy
     assert.ok(taggedSummary.includes('[Trait] Fighting Style'), 'Summary with includeTags includes [Trait] prefix');
     assert.ok(taggedSummary.includes('[Ability] Second Wind'), 'Summary with includeTags includes [Ability] prefix');
     assert.ok(taggedSummary.includes('Level 4 (Prof +2): (ASI / Feat Milestone)'), 'Summary marks empty ASI levels');
+
+    // 8. Bracket-safe directive parser prevents premature cutoff on inner brackets ([Trait], [⚡ Ability])
+    const rawConciergeReply = `Audit complete. Every feature now strictly uses the \`Name (hover tooltip)\` pill syntax, with passive perks tagged \`[Trait]\`, active powers tagged \`[⚡ Ability]\` with explicit \`X/Y\` rest counters, and all ASI levels cleared.
+
+[UPDATE_LEVEL: 1 | [Trait] Street Rat (+2 to Stealth and Deception rolls in urban districts); [Trait] Scavenger's Instinct (+2 to Survival checks in wrecked environments); [⚡ Ability] Misfortune Gambit (Reroll a failed check from critical misfortune; 1/1 per long rest)]
+[UPDATE_LEVEL: 2 | [⚡ Ability] Cunning Action (Bonus Action: Dash, Disengage, or Hide; at-will)]
+[UPDATE_LEVEL: 3 | [Trait] Skirmish Tactics (Fast Hands object manipulation)]
+[UPDATE_LEVEL: 4 | None]`;
+
+    const { directives, cleanedText } = extractConciergeDirectives(rawConciergeReply);
+    assert.strictEqual(directives.length, 4, 'Must parse all 4 directives without truncating at inner brackets');
+    assert.strictEqual(directives[0].tag, 'UPDATE_LEVEL');
+    assert.ok(directives[0].payload.startsWith('1 |'));
+    assert.ok(directives[0].payload.includes('Misfortune Gambit'), 'Inner brackets must not truncate directive payload');
+    assert.strictEqual(directives[3].payload, '4 | None');
+
+    // Verify cleaned text does not leak any directive content into chat
+    assert.ok(!cleanedText.includes('UPDATE_LEVEL'), 'Cleaned text must not contain UPDATE_LEVEL tags');
+    assert.ok(!cleanedText.includes('Street Rat'), 'Cleaned text must not leak directive feature names');
+    assert.ok(cleanedText.startsWith('Audit complete.'), 'Spoken response preserved cleanly');
+
+    // Verify formatTraitAsPill strips [Trait] and [⚡ Ability] and preserves classification
+    const l1Parts = splitTopLevelDirectives(directives[0].payload.slice(directives[0].payload.indexOf('|') + 1), ';').map(f => f.trim());
+    const pill1 = formatTraitAsPill(l1Parts[0]);
+    const pill3 = formatTraitAsPill(l1Parts[2]);
+    assert.strictEqual(pill1, 'Street Rat (+2 to Stealth and Deception rolls in urban districts)');
+    assert.strictEqual(classifyFeatureKind(pill1), 'trait');
+    assert.strictEqual(pill3, 'Misfortune Gambit (Reroll a failed check from critical misfortune; 1/1 per long rest)');
+    assert.strictEqual(classifyFeatureKind(pill3), 'ability');
 });

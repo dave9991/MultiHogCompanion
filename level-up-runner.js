@@ -123,6 +123,115 @@ export function ensureNamedFeature(rawName, rawText) {
 }
 
 /**
+ * Splits a string by a delimiter (e.g. ';') only at top-level parenthesis and bracket depth (depth 0),
+ * preventing parenthetical descriptions with semicolons (e.g. `(Heal 1d10 HP; 1/1 per rest)`) from being cut in half.
+ *
+ * @param {string} str
+ * @param {string} [delimiter=';']
+ * @returns {string[]}
+ */
+export function splitTopLevelDirectives(str, delimiter = ';') {
+    if (typeof str !== 'string') return [];
+    const out = [];
+    let cur = '';
+    let pDepth = 0;
+    let bDepth = 0;
+    for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+        if (ch === '(') pDepth++;
+        else if (ch === ')') pDepth = Math.max(0, pDepth - 1);
+        else if (ch === '[') bDepth++;
+        else if (ch === ']') bDepth = Math.max(0, bDepth - 1);
+
+        if (ch === delimiter && pDepth === 0 && bDepth === 0) {
+            if (cur.trim()) out.push(cur.trim());
+            cur = '';
+        } else {
+            cur += ch;
+        }
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+}
+
+/**
+ * Robust bracket-depth scanner for Concierge directives in LLM responses.
+ *
+ * Scans forward tracking parenthesis/bracket depth so directives containing internal
+ * brackets (e.g. `[UPDATE_LEVEL: 1 | [Trait] Street Rat (...); [⚡ Ability] ...]` or
+ * `[ADD_FEATURE: Move Name [+STAT] (...)]`) are parsed as single complete directives
+ * rather than truncating at the first inner `]`.
+ *
+ * @param {string} text Raw LLM response string.
+ * @returns {{
+ *   directives: Array<{ tag: string, payload: string }>,
+ *   cleanedText: string
+ * }}
+ */
+export function extractConciergeDirectives(text) {
+    if (typeof text !== 'string' || !text) {
+        return { directives: [], cleanedText: text || '' };
+    }
+
+    const KNOWN_DIRECTIVES = new Set([
+        'UPDATE_LEVEL',
+        'SET_HIT_DIE',
+        'SET_CLASS_NAME',
+        'ADD_FEATURE',
+        'UPDATE_FEATURE',
+        'REMOVE_FEATURE',
+        'ADD_ABILITY',
+        'UPDATE_ABILITY',
+        'REMOVE_ABILITY',
+        'MOVE_TO_ABILITIES',
+        'MOVE_TO_FEATURES',
+        'SET_STAT',
+    ]);
+
+    const directives = [];
+    let cleaned = '';
+    let i = 0;
+
+    while (i < text.length) {
+        if (text[i] === '[') {
+            const rem = text.slice(i);
+            const m = rem.match(/^\[([A-Z_]+)\s*:\s*/i);
+            if (m && KNOWN_DIRECTIVES.has(m[1].toUpperCase())) {
+                const tag = m[1].toUpperCase();
+                let depth = 0;
+                let endIdx = -1;
+                for (let j = i; j < text.length; j++) {
+                    if (text[j] === '[') depth++;
+                    else if (text[j] === ']') {
+                        depth--;
+                        if (depth === 0) {
+                            endIdx = j;
+                            break;
+                        }
+                    }
+                }
+                if (endIdx > 0) {
+                    const rawPayload = text.slice(i + m[0].length, endIdx).trim();
+                    directives.push({ tag, payload: rawPayload });
+                    i = endIdx + 1;
+                    continue;
+                }
+            }
+        }
+        cleaned += text[i];
+        i++;
+    }
+
+    // Strip full ```json ... ``` codeblocks from displayed chat text if present
+    cleaned = cleaned.replace(/```(?:json)?[\s\S]*?"levels"[\s\S]*?```/gi, '');
+
+    return {
+        directives,
+        cleanedText: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
+    };
+}
+
+/**
  * Checks whether a feature or ability string matches a removal directive target by exact canonical key
  * (preventing substring collisions like removing "Rage" from deleting "Enrage" or "Mindless Rage").
  *

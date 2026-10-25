@@ -2,19 +2,24 @@ import assert from 'node:assert';
 import { test } from 'node:test';
 import {
     parseCharacterBlockFromMemo,
+    parseAbilitiesBlockFromMemo,
     scaffoldDossierStubForChat,
     ensureChatDossier,
+    persistCompanionDossier,
 } from '../level-up-scaffold.js';
 import {
     getCanonicalDndProgression,
     hasProgressionBlueprint,
     getTierPerks,
     parseBlueprintFromResponse,
+    buildBlueprintPrompt,
 } from '../level-up-blueprint.js';
 import {
     evaluateLevelUpEligibility,
     formulateLevelUpProposal,
     applyLevelUpCommit,
+    extractFeatureKey,
+    deduplicateFeatures,
 } from '../level-up-runner.js';
 
 test('Level-Up System: Character Parsing & Auto-Scaffold', () => {
@@ -39,6 +44,7 @@ Total: 1,200 / 2,700 XP (Level 3)
     assert.strictEqual(parsed.hitDie, 'd10');
     assert.strictEqual(parsed.stats.STR, 16);
     assert.strictEqual(parsed.stats.CON, 14);
+    assert.deepStrictEqual(parsed.features, ['Second Wind', 'Action Surge']);
 
     const stub = scaffoldDossierStubForChat('test_chat_001', rawMemo, 'The Valiant Saga');
     assert.strictEqual(stub.meta.chatId, 'test_chat_001');
@@ -46,6 +52,7 @@ Total: 1,200 / 2,700 XP (Level 3)
     assert.strictEqual(stub.meta.systemKey, 'dnd5e');
     assert.strictEqual(stub.meta.isStub, true);
     assert.strictEqual(stub.protagonist.name, 'Marcus the Valiant');
+    assert.deepStrictEqual(stub.protagonist.features, ['Second Wind', 'Action Surge']);
     assert.strictEqual(stub.progressionBlueprint, null);
 
     const mockSettings = { chatStates: { test_chat_001: {} }, currentMemo: rawMemo };
@@ -80,6 +87,7 @@ Level: 1 | XP: 5/300
     assert.strictEqual(parsedBarbarian.stats.STR, 16);
     assert.strictEqual(parsedBarbarian.stats.CON, 16);
     assert.strictEqual(parsedBarbarian.stats.DEX, 14);
+    assert.deepStrictEqual(parsedBarbarian.features, ['Unarmored Defense', 'Feral Instinct', 'Fast Movement']);
 
     // Verify stub refresh logic when an uninitialized stub had 'Protagonist'
     const staleStubSettings = {
@@ -398,6 +406,12 @@ test('Level-Up & Respec System: Instant Modal Open with Async Blueprint Shimmer'
                     if (sel === '.mhc-badge-hitdie') {
                         return { set innerHTML(val) { el._hitDieBadge = val; } };
                     }
+                    if (sel === '#mhc-stage1-chat-log') {
+                        return {
+                            set innerHTML(val) { el.innerHTML += val; },
+                            get innerHTML() { return el.innerHTML; },
+                        };
+                    }
                     return null;
                 },
                 querySelectorAll: () => [],
@@ -446,6 +460,7 @@ test('Level-Up & Respec System: Instant Modal Open with Async Blueprint Shimmer'
         assert.ok(mountedModal, 'Modal must mount to DOM immediately without waiting for LLM');
         assert.ok(mountedModal.innerHTML.includes('mhc-blueprint-shimmer'), 'Modal must contain animated shimmer skeleton while generating');
         assert.ok(mountedModal.innerHTML.includes('Astro-Mage'), 'Modal must display the custom class name in the shimmer header');
+        assert.ok(mountedModal.innerHTML.includes('actively drafting and balancing'), 'Concierge must reinforce the waiting state while loading');
 
         // Resolve blueprint asynchronously
         const mockBlueprint = {
@@ -461,6 +476,7 @@ test('Level-Up & Respec System: Instant Modal Open with Async Blueprint Shimmer'
         await new Promise((r) => setTimeout(r, 20));
 
         assert.ok(!mountedModal.innerHTML.includes('mhc-blueprint-shimmer'), 'Shimmer must be removed once blueprint resolves');
+        assert.ok(mountedModal.innerHTML.includes('is ready!'), 'Concierge message must update to ready once blueprint resolves');
         closeLevelUpModal();
     } finally {
         globalThis.document = prevDoc;
@@ -660,4 +676,322 @@ test('Level-Up & Respec System: Two-Stage Progression Architecture (Stage 1 Code
     } finally {
         globalThis.document = prevDoc;
     }
+});
+
+test('Level-Up & Respec System: Blueprint Persistence & Reopening Flow', async () => {
+    const { ensureChatDossier, persistCompanionDossier } = await import('../level-up-scaffold.js');
+    const { hasProgressionBlueprint } = await import('../level-up-blueprint.js');
+
+    const chatId = 'smuggler_chat_persistence_test';
+    const memo = `[CHARACTER]
+Edmund Wilson (Smuggler): 15/15 HP
+Stats: STR 10, DEX 16, CON 14, INT 12, WIS 14, CHA 12
+Hit Die: 1d10
+Features: Cunning Action, Quick Reflexes
+Level: 1
+[/CHARACTER]
+[XP]
+Level: 1 | XP: 0/300
+[/XP]`;
+
+    // Mock storage environments
+    const mockCompanionSettings = {
+        chatStates: {},
+    };
+
+    const mockCtx = {
+        chatMetadata: {},
+        saveMetadataDebounced: () => {},
+        saveSettingsDebounced: () => {},
+    };
+    globalThis.SillyTavern = { getContext: () => mockCtx };
+
+    try {
+        // Initial scaffold
+        const initialDossier = ensureChatDossier(chatId, mockCompanionSettings, { memo });
+        assert.strictEqual(initialDossier.protagonist.name, 'Edmund Wilson');
+        assert.strictEqual(initialDossier.protagonist.class, 'Smuggler');
+        assert.strictEqual(hasProgressionBlueprint(initialDossier), false, 'Initially must not have blueprint');
+
+        // Assign and persist blueprint
+        initialDossier.progressionBlueprint = {
+            className: 'Smuggler',
+            hitDie: 'd10',
+            levels: {
+                1: { features: ['Black Market Contact'] },
+                20: { features: ['Master of the Gray Market'] },
+            },
+        };
+
+        persistCompanionDossier(chatId, initialDossier);
+
+        assert.strictEqual(mockCtx.chatMetadata.mhc_dossier.progressionBlueprint.className, 'Smuggler');
+        assert.strictEqual(mockCompanionSettings.chatStates[chatId].companionDossier.progressionBlueprint.className, 'Smuggler');
+
+        // Simulate subsequent reopening on a fresh invocation
+        const freshCompanionSettings = {
+            chatStates: {
+                [chatId]: {
+                    companionDossier: mockCompanionSettings.chatStates[chatId].companionDossier,
+                },
+            },
+        };
+
+        const reloadedDossier = ensureChatDossier(chatId, freshCompanionSettings, { memo });
+        assert.strictEqual(hasProgressionBlueprint(reloadedDossier), true, 'Reloaded dossier must retain progressionBlueprint');
+        assert.strictEqual(reloadedDossier.progressionBlueprint.className, 'Smuggler');
+        assert.strictEqual(reloadedDossier.progressionBlueprint.levels['20'].features[0], 'Master of the Gray Market');
+    } finally {
+        delete globalThis.SillyTavern;
+    }
+});
+
+test('Level-Up System: Starting Trait Grounding & Non-Duplicating Respec Commit', () => {
+    // 1. Verify buildBlueprintPrompt grounds prompt in established sheet traits
+    const testChar = {
+        name: 'Edmund Wilson',
+        class: 'Eldritch Bounty Hunter',
+        hitDie: 'd10',
+        stats: { STR: 16, DEX: 14, CON: 14, INT: 10, WIS: 12, CHA: 8 },
+        features: ['Arcane Tracking', 'Silver Tongue', 'Quick Draw'],
+    };
+
+    const prompt = buildBlueprintPrompt({ character: testChar, genre: 'grimdark fantasy' });
+    assert.match(prompt, /ESTABLISHED STARTING TRAITS \/ AD-HOC ABILITIES:\s*Arcane Tracking, Silver Tongue, Quick Draw/);
+    assert.match(prompt, /Starting Trait Integration: You MUST incorporate and honor the character's ESTABLISHED STARTING TRAITS/);
+
+    // 2. Verify applyLevelUpCommit replaces rather than duplicates on Respec
+    const initialMemo = `[CHARACTER]
+Edmund Wilson (Eldritch Bounty Hunter): 12/12 HP
+Stats: STR 16, DEX 14, CON 14, INT 10, WIS 12, CHA 8
+Features: Arcane Tracking, Silver Tongue, Quick Draw
+Level: 1
+[/CHARACTER]
+[XP]
+Level: 1 | XP: 0/300
+[/XP]`;
+
+    const respecProposal1 = {
+        characterName: 'Edmund Wilson',
+        className: 'Eldritch Bounty Hunter',
+        targetLevel: 1,
+        currentLevel: 1,
+        hitDie: 'd10',
+        hpChange: { oldMax: 12, gain: 0, newMax: 12 },
+        newFeatures: ['Arcane Tracking', 'Silver Tongue', 'Quick Draw', 'Eldritch Sense'],
+        partyChanges: [],
+    };
+
+    // First respec commit
+    const commit1 = applyLevelUpCommit({
+        chatId: 'edmund_chat',
+        currentMemo: initialMemo,
+        proposal: respecProposal1,
+        isRespec: true,
+    });
+
+    assert.strictEqual(commit1.success, true);
+    assert.match(commit1.updatedMemo, /Features:\s*Arcane Tracking, Silver Tongue, Quick Draw, Eldritch Sense/);
+    // Ensure no duplicate features line or repeated traits
+    const matches1 = commit1.updatedMemo.match(/Arcane Tracking/g);
+    assert.strictEqual(matches1.length, 1, 'Feature should only appear once after first respec');
+
+    // Second respec commit (simulating user opening respec again and modifying traits)
+    const respecProposal2 = {
+        ...respecProposal1,
+        newFeatures: ['Arcane Tracking', 'Eldritch Sense', 'Shadow Step'],
+    };
+
+    const commit2 = applyLevelUpCommit({
+        chatId: 'edmund_chat',
+        currentMemo: commit1.updatedMemo,
+        proposal: respecProposal2,
+        isRespec: true,
+    });
+
+    assert.strictEqual(commit2.success, true);
+    assert.match(commit2.updatedMemo, /Features:\s*Arcane Tracking, Eldritch Sense, Shadow Step/);
+    assert.doesNotMatch(commit2.updatedMemo, /Silver Tongue/);
+    assert.doesNotMatch(commit2.updatedMemo, /Quick Draw/);
+    const matches2 = commit2.updatedMemo.match(/Arcane Tracking/g);
+    assert.strictEqual(matches2.length, 1, 'Feature should strictly appear once after second respec');
+
+    // 3. Verify applyLevelUpCommit deduplicates new features on Level-Up
+    const levelUpProposal = {
+        characterName: 'Edmund Wilson',
+        className: 'Eldritch Bounty Hunter',
+        targetLevel: 2,
+        currentLevel: 1,
+        hitDie: 'd10',
+        hpChange: { oldMax: 12, gain: 7, newMax: 19 },
+        newFeatures: ['Arcane Tracking', 'Hunter\'s Mark'], // Arcane Tracking is already on sheet
+        partyChanges: [],
+    };
+
+    const commitLevelUp = applyLevelUpCommit({
+        chatId: 'edmund_chat',
+        currentMemo: commit2.updatedMemo,
+        proposal: levelUpProposal,
+        isRespec: false,
+    });
+
+    assert.strictEqual(commitLevelUp.success, true);
+    assert.match(commitLevelUp.updatedMemo, /Hunter's Mark/);
+    const matchesLevelUp = commitLevelUp.updatedMemo.match(/Arcane Tracking/g);
+    assert.strictEqual(matchesLevelUp.length, 1, 'Level-up should deduplicate already existing features');
+});
+
+test('Level-Up System: Passive Traits vs Active [ABILITIES] Dual-Block Persistence', () => {
+    const rawSmugglerMemo = `[CHARACTER]
+Edmund Wilson (Smuggler): 12/12 HP
+Combat: BAB: +1 | Ranged (1 attack): +4 | Melee (1 attack): +2 | Base AC: 13 | Total AC: 16
+Gear: "Gutter-Snipe" Revolver (2d8+1 Kinetic, +1 to hit) | Standard Combat Knife (1d4+1 Slashing) | Worn Synth-Leather Armor (+3 AC)
+Proficiencies: Light Armor, Simple Firearms, Basic Melee Weapons
+Attr: STR 12 (+1), DEX 16 (+3), CON 14 (+2), INT 15 (+2), WIS 10 (+0), CHA 14 (+2)
+Saves: Fort +2 | Ref +5 | Will +2
+Skills: Stealth +6, Persuasion +4
+Traits: Street Rat (+2 to Stealth), Scavenger's Instinct (+2 to Survival), Bad Luck Bearer (reroll misfortune)
+HD: d10 (10/10)
+Status: Healthy
+[/CHARACTER]
+
+[INVENTORY]
+Gear:
+- ⚡ [Uncommon] [E] "Gutter-Snipe" Revolver (2d8+1 Kinetic, +1 to hit) (~150 CR)
+- 🧥 [Common] Worn Synth-Leather Armor (+3 AC) (~40 CR)
+[/INVENTORY]
+
+[ABILITIES]
+Underworld Broker (Forces an enemy to make a Ref DC 13 save or waste their next action, 1/1 per short rest)
+Misfortune Gambit (Reroll a critical misfortune check, 1/1 per rest)
+[/ABILITIES]
+
+[XP]
+Level: 1 | XP: 0/300
+[/XP]`;
+
+    // 1. Verify parseAbilitiesBlockFromMemo extracts abilities correctly
+    const parsedAbilities = parseAbilitiesBlockFromMemo(rawSmugglerMemo);
+    assert.strictEqual(parsedAbilities.length, 2);
+    assert.match(parsedAbilities[0], /Underworld Broker/);
+    assert.match(parsedAbilities[1], /Misfortune Gambit/);
+
+    const parsedChar = parseCharacterBlockFromMemo(rawSmugglerMemo);
+    assert.strictEqual(parsedChar.features.length, 3);
+    assert.strictEqual(parsedChar.abilities.length, 2);
+
+    // 2. Formulate proposal with options.currentMemo
+    const proposal = formulateLevelUpProposal(null, null, 1, {
+        isRespec: true,
+        currentMemo: rawSmugglerMemo,
+    });
+    assert.strictEqual(proposal.activeAbilities.length, 2);
+    assert.match(proposal.activeAbilities[0], /Underworld Broker/);
+
+    // 3. Simulate Concierge audit & deduplication:
+    // Remove duplicated 'Bad Luck Bearer' from passive traits, keep 'Misfortune Gambit' in active abilities,
+    // and add a new active ability 'Smoke Bomb (1/1 per short rest)'.
+    proposal.newFeatures = ["Street Rat (+2 to Stealth)", "Scavenger's Instinct (+2 to Survival)"];
+    proposal.activeAbilities = [
+        "Underworld Broker (Forces an enemy to make a Ref DC 13 save or waste their next action, 1/1 per short rest)",
+        "Misfortune Gambit (Reroll a critical misfortune check, 1/1 per rest)",
+        "Smoke Bomb (Concealment in 15ft radius, 1/1 per short rest)",
+    ];
+
+    const commitResult = applyLevelUpCommit({
+        chatId: 'edmund_smuggler',
+        currentMemo: rawSmugglerMemo,
+        proposal,
+        isRespec: true,
+    });
+
+    assert.strictEqual(commitResult.success, true);
+    // [CHARACTER] must have the cleaned passive traits and NOT have Bad Luck Bearer
+    assert.match(commitResult.updatedMemo, /Traits:\s*Street Rat \(\+2 to Stealth\), Scavenger's Instinct \(\+2 to Survival\)/);
+    assert.doesNotMatch(commitResult.updatedMemo, /Bad Luck Bearer/);
+
+    // [ABILITIES] must be cleanly updated with all 3 active abilities
+    assert.match(commitResult.updatedMemo, /\[ABILITIES\][\s\S]*?Underworld Broker[\s\S]*?Smoke Bomb[\s\S]*?\[\/ABILITIES\]/);
+    assert.match(commitResult.updatedMemo, /Smoke Bomb \(Concealment in 15ft radius, 1\/1 per short rest\)/);
+
+    // Verify [INVENTORY] and [XP] blocks remain intact
+    assert.match(commitResult.updatedMemo, /\[INVENTORY\][\s\S]*?\[\/INVENTORY\]/);
+    assert.match(commitResult.updatedMemo, /\[XP\][\s\S]*?\[\/XP\]/);
+});
+
+test('Level-Up System: Feature Key Extraction & Smart Title-Based Deduplication', () => {
+    // 1. Test extractFeatureKey
+    assert.strictEqual(
+        extractFeatureKey('Street Rat (+2 to Stealth and Deception rolls in urban underbelly districts)'),
+        'street rat'
+    );
+    assert.strictEqual(
+        extractFeatureKey('Street Rat (+2 Stealth/Deception in urban underbelly)'),
+        'street rat'
+    );
+    assert.strictEqual(
+        extractFeatureKey('Underworld Broker (Forces an enemy to make a Ref DC 13 save...)'),
+        'underworld broker'
+    );
+    assert.strictEqual(
+        extractFeatureKey('Underworld Broker (Force Ref DC 13 save or target wastes action)'),
+        'underworld broker'
+    );
+    assert.strictEqual(
+        extractFeatureKey('• Cunning Action: Dash, Disengage, or Hide'),
+        'cunning action'
+    );
+    assert.strictEqual(
+        extractFeatureKey('Darkvision'),
+        'darkvision'
+    );
+
+    // 2. Test deduplicateFeatures
+    const mixedTraits = [
+        'Street Rat (+2 to Stealth and Deception rolls in urban underbelly districts)',
+        'Scavenger\'s Instinct (+2 to Survival checks when navigating wrecked environments or scrap heaps)',
+        'Bad Luck Bearer (Once per long rest, reroll a failed saving throw...)',
+        'Street Rat (+2 Stealth/Deception in urban underbelly)',
+        'Scavenger\'s Instinct (+2 Survival in wrecked environments)',
+    ];
+    const deduplicated = deduplicateFeatures(mixedTraits);
+    assert.strictEqual(deduplicated.length, 3);
+    assert.strictEqual(deduplicated[0], 'Street Rat (+2 to Stealth and Deception rolls in urban underbelly districts)');
+    assert.strictEqual(deduplicated[1], 'Scavenger\'s Instinct (+2 to Survival checks when navigating wrecked environments or scrap heaps)');
+    assert.strictEqual(deduplicated[2], 'Bad Luck Bearer (Once per long rest, reroll a failed saving throw...)');
+
+    // 3. Test deduplication inside formulateLevelUpProposal with paraphrased blueprint features
+    const mockBlueprint = {
+        className: 'Smuggler',
+        hitDie: 'd10',
+        levels: {
+            '1': {
+                features: [
+                    'Street Rat (+2 Stealth/Deception in urban underbelly)',
+                    'Scavenger\'s Instinct (+2 Survival in wrecked environments)',
+                ],
+            },
+        },
+    };
+    const mockChar = {
+        name: 'Edmund Wilson',
+        class: 'Smuggler',
+        level: 1,
+        features: [
+            'Street Rat (+2 to Stealth and Deception rolls in urban underbelly districts)',
+            'Scavenger\'s Instinct (+2 to Survival checks when navigating wrecked environments or scrap heaps)',
+            'Bad Luck Bearer (Once per long rest, reroll a failed saving throw...)',
+        ],
+        abilities: [
+            'Underworld Broker (Forces an enemy to make a Ref DC 13 save or waste their next action, 1/1 per short rest)',
+        ],
+    };
+
+    const proposal = formulateLevelUpProposal(mockChar, mockBlueprint, 1, { isRespec: true });
+    // Should contain exactly 3 traits (retaining established sheet descriptions), NOT 5
+    assert.strictEqual(proposal.newFeatures.length, 3);
+    assert.strictEqual(extractFeatureKey(proposal.newFeatures[0]), 'street rat');
+    assert.strictEqual(extractFeatureKey(proposal.newFeatures[1]), 'scavenger\'s instinct');
+    assert.strictEqual(extractFeatureKey(proposal.newFeatures[2]), 'bad luck bearer');
+    assert.strictEqual(proposal.activeAbilities.length, 1);
 });

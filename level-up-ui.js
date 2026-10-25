@@ -10,10 +10,10 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit } from './level-up-runner.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures } from './level-up-runner.js';
 import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
-import { syncDossierToWorldInfoBook } from './level-up-scaffold.js';
+import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
 
 let _activeModalElement = null;
 
@@ -87,8 +87,21 @@ export function openLevelUpModal({
     // For D&D: if initialStage is passed, honor it. Otherwise, if blueprint exists, default to 2; if not, default to 1.
     let currentStage = isPbta ? 2 : (initialStage ? initialStage : (activeBlueprint ? 2 : 1));
 
-    const proposal = formulateLevelUpProposal(dossier, activeBlueprint, targetLevel, { isRespec, isPbta });
+    const parsedCurrentSheet = parseCharacterBlockFromMemo(rpgSettings?.currentMemo || '');
+    const initialSheetFeatures = Array.isArray(dossier?.protagonist?.features) && dossier.protagonist.features.length > 0
+        ? [...dossier.protagonist.features]
+        : (parsedCurrentSheet.features || []);
+
+    const proposal = formulateLevelUpProposal(dossier, activeBlueprint, targetLevel, {
+        isRespec,
+        isPbta,
+        currentMemo: rpgSettings?.currentMemo,
+    });
     proposal.newFeatures = [...(proposal.newFeatures || [])];
+    proposal.activeAbilities = [...(proposal.activeAbilities || [])];
+    if (proposal.activeAbilities.length === 0 && Array.isArray(parsedCurrentSheet.abilities) && parsedCurrentSheet.abilities.length > 0) {
+        proposal.activeAbilities = [...parsedCurrentSheet.abilities];
+    }
 
     const modal = document.createElement('div');
     modal.id = 'mhc-level-up-modal';
@@ -236,10 +249,37 @@ export function openLevelUpModal({
         ? (isRespec ? 'Add or tweak custom Playbook Move...' : 'Add custom Playbook Move manually...')
         : (isRespec ? 'Add or tweak custom trait or ability...' : 'Add custom trait or ability manually...');
 
+    const harmonizationControlsHtml = (!isPbta && isRespec) ? `
+    <div class="mhc-harmonize-bar" style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <button class="mhc-chip" id="mhc-sync-codex-traits-btn" title="Harmonize active traits strictly with the 1–20 Progression Codex up to your level">
+            <i class="fa-solid fa-arrows-rotate"></i> Sync from Codex Table
+        </button>
+        <button class="mhc-chip" id="mhc-restore-sheet-traits-btn" title="Restore original starting traits from your adventure character sheet">
+            <i class="fa-solid fa-file-lines"></i> Restore Adventure Sheet Traits
+        </button>
+    </div>
+    ` : '';
+
+    const activeAbilitiesSectionHtml = !isPbta ? `
+    <div class="mhc-card-section" style="margin-top: 10px;">
+        <div class="mhc-section-title" style="justify-content: space-between;">
+            <span><i class="fa-solid fa-bolt" style="color: #60a5fa;"></i> Active Powers & Rest Resources ([ABILITIES])</span>
+            <span style="font-size: 0.8em; color: #9ca3af;"><i class="fa-solid fa-circle-info"></i> Tracked with clickable resource pills</span>
+        </div>
+        <ul class="mhc-perks-list" id="mhc-abilities-list-container">
+            <!-- Populated dynamically by renderAbilitiesList -->
+        </ul>
+        <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
+            <input type="text" id="mhc_manual_ability_input" class="text_pole" placeholder="Add active power (e.g. Underworld Broker, 1/1 per short rest)..." style="flex: 1;" />
+            <button class="menu_button" id="mhc_manual_ability_add_btn"><i class="fa-solid fa-plus"></i> Add Power</button>
+        </div>
+    </div>
+    ` : '';
+
     const conciergeTitle = isPbta ? 'Playbook Guide Concierge' : 'Leveling Guide Concierge';
     const conciergeDesc = isPbta
         ? (isRespec ? 'Consult your guide to review your playbook moves, refine stats (-1 to +3), or tune gear and conditions.' : 'Consult your guide for playbook advances, new narrative moves, or rule clarifications.')
-        : (isRespec ? 'Consult your guide to review your build, rebalance techniques, or customize perks without changing your level.' : 'Consult your guide for build recommendations, rule clarifications, or to request custom thematic perks.');
+        : (isRespec ? 'Consult your guide to review your build, audit active vs passive abilities, or rebalance perks without changing your level.' : 'Consult your guide for build recommendations, rule clarifications, or to request custom thematic perks.');
 
     let stage2QuickChipsHtml = '';
     if (isPbta) {
@@ -250,12 +290,14 @@ export function openLevelUpModal({
         `;
     } else if (isRespec) {
         stage2QuickChipsHtml = `
+        <button class="mhc-chip" data-prompt="Audit my passive traits and active abilities: detect any duplicates, verify they are in the right place, and clean them up">🔍 Audit & fix duplicates</button>
         <button class="mhc-chip" data-prompt="Rebalance my abilities for a specific weapon or playstyle">🔄 Rebalance abilities</button>
         <button class="mhc-chip" data-prompt="Suggest a custom trait or boon fitting my character">⚡ Suggest custom trait</button>
         <button class="mhc-chip" data-prompt="Review my current build and suggest tweaks">📜 Review build balance</button>
         `;
     } else {
         stage2QuickChipsHtml = `
+        <button class="mhc-chip" data-prompt="Audit my traits and active abilities for duplicates or misplaced powers">🔍 Audit & fix duplicates</button>
         <button class="mhc-chip" data-prompt="Suggest a unique martial or magical perk fitting my character">⚡ Suggest custom perk</button>
         <button class="mhc-chip" data-prompt="Explain my class features and how to best use them">📜 Explain my abilities</button>
         <button class="mhc-chip" data-prompt="Recommend an optimal ASI or feat choice">🛡️ Recommend feats</button>
@@ -392,52 +434,61 @@ export function openLevelUpModal({
                 </div>
                 <button class="mhc-modal-close" id="mhc-stage2-close-btn">&times;</button>
             </div>
-            <div class="mhc-modal-body">
-                <!-- Vitality / Harm Section -->
-                ${vitalitySectionHtml}
+            <div class="mhc-modal-body mhc-advancement-split-body">
+                <!-- Left Column: Character Build & Features -->
+                <div class="mhc-advancement-cards-col">
+                    <!-- Vitality / Harm Section -->
+                    ${vitalitySectionHtml}
 
-                <!-- Class Features & Active Traits / Moves -->
-                <div class="mhc-card-section">
-                    <div class="mhc-section-title" style="justify-content: space-between;">
-                        <span><i class="fa-solid ${featuresIcon}"></i> ${escapeHtml(featuresTitle)}</span>
+                    <!-- Class Features & Active Traits / Moves -->
+                    <div class="mhc-card-section">
+                        <div class="mhc-section-title" style="justify-content: space-between;">
+                            <span><i class="fa-solid ${featuresIcon}"></i> ${escapeHtml(featuresTitle)}</span>
+                        </div>
+                        ${harmonizationControlsHtml}
+                        <ul class="mhc-perks-list" id="mhc-perks-list-container">
+                            <!-- Populated dynamically by renderPerksList -->
+                        </ul>
+                        <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
+                            <input type="text" id="mhc_manual_perk_input" class="text_pole" placeholder="${featuresPlaceholder}" style="flex: 1;" />
+                            <button class="menu_button" id="mhc_manual_perk_add_btn"><i class="fa-solid fa-plus"></i> Add</button>
+                        </div>
                     </div>
-                    <ul class="mhc-perks-list" id="mhc-perks-list-container">
-                        <!-- Populated dynamically by renderPerksList -->
-                    </ul>
-                    <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
-                        <input type="text" id="mhc_manual_perk_input" class="text_pole" placeholder="${featuresPlaceholder}" style="flex: 1;" />
-                        <button class="menu_button" id="mhc_manual_perk_add_btn"><i class="fa-solid fa-plus"></i> Add</button>
-                    </div>
+
+                    <!-- Active Tracked Abilities ([ABILITIES] Module) -->
+                    ${activeAbilitiesSectionHtml}
+
+                    <!-- ASI / Feat Section -->
+                    ${asiSection}
+
+                    <!-- Party Sync Section -->
+                    ${partySection}
                 </div>
 
-                <!-- ASI / Feat Section -->
-                ${asiSection}
+                <!-- Right Column: Interactive Concierge Desk -->
+                <div class="mhc-advancement-concierge-col">
+                    <div class="mhc-card-section mhc-concierge-section mhc-concierge-desk-card">
+                        <div class="mhc-section-title"><i class="fa-solid fa-wand-magic-sparkles"></i> ${conciergeTitle}</div>
+                        <div class="mhc-concierge-desc">${conciergeDesc}</div>
+                        
+                        <div class="mhc-concierge-chat-log" id="mhc-concierge-chat-log">
+                            <!-- Populated by renderStage2Chat -->
+                        </div>
 
-                <!-- Party Sync Section -->
-                ${partySection}
+                        <div class="mhc-concierge-typing" id="mhc-concierge-typing" style="display: none;">
+                            <i class="fa-solid fa-wand-magic-sparkles fa-spin"></i> Guide is considering your request...
+                        </div>
 
-                <!-- Interactive Concierge Desk -->
-                <div class="mhc-card-section mhc-concierge-section">
-                    <div class="mhc-section-title"><i class="fa-solid fa-wand-magic-sparkles"></i> ${conciergeTitle}</div>
-                    <div class="mhc-concierge-desc">${conciergeDesc}</div>
-                    
-                    <div class="mhc-concierge-chat-log" id="mhc-concierge-chat-log">
-                        <!-- Populated by renderStage2Chat -->
-                    </div>
+                        <div class="mhc-quick-chips">
+                            ${stage2QuickChipsHtml}
+                        </div>
 
-                    <div class="mhc-concierge-typing" id="mhc-concierge-typing" style="display: none;">
-                        <i class="fa-solid fa-wand-magic-sparkles fa-spin"></i> Guide is considering your request...
-                    </div>
-
-                    <div class="mhc-quick-chips">
-                        ${stage2QuickChipsHtml}
-                    </div>
-
-                    <div class="mhc-concierge-input-row">
-                        <input type="text" id="mhc_concierge_input" class="text_pole" placeholder="${stage2Placeholder}" />
-                        <button class="menu_button menu_button_primary" id="mhc_concierge_send_btn">
-                            <i class="fa-solid fa-paper-plane"></i> Send
-                        </button>
+                        <div class="mhc-concierge-input-row">
+                            <input type="text" id="mhc_concierge_input" class="text_pole" placeholder="${stage2Placeholder}" />
+                            <button class="menu_button menu_button_primary" id="mhc_concierge_send_btn">
+                                <i class="fa-solid fa-paper-plane"></i> Send
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -549,12 +600,14 @@ export function openLevelUpModal({
     // ─────────────────────────────────────────────────────────────
 
     const stage1ChatLogEl = modal.querySelector('#mhc-stage1-chat-log');
-    const stage1Greeting = `Greetings, ${proposal.characterName}! I am your RPG Systems Architect. Here is your complete 1–20 progression codex for the ${activeBlueprint?.className || proposal.className} class. You can review all 20 levels, customize abilities, change your Hit Die, or request thematic powers before proceeding. What would you like to refine?`;
+    const stage1ReadyGreeting = `Greetings, ${proposal.characterName}! I am your RPG Systems Architect. Here is your complete 1–20 progression codex for the ${activeBlueprint?.className || proposal.className} class. You can review all 20 levels, customize abilities, change your Hit Die, or request thematic powers before proceeding. What would you like to refine?`;
+
+    const stage1LoadingGreeting = `Greetings, ${proposal.characterName}! I am your RPG Systems Architect. I am actively drafting and balancing your 1–20 Progression Codex for the ${proposal.className} class right now. Please hold for just a few moments while I craft your progression roadmap...`;
 
     const stage1ChatHistory = [
         {
             role: 'assistant',
-            content: stage1Greeting,
+            content: isLoadingBlueprint ? stage1LoadingGreeting : stage1ReadyGreeting,
         },
     ];
 
@@ -563,7 +616,7 @@ export function openLevelUpModal({
         stage1ChatLogEl.innerHTML = stage1ChatHistory.map(m => `
             <div class="mhc-chat-msg mhc-chat-${m.role}">
                 <div class="mhc-chat-avatar"><i class="fa-solid ${m.role === 'assistant' ? 'fa-wand-magic-sparkles' : 'fa-user'}"></i></div>
-                <div class="mhc-chat-bubble">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>
+                <div class="mhc-chat-bubble">${escapeHtml(m.content).replace(/\n{3,}/g, '\n\n').replace(/\n/g, '<br>')}</div>
             </div>
         `).join('');
         stage1ChatLogEl.scrollTop = stage1ChatLogEl.scrollHeight;
@@ -573,6 +626,18 @@ export function openLevelUpModal({
     const stage1Input = modal.querySelector('#mhc_stage1_concierge_input');
     const stage1SendBtn = modal.querySelector('#mhc_stage1_concierge_send_btn');
     const stage1Typing = modal.querySelector('#mhc-stage1-typing');
+
+    if (isLoadingBlueprint) {
+        if (stage1Input) {
+            stage1Input.disabled = true;
+            stage1Input.placeholder = 'Architect is drafting your 1–20 Progression Codex...';
+        }
+        if (stage1SendBtn) stage1SendBtn.disabled = true;
+        if (stage1Typing) {
+            stage1Typing.style.display = 'flex';
+            stage1Typing.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles fa-spin"></i> Architect is drafting your 1–20 Progression Codex...';
+        }
+    }
 
     async function sendStage1ConciergeMessage(userText) {
         const text = userText?.trim();
@@ -596,13 +661,14 @@ ${formatBlueprintSummary(activeBlueprint)}
 
 GUIDELINES (D&D LITE PHILOSOPHY):
 1. Single-Track Progression: We use a streamlined single-track model from 1 to 20 with no rigid branching subclass trees or multi-class requirements.
-2. Dynamic Table Updates: When the player asks to change, add, or customize abilities at any level, emit:
+2. Distinct Traits vs Abilities: When designing or customizing features, distinguish between passive traits (constant bonuses) and active abilities with rest uses (e.g. "1/1 per short rest" or "2/2 per long rest"). Active powers should include their rest recharge in parentheses.
+3. Dynamic Table Updates: When the player asks to change, add, or customize abilities at any level, emit:
    [UPDATE_LEVEL: <level_number> | <feature1>; <feature2>]
-3. Hit Die Updates: If the player asks to change their Hit Die (d6, d8, d10, or d12), emit:
+4. Hit Die Updates: If the player asks to change their Hit Die (d6, d8, d10, or d12), emit:
    [SET_HIT_DIE: <d6|d8|d10|d12>]
-4. Class Name Updates: If the player asks to rename the class, emit:
+5. Class Name Updates: If the player asks to rename the class, emit:
    [SET_CLASS_NAME: <New Class Name>]
-5. Concise & Inspiring: Keep your spoken reply evocative, mechanically balanced, and concise (under 120 words), explaining what you modified.`;
+6. Concise & Inspiring: Keep your spoken reply evocative, mechanically balanced, and concise (under 120 words), explaining what you modified.`;
 
         const messages = [
             { role: 'system', content: stage1SystemPrompt },
@@ -653,9 +719,10 @@ GUIDELINES (D&D LITE PHILOSOPHY):
                 }
 
                 renderBlueprintTable();
+                persistCompanionDossier(chatId, dossier);
             }
 
-            const cleanReply = reply.replace(/\[(?:UPDATE_LEVEL|SET_HIT_DIE|SET_CLASS_NAME):[^\]]+\]/gi, '').trim();
+            const cleanReply = reply.replace(/\[(?:UPDATE_LEVEL|SET_HIT_DIE|SET_CLASS_NAME):[^\]]+\]/gi, '').replace(/\n{3,}/g, '\n\n').trim();
             stage1ChatHistory.push({ role: 'assistant', content: cleanReply || reply });
             renderStage1Chat();
         } catch (err) {
@@ -697,13 +764,40 @@ GUIDELINES (D&D LITE PHILOSOPHY):
             perksContainer.innerHTML = `<li class="mhc-perk-item"><em>${isPbta ? 'Active Playbook Moves' : 'Stat & Vitality Progression'}</em></li>`;
             return;
         }
-        perksContainer.innerHTML = proposal.newFeatures.map((f, idx) => `
+
+        // Determine origin badges for D&D respec
+        let codexFeatKeys = new Set();
+        if (!isPbta && isRespec && activeBlueprint?.levels) {
+            for (let l = 1; l <= (proposal.currentLevel || targetLevel || 1); l++) {
+                const feats = activeBlueprint.levels[String(l)]?.features || [];
+                feats.forEach(f => codexFeatKeys.add(extractFeatureKey(f)));
+            }
+        }
+        const sheetFeatKeys = new Set(initialSheetFeatures.map(f => extractFeatureKey(f)));
+
+        perksContainer.innerHTML = proposal.newFeatures.map((f, idx) => {
+            let originBadgeHtml = '';
+            if (!isPbta && isRespec) {
+                const fKey = extractFeatureKey(f);
+                const inCodex = codexFeatKeys.has(fKey);
+                const inSheet = sheetFeatKeys.has(fKey);
+                if (inCodex && inSheet) {
+                    originBadgeHtml = `<span class="mhc-trait-origin-badge mhc-trait-origin-harmonized" title="Integrated in both Roadmap Codex and Adventure Sheet">Harmonized</span>`;
+                } else if (inCodex) {
+                    originBadgeHtml = `<span class="mhc-trait-origin-badge mhc-trait-origin-codex" title="Derived from 1–20 Progression Codex">Codex</span>`;
+                } else if (inSheet) {
+                    originBadgeHtml = `<span class="mhc-trait-origin-badge mhc-trait-origin-sheet" title="Established on Adventure Character Sheet">Adventure Sheet</span>`;
+                }
+            }
+
+            return `
             <li class="mhc-perk-item" data-index="${idx}">
                 <i class="fa-solid fa-star"></i>
+                ${originBadgeHtml}
                 <span class="mhc-perk-text" style="flex: 1;">${escapeHtml(f)}</span>
                 <button class="mhc-remove-perk-btn" data-index="${idx}" title="Remove feature" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:1.1em; line-height:1; padding:0 4px;">&times;</button>
-            </li>
-        `).join('');
+            </li>`;
+        }).join('');
 
         perksContainer.querySelectorAll('.mhc-remove-perk-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -718,6 +812,89 @@ GUIDELINES (D&D LITE PHILOSOPHY):
     }
     renderPerksList();
 
+    // Harmonization Buttons (D&D Respec)
+    modal.querySelector('#mhc-sync-codex-traits-btn')?.addEventListener('click', () => {
+        let codexFeats = [];
+        if (activeBlueprint?.levels) {
+            for (let l = 1; l <= (proposal.currentLevel || targetLevel || 1); l++) {
+                const lvlFeats = activeBlueprint.levels[String(l)]?.features || [];
+                codexFeats.push(...lvlFeats);
+            }
+        }
+        if (codexFeats.length === 0 && activeBlueprint) {
+            const conMod = Math.floor((((dossier?.protagonist?.stats?.CON ?? 10) - 10) / 2));
+            const perks = getTierPerks(activeBlueprint, proposal.currentLevel || 1, conMod);
+            codexFeats = perks.features || [];
+        }
+        proposal.newFeatures = codexFeats.length > 0 ? deduplicateFeatures(codexFeats) : [];
+        renderPerksList();
+        if (typeof toastr !== 'undefined') {
+            toastr.info(`Synchronized traits from ${activeBlueprint?.className || 'Class'} Progression Codex.`, 'Codex Harmonizer');
+        }
+    });
+
+    modal.querySelector('#mhc-restore-sheet-traits-btn')?.addEventListener('click', () => {
+        proposal.newFeatures = initialSheetFeatures.length > 0 ? deduplicateFeatures(initialSheetFeatures) : [];
+        renderPerksList();
+        if (typeof toastr !== 'undefined') {
+            toastr.info('Restored starting traits from adventure character sheet.', 'Sheet Harmonizer');
+        }
+    });
+
+    // Active Abilities List ([ABILITIES] Module)
+    const abilitiesContainer = modal.querySelector('#mhc-abilities-list-container');
+    function renderAbilitiesList() {
+        if (!abilitiesContainer) return;
+        if (!proposal.activeAbilities || proposal.activeAbilities.length === 0) {
+            abilitiesContainer.innerHTML = `<li class="mhc-perk-item"><em>No active resource abilities configured (all powers are passive or at-will)</em></li>`;
+            return;
+        }
+        abilitiesContainer.innerHTML = proposal.activeAbilities.map((ab, idx) => `
+            <li class="mhc-perk-item" data-index="${idx}">
+                <i class="fa-solid fa-bolt" style="color: #60a5fa; margin-top: 2px;"></i>
+                <span class="mhc-perk-text" style="flex: 1;">${escapeHtml(ab)}</span>
+                <button class="mhc-remove-ability-btn" data-index="${idx}" title="Remove active ability" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:1.1em; line-height:1; padding:0 4px;">&times;</button>
+            </li>
+        `).join('');
+
+        abilitiesContainer.querySelectorAll('.mhc-remove-ability-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.getAttribute('data-index'), 10);
+                if (!isNaN(idx) && idx >= 0 && idx < proposal.activeAbilities.length) {
+                    proposal.activeAbilities.splice(idx, 1);
+                    renderAbilitiesList();
+                }
+            });
+        });
+    }
+    renderAbilitiesList();
+
+    const manualAbilityInput = modal.querySelector('#mhc_manual_ability_input');
+    const manualAbilityAddBtn = modal.querySelector('#mhc_manual_ability_add_btn');
+    const handleManualAbilityAdd = () => {
+        const val = manualAbilityInput?.value?.trim();
+        if (val) {
+            proposal.activeAbilities = proposal.activeAbilities || [];
+            const key = extractFeatureKey(val);
+            const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === key);
+            if (idx >= 0) {
+                proposal.activeAbilities[idx] = val;
+            } else {
+                proposal.activeAbilities.push(val);
+            }
+            renderAbilitiesList();
+            if (manualAbilityInput) manualAbilityInput.value = '';
+        }
+    };
+    manualAbilityAddBtn?.addEventListener('click', handleManualAbilityAdd);
+    manualAbilityInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleManualAbilityAdd();
+        }
+    });
+
     // Hook up blueprint promise if generating asynchronously
     if (isLoadingBlueprint && blueprintPromise) {
         blueprintPromise.then((resolvedBlueprint) => {
@@ -728,6 +905,24 @@ GUIDELINES (D&D LITE PHILOSOPHY):
             if (resolvedBlueprint) {
                 activeBlueprint = resolvedBlueprint;
                 dossier.progressionBlueprint = resolvedBlueprint;
+                persistCompanionDossier(chatId, dossier);
+
+                // Update Stage 1 Concierge message to ready greeting and re-enable input
+                stage1ChatHistory[0] = {
+                    role: 'assistant',
+                    content: `Greetings, ${proposal.characterName}! I am your RPG Systems Architect. Your complete 1–20 progression codex for the ${resolvedBlueprint.className || proposal.className} class is ready! You can review all 20 levels in the roadmap above, customize abilities, change your Hit Die, or request thematic powers before proceeding. What would you like to refine?`,
+                };
+                renderStage1Chat();
+
+                if (stage1Input) {
+                    stage1Input.disabled = false;
+                    stage1Input.placeholder = "Ask your architect, or request changes (e.g. 'Make level 6 a lightning teleport')...";
+                }
+                if (stage1SendBtn) stage1SendBtn.disabled = false;
+                if (stage1Typing) {
+                    stage1Typing.style.display = 'none';
+                    stage1Typing.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles fa-spin"></i> Architect is updating your progression table...';
+                }
 
                 // Sync Stage 1 elements
                 if (bpClassNameInput) bpClassNameInput.value = resolvedBlueprint.className || proposal.className;
@@ -756,19 +951,19 @@ GUIDELINES (D&D LITE PHILOSOPHY):
 
                 if (isRespec) {
                     let feats = [];
+                    if (initialSheetFeatures.length > 0) {
+                        feats.push(...initialSheetFeatures);
+                    }
                     if (resolvedBlueprint.levels) {
                         for (let l = 1; l <= (targetLevel || 1); l++) {
                             const lvlFeats = resolvedBlueprint.levels[String(l)]?.features || [];
                             feats.push(...lvlFeats);
                         }
                     }
-                    if (Array.isArray(dossier?.protagonist?.features) && dossier.protagonist.features.length > 0) {
-                        feats.push(...dossier.protagonist.features);
-                    }
-                    proposal.newFeatures = Array.from(new Set(feats));
+                    proposal.newFeatures = deduplicateFeatures(feats);
                     if (proposal.newFeatures.length === 0) proposal.newFeatures = perks.features || [];
                 } else {
-                    proposal.newFeatures = perks.features || [];
+                    proposal.newFeatures = deduplicateFeatures(perks.features || []);
                 }
                 renderPerksList();
                 if (typeof toastr !== 'undefined') {
@@ -783,6 +978,12 @@ GUIDELINES (D&D LITE PHILOSOPHY):
             if (!_activeModalElement || _activeModalElement !== modal) return;
             const shimmerEl = modal.querySelector('#mhc-blueprint-shimmer');
             if (shimmerEl) shimmerEl.remove();
+            if (stage1Input) {
+                stage1Input.disabled = false;
+                stage1Input.placeholder = "Ask your architect, or request changes...";
+            }
+            if (stage1SendBtn) stage1SendBtn.disabled = false;
+            if (stage1Typing) stage1Typing.style.display = 'none';
             renderBlueprintTable();
             renderPerksList();
         });
@@ -794,7 +995,14 @@ GUIDELINES (D&D LITE PHILOSOPHY):
     const handleManualAdd = () => {
         const val = manualPerkInput?.value?.trim();
         if (val) {
-            proposal.newFeatures.push(val);
+            proposal.newFeatures = proposal.newFeatures || [];
+            const key = extractFeatureKey(val);
+            const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === key);
+            if (idx >= 0) {
+                proposal.newFeatures[idx] = val;
+            } else {
+                proposal.newFeatures.push(val);
+            }
             renderPerksList();
             if (manualPerkInput) manualPerkInput.value = '';
         }
@@ -832,7 +1040,7 @@ GUIDELINES (D&D LITE PHILOSOPHY):
         chatLogEl.innerHTML = stage2ChatHistory.map(m => `
             <div class="mhc-chat-msg mhc-chat-${m.role}">
                 <div class="mhc-chat-avatar"><i class="fa-solid ${m.role === 'assistant' ? 'fa-wand-magic-sparkles' : 'fa-user'}"></i></div>
-                <div class="mhc-chat-bubble">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>
+                <div class="mhc-chat-bubble">${escapeHtml(m.content).replace(/\n{3,}/g, '\n\n').replace(/\n/g, '<br>')}</div>
             </div>
         `).join('');
         chatLogEl.scrollTop = chatLogEl.scrollHeight;
@@ -874,15 +1082,31 @@ STRICT PbtA ARCHITECTURAL RULES:
         : `You are the Level-Up Concierge and RPG systems architect for "${proposal.characterName}", a Level ${proposal.currentLevel} ${proposal.className} advancing to Level ${proposal.targetLevel}.
 Character Stats: ${JSON.stringify(dossier?.protagonist?.stats || {})}
 Hit Die: ${proposal.hitDie}
-Current Proposed Features: ${proposal.newFeatures.join(', ')}
 
-GUIDELINES (D&D LITE PHILOSOPHY):
-1. Single-Track Progression: We follow a streamlined D&D Lite model with no rigid branching subclass trees. The character's class remains purely "${proposal.className}".
-2. Dynamic Flavor via Boons: When the player wants specific thematic flavor (e.g. Totem Warrior vibes, Assassin tricks, Battle Master maneuvers, Eldritch magic), do NOT tell them to switch classes or pick a rigid subclass. Instead, grant them tailored custom perks, traits, or boons directly via:
-   [ADD_FEATURE: Feature Name: Description]
-3. Feature Removal: If the user asks to remove a feature, emit:
-   [REMOVE_FEATURE: Feature Name]
-4. Concise & Atmospheric: Keep your response inspiring, mechanically balanced, and concise (under 120 words).`;
+CURRENT SHEETS & ABILITIES AUDIT:
+- PASSIVE TRAITS ([CHARACTER] sheet):
+  ${proposal.newFeatures.join('; ') || 'None'}
+- ACTIVE ABILITIES ([ABILITIES] resource tracker):
+  ${(proposal.activeAbilities || []).join('; ') || 'None'}
+
+ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
+1. Where It Goes — The Golden Rule:
+   - Passive Traits ([CHARACTER] Traits): Belongs here if it is a passive skill bonus (e.g. "+2 to Stealth"), environmental/survival perk, sensory advantage (Darkvision), background lore, or constant at-will bonus with NO usage counter.
+   - Active Abilities ([ABILITIES] Block): Belongs here if it is an active combat/tactical action, has limited uses per rest (e.g. "1/1 per short rest", "2/2 per long rest"), triggered reactions, or forces enemy saving throws (e.g. "Ref DC 13").
+2. Explicit Permission to Audit & Fix Duplicates:
+   - You have FULL PERMISSION to audit both lists. If you spot duplicates (e.g. the same mechanic under two different names like "Bad Luck Bearer" in Traits and "Misfortune Gambit" in Abilities), or if an ability is misplaced (e.g. an active limited-use power stuck in passive Traits), clearly explain the distinction and fix it immediately using the command tags below!
+   - IMPORTANT: All existing features listed above are KEPT BY DEFAULT. Do NOT emit add commands for features that are already listed unless updating their wording.
+3. Directives for Updating Build:
+   - To add a NEW passive trait: [ADD_FEATURE: Trait Name (effect)]
+   - To update/refine an existing passive trait description: [UPDATE_FEATURE: Trait Name | Full Description]
+   - To remove a passive trait: [REMOVE_FEATURE: Trait Name]
+   - To add a NEW active/resource power: [ADD_ABILITY: Ability Name (trigger, effect; uses/max per rest)]
+   - To update/refine an existing active ability description: [UPDATE_ABILITY: Ability Name | Full Description]
+   - To remove an active power: [REMOVE_ABILITY: Ability Name]
+   - To relocate a misplaced passive trait into active abilities: [MOVE_TO_ABILITIES: Feature Name]
+   - To relocate an active ability into passive traits: [MOVE_TO_FEATURES: Ability Name]
+4. Single-Track Progression: Streamlined D&D Lite model. No rigid subclass branching. The class remains "${proposal.className}".
+5. Concise & Inspiring: Keep your spoken reply evocative, clear, and under 130 words.`;
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -896,24 +1120,121 @@ GUIDELINES (D&D LITE PHILOSOPHY):
             if (conciergeSendBtn) conciergeSendBtn.disabled = false;
             conciergeInput?.focus();
 
+            // [ADD_FEATURE: ...]
             const addMatches = [...reply.matchAll(/\[ADD_FEATURE:\s*([^\]]+)\]/gi)];
             for (const match of addMatches) {
                 const feat = match[1].trim();
-                if (feat && !proposal.newFeatures.includes(feat)) {
-                    proposal.newFeatures.push(feat);
-                    if (typeof toastr !== 'undefined') toastr.info(feat, 'Added New Feature');
+                if (feat) {
+                    const key = extractFeatureKey(feat);
+                    const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === key);
+                    if (idx >= 0) {
+                        proposal.newFeatures[idx] = feat;
+                    } else {
+                        proposal.newFeatures.push(feat);
+                        if (typeof toastr !== 'undefined') toastr.info(feat, 'Added New Trait');
+                    }
                 }
             }
 
-            const removeMatches = [...reply.matchAll(/\[REMOVE_FEATURE:\s*([^\]]+)\]/gi)];
-            for (const match of removeMatches) {
-                const target = match[1].trim().toLowerCase();
-                proposal.newFeatures = proposal.newFeatures.filter(f => !f.toLowerCase().includes(target));
+            // [UPDATE_FEATURE: Name | Description]
+            const updateMatches = [...reply.matchAll(/\[UPDATE_FEATURE:\s*([^|\]]+)\|\s*([^\]]+)\]/gi)];
+            for (const match of updateMatches) {
+                const targetKey = extractFeatureKey(match[1]);
+                const newText = match[2].trim();
+                const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
+                if (idx >= 0) {
+                    proposal.newFeatures[idx] = newText;
+                } else {
+                    proposal.newFeatures.push(newText);
+                }
             }
 
-            renderPerksList();
+            // [REMOVE_FEATURE: ...]
+            const removeMatches = [...reply.matchAll(/\[REMOVE_FEATURE:\s*([^\]]+)\]/gi)];
+            for (const match of removeMatches) {
+                const targetKey = extractFeatureKey(match[1]);
+                proposal.newFeatures = proposal.newFeatures.filter(f => {
+                    return extractFeatureKey(f) !== targetKey && !f.toLowerCase().includes(targetKey);
+                });
+            }
 
-            const cleanReply = reply.replace(/\[(?:ADD|REMOVE)_FEATURE:[^\]]+\]/gi, '').trim();
+            // [ADD_ABILITY: ...]
+            proposal.activeAbilities = proposal.activeAbilities || [];
+            const addAbilityMatches = [...reply.matchAll(/\[ADD_ABILITY:\s*([^\]]+)\]/gi)];
+            for (const match of addAbilityMatches) {
+                const ab = match[1].trim();
+                if (ab) {
+                    const key = extractFeatureKey(ab);
+                    const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === key);
+                    if (idx >= 0) {
+                        proposal.activeAbilities[idx] = ab;
+                    } else {
+                        proposal.activeAbilities.push(ab);
+                        if (typeof toastr !== 'undefined') toastr.info(ab, 'Added Active Ability');
+                    }
+                }
+            }
+
+            // [UPDATE_ABILITY: Name | Description]
+            const updateAbilityMatches = [...reply.matchAll(/\[UPDATE_ABILITY:\s*([^|\]]+)\|\s*([^\]]+)\]/gi)];
+            for (const match of updateAbilityMatches) {
+                const targetKey = extractFeatureKey(match[1]);
+                const newText = match[2].trim();
+                const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
+                if (idx >= 0) {
+                    proposal.activeAbilities[idx] = newText;
+                } else {
+                    proposal.activeAbilities.push(newText);
+                }
+            }
+
+            // [REMOVE_ABILITY: ...]
+            const removeAbilityMatches = [...reply.matchAll(/\[REMOVE_ABILITY:\s*([^\]]+)\]/gi)];
+            for (const match of removeAbilityMatches) {
+                const targetKey = extractFeatureKey(match[1]);
+                proposal.activeAbilities = proposal.activeAbilities.filter(a => {
+                    return extractFeatureKey(a) !== targetKey && !a.toLowerCase().includes(targetKey);
+                });
+            }
+
+            // [MOVE_TO_ABILITIES: Name]
+            const moveToAbilitiesMatches = [...reply.matchAll(/\[MOVE_TO_ABILITIES:\s*([^\]]+)\]/gi)];
+            for (const match of moveToAbilitiesMatches) {
+                const targetKey = extractFeatureKey(match[1]);
+                const foundIdx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
+                if (foundIdx >= 0) {
+                    const movedItem = proposal.newFeatures.splice(foundIdx, 1)[0];
+                    if (!proposal.activeAbilities.some(a => extractFeatureKey(a) === targetKey)) {
+                        proposal.activeAbilities.push(movedItem);
+                    }
+                    if (typeof toastr !== 'undefined') toastr.info(movedItem, 'Relocated to Active Powers');
+                }
+            }
+
+            // [MOVE_TO_FEATURES: Name]
+            const moveToFeaturesMatches = [...reply.matchAll(/\[MOVE_TO_FEATURES:\s*([^\]]+)\]/gi)];
+            for (const match of moveToFeaturesMatches) {
+                const targetKey = extractFeatureKey(match[1]);
+                const foundIdx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
+                if (foundIdx >= 0) {
+                    const movedItem = proposal.activeAbilities.splice(foundIdx, 1)[0];
+                    if (!proposal.newFeatures.some(f => extractFeatureKey(f) === targetKey)) {
+                        proposal.newFeatures.push(movedItem);
+                    }
+                    if (typeof toastr !== 'undefined') toastr.info(movedItem, 'Relocated to Passive Traits');
+                }
+            }
+
+            proposal.newFeatures = deduplicateFeatures(proposal.newFeatures);
+            proposal.activeAbilities = deduplicateFeatures(proposal.activeAbilities);
+
+            renderPerksList();
+            renderAbilitiesList();
+
+            const cleanReply = reply
+                .replace(/\[(?:ADD|REMOVE|UPDATE|MOVE_TO)_(?:FEATURE|ABILITY|ABILITIES|FEATURES):[^\]]+\]/gi, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
             stage2ChatHistory.push({ role: 'assistant', content: cleanReply || reply });
             renderStage2Chat();
         } catch (err) {
@@ -966,7 +1287,7 @@ GUIDELINES (D&D LITE PHILOSOPHY):
                     if (activeBlueprint.className) dossier.protagonist.class = activeBlueprint.className;
                     if (activeBlueprint.hitDie) dossier.protagonist.hitDie = activeBlueprint.hitDie;
                 }
-                syncDossierToWorldInfoBook(chatId, dossier).catch(() => {});
+                persistCompanionDossier(chatId, dossier);
 
                 // Recalculate Stage 2 features and Hit Die
                 proposal.hitDie = activeBlueprint.hitDie;
@@ -988,8 +1309,8 @@ GUIDELINES (D&D LITE PHILOSOPHY):
                             feats.push(...lvlFeats);
                         }
                     }
-                    if (Array.isArray(dossier?.protagonist?.features) && dossier.protagonist.features.length > 0) {
-                        feats.push(...dossier.protagonist.features);
+                    if (initialSheetFeatures.length > 0) {
+                        feats.push(...initialSheetFeatures);
                     }
                     proposal.newFeatures = Array.from(new Set(feats));
                     if (proposal.newFeatures.length === 0) proposal.newFeatures = perks.features || [];
@@ -1119,22 +1440,17 @@ GUIDELINES (D&D LITE PHILOSOPHY):
                         );
                     }
                     if (proposal.newFeatures && Array.isArray(proposal.newFeatures)) {
-                        dossier.protagonist.features = [
-                            ...new Set([...(dossier.protagonist.features || []), ...proposal.newFeatures]),
-                        ];
+                        dossier.protagonist.features = isRespec
+                            ? [...proposal.newFeatures]
+                            : [ ...new Set([...(dossier.protagonist.features || []), ...proposal.newFeatures]) ];
+                    }
+                    if (proposal.activeAbilities && Array.isArray(proposal.activeAbilities)) {
+                        dossier.protagonist.abilities = [...proposal.activeAbilities];
                     }
                 }
             }
 
-            try {
-                const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-                if (ctx?.chat_metadata) {
-                    ctx.chat_metadata.mhc_dossier = dossier;
-                    if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
-                }
-            } catch (_) {}
-
-            syncDossierToWorldInfoBook(chatId, dossier).catch(() => {});
+            persistCompanionDossier(chatId, dossier);
 
             if (typeof toastr !== 'undefined') {
                 const successMsg = isPbta

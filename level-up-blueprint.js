@@ -230,20 +230,25 @@ export function buildBlueprintPrompt({ character = {}, genre = 'fantasy', worldR
     const stats = Object.entries(character.stats || {})
         .map(([k, v]) => `${k}: ${v}`)
         .join(', ') || 'Standard array';
+    const existingFeatures = Array.isArray(character.features) && character.features.length > 0
+        ? character.features.join(', ')
+        : 'None specified';
 
     return `You are an expert tabletop game designer and RPG systems architect.
 Design a cohesive, exciting, and balanced 1–20 Class Progression Table for the following character class using a streamlined "D&D Lite" model:
 
 CLASS NAME: ${cName}
 CHARACTER: ${name} (Stats: ${stats}, Hit Die: ${hitDie})
+ESTABLISHED STARTING TRAITS / AD-HOC ABILITIES: ${existingFeatures}
 GENRE / SETTING: ${genre}
 WORLD PREMISE / RULES: ${worldRules || 'Standard campaign setting'}
 
 GUIDELINES (D&D LITE PHILOSOPHY):
 1. Single-Track Progression: Do NOT create or require rigid branching subclass trees or multi-class tables. Keep progression unified, elegant, and single-track (Levels 1 to 20).
-2. Level 3 Archetype Milestone: At Level 3, grant a signature "Archetype Specialization" feature (e.g. Martial Mastery, Primal Instincts, Arcane Savant) that defines the class fantasy without splintering into sub-tables.
-3. Milestones: Every level must provide tangible progression (HP gain via Hit Die + CON; class traits; ASIs/Feats at Levels 4, 8, 12, 16, 19).
-4. Thematic Depth: Make the abilities uniquely fit the "${cName}" class fantasy. Do not use generic placeholders like "Subclass Feature".
+2. Starting Trait Integration: You MUST incorporate and honor the character's ESTABLISHED STARTING TRAITS (${existingFeatures !== 'None specified' ? existingFeatures : 'if any'}) into Level 1 (and early levels) of the progression table so existing abilities granted by the adventure are preserved rather than replaced.
+3. Level 3 Archetype Milestone: At Level 3, grant a signature "Archetype Specialization" feature (e.g. Martial Mastery, Primal Instincts, Arcane Savant) that defines the class fantasy without splintering into sub-tables.
+4. Milestones: Every level must provide tangible progression (HP gain via Hit Die + CON; class traits; ASIs/Feats at Levels 4, 8, 12, 16, 19).
+5. Thematic Depth: Make the abilities uniquely fit the "${cName}" class fantasy. Do not use generic placeholders like "Subclass Feature".
 5. Output Format: You MUST output the progression inside a clean JSON codeblock using this exact structure:
 
 \`\`\`json

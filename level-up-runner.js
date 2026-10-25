@@ -8,6 +8,44 @@
  */
 
 import { XP_LEVEL_THRESHOLDS, getTierPerks, getCanonicalDndProgression } from './level-up-blueprint.js';
+import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
+
+/**
+ * Extracts the canonical identity key of a feature or ability (text before '(', ':', or '[').
+ * e.g. "Street Rat (+2 to Stealth...)" -> "street rat"
+ *      "Underworld Broker (Forces...)" -> "underworld broker"
+ * @param {string} feat
+ * @returns {string}
+ */
+export function extractFeatureKey(feat) {
+    if (!feat || typeof feat !== 'string') return '';
+    const clean = feat.replace(/^[-*•\s]+/, '').trim();
+    const match = clean.match(/^([^(:\[]+)/);
+    if (match && match[1].trim()) {
+        return match[1].trim().toLowerCase();
+    }
+    return clean.toLowerCase();
+}
+
+/**
+ * Deduplicates a list of features or abilities by their canonical name key.
+ * Preserves the first encountered version while ensuring no duplicates occur.
+ * @param {string[]} list
+ * @returns {string[]}
+ */
+export function deduplicateFeatures(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Map();
+    for (const item of list) {
+        if (!item || typeof item !== 'string') continue;
+        const key = extractFeatureKey(item);
+        if (!key) continue;
+        if (!seen.has(key)) {
+            seen.set(key, item.trim());
+        }
+    }
+    return Array.from(seen.values());
+}
 
 /**
  * Evaluates whether the character has accumulated sufficient XP to advance a level.
@@ -106,7 +144,7 @@ export function evaluateLevelUpEligibility(memoText, ruleset = 'dnd5e') {
  */
 export function formulateLevelUpProposal(dossier, blueprint, targetLevel, options = {}) {
     const isRespec = !!options.isRespec;
-    const char = dossier?.protagonist || {};
+    const char = dossier?.protagonist || (dossier?.features || dossier?.name ? dossier : {});
     const isPbta = options.isPbta
         || dossier?.meta?.systemKey === 'pbta'
         || !!char.isPbta
@@ -173,16 +211,16 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
     // Active features: in respec mode, collect all active traits from level 1 up to currentLevel
     let features = [];
     if (isRespec) {
+        if (Array.isArray(char.features) && char.features.length > 0) {
+            features.push(...char.features);
+        }
         if (blueprint?.levels) {
             for (let l = 1; l <= currentLevel; l++) {
                 const lvlFeatures = blueprint.levels[String(l)]?.features || [];
                 features.push(...lvlFeatures);
             }
         }
-        if (Array.isArray(char.features) && char.features.length > 0) {
-            features.push(...char.features);
-        }
-        features = Array.from(new Set(features));
+        features = deduplicateFeatures(features);
         if (features.length === 0) {
             features = perks.features || [];
         }
@@ -223,6 +261,17 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
         }
     }
 
+    // Active abilities from [ABILITIES] block
+    let activeAbilities = [];
+    if (Array.isArray(options.activeAbilities)) {
+        activeAbilities = [...options.activeAbilities];
+    } else if (Array.isArray(char.abilities) && char.abilities.length > 0) {
+        activeAbilities = [...char.abilities];
+    } else if (options.currentMemo || options.memo) {
+        activeAbilities = parseAbilitiesBlockFromMemo(options.currentMemo || options.memo || '');
+    }
+    activeAbilities = deduplicateFeatures(activeAbilities);
+
     return {
         targetLevel,
         currentLevel,
@@ -236,6 +285,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
             mode: isRespec ? 'respec' : (options.rolledHp !== undefined ? 'rolled' : 'average'),
         },
         newFeatures: features,
+        activeAbilities,
         isAsi: perks.isAsi,
         asiOptions,
         partyChanges,
@@ -378,17 +428,73 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
             }
         }
 
-        // Append new feature to Abilities/Features line if present
-        if (Array.isArray(proposal.newFeatures) && proposal.newFeatures.length > 0) {
+        // Update Features / Traits / Abilities line
+        if (Array.isArray(proposal.newFeatures)) {
             const featText = proposal.newFeatures.join(', ');
-            if (/Abilities\s*:/i.test(charBlock)) {
-                charBlock = charBlock.replace(/(Abilities\s*:[^\n\r]*)/i, `$1, ${featText}`);
-            } else if (/Features\s*:/i.test(charBlock)) {
-                charBlock = charBlock.replace(/(Features\s*:[^\n\r]*)/i, `$1, ${featText}`);
+            const featureRegex = /(?:Features|Traits|Abilities)\s*:[^\n\r]*/i;
+            const hasFeaturesLine = featureRegex.test(charBlock);
+
+            if (isRespec) {
+                // In Respec mode: replace the line cleanly with the exact approved list
+                if (hasFeaturesLine) {
+                    if (/Features\s*:/i.test(charBlock)) {
+                        charBlock = charBlock.replace(/(Features\s*:[^\n\r]*)/i, `Features: ${featText}`);
+                    } else if (/Traits\s*:/i.test(charBlock)) {
+                        charBlock = charBlock.replace(/(Traits\s*:[^\n\r]*)/i, `Traits: ${featText}`);
+                    } else if (/Abilities\s*:/i.test(charBlock)) {
+                        charBlock = charBlock.replace(/(Abilities\s*:[^\n\r]*)/i, `Abilities: ${featText}`);
+                    }
+                } else if (featText) {
+                    charBlock = `${charBlock.trim()}\nFeatures: ${featText}\n`;
+                }
+            } else {
+                // In Level-Up mode: only append new features that aren't already present
+                if (hasFeaturesLine) {
+                    const match = charBlock.match(/((?:Features|Traits|Abilities)\s*:\s*)([^\n\r]*)/i);
+                    if (match) {
+                        const existingFeats = match[2]
+                            .split(/,(?![^(\[]*[)\]])/)
+                            .map(f => f.trim())
+                            .filter(Boolean);
+                        const existingKeys = new Set(existingFeats.map(f => extractFeatureKey(f)));
+                        const genuinelyNew = proposal.newFeatures.filter(f => !existingKeys.has(extractFeatureKey(f)));
+                        if (genuinelyNew.length > 0) {
+                            const combined = [...existingFeats, ...genuinelyNew].join(', ');
+                            charBlock = charBlock.replace(match[0], `${match[1]}${combined}`);
+                        }
+                    }
+                } else if (featText) {
+                    charBlock = `${charBlock.trim()}\nFeatures: ${featText}\n`;
+                }
             }
         }
 
         updatedMemo = updatedMemo.replace(charMatch[0], `[CHARACTER]${charBlock}[/CHARACTER]`);
+    }
+
+    // 1b. Update [ABILITIES] block if active abilities are defined
+    if (Array.isArray(proposal.activeAbilities)) {
+        const abMatch = updatedMemo.match(/\[ABILITIES\]([\s\S]*?)\[\/ABILITIES\]/i);
+        const abLines = proposal.activeAbilities
+            .map(a => a.trim().replace(/^[-*•–—]\s*/, ''))
+            .filter(Boolean);
+
+        if (abMatch) {
+            if (abLines.length > 0) {
+                const formatted = abLines.join('\n');
+                updatedMemo = updatedMemo.replace(abMatch[0], `[ABILITIES]\n${formatted}\n[/ABILITIES]`);
+            } else if (isRespec) {
+                updatedMemo = updatedMemo.replace(abMatch[0], `[ABILITIES]\n[/ABILITIES]`);
+            }
+        } else if (abLines.length > 0) {
+            const formatted = abLines.join('\n');
+            const abBlock = `\n\n[ABILITIES]\n${formatted}\n[/ABILITIES]`;
+            if (/\[\/INVENTORY\]/i.test(updatedMemo)) {
+                updatedMemo = updatedMemo.replace(/(\[\/INVENTORY\])/i, `$1${abBlock}`);
+            } else if (/\[\/CHARACTER\]/i.test(updatedMemo)) {
+                updatedMemo = updatedMemo.replace(/(\[\/CHARACTER\])/i, `$1${abBlock}`);
+            }
+        }
     }
 
     // 2. Update [XP] block

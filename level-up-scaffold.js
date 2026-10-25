@@ -7,6 +7,8 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
+import { getCandidateChatIds } from './persona-matching.js';
+
 /**
  * Extracts and parses key character sheet properties from a State Memo [CHARACTER] block.
  *
@@ -31,6 +33,8 @@ export function parseCharacterBlockFromMemo(memoText) {
         maxHp: 10,
         stats: {},
         hitDie: 'd8',
+        features: [],
+        abilities: [],
         rawText: '',
     };
 
@@ -158,6 +162,17 @@ export function parseCharacterBlockFromMemo(memoText) {
             else if (cLower.includes('wizard') || cLower.includes('sorcerer')) result.hitDie = 'd6';
             else result.hitDie = 'd8';
         }
+
+        // 4. Features / Traits / Abilities
+        const featMatch = raw.match(/(?:Features|Traits|Abilities)\s*:\s*([^\n\r]+)/i);
+        if (featMatch) {
+            result.features = featMatch[1]
+                .split(/,(?![^(\[]*[)\]])/)
+                .map(f => f.trim())
+                .filter(Boolean);
+        } else {
+            result.features = [];
+        }
     }
 
     // 4. Attributes / Stats
@@ -180,7 +195,25 @@ export function parseCharacterBlockFromMemo(memoText) {
         }
     }
 
+    result.abilities = parseAbilitiesBlockFromMemo(memoText);
+
     return result;
+}
+
+/**
+ * Parses the standalone [ABILITIES] block from the State Memo if present.
+ *
+ * @param {string} memoText Raw state memo text.
+ * @returns {string[]} Array of active ability lines.
+ */
+export function parseAbilitiesBlockFromMemo(memoText) {
+    if (!memoText || typeof memoText !== 'string') return [];
+    const abMatch = memoText.match(/\[ABILITIES\]([\s\S]*?)\[\/ABILITIES\]/i);
+    if (!abMatch) return [];
+    return abMatch[1]
+        .split('\n')
+        .map(line => line.trim().replace(/^[-*•–—]\s*/, ''))
+        .filter(Boolean);
 }
 
 /**
@@ -238,6 +271,8 @@ export function scaffoldDossierStubForChat(chatId, stateMemo, chatTitle = '') {
             startingMoves: isPbta ? (charData.moves || []) : undefined,
             conditions: isPbta ? (charData.conditions || []) : undefined,
             gear: isPbta ? (charData.gear || []) : undefined,
+            features: isPbta ? undefined : (charData.features || []),
+            abilities: isPbta ? undefined : (charData.abilities || []),
             status: isPbta ? (charData.status || 'Healthy') : undefined,
             stats: charData.stats,
             rawCharacterBlock: charData.rawText,
@@ -268,29 +303,58 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
 
     if (!chatId) return scaffoldDossierStubForChat('unknown', liveMemo);
 
-    const chatPartition = companionSettings?.chatStates?.[chatId];
-
-    // 1. Existing PbtA or Companion dossier
+    const candidateIds = getCandidateChatIds(chatId);
     let dossier = null;
-    if (chatPartition?.pbtaCampaignDossier) {
-        dossier = chatPartition.pbtaCampaignDossier;
-    } else if (chatPartition?.companionDossier) {
-        dossier = chatPartition.companionDossier;
+
+    // 1. Existing PbtA or Companion dossier in passed companionSettings
+    if (companionSettings?.chatStates) {
+        for (const cid of candidateIds) {
+            const part = companionSettings.chatStates[cid];
+            if (part?.pbtaCampaignDossier) {
+                dossier = part.pbtaCampaignDossier;
+                break;
+            }
+            if (part?.companionDossier) {
+                dossier = part.companionDossier;
+                break;
+            }
+        }
     }
 
-    // 2. SillyTavern chat_metadata check
+    // 2. SillyTavern chatMetadata check (direct per-chat metadata)
     if (!dossier) {
         try {
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-            if (ctx?.chat_metadata?.mhc_dossier) {
-                dossier = ctx.chat_metadata.mhc_dossier;
-                if (chatPartition) {
-                    chatPartition.companionDossier = dossier;
-                }
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+            const metaDossier = ctx?.chatMetadata?.mhc_dossier
+                || ctx?.chat_metadata?.mhc_dossier
+                || (typeof globalThis !== 'undefined' && globalThis.chat_metadata?.mhc_dossier);
+            if (metaDossier && typeof metaDossier === 'object') {
+                dossier = metaDossier;
             }
         } catch (_) {
             // SillyTavern context unavailable in headless testing
         }
+    }
+
+    // 3. Global extension_settings checks
+    if (!dossier) {
+        try {
+            const compGlobal = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
+                || globalThis.extension_settings?.multihog_companion;
+            const rpgGlobal = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
+                || globalThis.extension_settings?.rpg_tracker;
+
+            for (const cid of candidateIds) {
+                if (compGlobal?.chatStates?.[cid]?.companionDossier) {
+                    dossier = compGlobal.chatStates[cid].companionDossier;
+                    break;
+                }
+                if (rpgGlobal?.chatStates?.[cid]?.companionDossier) {
+                    dossier = rpgGlobal.chatStates[cid].companionDossier;
+                    break;
+                }
+            }
+        } catch (_) {}
     }
 
     // Refresh protagonist details if existing dossier is a stub or has generic protagonist while liveMemo has real data
@@ -338,35 +402,58 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
                         startingMoves: isPbtaProtagonist ? (dossier.protagonist?.startingMoves || parsed.moves || []) : undefined,
                         conditions: isPbtaProtagonist ? (parsed.conditions || dossier.protagonist?.conditions || []) : undefined,
                         gear: isPbtaProtagonist ? (parsed.gear || dossier.protagonist?.gear || []) : undefined,
+                        features: isPbtaProtagonist ? undefined : (parsed.features?.length > 0 ? parsed.features : (dossier.protagonist?.features || [])),
+                        abilities: isPbtaProtagonist ? undefined : (parsed.abilities?.length > 0 ? parsed.abilities : (dossier.protagonist?.abilities || [])),
                         status: isPbtaProtagonist ? (parsed.status || dossier.protagonist?.status || 'Healthy') : undefined,
                         stats: Object.keys(parsed.stats).length > 0 ? parsed.stats : (dossier.protagonist?.stats || {}),
                         rawCharacterBlock: parsed.rawText || dossier.protagonist?.rawCharacterBlock,
                     };
                 }
             }
-            return dossier;
         }
+
+        if (liveMemo && !pbtaMode) {
+            const liveParsed = parseCharacterBlockFromMemo(liveMemo);
+            if (Array.isArray(liveParsed.features) && liveParsed.features.length > 0) {
+                if (!dossier.protagonist) dossier.protagonist = {};
+                if (!Array.isArray(dossier.protagonist.features) || dossier.protagonist.features.length === 0) {
+                    dossier.protagonist.features = [...liveParsed.features];
+                }
+            }
+            if (Array.isArray(liveParsed.abilities) && liveParsed.abilities.length > 0) {
+                if (!dossier.protagonist) dossier.protagonist = {};
+                if (!Array.isArray(dossier.protagonist.abilities) || dossier.protagonist.abilities.length === 0) {
+                    dossier.protagonist.abilities = [...liveParsed.abilities];
+                }
+            }
+        }
+
+        // Keep partition cache in sync
+        if (companionSettings?.chatStates && chatId) {
+            companionSettings.chatStates[chatId] = companionSettings.chatStates[chatId] || {};
+            companionSettings.chatStates[chatId].companionDossier = dossier;
+        }
+
         return dossier;
     }
 
-    if (dossier) return dossier;
-
-    // 3. Auto-Scaffold fresh stub from current state memo
+    // 4. Auto-Scaffold fresh stub from current state memo
     const chatTitle = options.chatTitle || '';
     const stub = scaffoldDossierStubForChat(chatId, liveMemo, chatTitle);
 
     // Save in chat partition
-    if (chatPartition) {
-        chatPartition.companionDossier = stub;
+    if (companionSettings?.chatStates && chatId) {
+        companionSettings.chatStates[chatId] = companionSettings.chatStates[chatId] || {};
+        companionSettings.chatStates[chatId].companionDossier = stub;
     }
 
-    // Save in SillyTavern chat_metadata if available
+    // Save in SillyTavern chatMetadata if available
     try {
-        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-        if (ctx?.chat_metadata) {
-            ctx.chat_metadata.mhc_dossier = stub;
-            if (typeof ctx.saveMetadata === 'function') {
-                ctx.saveMetadata();
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        if (ctx?.chatMetadata) {
+            ctx.chatMetadata.mhc_dossier = stub;
+            if (typeof ctx.saveMetadataDebounced === 'function') {
+                ctx.saveMetadataDebounced();
             }
         }
     } catch (_) {}
@@ -375,6 +462,87 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
     syncDossierToWorldInfoBook(chatId, stub).catch(() => {});
 
     return stub;
+}
+
+/**
+ * Persists the Campaign Dossier and Progression Blueprint across all storage tiers:
+ * 1. SillyTavern chatMetadata (direct per-chat metadata, saved to disk)
+ * 2. MultiHog Companion chatStates partitions (all candidate chat IDs)
+ * 3. MultiHog RPG Tracker chatStates partitions (all candidate chat IDs)
+ * 4. SillyTavern extension settings (saveSettingsDebounced)
+ * 5. Campaign_<ChatTitle> World Info Lorebook (async)
+ *
+ * @param {string} chatId
+ * @param {object} dossier
+ * @returns {object} The persisted dossier
+ */
+export function persistCompanionDossier(chatId, dossier) {
+    if (!dossier) return null;
+
+    // Once a blueprint exists or build changes are committed, mark stub as false
+    if (dossier.meta) {
+        if (dossier.progressionBlueprint) {
+            dossier.meta.isStub = false;
+        }
+        dossier.meta.updatedAt = new Date().toISOString();
+    }
+
+    const candidateIds = getCandidateChatIds(chatId);
+
+    // 1. SillyTavern chatMetadata
+    try {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        if (ctx?.chatMetadata) {
+            ctx.chatMetadata.mhc_dossier = dossier;
+        }
+        if (typeof globalThis !== 'undefined' && globalThis.chat_metadata) {
+            globalThis.chat_metadata.mhc_dossier = dossier;
+        }
+        if (typeof ctx?.saveMetadataDebounced === 'function') {
+            ctx.saveMetadataDebounced();
+        } else if (typeof ctx?.saveMetadata === 'function') {
+            ctx.saveMetadata();
+        }
+    } catch (_) {}
+
+    // 2. MultiHog Companion extension_settings partition
+    try {
+        const compSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
+            || globalThis.extension_settings?.multihog_companion;
+        if (compSettings) {
+            compSettings.chatStates = compSettings.chatStates || {};
+            for (const cid of candidateIds) {
+                compSettings.chatStates[cid] = compSettings.chatStates[cid] || {};
+                compSettings.chatStates[cid].companionDossier = dossier;
+            }
+        }
+    } catch (_) {}
+
+    // 3. Upstream MultiHog RPG Tracker partition
+    try {
+        const rpg = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
+            || globalThis.extension_settings?.rpg_tracker;
+        if (rpg) {
+            rpg.chatStates = rpg.chatStates || {};
+            for (const cid of candidateIds) {
+                rpg.chatStates[cid] = rpg.chatStates[cid] || {};
+                rpg.chatStates[cid].companionDossier = dossier;
+            }
+        }
+    } catch (_) {}
+
+    // 4. Save settings debounced
+    try {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        if (typeof ctx?.saveSettingsDebounced === 'function') {
+            ctx.saveSettingsDebounced();
+        }
+    } catch (_) {}
+
+    // 5. Campaign World Info Lorebook sync
+    syncDossierToWorldInfoBook(chatId, dossier).catch(() => {});
+
+    return dossier;
 }
 
 /**

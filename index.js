@@ -1934,7 +1934,7 @@ export function initWandMenu() {
 export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     const s = getSettings();
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-    const chatId = ctx?.chatId || s.currentChatId || 'default';
+    const chatId = ctx?.getCurrentChatId?.() || ctx?.chatId || s.currentChatId || 'default';
     
     // Upstream MultiHog DnD Framework stores its active memo & partitions in extension_settings.rpg_tracker
     const rpgSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
@@ -1946,7 +1946,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
         || s.currentMemo
         || '';
 
-    const { ensureChatDossier, syncDossierToWorldInfoBook } = await import('./level-up-scaffold.js');
+    const { ensureChatDossier, persistCompanionDossier, syncDossierToWorldInfoBook } = await import('./level-up-scaffold.js');
     const { getCanonicalDndProgression, hasProgressionBlueprint, generateProgressionBlueprintViaConcierge } = await import('./level-up-blueprint.js');
     const { evaluateLevelUpEligibility, decorateXpBarsForLevelUp } = await import('./level-up-runner.js');
     const { openLevelUpModal } = await import('./level-up-ui.js');
@@ -1975,6 +1975,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
         const canonical = getCanonicalDndProgression(dossier.protagonist?.class);
         if (canonical) {
             dossier.progressionBlueprint = canonical;
+            persistCompanionDossier(chatId, dossier);
         } else {
             // Kick off async Concierge generation without blocking modal display
             blueprintPromise = generateProgressionBlueprintViaConcierge({
@@ -1984,17 +1985,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
             }).then(bp => {
                 if (bp) {
                     dossier.progressionBlueprint = bp;
-                    if (s.chatStates && chatId) {
-                        s.chatStates[chatId] = s.chatStates[chatId] || {};
-                        s.chatStates[chatId].companionDossier = dossier;
-                    }
-                    if (ctx?.chat_metadata) {
-                        ctx.chat_metadata.mhc_dossier = dossier;
-                        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
-                    }
-                    if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext?.()?.saveSettingsDebounced === 'function') {
-                        SillyTavern.getContext().saveSettingsDebounced();
-                    }
+                    persistCompanionDossier(chatId, dossier);
                 }
                 return bp;
             });

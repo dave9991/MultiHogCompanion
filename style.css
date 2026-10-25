@@ -1500,5 +1500,39 @@
 }
 
 #mhc-level-up-modal .mhc-feat-line {
-    padding: 1px 0;
+    padding: 2px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+#mhc-level-up-modal .mhc-kind-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+#mhc-level-up-modal .mhc-kind-trait {
+    background: rgba(148, 163, 184, 0.14);
+    color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+#mhc-level-up-modal .mhc-kind-ability {
+    background: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+#mhc-level-up-modal .mhc-move-to-ability-btn:hover,
+#mhc-level-up-modal .mhc-move-to-trait-btn:hover {
+    opacity: 1;
+    color: #f8fafc !important;
 }

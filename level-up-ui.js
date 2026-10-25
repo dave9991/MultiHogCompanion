@@ -10,8 +10,8 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection } from './level-up-runner.js';
-import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, normalizeBlueprint, normalizeLevelEntry, formatTraitAsPill } from './level-up-blueprint.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection } from './level-up-runner.js';
+import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, parseBlueprintFromResponse, normalizeBlueprint, normalizeLevelEntry, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
@@ -506,6 +506,7 @@ export function openLevelUpModal({
                     </div>
 
                     <div class="mhc-quick-chips" id="mhc-stage1-quick-chips">
+                        <button class="mhc-chip" data-prompt="Audit and fix all 20 levels so every feature uses Name (hover tooltip) pill syntax and active powers include X/Y per rest counters">✨ Audit &amp; Fix Roadmap Formatting</button>
                         <button class="mhc-chip" data-prompt="Suggest a signature Level 3 Archetype Specialization for my class">⚡ Suggest Level 3 Specialization</button>
                         <button class="mhc-chip" data-prompt="Rebalance high-tier features (Levels 11–20) with exciting epic abilities">🛡️ Rebalance Levels 11–20</button>
                         <button class="mhc-chip" data-prompt="Change my Hit Die to d10 and adjust traits for a martial playstyle">🎲 Make Hit Die d10 (Martial Focus)</button>
@@ -696,7 +697,13 @@ export function openLevelUpModal({
                 const isCurrent = (lvl === curLvl);
                 const rowClass = `mhc-blueprint-row${isCurrent ? ' mhc-row-current' : ''}`;
                 const featsHtml = featuresArr.length > 0
-                    ? featuresArr.map(f => `<div class="mhc-feat-line">${escapeHtml(f)}</div>`).join('')
+                    ? featuresArr.map(f => {
+                        const kind = classifyFeatureKind(f);
+                        const kindBadge = kind === 'ability'
+                            ? '<span class="mhc-kind-badge mhc-kind-ability" title="Active / Resource Power → routes to [ABILITIES] tracker"><i class="fa-solid fa-bolt"></i> Ability</span>'
+                            : '<span class="mhc-kind-badge mhc-kind-trait" title="Passive Trait → routes to [CHARACTER] Traits">Trait</span>';
+                        return `<div class="mhc-feat-line">${kindBadge}<span>${escapeHtml(f)}</span></div>`;
+                    }).join('')
                     : (isAsi ? '' : '<span style="opacity: 0.4;">—</span>');
 
                 rowsHtml += `
@@ -811,6 +818,87 @@ export function openLevelUpModal({
         }
     }
 
+    /**
+     * Applies roadmap-level directives ([UPDATE_LEVEL], [SET_HIT_DIE], [SET_CLASS_NAME], or a full JSON blueprint block)
+     * from a Concierge reply in either Stage 1 or Stage 2.
+     */
+    function applyBlueprintDirectivesFromReply(reply) {
+        if (!activeBlueprint || !activeBlueprint.levels || typeof reply !== 'string') return false;
+        let modified = false;
+
+        // 1. Check if the Concierge returned a full 1–20 JSON codeblock overhaul
+        if (/```(?:json)?[\s\S]*?"levels"[\s\S]*?```/i.test(reply)) {
+            const parsedFull = parseBlueprintFromResponse(
+                reply,
+                activeBlueprint.className || proposal.className,
+                activeBlueprint.hitDie || proposal.hitDie || 'd8',
+            );
+            if (parsedFull && parsedFull.levels) {
+                activeBlueprint = parsedFull;
+                dossier.progressionBlueprint = activeBlueprint;
+                modified = true;
+            }
+        }
+
+        // 2. Parse [UPDATE_LEVEL: <level> | <features or None>]
+        const updateMatches = [...reply.matchAll(/\[UPDATE_LEVEL:\s*(\d+)\s*\|\s*([^\]]*)\]/gi)];
+        for (const match of updateMatches) {
+            const lvlStr = match[1];
+            const featsRaw = (match[2] || '').trim();
+            const lvlNum = parseInt(lvlStr, 10);
+            if (!(lvlNum >= 1 && lvlNum <= 20)) continue;
+            const isClear = !featsRaw || /^(?:none|empty|clear|asi(?:\s*only)?|-|—)$/i.test(featsRaw);
+            const feats = isClear
+                ? []
+                : featsRaw
+                    .split(';')
+                    .map(f => f.trim())
+                    .filter(f => f && !/^(?:none|empty|clear|-|—)$/i.test(f));
+            const entry = normalizeLevelEntry({ ...(activeBlueprint.levels[lvlStr] || {}), features: feats }, lvlNum);
+            if (!entry.spellSlots) delete entry.spellSlots;
+            activeBlueprint.levels[lvlStr] = entry;
+            modified = true;
+            if (typeof toastr !== 'undefined') toastr.info(entry.features.join(', ') || 'Cleared (ASI / Milestone)', `Level ${lvlStr} Updated`);
+        }
+
+        // 3. Parse [SET_HIT_DIE: <d6|d8|d10|d12>]
+        const hdMatch = reply.match(/\[SET_HIT_DIE:\s*(d6|d8|d10|d12)\]/i);
+        if (hdMatch) {
+            const newHd = hdMatch[1].toLowerCase();
+            activeBlueprint.hitDie = newHd;
+            proposal.hitDie = newHd;
+            if (bpHitDieSelect) bpHitDieSelect.value = newHd;
+            const badge1 = modal.querySelector('#mhc-blueprint-badge-hitdie');
+            if (badge1) badge1.textContent = newHd;
+            const badge2 = modal.querySelector('#mhc-stage2-hitdie-badge');
+            if (badge2) badge2.innerHTML = `<i class="fa-solid fa-dice-d20"></i> Hit Die: ${escapeHtml(newHd)}`;
+            modified = true;
+            if (typeof toastr !== 'undefined') toastr.info(`Hit Die set to ${newHd}`, 'Hit Die Updated');
+        }
+
+        // 4. Parse [SET_CLASS_NAME: <name>]
+        const nameMatch = reply.match(/\[SET_CLASS_NAME:\s*([^\]]+)\]/i);
+        if (nameMatch) {
+            const newName = nameMatch[1].trim();
+            activeBlueprint.className = newName;
+            proposal.className = newName;
+            if (bpClassNameInput) bpClassNameInput.value = newName;
+            const badge1 = modal.querySelector('#mhc-blueprint-badge-class');
+            if (badge1) badge1.textContent = newName;
+            const badge2 = modal.querySelector('#mhc-stage2-class-badge');
+            if (badge2) badge2.innerHTML = `<i class="fa-solid fa-shield-halved"></i> ${escapeHtml(newName)}`;
+            modified = true;
+            if (typeof toastr !== 'undefined') toastr.info(`Class renamed to ${newName}`, 'Class Updated');
+        }
+
+        if (modified) {
+            dossier.progressionBlueprint = activeBlueprint;
+            renderBlueprintTable();
+            persistCompanionDossier(chatId, dossier);
+        }
+        return modified;
+    }
+
     async function sendStage1ConciergeMessage(userText) {
         const text = userText?.trim();
         if (!text) return;
@@ -828,14 +916,22 @@ export function openLevelUpModal({
         const stage1SystemPrompt = `You are the RPG Systems Architect designing the 1–20 Class Progression Codex for "${proposal.characterName}" (${activeBlueprint?.className || proposal.className}).
 Character Stats: ${JSON.stringify(dossier?.protagonist?.stats || {})}
 Hit Die: ${activeBlueprint?.hitDie || proposal.hitDie || 'd8'}
-Current Progression Table:
-${formatBlueprintSummary(activeBlueprint)}
+Established Sheet Traits ([CHARACTER]): ${initialSheetFeatures.join('; ') || 'None'}
+Established Active Abilities ([ABILITIES]): ${(proposal.activeAbilities || []).join('; ') || 'None'}
+Current 1–20 Progression Table (with current [Trait] vs [Ability] routing tags):
+${formatBlueprintSummary(activeBlueprint, { includeTags: true })}
 
 GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
 1. Single-Track Progression: We use a streamlined single-track model from 1 to 20 with no rigid branching subclass trees or multi-class requirements.
-2. MultiHog Interactive Pill Syntax: The character sheet renders every feature as a hoverable pill using "Feature Name (concise hover tooltip description)". Distinguish between passive traits (constant bonuses) and active abilities with rest uses (e.g. "Feature Name (effect; 1/1 per short rest)"). NEVER use colons ("Name: description") or dashes ("Name - description") outside parentheses.
-3. Dynamic Table Updates: When the player asks to change, add, or customize abilities at any level, emit:
-   [UPDATE_LEVEL: <level_number> | <Feature Name 1 (description)>; <Feature Name 2 (description)>]
+2. MultiHog Interactive Pill Syntax & Trait vs. Ability Routing:
+   - Every feature MUST be formatted as "Feature Name (concise hover tooltip description)".
+   - Passive perks are tagged [Trait] and route to [CHARACTER] Traits (e.g. "[TRAIT] Shadow Veil (+2 to Stealth in dim light)").
+   - Active/resource powers are tagged [⚡ Ability] and route to the [ABILITIES] tracker. Always include a two-number X/Y rest counter inside the parentheses (e.g. "1/1 per short rest" or "2/2 per long rest") or prefix with "[ABILITY]" so MultiHog renders the interactive resource badge!
+   - NEVER use colons ("Name: description") or dashes ("Name - description") outside parentheses, and NEVER nest parentheses inside parentheses (use [brackets] inside parentheses if needed).
+3. Dynamic Table Updates: When the player asks to change, fix, or customize abilities at any level (or audit all 20 levels), emit one [UPDATE_LEVEL] directive per modified level:
+   [UPDATE_LEVEL: <level_number> | <Feature Name 1 (description)>; <Feature Name 2 (description; 1/1 per short rest)>]
+   To clear an ASI-only level so it has no extra feature text, emit:
+   [UPDATE_LEVEL: <level_number> | None]
    NEVER list HP gain, Hit Die, proficiency bonus, Ability Score Improvements, or spell slot counts as features: the engine tracks those separately.
 4. Hit Die Updates: If the player asks to change their Hit Die (d6, d8, d10, or d12), emit:
    [SET_HIT_DIE: <d6|d8|d10|d12>]
@@ -855,50 +951,13 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
             if (stage1SendBtn) stage1SendBtn.disabled = false;
             stage1Input?.focus();
 
-            if (activeBlueprint && activeBlueprint.levels) {
-                // Parse [UPDATE_LEVEL: <level> | <features>]
-                const updateMatches = [...reply.matchAll(/\[UPDATE_LEVEL:\s*(\d+)\s*\|\s*([^\]]+)\]/gi)];
-                for (const match of updateMatches) {
-                    const lvlStr = match[1];
-                    const featsRaw = match[2];
-                    const lvlNum = parseInt(lvlStr, 10);
-                    if (!(lvlNum >= 1 && lvlNum <= 20)) continue;
-                    const feats = featsRaw.split(';').map(f => f.trim()).filter(Boolean);
-                    if (feats.length > 0) {
-                        const entry = normalizeLevelEntry({ ...(activeBlueprint.levels[lvlStr] || {}), features: feats }, lvlNum);
-                        if (!entry.spellSlots) delete entry.spellSlots;
-                        activeBlueprint.levels[lvlStr] = entry;
-                        if (typeof toastr !== 'undefined') toastr.info(entry.features.join(', ') || 'Cleared', `Level ${lvlStr} Updated`);
-                    }
-                }
+            applyBlueprintDirectivesFromReply(reply);
 
-                // Parse [SET_HIT_DIE: <d6|d8|d10|d12>]
-                const hdMatch = reply.match(/\[SET_HIT_DIE:\s*(d6|d8|d10|d12)\]/i);
-                if (hdMatch) {
-                    const newHd = hdMatch[1].toLowerCase();
-                    activeBlueprint.hitDie = newHd;
-                    if (bpHitDieSelect) bpHitDieSelect.value = newHd;
-                    const badge = modal.querySelector('#mhc-blueprint-badge-hitdie');
-                    if (badge) badge.textContent = newHd;
-                    if (typeof toastr !== 'undefined') toastr.info(`Hit Die set to ${newHd}`, 'Hit Die Updated');
-                }
-
-                // Parse [SET_CLASS_NAME: <name>]
-                const nameMatch = reply.match(/\[SET_CLASS_NAME:\s*([^\]]+)\]/i);
-                if (nameMatch) {
-                    const newName = nameMatch[1].trim();
-                    activeBlueprint.className = newName;
-                    if (bpClassNameInput) bpClassNameInput.value = newName;
-                    const badge = modal.querySelector('#mhc-blueprint-badge-class');
-                    if (badge) badge.textContent = newName;
-                    if (typeof toastr !== 'undefined') toastr.info(`Class renamed to ${newName}`, 'Class Updated');
-                }
-
-                renderBlueprintTable();
-                persistCompanionDossier(chatId, dossier);
-            }
-
-            const cleanReply = reply.replace(/\[(?:UPDATE_LEVEL|SET_HIT_DIE|SET_CLASS_NAME):[^\]]+\]/gi, '').replace(/\n{3,}/g, '\n\n').trim();
+            const cleanReply = reply
+                .replace(/```(?:json)?[\s\S]*?```/gi, '')
+                .replace(/\[(?:UPDATE_LEVEL|SET_HIT_DIE|SET_CLASS_NAME):[^\]]*\]/gi, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
             stage1ChatHistory.push({ role: 'assistant', content: cleanReply || reply });
             renderStage1Chat();
         } catch (err) {
@@ -966,14 +1025,32 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
                 }
             }
 
+            const moveBtnHtml = !isPbta
+                ? `<button class="mhc-move-to-ability-btn" data-index="${idx}" title="Move to Active Abilities ([ABILITIES])" style="background:none; border:none; color:#60a5fa; cursor:pointer; font-size:0.95em; line-height:1; padding:0 4px;">&#8644;</button>`
+                : '';
+
             return `
             <li class="mhc-perk-item" data-index="${idx}">
                 <i class="fa-solid fa-star"></i>
                 ${originBadgeHtml}
                 <span class="mhc-perk-text" style="flex: 1;">${escapeHtml(f)}</span>
+                ${moveBtnHtml}
                 <button class="mhc-remove-perk-btn" data-index="${idx}" title="Remove feature" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:1.1em; line-height:1; padding:0 4px;">&times;</button>
             </li>`;
         }).join('');
+
+        perksContainer.querySelectorAll('.mhc-move-to-ability-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.getAttribute('data-index'), 10);
+                if (!isNaN(idx) && idx >= 0 && idx < proposal.newFeatures.length) {
+                    const [moved] = proposal.newFeatures.splice(idx, 1);
+                    proposal.activeAbilities = mergeUpgradedFeatures(proposal.activeAbilities || [], [moved]);
+                    renderPerksList();
+                    renderAbilitiesList();
+                }
+            });
+        });
 
         perksContainer.querySelectorAll('.mhc-remove-perk-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -990,22 +1067,21 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
 
     // Harmonization Buttons (D&D Respec)
     modal.querySelector('#mhc-sync-codex-traits-btn')?.addEventListener('click', () => {
-        let codexFeats = [];
-        if (activeBlueprint?.levels) {
-            for (let l = 1; l <= (proposal.currentLevel || targetLevel || 1); l++) {
-                const lvlFeats = activeBlueprint.levels[String(l)]?.features || [];
-                codexFeats.push(...lvlFeats);
-            }
-        }
+        const syncLvl = proposal.currentLevel || targetLevel || 1;
+        let codexFeats = collapseCodexProgression(activeBlueprint, syncLvl);
         if (codexFeats.length === 0 && activeBlueprint) {
             const conMod = Math.floor((((dossier?.protagonist?.stats?.CON ?? 10) - 10) / 2));
-            const perks = getTierPerks(activeBlueprint, proposal.currentLevel || 1, conMod);
+            const perks = getTierPerks(activeBlueprint, syncLvl, conMod);
             codexFeats = perks.features || [];
         }
-        proposal.newFeatures = codexFeats.length > 0 ? deduplicateFeatures(codexFeats) : [];
+        const { traits: codexTraits, abilities: codexAbilities } = partitionFeaturesAndAbilities(codexFeats);
+        proposal.activeAbilities = mergeUpgradedFeatures(proposal.activeAbilities || [], codexAbilities);
+        const activeKeys = new Set((proposal.activeAbilities || []).map(a => extractFeatureKey(a)).filter(Boolean));
+        proposal.newFeatures = codexTraits.filter(t => !activeKeys.has(extractFeatureKey(t)));
         renderPerksList();
+        renderAbilitiesList();
         if (typeof toastr !== 'undefined') {
-            toastr.info(`Synchronized traits from ${activeBlueprint?.className || 'Class'} Progression Codex.`, 'Codex Harmonizer');
+            toastr.info(`Synchronized traits & active abilities from ${activeBlueprint?.className || 'Class'} Progression Codex.`, 'Codex Harmonizer');
         }
     });
 
@@ -1029,9 +1105,23 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
             <li class="mhc-perk-item" data-index="${idx}">
                 <i class="fa-solid fa-bolt" style="color: #60a5fa; margin-top: 2px;"></i>
                 <span class="mhc-perk-text" style="flex: 1;">${escapeHtml(ab)}</span>
+                <button class="mhc-move-to-trait-btn" data-index="${idx}" title="Move to Passive Traits ([CHARACTER])" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:0.95em; line-height:1; padding:0 4px;">&#8644;</button>
                 <button class="mhc-remove-ability-btn" data-index="${idx}" title="Remove active ability" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:1.1em; line-height:1; padding:0 4px;">&times;</button>
             </li>
         `).join('');
+
+        abilitiesContainer.querySelectorAll('.mhc-move-to-trait-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.getAttribute('data-index'), 10);
+                if (!isNaN(idx) && idx >= 0 && idx < proposal.activeAbilities.length) {
+                    const [moved] = proposal.activeAbilities.splice(idx, 1);
+                    proposal.newFeatures = mergeUpgradedFeatures(proposal.newFeatures || [], [moved]);
+                    renderPerksList();
+                    renderAbilitiesList();
+                }
+            });
+        });
 
         abilitiesContainer.querySelectorAll('.mhc-remove-ability-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -1127,23 +1217,33 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
                     if (classBadge2) classBadge2.innerHTML = `<i class="fa-solid fa-shield-halved"></i> ${escapeHtml(proposal.className)}`;
                 }
 
+                const sheetKeys = new Set(initialSheetFeatures.map(f => extractFeatureKey(f)).filter(Boolean));
                 if (isRespec) {
-                    let feats = [];
-                    if (initialSheetFeatures.length > 0) {
-                        feats.push(...initialSheetFeatures);
+                    const codexFeats = collapseCodexProgression(resolvedBlueprint, targetLevel || 1);
+                    const { traits: codexTraits, abilities: codexAbilities } = partitionFeaturesAndAbilities(codexFeats);
+                    const routedAbilities = codexAbilities.filter(ab => !sheetKeys.has(extractFeatureKey(ab)));
+                    if (routedAbilities.length > 0) {
+                        proposal.activeAbilities = mergeUpgradedFeatures(proposal.activeAbilities || [], routedAbilities);
                     }
-                    if (resolvedBlueprint.levels) {
-                        for (let l = 1; l <= (targetLevel || 1); l++) {
-                            const lvlFeats = resolvedBlueprint.levels[String(l)]?.features || [];
-                            feats.push(...lvlFeats);
-                        }
+                    const activeKeys = new Set((proposal.activeAbilities || []).map(a => extractFeatureKey(a)).filter(Boolean));
+                    proposal.newFeatures = deduplicateFeatures([
+                        ...initialSheetFeatures,
+                        ...codexTraits.filter(t => !activeKeys.has(extractFeatureKey(t))),
+                    ]);
+                    if (proposal.newFeatures.length === 0 && (proposal.activeAbilities || []).length === 0) {
+                        proposal.newFeatures = perks.traits || perks.features || [];
                     }
-                    proposal.newFeatures = deduplicateFeatures(feats);
-                    if (proposal.newFeatures.length === 0) proposal.newFeatures = perks.features || [];
                 } else {
-                    proposal.newFeatures = deduplicateFeatures(perks.features || []);
+                    const { traits: lvlTraits, abilities: lvlAbilities } = partitionFeaturesAndAbilities(perks.features || []);
+                    const onSheet = lvlAbilities.filter(ab => sheetKeys.has(extractFeatureKey(ab)));
+                    const forTracker = lvlAbilities.filter(ab => !sheetKeys.has(extractFeatureKey(ab)));
+                    proposal.newFeatures = deduplicateFeatures([...lvlTraits, ...onSheet]);
+                    if (forTracker.length > 0) {
+                        proposal.activeAbilities = mergeUpgradedFeatures(proposal.activeAbilities || [], forTracker);
+                    }
                 }
                 renderPerksList();
+                renderAbilitiesList();
                 if (typeof toastr !== 'undefined') {
                     toastr.success(`Progression Codex crafted for ${proposal.className}!`, 'Concierge Codex');
                 }
@@ -1269,15 +1369,17 @@ CURRENT SHEETS & ABILITIES AUDIT:
   ${proposal.newFeatures.join('; ') || 'None'}
 - ACTIVE ABILITIES ([ABILITIES] resource tracker):
   ${(proposal.activeAbilities || []).join('; ') || 'None'}
+- 1–20 CLASS PROGRESSION ROADMAP (with [Trait] vs [Ability] routing tags):
+${formatBlueprintSummary(activeBlueprint, { includeTags: true })}
 
 ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
 1. Where It Goes — The Golden Rule:
    - Passive Traits ([CHARACTER] Traits): Belongs here if it is a passive skill bonus (e.g. "+2 to Stealth"), environmental/survival perk, sensory advantage (Darkvision), background lore, or constant at-will bonus with NO usage counter.
    - Active Abilities ([ABILITIES] Block): Belongs here if it is an active combat/tactical action, has limited uses per rest (e.g. "1/1 per short rest", "2/2 per long rest"), triggered reactions, or forces enemy saving throws (e.g. "Ref DC 13").
 2. Explicit Permission to Audit & Fix Duplicates:
-   - You have FULL PERMISSION to audit both lists. If you spot duplicates (e.g. the same mechanic under two different names like "Bad Luck Bearer" in Traits and "Misfortune Gambit" in Abilities), or if an ability is misplaced (e.g. an active limited-use power stuck in passive Traits), clearly explain the distinction and fix it immediately using the command tags below!
+   - You have FULL PERMISSION to audit both lists and the 1–20 Roadmap. If you spot duplicates (e.g. the same mechanic under two different names like "Bad Luck Bearer" in Traits and "Misfortune Gambit" in Abilities), or if an ability is misplaced (e.g. an active limited-use power stuck in passive Traits), clearly explain the distinction and fix it immediately using the command tags below!
    - IMPORTANT: All existing features listed above are KEPT BY DEFAULT. Do NOT emit add commands for features that are already listed unless updating their wording.
-3. Directives for Updating Build:
+3. Directives for Updating Build & 1–20 Roadmap:
    - To add a NEW passive trait: [ADD_FEATURE: Trait Name (constant benefit)]
    - To update/refine an existing passive trait: [UPDATE_FEATURE: Trait Name | Trait Name (constant benefit)]
    - To remove a passive trait: [REMOVE_FEATURE: Trait Name]
@@ -1286,6 +1388,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
    - To remove an active power: [REMOVE_ABILITY: Ability Name]
    - To relocate a misplaced passive trait into active abilities: [MOVE_TO_ABILITIES: Trait Name]
    - To relocate an active ability into passive traits: [MOVE_TO_FEATURES: Ability Name]
+   - To update any level (1–20) of the Class Progression Roadmap: [UPDATE_LEVEL: <level_number> | <Feature Name 1 (description)>; <Feature Name 2 (description; 1/1 per short rest)>] (or [UPDATE_LEVEL: <level_number> | None] to clear an ASI-only level)
 4. CRITICAL FORMATTING REQUIREMENT (MULTIHOG PILL RENDERER):
    - MultiHog renders both [CHARACTER] Traits and [ABILITIES] entries as interactive hover-pills using the exact syntax: Name (hover tooltip description).
    - EVERY ability and trait MUST begin with its title/name, followed by its mechanical effect and any X/Y rest counter INSIDE parentheses so MultiHog extracts the X/Y resource badge and places the description into the hover tooltip.
@@ -1427,6 +1530,10 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 }
             }
 
+            if (!isPbta) {
+                applyBlueprintDirectivesFromReply(reply);
+            }
+
             proposal.newFeatures = deduplicateFeatures(proposal.newFeatures);
             proposal.activeAbilities = deduplicateFeatures(proposal.activeAbilities);
 
@@ -1434,7 +1541,9 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             renderAbilitiesList();
 
             const cleanReply = reply
+                .replace(/```(?:json)?[\s\S]*?```/gi, '')
                 .replace(/\[(?:ADD|REMOVE|UPDATE|MOVE_TO)_(?:FEATURE|ABILITY|ABILITIES|FEATURES):[^\]]+\]/gi, '')
+                .replace(/\[(?:UPDATE_LEVEL|SET_HIT_DIE|SET_CLASS_NAME):[^\]]*\]/gi, '')
                 .replace(/\[SET_STAT:[^\]]+\]/gi, '')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -1508,23 +1617,32 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 const conMod = Math.floor((((dossier?.protagonist?.stats?.CON ?? 10) - 10) / 2));
                 const perks = getTierPerks(activeBlueprint, targetLevel || 1, conMod);
 
+                const sheetKeys = new Set(initialSheetFeatures.map(f => extractFeatureKey(f)).filter(Boolean));
                 if (!blueprintChanged) {
                     // Nothing to re-derive: preserve Stage 2 edits
                 } else if (isRespec) {
-                    let feats = [];
-                    if (activeBlueprint.levels) {
-                        for (let l = 1; l <= (targetLevel || 1); l++) {
-                            const lvlFeats = activeBlueprint.levels[String(l)]?.features || [];
-                            feats.push(...lvlFeats);
-                        }
+                    const codexFeats = collapseCodexProgression(activeBlueprint, targetLevel || 1);
+                    const { traits: codexTraits, abilities: codexAbilities } = partitionFeaturesAndAbilities(codexFeats);
+                    const routedAbilities = codexAbilities.filter(ab => !sheetKeys.has(extractFeatureKey(ab)));
+                    if (routedAbilities.length > 0) {
+                        proposal.activeAbilities = mergeUpgradedFeatures(proposal.activeAbilities || [], routedAbilities);
                     }
-                    if (initialSheetFeatures.length > 0) {
-                        feats.push(...initialSheetFeatures);
+                    const activeKeys = new Set((proposal.activeAbilities || []).map(a => extractFeatureKey(a)).filter(Boolean));
+                    proposal.newFeatures = deduplicateFeatures([
+                        ...initialSheetFeatures,
+                        ...codexTraits.filter(t => !activeKeys.has(extractFeatureKey(t))),
+                    ]);
+                    if (proposal.newFeatures.length === 0 && (proposal.activeAbilities || []).length === 0) {
+                        proposal.newFeatures = perks.traits || perks.features || [];
                     }
-                    proposal.newFeatures = Array.from(new Set(feats));
-                    if (proposal.newFeatures.length === 0) proposal.newFeatures = perks.features || [];
                 } else {
-                    proposal.newFeatures = perks.features || [];
+                    const { traits: lvlTraits, abilities: lvlAbilities } = partitionFeaturesAndAbilities(perks.features || []);
+                    const onSheet = lvlAbilities.filter(ab => sheetKeys.has(extractFeatureKey(ab)));
+                    const forTracker = lvlAbilities.filter(ab => !sheetKeys.has(extractFeatureKey(ab)));
+                    proposal.newFeatures = deduplicateFeatures([...lvlTraits, ...onSheet]);
+                    if (forTracker.length > 0) {
+                        proposal.activeAbilities = mergeUpgradedFeatures(proposal.activeAbilities || [], forTracker);
+                    }
                     if (proposal.hpChange) {
                         proposal.hpChange.gain = perks.averageHpGain;
                         proposal.hpChange.newMax = (proposal.hpChange.oldMax || 0) + perks.averageHpGain;
@@ -1538,6 +1656,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                     }
                 }
                 renderPerksList();
+                renderAbilitiesList();
             }
 
             if (s1View) s1View.style.display = 'none';

@@ -7,7 +7,7 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList, formatTraitAsPill } from './level-up-blueprint.js';
+import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
 
@@ -46,6 +46,53 @@ export function deduplicateFeatures(list) {
         }
     }
     return Array.from(seen.values());
+}
+
+/**
+ * Merges incoming/upgraded features into an existing feature list by canonical name key.
+ * When an incoming feature shares a key with an existing entry (e.g. `Sneak Attack (2d6)`
+ * upgrading `Sneak Attack (1d6)` or `Rage (3/day, +2 dmg)` upgrading `Rage (2/day, +2 dmg)`),
+ * the existing entry is replaced in place; genuinely new keys are appended.
+ *
+ * @param {string[]} baseList Existing features/abilities.
+ * @param {string[]} upgradeList Incoming/higher-tier features/abilities.
+ * @returns {string[]}
+ */
+export function mergeUpgradedFeatures(baseList = [], upgradeList = []) {
+    const map = new Map();
+    for (const item of sanitizeFeatureList(baseList)) {
+        const key = extractFeatureKey(item);
+        if (key && !map.has(key)) {
+            map.set(key, item);
+        }
+    }
+    for (const item of sanitizeFeatureList(upgradeList)) {
+        const key = extractFeatureKey(item);
+        if (key) {
+            map.set(key, item);
+        }
+    }
+    return Array.from(map.values());
+}
+
+/**
+ * Collapses a blueprint's features from Level 1 up to `upToLevel`, upgrading scaling
+ * features in place (so e.g. Level 5 Rogue has `Sneak Attack (3d6)` rather than three
+ * separate Sneak Attack pills).
+ *
+ * @param {object} blueprint Progression blueprint.
+ * @param {number} upToLevel Maximum level to include.
+ * @returns {string[]}
+ */
+export function collapseCodexProgression(blueprint, upToLevel = 1) {
+    if (!blueprint?.levels) return [];
+    let acc = [];
+    const maxLvl = Math.max(1, Math.min(20, Number(upToLevel) || 1));
+    for (let l = 1; l <= maxLvl; l++) {
+        const lvlFeatures = blueprint.levels[String(l)]?.features || blueprint.levels[l]?.features || [];
+        acc = mergeUpgradedFeatures(acc, lvlFeatures);
+    }
+    return acc;
 }
 
 /**
@@ -533,24 +580,51 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
     const hpGain = isRespec ? 0 : (options.rolledHp !== undefined ? options.rolledHp : perks.averageHpGain);
     const newHp = isRespec ? oldHp : (oldHp + hpGain);
 
-    // Active features: in respec mode, collect all active traits from level 1 up to currentLevel
+    // Active abilities from [ABILITIES] block (resolved before partitioning codex features)
+    let activeAbilities = [];
+    if (Array.isArray(options.activeAbilities)) {
+        activeAbilities = [...options.activeAbilities];
+    } else if (Array.isArray(char.abilities) && char.abilities.length > 0) {
+        activeAbilities = [...char.abilities];
+    } else if (options.currentMemo || options.memo) {
+        activeAbilities = parseAbilitiesBlockFromMemo(options.currentMemo || options.memo || '');
+    }
+    activeAbilities = deduplicateFeatures(activeAbilities.map(a => formatTraitAsPill(a)).filter(Boolean));
+
+    const sheetFeatures = Array.isArray(char.features) ? sanitizeFeatureList(char.features) : [];
+    const sheetTraitKeys = new Set(sheetFeatures.map(f => extractFeatureKey(f)).filter(Boolean));
+
+    // Route codex features between passive [CHARACTER] Traits and active [ABILITIES]
     let features = [];
     if (isRespec) {
-        if (Array.isArray(char.features) && char.features.length > 0) {
-            features.push(...char.features);
+        const codexCollapsed = collapseCodexProgression(blueprint, currentLevel);
+        const { traits: codexTraits, abilities: codexAbilities } = partitionFeaturesAndAbilities(codexCollapsed);
+
+        // Preserve established sheet features first (so custom sheet descriptions win on key collision)
+        const abilityKeys = new Set(activeAbilities.map(a => extractFeatureKey(a)).filter(Boolean));
+        features = deduplicateFeatures([
+            ...sheetFeatures,
+            ...codexTraits.filter(t => !abilityKeys.has(extractFeatureKey(t))),
+        ]);
+
+        // Route codex active abilities into [ABILITIES] unless already tracked on the passive sheet
+        const routedCodexAbilities = codexAbilities.filter(ab => !sheetTraitKeys.has(extractFeatureKey(ab)));
+        if (routedCodexAbilities.length > 0) {
+            activeAbilities = mergeUpgradedFeatures(activeAbilities, routedCodexAbilities);
         }
-        if (blueprint?.levels) {
-            for (let l = 1; l <= currentLevel; l++) {
-                const lvlFeatures = blueprint.levels[String(l)]?.features || [];
-                features.push(...lvlFeatures);
-            }
-        }
-        features = deduplicateFeatures(sanitizeFeatureList(features));
-        if (features.length === 0) {
-            features = perks.features || [];
+
+        if (features.length === 0 && activeAbilities.length === 0) {
+            features = perks.traits || perks.features || [];
         }
     } else {
-        features = perks.features || [];
+        const { traits: levelTraits, abilities: levelAbilities } = partitionFeaturesAndAbilities(perks.features || []);
+        const abilitiesOnPassiveSheet = levelAbilities.filter(ab => sheetTraitKeys.has(extractFeatureKey(ab)));
+        const abilitiesForTracker = levelAbilities.filter(ab => !sheetTraitKeys.has(extractFeatureKey(ab)));
+
+        features = deduplicateFeatures([...levelTraits, ...abilitiesOnPassiveSheet]);
+        if (abilitiesForTracker.length > 0) {
+            activeAbilities = mergeUpgradedFeatures(activeAbilities, abilitiesForTracker);
+        }
     }
 
     // ASI or Feat recommendations if milestone level
@@ -573,7 +647,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
         };
     }
 
-    // Party companions preview (only during actual level up, not respec)
+        // Party companions preview (only during actual level up, not respec)
     const partyChanges = [];
     if (!isRespec && dossier.config?.partySyncEnabled !== false) {
         const companions = dossier.party || [];
@@ -585,17 +659,6 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
             });
         }
     }
-
-    // Active abilities from [ABILITIES] block
-    let activeAbilities = [];
-    if (Array.isArray(options.activeAbilities)) {
-        activeAbilities = [...options.activeAbilities];
-    } else if (Array.isArray(char.abilities) && char.abilities.length > 0) {
-        activeAbilities = [...char.abilities];
-    } else if (options.currentMemo || options.memo) {
-        activeAbilities = parseAbilitiesBlockFromMemo(options.currentMemo || options.memo || '');
-    }
-    activeAbilities = deduplicateFeatures(activeAbilities.map(a => formatTraitAsPill(a)).filter(Boolean));
 
     return {
         targetLevel,
@@ -839,15 +902,13 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
                     charBlock = `${charBlock.trim()}\nTraits: ${featText}\n`;
                 }
             } else {
-                // In Level-Up mode: only append new features that aren't already present
+                // In Level-Up mode: upgrade scaling features in place by key and append genuinely new ones
                 if (existingMatch) {
                     const existingFeats = splitTopLevelPillItems(existingMatch[2])
                         .map(f => formatTraitAsPill(f))
                         .filter(Boolean);
-                    const existingKeys = new Set(existingFeats.map(f => extractFeatureKey(f)));
-                    const genuinelyNew = cleanFeatures.filter(f => !existingKeys.has(extractFeatureKey(f)));
-                    if (genuinelyNew.length > 0) {
-                        const combined = [...existingFeats, ...genuinelyNew].join(', ');
+                    if (cleanFeatures.length > 0) {
+                        const combined = mergeUpgradedFeatures(existingFeats, cleanFeatures).join(', ');
                         charBlock = charBlock.replace(existingMatch[0], `${existingMatch[1]}${combined}`);
                     }
                 } else if (featText) {

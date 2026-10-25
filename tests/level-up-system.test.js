@@ -1398,3 +1398,177 @@ test('Level-Up System: MultiHog Pill Rendering Format Normalization (formatTrait
         '[ABILITIES] entries are also normalized into pill syntax with resource counter preserved',
     );
 });
+
+test('Level-Up System: Trait vs Ability Classification, Roadmap Badges, Codex Sync Routing & In-Place Upgrades', async () => {
+    const {
+        classifyFeatureKind,
+        partitionFeaturesAndAbilities,
+        formatTraitAsPill,
+        formatBlueprintSummary,
+    } = await import('../level-up-blueprint.js');
+    const {
+        mergeUpgradedFeatures,
+        collapseCodexProgression,
+    } = await import('../level-up-runner.js');
+    const { openLevelUpModal, closeLevelUpModal } = await import('../level-up-ui.js');
+
+    // 1. Deterministic classifier + explicit [ABILITY] / [TRAIT] tags
+    assert.strictEqual(classifyFeatureKind('Unarmored Defense (10+DEX+CON)'), 'trait');
+    assert.strictEqual(classifyFeatureKind('Fighting Style (Defense, Dueling, or Great Weapon)'), 'trait');
+    assert.strictEqual(classifyFeatureKind('Sneak Attack (2d6)'), 'trait');
+    assert.strictEqual(classifyFeatureKind('Second Wind (1d10+Level HP 1/rest)'), 'ability');
+    assert.strictEqual(classifyFeatureKind('Action Surge (1/rest)'), 'ability');
+    assert.strictEqual(classifyFeatureKind('Rage (2/day, +2 dmg)'), 'ability');
+    assert.strictEqual(classifyFeatureKind('Cunning Action (Dash, Disengage, or Hide as Bonus Action)'), 'ability');
+    assert.strictEqual(classifyFeatureKind('Ki (2 points/short rest: Flurry of Blows, Patient Defense, Step of the Wind)'), 'ability');
+    assert.strictEqual(classifyFeatureKind('Bardic Inspiration (d6, CHA/day)'), 'ability');
+
+    // Explicit prefix tags override heuristics and are stripped from the pill text
+    const taggedAbility = formatTraitAsPill('[ABILITY] Shadow Step (Teleport 60 ft between dim shadows)');
+    assert.strictEqual(taggedAbility, 'Shadow Step (Teleport 60 ft between dim shadows)');
+    assert.strictEqual(classifyFeatureKind(taggedAbility), 'ability');
+
+    const taggedTrait = formatTraitAsPill('[TRAIT] Endless Vigil (Can never be surprised while conscious)');
+    assert.strictEqual(taggedTrait, 'Endless Vigil (Can never be surprised while conscious)');
+    assert.strictEqual(classifyFeatureKind(taggedTrait), 'trait');
+
+    // 2. Partitioning a Fighter Level 1–2 feature list splits passive traits vs active abilities
+    const fighterL1L2 = [
+        'Fighting Style (Defense, Dueling, or Great Weapon)',
+        'Second Wind (1d10+Level HP 1/rest)',
+        'Action Surge (1/rest)',
+    ];
+    const partitioned = partitionFeaturesAndAbilities(fighterL1L2);
+    assert.deepStrictEqual(partitioned.traits, ['Fighting Style (Defense, Dueling, or Great Weapon)']);
+    assert.deepStrictEqual(partitioned.abilities, [
+        'Second Wind (1d10+Level HP 1/rest)',
+        'Action Surge (1/rest)',
+    ]);
+
+    // 3. collapseCodexProgression upgrades scaling features in place across levels
+    const rogueBp = getCanonicalDndProgression('Rogue');
+    const rogueUpTo5 = collapseCodexProgression(rogueBp, 5);
+    const sneakAttacks = rogueUpTo5.filter(f => f.startsWith('Sneak Attack'));
+    assert.deepStrictEqual(sneakAttacks, ['Sneak Attack (3d6)'], 'Scaling Sneak Attack must collapse to latest tier (3d6 at Level 5)');
+
+    // 4. Level-Up proposal routes active abilities to [ABILITIES] and upgrades existing sheet traits in place on commit
+    const rogueDossier = {
+        protagonist: {
+            name: 'Vaelen',
+            class: 'Rogue',
+            level: 2,
+            hp: { current: 16, max: 16 },
+            stats: { DEX: 16, CON: 12 },
+            features: ['Expertise (Double proficiency in 2 skills)', 'Sneak Attack (1d6)'],
+            abilities: ['Cunning Action (Dash, Disengage, or Hide as Bonus Action)'],
+        },
+    };
+    const rogueL3Proposal = formulateLevelUpProposal(rogueDossier, rogueBp, 3, { isRespec: false });
+    assert.ok(rogueL3Proposal.newFeatures.includes('Sneak Attack (2d6)'), 'Level 3 proposal includes upgraded Sneak Attack (2d6)');
+
+    const rogueMemo = `[CHARACTER]\nVaelen (Rogue): 16/16 HP\nLevel: 2\nTraits: Expertise (Double proficiency in 2 skills), Sneak Attack (1d6)\n[/CHARACTER]\n[ABILITIES]\nCunning Action (Dash, Disengage, or Hide as Bonus Action)\n[/ABILITIES]\n[XP]\nTotal: 900 / 900 XP (Level 2)\n[/XP]`;
+    const rogueCommit = applyLevelUpCommit({
+        chatId: 'vaelen_rogue',
+        currentMemo: rogueMemo,
+        proposal: rogueL3Proposal,
+        isRespec: false,
+    });
+    assert.strictEqual(rogueCommit.success, true);
+    assert.ok(rogueCommit.updatedMemo.includes('Sneak Attack (2d6)'), 'Commit must upgrade Sneak Attack (1d6) to Sneak Attack (2d6) in place');
+    assert.ok(!rogueCommit.updatedMemo.includes('Sneak Attack (1d6)'), 'Old Sneak Attack (1d6) must be replaced, not duplicated');
+
+    // 5. Stage 1 Roadmap renders Trait / Ability badges & Stage 2 Sync from Codex partitions into both lists
+    const elementsRegistry = new Map();
+    let mountedModal = null;
+    function createMockEl(tag = 'div') {
+        const listeners = {};
+        const el = {
+            tagName: tag.toUpperCase(),
+            id: '',
+            className: '',
+            _innerHTML: '',
+            style: { display: '' },
+            value: '',
+            textContent: '',
+            set innerHTML(val) { this._innerHTML = val; },
+            get innerHTML() { return this._innerHTML; },
+            addEventListener: (ev, cb) => { (listeners[ev] = listeners[ev] || []).push(cb); },
+            click: () => { (listeners['click'] || []).forEach(cb => cb({ preventDefault: () => {}, stopPropagation: () => {} })); },
+            remove: () => { if (mountedModal === el) mountedModal = null; },
+            querySelector: (sel) => {
+                if (sel === '#mhc-blueprint-shimmer') return null;
+                if (elementsRegistry.has(sel)) return elementsRegistry.get(sel);
+                const sub = createMockEl('div');
+                if (sel.startsWith('#')) sub.id = sel.slice(1);
+                elementsRegistry.set(sel, sub);
+                return sub;
+            },
+            querySelectorAll: () => [],
+        };
+        return el;
+    }
+    const prevDoc = globalThis.document;
+    globalThis.document = {
+        createElement: (tag) => createMockEl(tag),
+        body: { appendChild: (el) => { mountedModal = el; } },
+        getElementById: (id) => elementsRegistry.get(`#${id}`) || (mountedModal?.id === id ? mountedModal : null),
+    };
+    try {
+        const fighterBp = getCanonicalDndProgression('Fighter');
+        const fighterDossier = {
+            meta: { systemKey: 'dnd5e' },
+            protagonist: {
+                name: 'Valeria',
+                class: 'Fighter',
+                level: 2,
+                hp: { current: 20, max: 20 },
+                stats: { STR: 16, CON: 14 },
+                features: ['Custom Starting Trait (+1 Initiative)'],
+                abilities: [],
+            },
+        };
+        openLevelUpModal({
+            chatId: 'valeria_fighter',
+            dossier: fighterDossier,
+            blueprint: fighterBp,
+            targetLevel: 2,
+            isRespec: true,
+            initialStage: 1,
+        });
+        const tableContainer = elementsRegistry.get('#mhc-blueprint-table-container');
+        assert.ok(tableContainer.innerHTML.includes('mhc-kind-trait'), 'Stage 1 roadmap must render Trait badge');
+        assert.ok(tableContainer.innerHTML.includes('mhc-kind-ability'), 'Stage 1 roadmap must render ⚡ Ability badge');
+
+        // Click "Sync from Codex Table" in Stage 2 and verify Fighting Style goes to Perks while Second Wind & Action Surge go to Abilities
+        const syncBtn = elementsRegistry.get('#mhc-sync-codex-traits-btn');
+        syncBtn.click();
+        const perksListEl = elementsRegistry.get('#mhc-perks-list-container');
+        const abilitiesListEl = elementsRegistry.get('#mhc-abilities-list-container');
+        assert.ok(perksListEl.innerHTML.includes('Fighting Style'), 'Passive trait Fighting Style must sync to Passive Traits list');
+        assert.ok(!perksListEl.innerHTML.includes('Action Surge'), 'Active ability Action Surge must NOT be placed in Passive Traits list');
+        assert.ok(abilitiesListEl.innerHTML.includes('Second Wind'), 'Second Wind must sync to Active Abilities list');
+        assert.ok(abilitiesListEl.innerHTML.includes('Action Surge'), 'Action Surge must sync to Active Abilities list');
+        closeLevelUpModal();
+    } finally {
+        globalThis.document = prevDoc;
+    }
+
+    // 6. All 12 SRD progressions use Name (tooltip) pill syntax on every feature and X/Y counters on active abilities
+    const srdClasses = ['Fighter', 'Rogue', 'Wizard', 'Cleric', 'Barbarian', 'Paladin', 'Bard', 'Druid', 'Monk', 'Ranger', 'Sorcerer', 'Warlock'];
+    for (const cName of srdClasses) {
+        const prog = getCanonicalDndProgression(cName);
+        for (let lvl = 1; lvl <= 20; lvl++) {
+            for (const f of prog.levels[String(lvl)].features) {
+                assert.match(f, /^.+?\s*\(.+\)$/, `${cName} L${lvl} feature "${f}" must include (hover tooltip) pill syntax`);
+            }
+        }
+    }
+    assert.match(getCanonicalDndProgression('Fighter').levels['1'].features[1], /\b1\/1\s+per\s+short\s+rest\b/);
+    assert.match(getCanonicalDndProgression('Barbarian').levels['1'].features[0], /\b2\/2\s+per\s+long\s+rest\b/);
+
+    // 7. formatBlueprintSummary with { includeTags: true } exposes [Trait] and [Ability] routing tags for Concierge audits
+    const taggedSummary = formatBlueprintSummary(getCanonicalDndProgression('Fighter'), { includeTags: true });
+    assert.ok(taggedSummary.includes('[Trait] Fighting Style'), 'Summary with includeTags includes [Trait] prefix');
+    assert.ok(taggedSummary.includes('[Ability] Second Wind'), 'Summary with includeTags includes [Ability] prefix');
+    assert.ok(taggedSummary.includes('Level 4 (Prof +2): (ASI / Feat Milestone)'), 'Summary marks empty ASI levels');
+});

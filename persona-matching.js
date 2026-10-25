@@ -64,8 +64,8 @@ export async function findMatchingPersona(charName, providedPersonas = null) {
     let personas = providedPersonas;
     if (!personas) {
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-        let powerUser = ctx?.power_user || (typeof window !== 'undefined' ? window.power_user : null);
-        if (!powerUser?.personas && typeof import('../../../power-user.js') !== 'undefined') {
+        let powerUser = ctx?.powerUser || ctx?.power_user || (typeof window !== 'undefined' ? window.power_user : null);
+        if (!powerUser?.personas) {
             try {
                 const pu = await import('../../../power-user.js');
                 powerUser = pu.power_user;
@@ -146,13 +146,15 @@ export function extractNameFromMemo(memo) {
     const charBlock = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
     if (charBlock) {
         let firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
-        // Decode common HTML entities
+        // Decode common HTML entities and strip leading bullets or MultiHog ((ICON)) / ((BAR...)) markers
         firstLine = firstLine
             .replace(/&quot;/g, '"')
             .replace(/&#34;/g, '"')
             .replace(/&apos;/g, "'")
             .replace(/&#39;/g, "'")
             .replace(/^[-*•–—]\s*/, '')
+            .replace(/^(?:\(\([A-Za-z0-9_]+\)\)\s*)+/, '')
+            .replace(/\s*\(\([A-Za-z0-9_]+\)\)[\s\S]*$/, '')
             .trim();
         const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
         if (m) {
@@ -210,6 +212,61 @@ export function getCandidateChatIds(chatId) {
 }
 
 /**
+ * Extract player character name from Multihog settings/memo strictly for this chat.
+ * @param {string} [chatId]
+ * @param {object} [providedRpgSettings]
+ * @returns {string|null}
+ */
+export function getMultihogPlayerName(chatId, providedRpgSettings = null) {
+    const s = providedRpgSettings || (typeof globalThis._rpgSettings !== 'undefined'
+        ? globalThis._rpgSettings
+        : (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null));
+    if (!s) return null;
+
+    const candidateIds = getCandidateChatIds(chatId);
+
+    // 1. Chat partition playerCharacter, pbtaCampaignDossier, or companionDossier
+    for (const cid of candidateIds) {
+        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
+        if (pcName && isValidCharacterName(pcName)) {
+            return pcName.trim();
+        }
+        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name
+            || s.chatStates?.[cid]?.companionDossier?.protagonist?.name;
+        if (protoName && isValidCharacterName(protoName)) {
+            return protoName.trim();
+        }
+    }
+
+    // 2. Chat partition currentMemo
+    for (const cid of candidateIds) {
+        if (s.chatStates?.[cid]?.currentMemo) {
+            const name = extractNameFromMemo(s.chatStates[cid].currentMemo);
+            if (name && isValidCharacterName(name)) return name;
+        }
+    }
+
+    // 3. Current RPG memo [CHARACTER] block
+    // Accept if projection owner matches candidate IDs OR is unset/empty (e.g. boot/reload, chat link disabled, or turn 0)
+    const owner = String(s.chatStateProjectionOwner || '').trim();
+    const isOwnerMatch = owner && candidateIds.some(cid => cid === owner || cid.replace(/\.jsonl$/i, '') === owner.replace(/\.jsonl$/i, ''));
+    const isOwnerUnset = !owner;
+
+    if ((isOwnerMatch || isOwnerUnset) && s.currentMemo) {
+        const name = extractNameFromMemo(s.currentMemo);
+        if (name && isValidCharacterName(name)) return name;
+    }
+
+    // 4. Top-level playerCharacter (if live and belongs to this chat)
+    if ((isOwnerMatch || isOwnerUnset) && s.playerCharacter?.name) {
+        const topName = s.playerCharacter.name.trim();
+        if (isValidCharacterName(topName)) return topName;
+    }
+
+    return null;
+}
+
+/**
  * Retrieve player character portrait src from Multihog settings.
  * Prioritizes customPortraits (where manual uploads, replacements, and newly assigned portraits reside),
  * matching upstream MultiHog's resolvePortraitSrcForPlayerCharacter lookup sequence,
@@ -221,26 +278,49 @@ export function getCandidateChatIds(chatId) {
  * @returns {string|null}
  */
 export function getMultihogPlayerPortrait(chatId, charName, providedRpgSettings = null) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
     const s = providedRpgSettings || (typeof globalThis._rpgSettings !== 'undefined'
         ? globalThis._rpgSettings
-        : (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null));
+        : ctx?.extensionSettings?.rpg_tracker || null);
     if (!s) return null;
 
     const candidateIds = getCandidateChatIds(chatId);
     const candidateNames = [];
-    if (charName) candidateNames.push(charName);
+    const addCandidateName = (raw) => {
+        if (!raw || typeof raw !== 'string') return;
+        const trimmed = raw.trim();
+        if (trimmed && isValidCharacterName(trimmed) && !candidateNames.includes(trimmed)) {
+            candidateNames.push(trimmed);
+        }
+    };
 
-    // Also collect names from character blocks or playerCharacter across candidate partitions
+    addCandidateName(charName);
+
+    // Also collect names from character blocks, dossiers, or playerCharacter across candidate partitions
     for (const cid of candidateIds) {
-        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
-        if (pcName && !candidateNames.includes(pcName)) candidateNames.push(pcName);
-        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name;
-        if (protoName && !candidateNames.includes(protoName)) candidateNames.push(protoName);
+        const part = s.chatStates?.[cid];
+        if (!part) continue;
+        addCandidateName(part.playerCharacter?.name);
+        addCandidateName(part.pbtaCampaignDossier?.protagonist?.name);
+        addCandidateName(part.companionDossier?.protagonist?.name);
+        if (part.currentMemo) {
+            addCandidateName(extractNameFromMemo(part.currentMemo));
+        }
     }
+
+    // Check SillyTavern chatMetadata dossiers if bound to active chat
+    if (ctx?.chatMetadata) {
+        addCandidateName(ctx.chatMetadata.mhc_pbta_dossier?.protagonist?.name);
+        addCandidateName(ctx.chatMetadata.mhc_dossier?.protagonist?.name);
+    }
+
     const owner = String(s.chatStateProjectionOwner || '').trim();
-    const isOwnerMatch = !owner || candidateIds.some(cid => cid === owner);
-    if (isOwnerMatch && s.playerCharacter?.name && !candidateNames.includes(s.playerCharacter.name)) {
-        candidateNames.push(s.playerCharacter.name);
+    const isOwnerMatch = !owner || candidateIds.some(cid => cid === owner || cid.replace(/\.jsonl$/i, '') === owner.replace(/\.jsonl$/i, ''));
+    if (isOwnerMatch) {
+        addCandidateName(s.playerCharacter?.name);
+        if (s.currentMemo) {
+            addCandidateName(extractNameFromMemo(s.currentMemo));
+        }
     }
 
     const charVariants = [...new Set(candidateNames.flatMap(n => getNameMatchingVariants(n)))];
@@ -282,9 +362,10 @@ export function getMultihogPlayerPortrait(chatId, charName, providedRpgSettings 
     const live = lookupInMap(s.customPortraits, { allowGenericFallback: false });
     if (live) return live;
 
-    // 3. Check pbtaCampaignDossier or playerCharacter portraitSrc across candidate partitions
+    // 3. Check pbtaCampaignDossier, companionDossier, or playerCharacter portraitSrc across candidate partitions
     for (const cid of candidateIds) {
-        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc;
+        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc
+            || s.chatStates?.[cid]?.companionDossier?.protagonist?.portraitSrc;
         if (dossierPortrait) return dossierPortrait;
         const pcPortrait = s.chatStates?.[cid]?.playerCharacter?.portraitSrc;
         if (pcPortrait) return pcPortrait;

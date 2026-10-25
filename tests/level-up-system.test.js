@@ -20,6 +20,7 @@ import {
     applyLevelUpCommit,
     extractFeatureKey,
     deduplicateFeatures,
+    ensureNamedFeature,
 } from '../level-up-runner.js';
 
 test('Level-Up System: Character Parsing & Auto-Scaffold', () => {
@@ -994,4 +995,22 @@ test('Level-Up System: Feature Key Extraction & Smart Title-Based Deduplication'
     assert.strictEqual(extractFeatureKey(proposal.newFeatures[1]), 'scavenger\'s instinct');
     assert.strictEqual(extractFeatureKey(proposal.newFeatures[2]), 'bad luck bearer');
     assert.strictEqual(proposal.activeAbilities.length, 1);
+
+    // 4. Test ensureNamedFeature name retention
+    assert.strictEqual(
+        ensureNamedFeature('Misfortune Gambit', 'Once per long rest, reroll a failed save; 1/1 per long rest'),
+        'Misfortune Gambit (Once per long rest, reroll a failed save; 1/1 per long rest)'
+    );
+    assert.strictEqual(
+        ensureNamedFeature('Misfortune Gambit', '(Once per long rest, reroll a failed save; 1/1 per long rest)'),
+        'Misfortune Gambit (Once per long rest, reroll a failed save; 1/1 per long rest)'
+    );
+    assert.strictEqual(
+        ensureNamedFeature('Misfortune Gambit', 'Misfortune Gambit (Once per long rest, reroll a failed save; 1/1 per long rest)'),
+        'Misfortune Gambit (Once per long rest, reroll a failed save; 1/1 per long rest)'
+    );
+    assert.strictEqual(
+        ensureNamedFeature('Street Rat', '+2 to Stealth and Deception in urban districts'),
+        'Street Rat (+2 to Stealth and Deception in urban districts)'
+    );
 });

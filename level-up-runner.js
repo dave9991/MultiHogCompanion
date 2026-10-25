@@ -48,6 +48,33 @@ export function deduplicateFeatures(list) {
 }
 
 /**
+ * Ensures that a feature or ability text retains its canonical name prefix.
+ * e.g. ensureNamedFeature("Misfortune Gambit", "Once per long rest, reroll...")
+ *      -> "Misfortune Gambit (Once per long rest, reroll...)"
+ * @param {string} rawName Canonical ability/feature name.
+ * @param {string} rawText Provided description or full text.
+ * @returns {string} Formatted string with name guaranteed.
+ */
+export function ensureNamedFeature(rawName, rawText) {
+    const name = (rawName || '').trim();
+    let text = (rawText || '').trim();
+    if (!name) return text;
+    if (!text) return name;
+
+    const nameLower = name.toLowerCase();
+    const textLower = text.toLowerCase();
+    if (textLower.startsWith(nameLower)) {
+        return text;
+    }
+
+    if (text.startsWith('(') && text.endsWith(')')) {
+        return `${name} ${text}`;
+    }
+
+    return `${name} (${text.replace(/^\(+|\)+$/g, '').trim()})`;
+}
+
+/**
  * Evaluates whether the character has accumulated sufficient XP to advance a level.
  *
  * @param {string} memoText State memo text.

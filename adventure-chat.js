@@ -39,25 +39,61 @@ export function isChatClean(ctx) {
 export function isAdventureActive(chatId = null, ctx = null) {
     const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null);
 
-    // 1. If SillyTavern chat is explicitly clean (unstarted / greeting only), no adventure is running
-    if (effectiveCtx && Array.isArray(effectiveCtx.chat) && isChatClean(effectiveCtx)) {
-        return false;
-    }
-
-    // 2. Check MultiHog settings / state
+    // 1. Check MultiHog settings / state
     const s = effectiveCtx?.extensionSettings?.rpg_tracker
         || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
     if (!s) return false;
+
+    const cid = chatId
+        || effectiveCtx?.getCurrentChatId?.() || effectiveCtx?.chatId
+        || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || '';
+    const cleanCid = String(cid).replace(/\.jsonl$/i, '').trim();
+    const candidateIds = cleanCid ? [...new Set([ String(cid).trim(), cleanCid, `${cleanCid}.jsonl` ])] : [];
+
+    // Check if THIS specific chat already has explicit initialized character/campaign state
+    // (e.g. Character Creator completed with onboardingSendStarterMessage: false, or PbtA Session Zero completed on Turn 0)
+    let hasExplicitChatCharacter = false;
+    for (const id of candidateIds) {
+        const part = s.chatStates?.[id];
+        if (!part) continue;
+        if (part.pbtaCampaignDossier || part.companionDossier || part.playerCharacter?.name) {
+            hasExplicitChatCharacter = true;
+            break;
+        }
+        if (part.currentMemo && /\[CHARACTER\]/i.test(part.currentMemo)) {
+            hasExplicitChatCharacter = true;
+            break;
+        }
+    }
+    if (!hasExplicitChatCharacter && cleanCid) {
+        const owner = String(s.chatStateProjectionOwner || '').replace(/\.jsonl$/i, '').trim();
+        if (owner && owner === cleanCid) {
+            if (s.playerCharacter?.name || (s.currentMemo && /\[CHARACTER\]/i.test(s.currentMemo))) {
+                hasExplicitChatCharacter = true;
+            }
+        }
+    }
+
+    // 2. If SillyTavern chat is explicitly clean (unstarted / greeting only) AND no character has been
+    // initialized for this chat yet, no adventure is running.
+    if (effectiveCtx && Array.isArray(effectiveCtx.chat) && isChatClean(effectiveCtx) && !hasExplicitChatCharacter) {
+        return false;
+    }
 
     // 3. Check if the DOM tracker is explicitly displaying the empty onboarding screen
     if (typeof document !== 'undefined') {
         const trackerEl = document.getElementById('rpg-tracker-render');
         if (trackerEl && (trackerEl.querySelector('.rt-empty') !== null || !trackerEl.children.length)) {
             const memo = String(s.currentMemo || '').trim();
-            if (!memo || !/\[CHARACTER\]/i.test(memo)) {
+            if ((!memo || !/\[CHARACTER\]/i.test(memo)) && !hasExplicitChatCharacter) {
                 return false;
             }
         }
+    }
+
+    if (hasExplicitChatCharacter) {
+        return true;
     }
 
     // 4. Check if live memo or partitioned state has any character/story data
@@ -66,13 +102,10 @@ export function isAdventureActive(chatId = null, ctx = null) {
         return true;
     }
 
-    const cid = chatId
-        || effectiveCtx?.getCurrentChatId?.() || effectiveCtx?.chatId
-        || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-        || '';
-    if (cid && s.chatStates?.[cid]) {
-        const part = s.chatStates[cid];
-        if (part.pbtaCampaignDossier || part.playerCharacter?.name) return true;
+    for (const id of candidateIds) {
+        const part = s.chatStates?.[id];
+        if (!part) continue;
+        if (part.pbtaCampaignDossier || part.companionDossier || part.playerCharacter?.name) return true;
         if (part.currentMemo && /\[CHARACTER\]/i.test(part.currentMemo)) return true;
         if (part.npcRelationshipValues && Object.keys(part.npcRelationshipValues).length > 0) return true;
     }

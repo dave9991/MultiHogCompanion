@@ -10,7 +10,7 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures } from './level-up-runner.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, ensureNamedFeature } from './level-up-runner.js';
 import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
@@ -1097,16 +1097,20 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
    - You have FULL PERMISSION to audit both lists. If you spot duplicates (e.g. the same mechanic under two different names like "Bad Luck Bearer" in Traits and "Misfortune Gambit" in Abilities), or if an ability is misplaced (e.g. an active limited-use power stuck in passive Traits), clearly explain the distinction and fix it immediately using the command tags below!
    - IMPORTANT: All existing features listed above are KEPT BY DEFAULT. Do NOT emit add commands for features that are already listed unless updating their wording.
 3. Directives for Updating Build:
-   - To add a NEW passive trait: [ADD_FEATURE: Trait Name (effect)]
-   - To update/refine an existing passive trait description: [UPDATE_FEATURE: Trait Name | Full Description]
+   - To add a NEW passive trait: [ADD_FEATURE: Trait Name (constant benefit)]
+   - To update/refine an existing passive trait: [UPDATE_FEATURE: Trait Name | Trait Name (constant benefit)]
    - To remove a passive trait: [REMOVE_FEATURE: Trait Name]
-   - To add a NEW active/resource power: [ADD_ABILITY: Ability Name (trigger, effect; uses/max per rest)]
-   - To update/refine an existing active ability description: [UPDATE_ABILITY: Ability Name | Full Description]
+   - To add a NEW active/resource power: [ADD_ABILITY: Ability Name (trigger/effect; uses/max per rest)]
+   - To update/refine an existing active ability: [UPDATE_ABILITY: Ability Name | Ability Name (trigger/effect; uses/max per rest)]
    - To remove an active power: [REMOVE_ABILITY: Ability Name]
-   - To relocate a misplaced passive trait into active abilities: [MOVE_TO_ABILITIES: Feature Name]
+   - To relocate a misplaced passive trait into active abilities: [MOVE_TO_ABILITIES: Trait Name]
    - To relocate an active ability into passive traits: [MOVE_TO_FEATURES: Ability Name]
-4. Single-Track Progression: Streamlined D&D Lite model. No rigid subclass branching. The class remains "${proposal.className}".
-5. Concise & Inspiring: Keep your spoken reply evocative, clear, and under 130 words.`;
+4. CRITICAL FORMATTING REQUIREMENT:
+   - EVERY ability and trait MUST begin with its title/name! Never output a bare description without an ability name.
+   - Example Active Power: Misfortune Gambit (Reroll a failed check from critical misfortune; 1/1 per long rest)
+   - Example Passive Perk: Street Rat (+2 to Stealth in urban districts)
+5. Single-Track Progression: Streamlined D&D Lite model. No rigid subclass branching. The class remains "${proposal.className}".
+6. Concise & Inspiring: Keep your spoken reply evocative, clear, and under 130 words.`;
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -1139,8 +1143,9 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             // [UPDATE_FEATURE: Name | Description]
             const updateMatches = [...reply.matchAll(/\[UPDATE_FEATURE:\s*([^|\]]+)\|\s*([^\]]+)\]/gi)];
             for (const match of updateMatches) {
-                const targetKey = extractFeatureKey(match[1]);
-                const newText = match[2].trim();
+                const featureName = match[1].trim();
+                const targetKey = extractFeatureKey(featureName);
+                const newText = ensureNamedFeature(featureName, match[2].trim());
                 const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
                 if (idx >= 0) {
                     proposal.newFeatures[idx] = newText;
@@ -1178,8 +1183,9 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             // [UPDATE_ABILITY: Name | Description]
             const updateAbilityMatches = [...reply.matchAll(/\[UPDATE_ABILITY:\s*([^|\]]+)\|\s*([^\]]+)\]/gi)];
             for (const match of updateAbilityMatches) {
-                const targetKey = extractFeatureKey(match[1]);
-                const newText = match[2].trim();
+                const abilityName = match[1].trim();
+                const targetKey = extractFeatureKey(abilityName);
+                const newText = ensureNamedFeature(abilityName, match[2].trim());
                 const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
                 if (idx >= 0) {
                     proposal.activeAbilities[idx] = newText;

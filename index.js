@@ -104,6 +104,19 @@ import {
     applyDndSubfooterAlignment,
     revertDndSubfooterAlignment,
 } from './dnd-fixes.js';
+import {
+    getNameMatchingVariants,
+    findMatchingPersona,
+    extractNameFromMemo,
+    getCandidateChatIds,
+    getMultihogPlayerName,
+    getMultihogPlayerPortrait,
+} from './persona-matching.js';
+export {
+    getNameMatchingVariants,
+    findMatchingPersona,
+    getMultihogPlayerPortrait,
+};
 
 const EXTENSION_NAME = 'multihog_companion';
 
@@ -195,218 +208,6 @@ function getRpgSettings() {
 }
 
 /**
- * Helper to extract character name from a memo string.
- */
-function extractNameFromMemo(memo) {
-    if (!memo || typeof memo !== 'string') return null;
-    const charBlock = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
-    if (charBlock) {
-        let firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
-        // Decode common HTML entities
-        firstLine = firstLine
-            .replace(/&quot;/g, '"')
-            .replace(/&#34;/g, '"')
-            .replace(/&apos;/g, "'")
-            .replace(/&#39;/g, "'")
-            .replace(/^[-*•–—]\s*/, '')
-            .trim();
-        const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
-        if (m) {
-            const candidate = m[1].trim();
-            if (isValidCharacterName(candidate)) return candidate;
-            return null;
-        }
-        if (firstLine && isValidCharacterName(firstLine) && firstLine.length <= 50) {
-            return firstLine;
-        }
-    }
-    const nameField = memo.match(/(?:^|\n)\s*(?:Name|Character Name)\s*[:\|]\s*([^\n\|\[<]{2,60})/im);
-    if (nameField) {
-        const candidate = nameField[1].replace(/<[^>]+>/g, '').trim();
-        if (isValidCharacterName(candidate)) return candidate;
-    }
-    return null;
-}
-
-/**
- * Helper to gather candidate chat IDs across SillyTavern and MultiHog context.
- */
-function getCandidateChatIds(chatId) {
-    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-    let raw = [];
-    if (chatId) {
-        raw = [chatId];
-    } else {
-        const stChatId = ctx?.getCurrentChatId?.() || ctx?.chatId || ctx?.chatMetadata?.chat_id || null;
-        if (stChatId) {
-            raw = [
-                ctx?.getCurrentChatId?.(),
-                ctx?.chatId,
-                ctx?.chatMetadata?.chat_id,
-            ];
-        } else {
-            raw = [
-                (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null),
-            ];
-        }
-    }
-    const filtered = raw.filter(Boolean).map(String);
-    const expanded = [];
-    for (const id of filtered) {
-        expanded.push(id);
-        if (id.endsWith('.jsonl')) {
-            expanded.push(id.slice(0, -6));
-        } else {
-            expanded.push(`${id}.jsonl`);
-        }
-    }
-    return [...new Set(expanded)];
-}
-
-/**
- * Extract player character name from Multihog settings/memo strictly for this chat.
- */
-function getMultihogPlayerName(chatId) {
-    const s = getRpgSettings();
-    if (!s) return null;
-
-    const candidateIds = getCandidateChatIds(chatId);
-
-    // 1. Chat partition playerCharacter or pbtaCampaignDossier
-    for (const cid of candidateIds) {
-        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
-        if (pcName && isValidCharacterName(pcName)) {
-            return pcName.trim();
-        }
-        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name;
-        if (protoName && isValidCharacterName(protoName)) {
-            return protoName.trim();
-        }
-    }
-
-    // 2. Chat partition currentMemo
-    for (const cid of candidateIds) {
-        if (s.chatStates?.[cid]?.currentMemo) {
-            const name = extractNameFromMemo(s.chatStates[cid].currentMemo);
-            if (name && isValidCharacterName(name)) return name;
-        }
-    }
-
-    // 3. Current RPG memo [CHARACTER] block
-    // Accept if projection owner matches candidate IDs OR is unset/empty (e.g. boot/reload, chat link disabled, or turn 0)
-    const owner = String(s.chatStateProjectionOwner || '').trim();
-    const isOwnerMatch = owner && candidateIds.some(cid => cid === owner);
-    const isOwnerUnset = !owner;
-
-    if ((isOwnerMatch || isOwnerUnset) && s.currentMemo) {
-        const name = extractNameFromMemo(s.currentMemo);
-        if (name && isValidCharacterName(name)) return name;
-    }
-
-    // 4. Top-level playerCharacter (if live and belongs to this chat)
-    if ((isOwnerMatch || isOwnerUnset) && s.playerCharacter?.name) {
-        const topName = s.playerCharacter.name.trim();
-        if (isValidCharacterName(topName)) return topName;
-    }
-
-    return null;
-}
-
-
-/**
- * Generates normalized lookup keys/variants for a character or persona name.
- * Handles quoted nicknames (e.g., John "The axe" Smith), smart quotes, HTML entities,
- * parenthetical descriptors, and quote stripping (as done upstream by MultiHog DnD).
- * @param {string} rawName
- * @returns {string[]}
- */
-export function getNameMatchingVariants(rawName) {
-    if (!rawName || typeof rawName !== 'string') return [];
-    // Decode HTML entities
-    let str = rawName
-        .replace(/&quot;/g, '"')
-        .replace(/&#34;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&#39;/g, "'")
-        .trim();
-    // Normalize unicode/curly quotes to standard straight quotes
-    str = str.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-
-    const lower = str.toLowerCase();
-    // 1. Without parentheses (e.g. "Bob (the Barbarian)" -> "Bob")
-    const noParens = lower.replace(/\s*\(.*?\)/g, '').replace(/\s+/g, ' ').trim();
-    // 2. Without quote characters (e.g. 'john "the axe" smith' -> 'john the axe smith')
-    // MultiHog's buildNameOnlyPersonaIdentity strips quotes with replace(/['"\\]/g, '')
-    const noQuotes = lower.replace(/['"\\]/g, '').replace(/\s+/g, ' ').trim();
-    const noParensNoQuotes = noParens.replace(/['"\\]/g, '').replace(/\s+/g, ' ').trim();
-    // 3. Without the quoted nickname altogether (e.g. 'john "the axe" smith' -> 'john smith')
-    const noNickname = lower
-        .replace(/\s*\(.*?\)/g, '')
-        .replace(/\s*["'][^"']*["']/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    return [...new Set([
-        lower,
-        noQuotes,
-        noParens,
-        noParensNoQuotes,
-        noNickname,
-    ])].filter(Boolean);
-}
-
-/**
- * Locate matching SillyTavern persona for the given character name.
- */
-export async function findMatchingPersona(charName) {
-    if (!charName) return null;
-    const ctx = SillyTavern.getContext();
-    let powerUser = ctx.power_user || window.power_user;
-    if (!powerUser?.personas) {
-        try {
-            const pu = await import('../../../power-user.js');
-            powerUser = pu.power_user;
-        } catch (_) {}
-    }
-    if (!powerUser?.personas) return null;
-
-    const charVariants = getNameMatchingVariants(charName);
-    if (!charVariants.length) return null;
-
-    // 1. Exact match across normalized variants
-    // Catches:
-    // - Exact raw match ("John \"The axe\" Smith" == "John \"The axe\" Smith")
-    // - Upstream quote-stripped persona ("John \"The axe\" Smith" matching "John The axe Smith")
-    // - Base-name persona without nickname ("John \"The axe\" Smith" matching "John Smith")
-    // - Smart quotes vs straight quotes
-    for (const [avatarId, personaName] of Object.entries(powerUser.personas)) {
-        if (!personaName) continue;
-        const personaVariants = getNameMatchingVariants(personaName);
-        const hasVariantMatch = charVariants.some(cv => personaVariants.includes(cv));
-        if (hasVariantMatch) {
-            return { avatar: avatarId, name: personaName };
-        }
-    }
-
-    // 2. Prefix / substring match for titled names (e.g. "Bob" matching "Bob the Barbarian")
-    for (const [avatarId, personaName] of Object.entries(powerUser.personas)) {
-        if (!personaName) continue;
-        const personaVariants = getNameMatchingVariants(personaName);
-        for (const cv of charVariants) {
-            if (cv.length < 2) continue;
-            for (const pv of personaVariants) {
-                if (pv.length < 2) continue;
-                if (cv.startsWith(pv) || pv.startsWith(cv)) {
-                    return { avatar: avatarId, name: personaName };
-                }
-            }
-        }
-    }
-
-    return null;
-}
-
-/**
  * Bind the persona to the active chat and set it active if not already.
  */
 export async function syncPersonaToChat(chatId, persona) {
@@ -448,88 +249,6 @@ export async function syncPersonaToChat(chatId, persona) {
 }
 
 /**
- * Retrieve player character portrait src from Multihog settings.
- * Prioritizes customPortraits (where manual uploads, replacements, and newly assigned portraits reside),
- * matching upstream MultiHog's resolvePortraitSrcForPlayerCharacter lookup sequence,
- * then falls back to pbtaCampaignDossier or playerCharacter objects.
- */
-export function getMultihogPlayerPortrait(chatId, charName) {
-    const s = getRpgSettings();
-    if (!s) return null;
-
-    const candidateIds = getCandidateChatIds(chatId);
-    const candidateNames = [];
-    if (charName) candidateNames.push(charName);
-
-    // Also collect names from character blocks or playerCharacter across candidate partitions
-    for (const cid of candidateIds) {
-        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
-        if (pcName && !candidateNames.includes(pcName)) candidateNames.push(pcName);
-        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name;
-        if (protoName && !candidateNames.includes(protoName)) candidateNames.push(protoName);
-    }
-    const owner = String(s.chatStateProjectionOwner || '').trim();
-    const isOwnerMatch = !owner || candidateIds.some(cid => cid === owner);
-    if (isOwnerMatch && s.playerCharacter?.name && !candidateNames.includes(s.playerCharacter.name)) {
-        candidateNames.push(s.playerCharacter.name);
-    }
-
-    const charVariants = [...new Set(candidateNames.flatMap(n => getNameMatchingVariants(n)))];
-
-    const lookupInMap = (map, { allowGenericFallback = false } = {}) => {
-        if (!map || typeof map !== 'object') return null;
-
-        // 1. Exact match on candidate character names
-        for (const name of candidateNames) {
-            if (map[name]) return map[name];
-        }
-
-        // 2. Case-insensitive / normalized search across name variants
-        const keys = Object.keys(map);
-        for (const k of keys) {
-            const keyVariants = getNameMatchingVariants(k);
-            if (charVariants.some(cv => keyVariants.includes(cv))) {
-                return map[k];
-            }
-        }
-
-        // 3. Fallback for generic PC keys ONLY when explicitly allowed (e.g. partition scope)
-        if (allowGenericFallback) {
-            if (map['CHARACTER']) return map['CHARACTER'];
-            if (map['PC']) return map['PC'];
-        }
-
-        return null;
-    };
-
-    // 1. Check chat partition customPortraits FIRST (holds user manual uploads and replaced portraits)
-    for (const cid of candidateIds) {
-        const part = s.chatStates?.[cid]?.customPortraits;
-        const res = lookupInMap(part, { allowGenericFallback: true });
-        if (res) return res;
-    }
-
-    // 2. Check live customPortraits (exact/variant match ONLY, no generic CHARACTER/PC fallback to prevent cross-chat bleed)
-    const live = lookupInMap(s.customPortraits, { allowGenericFallback: false });
-    if (live) return live;
-
-    // 3. Check pbtaCampaignDossier or playerCharacter portraitSrc across candidate partitions
-    for (const cid of candidateIds) {
-        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc;
-        if (dossierPortrait) return dossierPortrait;
-        const pcPortrait = s.chatStates?.[cid]?.playerCharacter?.portraitSrc;
-        if (pcPortrait) return pcPortrait;
-    }
-
-    // 4. Check live playerCharacter portrait if projection owner matches or unset
-    if (isOwnerMatch && s.playerCharacter?.portraitSrc) {
-        return s.playerCharacter.portraitSrc;
-    }
-
-    return null;
-}
-
-/**
  * Upload the image blob to the persona avatar file on SillyTavern server.
  */
 export async function uploadImageToPersona(avatarId, imageSrc) {
@@ -568,12 +287,18 @@ export async function uploadImageToPersona(avatarId, imageSrc) {
     }
 
     try {
-        const { getUserAvatar, getThumbnailUrl, getUserAvatars } = await import('../../../personas.js');
+        const [{ getUserAvatar, getUserAvatars }, scriptMod] = await Promise.all([
+            import('../../../personas.js').catch(() => ({})),
+            import('../../../../script.js').catch(() => ({})),
+        ]);
         if (typeof getUserAvatar === 'function') {
             await fetch(getUserAvatar(avatarId), { cache: 'reload' }).catch(() => {});
         }
-        if (typeof getThumbnailUrl === 'function') {
-            await fetch(getThumbnailUrl('persona', avatarId), { cache: 'reload' }).catch(() => {});
+        const thumbUrl = typeof scriptMod?.getThumbnailUrl === 'function'
+            ? scriptMod.getThumbnailUrl('persona', avatarId)
+            : `/thumbnail?type=persona&file=${encodeURIComponent(avatarId)}`;
+        if (thumbUrl) {
+            await fetch(thumbUrl, { cache: 'reload' }).catch(() => {});
         }
         if (typeof getUserAvatars === 'function') {
             await getUserAvatars(true, avatarId).catch(() => {});
@@ -582,31 +307,37 @@ export async function uploadImageToPersona(avatarId, imageSrc) {
 
     // Force DOM repaint with timestamp cache buster
     try {
+        const bust = String(Date.now());
         const updateSrcWithCacheBust = (src) => {
             if (!src) return src;
             try {
                 const dummyBase = 'http://st.local';
                 const parsed = new URL(src, dummyBase);
-                parsed.searchParams.set('t', String(Date.now()));
+                parsed.searchParams.set('t', bust);
                 if (src.startsWith('http://') || src.startsWith('https://')) {
                     return parsed.href;
                 }
                 return parsed.pathname + parsed.search;
             } catch (_) {
                 const sep = src.includes('?') ? '&' : '?';
-                return `${src}${sep}t=${Date.now()}`;
+                return `${src}${sep}t=${bust}`;
             }
         };
 
         // Target ONLY elements belonging to this avatar, avoiding indiscriminate selection of #user_avatar_block
         const safeAvatarId = (avatarId || '').replace(/"/g, '\\"');
-        const selector = [
+        const encodedAvatarId = encodeURIComponent(avatarId || '').replace(/"/g, '\\"');
+        const selectors = [
             `.mes[is_user="true"] .avatar img`,
             `#avatar`,
             `#user_avatar_block [data-avatar-id="${safeAvatarId}"] img`,
             `img[src*="${safeAvatarId}"]`,
             `#quickPersonaImg`,
-        ].join(', ');
+        ];
+        if (encodedAvatarId && encodedAvatarId !== safeAvatarId) {
+            selectors.push(`img[src*="${encodedAvatarId}"]`);
+        }
+        const selector = selectors.join(', ');
 
         if (typeof $ !== 'undefined') {
             $(selector).each(function () {
@@ -835,17 +566,20 @@ export async function runSync(reason = '') {
             return false;
         }
 
+        const isManual = reason === 'manual_button' || reason === 'slash_command';
+
         // If adventure is unstarted or in onboarding screen, skip runtime persona/portrait/vitality sync
-        if (!isAdventureActive(chatId)) {
+        if (!isManual && !isAdventureActive(chatId)) {
             return false;
         }
-
 
         let didWork = false;
 
         // 0. Ensure active chat ruleset consistency (rehydrates cartridge if MultiHog reset to D&D)
-        const rulesetChanged = await ensureActiveChatRulesetConsistency(chatId);
-        if (rulesetChanged) didWork = true;
+        if (reason !== 'CHAT_CHANGED' && reason !== 'INITIAL_LOAD' && reason !== 'SETTINGS_UPDATED') {
+            const rulesetChanged = await ensureActiveChatRulesetConsistency(chatId);
+            if (rulesetChanged) didWork = true;
+        }
 
         // 1. Auto-hydrate PbtA game state memo if needed
         const memoHydrated = await hydratePbtaMemoIfNeeded(chatId);
@@ -2176,6 +1910,7 @@ function updateRulesetBadge() {
 let _chatChangedTimer = null;
 let _activeChatChangedToken = 0;
 let _isSettingsSyncActive = false;
+let _pendingSettingsUpdatedSync = false;
 let _settingsUpdatedTimer = null;
 
 /**
@@ -2242,20 +1977,28 @@ async function runChatChangedCoordinator(targetChatId, token) {
 
 /**
  * Sequential coordinator for SETTINGS_UPDATED.
- * Protects against infinite re-entrancy loops.
+ * Protects against infinite re-entrancy loops while ensuring trailing portrait/persona syncs are not dropped.
  */
 async function runSettingsUpdatedCoordinator() {
-    if (_isSettingsSyncActive) return;
+    if (_isSettingsSyncActive) {
+        _pendingSettingsUpdatedSync = true;
+        return;
+    }
     _isSettingsSyncActive = true;
     try {
         await ensureActiveChatRulesetConsistency();
         updateRulesetBadge();
         updateLorebookSyncUI();
         updateRelationshipSyncUI();
+        await runSync('SETTINGS_UPDATED');
     } catch (err) {
         console.error('[MultiHog Companion] Error during settings updated coordinator:', err);
     } finally {
         _isSettingsSyncActive = false;
+        if (_pendingSettingsUpdatedSync) {
+            _pendingSettingsUpdatedSync = false;
+            scheduleSync('SETTINGS_UPDATED', 350);
+        }
     }
 }
 
@@ -2615,12 +2358,15 @@ jQuery(async () => {
     eventSource.on(event_types.SETTINGS_UPDATED, () => {
         if (isPersistingPbtaChatState()) {
             clearPersistingPbtaChatState();
+            scheduleSync('SETTINGS_UPDATED', 600);
             return;
         }
-        if (_isSettingsSyncActive) return;
+        if (_isSettingsSyncActive) {
+            _pendingSettingsUpdatedSync = true;
+            return;
+        }
 
         logRulesetEvent('SETTINGS_UPDATED', { activeChatId: getActiveChatId() });
-        scheduleSync('SETTINGS_UPDATED', 600);
 
         if (_settingsUpdatedTimer) clearTimeout(_settingsUpdatedTimer);
         _settingsUpdatedTimer = setTimeout(() => {

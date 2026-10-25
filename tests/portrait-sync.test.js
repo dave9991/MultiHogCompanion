@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { getMultihogPlayerPortrait } from '../persona-matching.js';
+import {
+    getMultihogPlayerPortrait,
+    getMultihogPlayerName,
+    extractNameFromMemo,
+} from '../persona-matching.js';
+import { isAdventureActive } from '../adventure-chat.js';
 
 test('Portrait Sync - Resolution Priority & Precedence', async (t) => {
     await t.test('1. Prioritizes customPortraits (manual upload/replacement) over stale playerCharacter.portraitSrc', () => {
@@ -140,5 +145,78 @@ test('Portrait Sync - Resolution Priority & Precedence', async (t) => {
         assert.strictEqual(updated, '/thumbnail?type=persona&file=1792076243144-LyleHolloway.png&t=123456');
         assert.ok(updated.includes('type=persona'), 'Must preserve type parameter');
         assert.ok(updated.includes('file='), 'Must preserve file parameter');
+    });
+
+    await t.test('8. Collects candidate names from [CHARACTER] memo block when customPortraits uses full name', () => {
+        globalThis._rpgSettings = {
+            chatStates: {
+                'chat_8': {
+                    playerCharacter: {
+                        name: 'Elira',
+                    },
+                    currentMemo: '[CHARACTER]\nElira Vance (Rogue): 12/12 HP\n[/CHARACTER]',
+                    customPortraits: {
+                        'Elira Vance': 'http://custom/elira_vance.png',
+                    },
+                },
+            },
+        };
+
+        const resolved = getMultihogPlayerPortrait('chat_8', 'Elira');
+        assert.strictEqual(resolved, 'http://custom/elira_vance.png', 'Should resolve customPortraits key matching [CHARACTER] memo name');
+    });
+
+    await t.test('9. extractNameFromMemo strips MultiHog ((HP)) and ((BARGREEN)) markers', () => {
+        const memoLeadingIcon = '[CHARACTER]\n((HP)) Edmund Wilson (Smuggler): 12/12 HP\n[/CHARACTER]';
+        assert.strictEqual(extractNameFromMemo(memoLeadingIcon), 'Edmund Wilson');
+
+        const memoInlineBar = '[CHARACTER]\nEdmund Wilson (Smuggler) ((BARGREEN)) 12/12\n[/CHARACTER]';
+        assert.strictEqual(extractNameFromMemo(memoInlineBar), 'Edmund Wilson');
+
+        const memoNameBarOnly = '[CHARACTER]\nEdmund Wilson ((BARGREEN)) 12/12\n[/CHARACTER]';
+        assert.strictEqual(extractNameFromMemo(memoNameBarOnly), 'Edmund Wilson');
+    });
+
+    await t.test('10. Turn-0 Character Creator session (0 chat messages) is recognized by isAdventureActive and resolves portrait', () => {
+        const chatId = 'Game Master - 2026-10-24@21h53m53s981ms';
+        const rpgTracker = {
+            chatStateProjectionOwner: chatId,
+            currentMemo: '[CHARACTER]\nEdmund Wilson (Smuggler): 12/12 HP\n[/CHARACTER]',
+            playerCharacter: {
+                name: 'Edmund Wilson',
+                bio: 'A seasoned smuggler.',
+            },
+            chatStates: {
+                [chatId]: {
+                    playerCharacter: {
+                        name: 'Edmund Wilson',
+                        bio: 'A seasoned smuggler.',
+                    },
+                    customPortraits: {
+                        'Edmund Wilson': '/user/images/2026-10-24@21h58m06s662ms.png',
+                    },
+                },
+            },
+        };
+        globalThis._rpgSettings = rpgTracker;
+        const turnZeroCtx = {
+            chat: [], // onboardingSendStarterMessage: false (no messages sent yet)
+            chatId,
+            getCurrentChatId: () => chatId,
+            extensionSettings: {
+                rpg_tracker: rpgTracker,
+            },
+        };
+
+        assert.strictEqual(
+            isAdventureActive(chatId, turnZeroCtx),
+            true,
+            'Turn-0 chat with Character Creator state owned by active chat must be recognized as active'
+        );
+        assert.strictEqual(getMultihogPlayerName(chatId, rpgTracker), 'Edmund Wilson');
+        assert.strictEqual(
+            getMultihogPlayerPortrait(chatId, 'Edmund Wilson', rpgTracker),
+            '/user/images/2026-10-24@21h58m06s662ms.png'
+        );
     });
 });

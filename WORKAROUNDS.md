@@ -144,7 +144,7 @@ SillyTavern emits `CHAT_RENAMED` *before* reloading the chat DOM, or exposes an 
 When a user opens a brand new, empty chat before generating Turn 1, background listeners and auto-sync systems in MultiHog and extensions attempt to evaluate party rosters, relationship meters, and auto-apply prompts against an empty message array. This triggers unnecessary LLM calls and writes default state into unstarted sessions.
 
 #### Companion Mitigation
-Companion provides `isChatClean()` and `isAdventureActive()` guards in `adventure-chat.js`. Relationship scans, PbtA setup assertions, and background LLM passes are strictly suppressed until the user has sent their first turn.
+Companion provides `isChatClean()` and `isAdventureActive()` guards in `adventure-chat.js`. Blank unstarted chats (0 user messages and no explicit character/campaign state owned by that chat partition) are strictly suppressed from firing background scans, while Turn-0 chats where Character Creator or PbtA Session Zero has already initialized a character (`playerCharacter.name`, `pbtaCampaignDossier`, `companionDossier`, or `[CHARACTER]` memo owned by the active chat) are recognized as active so Persona & Portrait Sync can run immediately.
 
 #### Blast Radius If Removed
 Switching to an empty chat triggers ghost LLM requests, consumes user token budget, and generates unrequested relationship metadata before the story begins.

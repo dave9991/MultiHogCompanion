@@ -217,16 +217,16 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-07: `CHARACTER_MESSAGE_RENDERED` (Relationship & Vitality Sync — Pipeline B)
 * **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM.
-* **Registered In:** `index.js` (line 2287)
+* **Registered In:** `index.js` (line 2445)
 * **Payload Structure:** `(messageId: number, type?: string)`
 * **Handler:** Canonical assistant turn event:
   1. **Greeting Guard:** Ignores `type === 'first_message'`.
   2. **Clean Chat Guard:** Aborts if `!isAdventureActive()` to prevent polluting unstarted chats.
-  3. **T+400ms Sync:** Calls `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` to synchronize persona/player portrait and memo state.
-  4. **T+600ms Relationship Evolution:** Calls `checkAndSyncTierCrossovers()`, scanning if the narrator's turn altered NPC friendship/affection beyond tier thresholds (-150..+150), triggering narrative evolution in the lorebook and refreshing UI badges.
+  3. **T+400ms Persona Sync:** Calls `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` to synchronize persona/player portrait and memo state.
+  4. **Reactive Relationship Coordinator (`coordinateTierSyncAfterTurn`):** Inspects MultiHog's `isRouterRunning()`. If MultiHog's Lorebook Agent is actively running on this turn, yields and awaits the completion event `rt_lore_agent_step` (`finish`/`error`). Once MultiHog is done (or immediately if Lorebook Agent is inactive), executes `checkAndSyncTierCrossovers()` to evaluate whether NPC friendship/affection crossed a tier threshold, surgically updating `[CORE]` / appending milestones in the lorebook without clobbering MultiHog's updates.
 * **Precondition:** `isAdventureActive()`
 * **Blast Radius:** Relationship tier progression and health synchronization will not update after LLM turns.
-* **Optimization Status:** **CANONICAL (Phase 2)**. Single message-turn listener; duplicate `MESSAGE_RECEIVED` removed.
+* **Optimization Status:** **CANONICAL (Phase 2 & 4)**. Single message-turn listener; `setTimeout` ladder retired in favor of reactive event coordinator.
 
 ---
 

@@ -65,6 +65,194 @@ async function sendLlmPrompt(connSettings, messages) {
 // ── 1. MultiHog Tier Math (Percentage-of-Max Thresholds) ───────────────────────
 
 /**
+ * Surgically patches a labeled section (e.g. 'Personality' or 'Habits/Behaviors')
+ * inside a [CORE] block string without modifying other sections.
+ * Matches MultiHog upstream router-utils.js patchLabeledSection.
+ * @param {string} text
+ * @param {string} field
+ * @param {string} newContent
+ * @returns {{ ok: boolean, text: string }}
+ */
+export function patchLabeledSection(text, field, newContent) {
+    if (!field || newContent == null || String(newContent).trim() === '') {
+        return { ok: false, text: text || '' };
+    }
+    const body = typeof text === 'string' ? text : '';
+
+    let fieldPatterns = [field.trim()];
+    if (/^personality$/i.test(field)) {
+        fieldPatterns = ['Personality'];
+    } else if (/^habits/i.test(field)) {
+        fieldPatterns = ['Habits/Behaviors', 'Habits & Behaviors', 'Habits', 'Behaviors'];
+    }
+
+    const otherHeaders = [
+        'Species',
+        'Body', 'Appearance/Species', 'Appearance',
+        'Worn Equipment', 'Equipment',
+        'Personality',
+        'Brief Background', 'Background',
+        'Habits/Behaviors', 'Habits & Behaviors', 'Habits', 'Behaviors',
+        'Strengths', 'Flaws',
+        'Combat Profile',
+        'Relationship',
+    ];
+
+    for (const rawLine of body.split('\n')) {
+        const hm = rawLine.trim().match(/^([A-Z][A-Za-z0-9 \/&]+?)\s*:/);
+        if (hm) {
+            const nm = hm[1].trim();
+            if (!otherHeaders.includes(nm)) otherHeaders.push(nm);
+        }
+    }
+
+    const otherHeadersRegexStr = otherHeaders.map(h => {
+        const esc = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (h === 'Background') return '(?<!Brief\\s)Background';
+        if (h === 'Behaviors') return '(?<!Habits\\/)(?<!Habits & )(?<!Habits and )Behaviors';
+        if (h === 'Appearance') return '(?<!/)Appearance(?!\\/Species)';
+        if (h === 'Equipment') return '(?<!Worn\\s)Equipment';
+        return esc;
+    }).join('|');
+
+    const escapedPatterns = fieldPatterns.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const targetFieldRegex = new RegExp(
+        `(?:(${escapedPatterns.join('|')})\\s*:)([\\s\\S]*?)(?=(?:${otherHeadersRegexStr})\\s*:|$)`,
+        'i'
+    );
+    const fieldMatch = body.match(targetFieldRegex);
+    const replacementValue = String(newContent).trim();
+
+    if (!fieldMatch) {
+        const fieldName = fieldPatterns[0] || field.trim();
+        const replacement = `${fieldName}: ${replacementValue}\n`;
+        let newBody = body.trimEnd();
+        newBody = newBody ? `${newBody}\n${replacement}` : replacement;
+        return { ok: true, text: newBody };
+    }
+
+    const matchedFieldName = fieldMatch[1];
+    const targetSubstring = `${matchedFieldName}:${fieldMatch[2]}`;
+    const replacement = `${matchedFieldName}: ${replacementValue}\n`;
+    return { ok: true, text: body.replace(targetSubstring, replacement) };
+}
+
+/**
+ * Applies a tier crossover update to an NPC lorebook entry.
+ * - If [CORE]...[/CORE] exists:
+ *   Surgically patches Personality and Habits/Behaviors inside [CORE].
+ *   Appends the milestone to the ## Narrative Chronicle section below [/CORE].
+ *   Preserves Species, Body, Worn Equipment, Combat Profile, and all past chronicles.
+ * - If [CORE] does not exist (fallback for vanilla cards):
+ *   Preserves the entire existing text and appends the milestone at the bottom.
+ * @param {string} existingContent
+ * @param {{ milestone: string, personality?: string|null, habits?: string|null }} update
+ * @param {string} [timestamp='']
+ * @returns {string}
+ */
+export function patchNpcLorebookEntry(existingContent, update, timestamp = '') {
+    if (!existingContent || !update || !update.milestone) {
+        return existingContent || '';
+    }
+
+    const timePrefix = timestamp ? `[${timestamp}] ` : '';
+    const milestoneLine = `- ${timePrefix}Relationship Milestone: ${update.milestone.trim()}`;
+
+    const coreMatch = existingContent.match(/\[CORE\]([\s\S]*?)\[\/CORE\]/i);
+
+    if (coreMatch) {
+        let coreInner = coreMatch[1];
+        if (update.personality) {
+            const pRes = patchLabeledSection(coreInner, 'Personality', update.personality);
+            if (pRes.ok) coreInner = pRes.text;
+        }
+        if (update.habits) {
+            const hRes = patchLabeledSection(coreInner, 'Habits/Behaviors', update.habits);
+            if (hRes.ok) coreInner = hRes.text;
+        }
+
+        let updatedEntry = existingContent.replace(coreMatch[0], `[CORE]${coreInner}[/CORE]`);
+
+        // Append milestone to chronicle below [/CORE]
+        const coreCloseIdx = updatedEntry.indexOf('[/CORE]');
+        const afterCore = updatedEntry.slice(coreCloseIdx + 7);
+        if (/##\s*(?:Narrative\s+)?Chronicle/i.test(afterCore)) {
+            updatedEntry = updatedEntry.trimEnd() + `\n${milestoneLine}`;
+        } else {
+            updatedEntry = updatedEntry.trimEnd() + `\n\n## Narrative Chronicle\n${milestoneLine}`;
+        }
+
+        return updatedEntry;
+    }
+
+    // Fallback for non-[CORE] entries: leave text untouched and append milestone at the bottom
+    return `${existingContent.trimEnd()}\n\n${milestoneLine}`;
+}
+
+/**
+ * Extracts up to maxPairs of clean user-assistant dialogue pairs from chat history.
+ * Explicitly filters out system messages, tool calls, and hidden tracker injection memos.
+ * @param {Array<object>} chat
+ * @param {number} [maxPairs=3]
+ * @returns {Array<{ user: string, assistant: string }>}
+ */
+export function extractRecentDialoguePairs(chat, maxPairs = 3) {
+    if (!Array.isArray(chat) || chat.length === 0) return [];
+
+    const pairs = [];
+    let currentAssistant = null;
+
+    for (let i = chat.length - 1; i >= 0 && pairs.length < maxPairs; i--) {
+        const msg = chat[i];
+        if (!msg || typeof msg !== 'object') continue;
+        if (msg.is_system) continue;
+        if (msg.extra?.type === 'tool') continue;
+        if (msg.extra?.tool_calls && Array.isArray(msg.extra.tool_calls) && msg.extra.tool_calls.length > 0 && !msg.mes?.trim()) continue;
+
+        const text = String(msg.mes || '').trim();
+        if (!text) continue;
+
+        // Skip tracker memos or hidden prompt injections
+        if (/^\[(?:RPG|STATE|TIME|INVENTORY|STATUS|MEMO)\]/i.test(text)) continue;
+
+        if (!msg.is_user) {
+            if (!currentAssistant) {
+                currentAssistant = text;
+            }
+        } else {
+            if (currentAssistant) {
+                pairs.unshift({
+                    user: text,
+                    assistant: currentAssistant,
+                });
+                currentAssistant = null;
+            }
+        }
+    }
+
+    return pairs;
+}
+
+/**
+ * Resolves the current in-game timestamp from MultiHog state memo if present.
+ * @param {string} [chatId]
+ * @returns {string}
+ */
+export function getInGameTimestamp(chatId) {
+    try {
+        const rpg = getMultiHogSettings();
+        const memo = (chatId && rpg.chatStates?.[chatId]?.currentMemo) || rpg.currentMemo || '';
+        const timeMatch = memo.match(/\[TIME\]([\s\S]*?)\[\/TIME\]/i);
+        if (timeMatch) {
+            const raw = timeMatch[1].trim();
+            const firstLine = raw.split('\n')[0].replace(/^[A-Za-z]+:\s*/, '').trim();
+            if (firstLine) return firstLine;
+        }
+    } catch (_) {}
+    return '';
+}
+
+/**
  * Maps a friendship value to a tier label and behavioral hint.
  * Matches MultiHog upstream relationship-math.js.
  * @param {number} value
@@ -184,16 +372,17 @@ export function parseDirectionAResponse(rawText) {
 }
 
 /**
- * Direction B: Prompt for full cohesive rewrite of NPC lorebook entry on tier crossover.
+ * Direction B: Prompt for conservative relationship milestone and optional demeanor nuance.
  * @param {string} npcName
  * @param {string} currentContent
  * @param {string} pcName
  * @param {Array<object>} recentLogs
  * @param {{ label: string, hint: string }} targetFriendshipTier
  * @param {{ label: string, hint: string }} targetAffectionTier
+ * @param {Array<{ user: string, assistant: string }>} [dialoguePairs=[]]
  * @returns {Array<{ role: string, content: string }>}
  */
-export function buildDirectionBPrompt(npcName, currentContent, pcName, recentLogs, targetFriendshipTier, targetAffectionTier) {
+export function buildDirectionBPrompt(npcName, currentContent, pcName, recentLogs, targetFriendshipTier, targetAffectionTier, dialoguePairs = []) {
     const safeNpc = npcName || 'the NPC';
     const safePc = pcName || 'the Protagonist';
 
@@ -201,18 +390,27 @@ export function buildDirectionBPrompt(npcName, currentContent, pcName, recentLog
         ? recentLogs.map(l => `• [${l.field?.toUpperCase() || 'DELTA'} ${l.delta >= 0 ? '+' : ''}${l.delta}] New Value: ${l.newValue}${l.reason ? ` (${l.reason})` : ''}`).join('\n')
         : '(Relationship points shifted through ongoing gameplay)';
 
+    const formattedDialogue = (dialoguePairs && dialoguePairs.length > 0)
+        ? dialoguePairs.map((p, idx) => `[Scene Exchange ${idx + 1}]\n${safePc}: ${p.user}\n${safeNpc}/Narrator: ${p.assistant}`).join('\n\n')
+        : '(Recent dialogue unavailable)';
+
     const systemPrompt = `You are an expert RPG narrative author.
-The relationship between ${safeNpc} and the protagonist ${safePc} has evolved significantly during the campaign.
+The relationship between ${safeNpc} and the protagonist ${safePc} has crossed a milestone boundary.
 
-Your task is to write a FULL, COHESIVE REWRITE of ${safeNpc}'s lorebook entry.
+Your job is to generate a relationship chronicle milestone and, ONLY IF STRICTLY WARRANTED, a conservative nuance to their demeanor.
 
-REWRITE RULES:
-1. PRESERVE CORE FACTS: Keep ${safeNpc}'s appearance, voice, equipment, skills, and fundamental historical backstory intact.
-2. ELIMINATE CONTRADICTIONS: Update their current demeanor, social standing, and feelings toward ${safePc} so the entire entry flows seamlessly. (For example: if the original entry stated they were an isolated loner who refuses to speak to anyone, update that aspect to reflect that ${safePc} has earned their trust while preserving their quiet, cautious demeanor).
-3. NEW ATTITUDE TARGETS:
-   - Friendship Standing: ${targetFriendshipTier.label} (${targetFriendshipTier.hint})
-   - Affection Standing: ${targetAffectionTier.label} (${targetAffectionTier.hint})
-4. FORMAT: Output ONLY the finished updated lorebook entry text. Do NOT wrap in markdown code blocks (\`\`\`), do NOT include conversational greetings, meta commentary, or thinking tags (<think>).`;
+CRITICAL GUIDELINES:
+1. CONSERVATIVE BY DEFAULT: Characters rarely undergo total personality overhauls. A cynical, blunt character remains cynical and blunt; an enemy who becomes an ally is still cautious. In most cases, NO changes to Personality or Habits are needed.
+2. BOTH PROGRESSION AND DETERIORATION: Relationships can deepen or deteriorate. If the bond dropped to a negative tier (Bitter, Hostile, Distrustful), document the grievance or falling out in the milestone, and adjust demeanor accordingly if warranted. If the bond improved, record how trust or affection was earned.
+3. PRESERVE ALL OTHER FIELDS: Never modify or invent Species, Body, Equipment, Background, or Combat Profile.
+4. MILESTONE: Always provide a concise 1-2 sentence chronicle entry summarizing the moment or shift in standing between ${safeNpc} and ${safePc}.
+
+Respond STRICTLY in valid JSON format with NO markdown code fences (\`\`\`) and NO conversational filler:
+{
+  "milestone": "<concise 1-2 sentence relationship milestone log>",
+  "personality": <updated Personality string ONLY if demeanor shifted toward ${safePc}, otherwise null>,
+  "habits": <updated Habits/Behaviors string ONLY if recurring behaviors toward ${safePc} changed, otherwise null>
+}`;
 
     const userPrompt = `NPC NAME: ${safeNpc}
 PROTAGONIST: ${safePc}
@@ -220,10 +418,17 @@ PROTAGONIST: ${safePc}
 RECENT RELATIONSHIP LOG:
 ${formattedLogs}
 
+RECENT CONVERSATION (LAST 3 EXCHANGES):
+${formattedDialogue}
+
 CURRENT LOREBOOK ENTRY FOR ${safeNpc}:
 ${currentContent}
 
-Write the cohesive updated lorebook entry for ${safeNpc}:`;
+NEW ATTITUDE STANDINGS:
+- Friendship Tier: ${targetFriendshipTier.label} (${targetFriendshipTier.hint})
+- Affection Tier: ${targetAffectionTier.label} (${targetAffectionTier.hint})
+
+Evaluate the relationship milestone and any subtle demeanor adjustments:`;
 
     return [
         { role: 'system', content: systemPrompt },
@@ -232,11 +437,10 @@ Write the cohesive updated lorebook entry for ${safeNpc}:`;
 }
 
 /**
- * Direction B: Parses and cleans the rewritten lorebook text.
+ * Direction B: Parses and cleans the structured milestone response.
  * Strips reasoning tokens, code fences, and conversational preambles.
- * Rejects pure reasoning dumps to prevent thinking leakage into world info.
  * @param {string} rawText
- * @returns {string | null}
+ * @returns {{ milestone: string, personality: string | null, habits: string | null } | null}
  */
 export function parseDirectionBResponse(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
@@ -244,15 +448,30 @@ export function parseDirectionBResponse(rawText) {
         return null;
     }
     let clean = stripThinkingContent(rawText);
-    // Strip markdown code fences if model enclosed response in them
-    clean = clean.replace(/^```(?:markdown|text)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-    // Strip conversational lead-ins
-    clean = clean.replace(/^(?:Here is (?:the|an) updated (?:lorebook )?entry[^:\n]*:\s*)+/i, '').trim();
-    // Reject pure reasoning dumps or responses that were only thought monologue
-    if (isReasoningDump(clean) || clean.length < 20) {
+    clean = clean.replace(/^```(?:json|markdown|text)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const milestone = typeof parsed.milestone === 'string' && parsed.milestone.trim().length > 0
+            ? parsed.milestone.trim()
+            : null;
+        if (!milestone) return null;
+
+        const personality = typeof parsed.personality === 'string' && parsed.personality.trim().length > 0 && !/^null|none|no change$/i.test(parsed.personality.trim())
+            ? parsed.personality.trim()
+            : null;
+
+        const habits = typeof parsed.habits === 'string' && parsed.habits.trim().length > 0 && !/^null|none|no change$/i.test(parsed.habits.trim())
+            ? parsed.habits.trim()
+            : null;
+
+        return { milestone, personality, habits };
+    } catch (_) {
         return null;
     }
-    return clean;
 }
 
 // ── 3. Connection & State Helpers ─────────────────────────────────────────────
@@ -666,43 +885,51 @@ export async function checkAndSyncTierCrossovers() {
             const npcName = (entry.comment || entry.key?.[0] || '').trim();
             const recentLogs = (relLogs[fullId] || []).slice(0, 5);
 
+            // Extract recent dialogue pairs (3 pairs max)
+            const chatMessages = ctx.chat || [];
+            const dialoguePairs = extractRecentDialoguePairs(chatMessages, 3);
+            const inGameTime = getInGameTimestamp(activeChatId);
+
             // Execute Direction B Narrative Rewrite
-            const messages = buildDirectionBPrompt(npcName, entry.content, pcName, recentLogs, curFTier, curATier);
+            const messages = buildDirectionBPrompt(npcName, entry.content, pcName, recentLogs, curFTier, curATier, dialoguePairs);
             try {
                 const rawOutput = await sendLlmPrompt(connSettings, messages);
-                const rewritten = parseDirectionBResponse(rawOutput);
-                if (rewritten && rewritten !== entry.content) {
-                    entry.content = rewritten;
+                const updatePayload = parseDirectionBResponse(rawOutput);
+                if (updatePayload && updatePayload.milestone) {
+                    const patchedContent = patchNpcLorebookEntry(entry.content, updatePayload, inGameTime);
+                    if (patchedContent && patchedContent !== entry.content) {
+                        entry.content = patchedContent;
 
-                    // Save to SillyTavern World Info
-                    await fetch('/api/worldinfo/edit', {
-                        method: 'POST',
-                        headers: getHeaders(),
-                        body: JSON.stringify({ name: bookName, data: bookData }),
-                    });
+                        // Save to SillyTavern World Info
+                        await fetch('/api/worldinfo/edit', {
+                            method: 'POST',
+                            headers: getHeaders(),
+                            body: JSON.stringify({ name: bookName, data: bookData }),
+                        });
 
-                    // Flush MultiHog router cache if available
-                    try {
-                        const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
-                        if (typeof router.updateWorldInfoCache === 'function') {
-                            await router.updateWorldInfoCache(bookName, bookData);
+                        // Flush MultiHog router cache if available
+                        try {
+                            const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
+                            if (typeof router.updateWorldInfoCache === 'function') {
+                                await router.updateWorldInfoCache(bookName, bookData);
+                            }
+                        } catch (_) {}
+
+                        updateRelationshipSyncLedger(fullId, {
+                            initialized: true,
+                            lastSyncedTier: {
+                                friendship: curFTier.label,
+                                affection: curATier.label,
+                            },
+                            lastFriendshipScore: fVal,
+                            lastAffectionScore: aVal,
+                            lastSyncedAt: Date.now(),
+                        }, activeChatId);
+                        updated++;
+
+                        if (typeof toastr !== 'undefined' && extSettings[EXTENSION_NAME]?.showToasts !== false) {
+                            toastr.info(`📖 ${npcName}'s narrative evolved to ${curFTier.label}`, 'Relationship Narrative Sync');
                         }
-                    } catch (_) {}
-
-                    updateRelationshipSyncLedger(fullId, {
-                        initialized: true,
-                        lastSyncedTier: {
-                            friendship: curFTier.label,
-                            affection: curATier.label,
-                        },
-                        lastFriendshipScore: fVal,
-                        lastAffectionScore: aVal,
-                        lastSyncedAt: Date.now(),
-                    }, activeChatId);
-                    updated++;
-
-                    if (typeof toastr !== 'undefined' && extSettings[EXTENSION_NAME]?.showToasts !== false) {
-                        toastr.info(`📖 ${npcName}'s narrative evolved to ${curFTier.label}`, 'Relationship Narrative Sync');
                     }
                 }
             } catch (err) {

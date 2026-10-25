@@ -92,10 +92,14 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 * **Core Capabilities:**
   * **Direction A (Narrative $\to$ Numerical Baseline):** Passively scans recent turns to initialize unrecorded NPCs with context-appropriate starting relationship values without unprompted LLM overhead.
   * **Direction B (Numerical $\to$ Narrative Evolution):** Detects when an NPC crosses an affection or friendship boundary tier and prompts the model to reflect this milestone in the ongoing story.
+  * **`[CORE]` Schema Alignment & Surgical Patching:** Surgically updates *only* `Personality` and `Habits/Behaviors` within MultiHog's `[CORE]` block while strictly protecting `Species`, `Body`, `Worn Equipment`, and `Combat Profile` for MultiHog's exclusive ownership.
+  * **Append-Only Chronicle Milestones:** Appends formatted relationship milestone bullets with in-game timestamps (`- [Day X] Relationship Milestone: ...`) below `[/CORE]` in `## Narrative Chronicle` without overwriting historical encounter logs.
+  * **Dialogue Pair Filtering:** Feeds the model the last 3 genuine user-assistant conversation pairs (filtering out tool calls, system messages, and hidden tracker injection memos).
+  * **Reactive Event Coordination:** Awaits upstream MultiHog's Lorebook Agent pass (`rt_lore_agent_step` finish/error) if actively running (`isRouterRunning()`) before executing, eliminating write-race hazards.
   * **Idempotent Sync Ledger:** Prevents re-scanning the same narrative events and locks each milestone to once-ever trigger rules.
 * **Associated Workarounds:**
   * [`WRK-05 (Unstarted Chat Premature Sync)`](./WORKAROUNDS.md#wrk-05-unstarted-chat-premature-sync--llm-triggering-upstream-premature-activation-defect) — Suppresses scans on unstarted chats.
-* **Associated Mechanisms:** [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator), [`EVT-06`](./LISTENERS.md#evt-06-character_message_rendered-canonical-post-generation-hook).
+* **Associated Mechanisms:** [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator), [`EVT-07`](./LISTENERS.md#evt-07-character_message_rendered-relationship--vitality-sync--pipeline-b).
 
 ---
 

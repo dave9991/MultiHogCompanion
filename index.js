@@ -2394,16 +2394,65 @@ jQuery(async () => {
             void runChatChangedCoordinator(activeChatId, token);
         }, 500);
     });
+/**
+ * Waits for MultiHog Lorebook Agent completion if actively running.
+ * @param {number} [timeoutMs=30000]
+ * @returns {Promise<void>}
+ */
+export async function waitForLoreAgentCompletion(timeoutMs = 30000) {
+    let isRunning = false;
+    try {
+        const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
+        isRunning = typeof router.isRouterRunning === 'function' && router.isRouterRunning();
+    } catch (_) {}
+
+    if (!isRunning) return;
+    if (typeof document === 'undefined') return;
+
+    return new Promise(resolve => {
+        let timer = null;
+        const handler = e => {
+            const detail = e.detail;
+            if (detail?.metadata?.source === 'lorebook_agent' && (detail.type === 'finish' || detail.type === 'error')) {
+                cleanup();
+                resolve();
+            }
+        };
+
+        const cleanup = () => {
+            if (timer) clearTimeout(timer);
+            try {
+                document.removeEventListener('rt_lore_agent_step', handler);
+            } catch (_) {}
+        };
+
+        timer = setTimeout(() => {
+            cleanup();
+            resolve();
+        }, timeoutMs);
+
+        document.addEventListener('rt_lore_agent_step', handler);
+    });
+}
+
+/**
+ * Deterministic turn coordinator: waits for Lorebook Agent if running,
+ * then executes tier crossover evaluation and refreshes UI.
+ */
+export async function coordinateTierSyncAfterTurn() {
+    if (!isAdventureActive()) return;
+    await waitForLoreAgentCompletion(30000);
+    await checkAndSyncTierCrossovers();
+    updateRelationshipSyncUI();
+}
+
     // [CATALOG: EVT-07]
     // Canonical assistant turn listener: executes once the message is committed to DOM
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId, type) => {
         if (type === 'first_message') return;
         if (!isAdventureActive()) return;
         scheduleSync('CHARACTER_MESSAGE_RENDERED', 400);
-        setTimeout(async () => {
-            await checkAndSyncTierCrossovers();
-            updateRelationshipSyncUI();
-        }, 600);
+        void coordinateTierSyncAfterTurn();
     });
     // [CATALOG: EVT-08]
     eventSource.on(event_types.SETTINGS_UPDATED, () => {

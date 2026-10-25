@@ -8,6 +8,10 @@ import {
     parseDirectionBResponse,
     getRelationshipSyncLedger,
     updateRelationshipSyncLedger,
+    extractRecentDialoguePairs,
+    patchLabeledSection,
+    patchNpcLorebookEntry,
+    getInGameTimestamp,
 } from '../relationship-narrative-sync.js';
 
 console.log('--- Running Relationship Narrative Sync Test Suite ---');
@@ -99,10 +103,44 @@ assert.strictEqual(parsedReasoningA.friendship, 35);
 assert.strictEqual(parsedReasoningA.affection, 0);
 console.log('✓ Direction A prompt builder and robust response parser verified');
 
-// ── 3. Direction B: Prompt & Narrative Rewrite Parsing ────────────────────────
+// ── 3. Direction B: Prompt, Structured Parsing & [CORE] Surgical Patching ────
 console.log('Testing Direction B (Numbers -> Narrative Text Evolution)...');
 
-const existingBio = `Marta Okonkwo is a stern cyborg quartermaster. She trusts nobody, eats alone in the hangar, and regards all newcomers with cold suspicion.`;
+// Dialogue Extraction
+const mockChat = [
+    { is_user: true, mes: 'Can you help us with the depot?' },
+    { is_user: false, mes: 'I work alone. Stay out of my way.' },
+    { is_system: true, mes: 'System notification: combat started.' },
+    { is_user: true, mes: 'Watch out behind you!', extra: {} },
+    { is_user: false, mes: '', extra: { type: 'tool', tool_calls: [{ id: '1' }] } },
+    { is_user: false, mes: 'Marta swings her cybernetic arm and crushes the scavenger.' },
+    { is_user: true, mes: 'Good hit! Let me patch up that hydraulic line.' },
+    { is_user: false, mes: '...Thanks. That actually helps.' },
+];
+const extractedPairs = extractRecentDialoguePairs(mockChat, 3);
+assert.strictEqual(extractedPairs.length, 3, 'Must extract exactly 3 dialogue pairs');
+assert.strictEqual(extractedPairs[0].user, 'Can you help us with the depot?');
+assert.strictEqual(extractedPairs[0].assistant, 'I work alone. Stay out of my way.');
+assert.strictEqual(extractedPairs[1].user, 'Watch out behind you!');
+assert.strictEqual(extractedPairs[1].assistant, 'Marta swings her cybernetic arm and crushes the scavenger.');
+assert.strictEqual(extractedPairs[2].user, 'Good hit! Let me patch up that hydraulic line.');
+assert.strictEqual(extractedPairs[2].assistant, '...Thanks. That actually helps.');
+console.log('✓ extractRecentDialoguePairs correctly filters tools/system messages and matches 3 pairs');
+
+// Direction B Prompt Builder
+const coreEntry = `[CORE]
+Species: Human, female cyborg.
+Body: Muscular build, cybernetic left arm, silver cropped hair.
+Worn Equipment: Blast-resistant coveralls, plasma cutter.
+Personality: Cautious, blunt, slow to trust anyone.
+Brief Background: Veteran engineer who defends the hangar.
+Habits/Behaviors: Avoids eye contact and eats alone.
+Combat Profile: AC 16, HP 45, BAB +3.
+[/CORE]
+
+## Narrative Chronicle
+- [Day 10] Met Silas at the depot gates.`;
+
 const logs = [
     { field: 'friendship', delta: 25, newValue: 45, reason: 'Silas repaired her cybernetic arm' },
     { field: 'friendship', delta: 25, newValue: 70, reason: 'Silas defended the supply depot' },
@@ -110,70 +148,67 @@ const logs = [
 const fTier = getFriendshipTier(70);
 const aTier = getAffectionTier(0);
 
-const dirBPrompt = buildDirectionBPrompt('Marta Okonkwo', existingBio, 'Silas Vance', logs, fTier, aTier);
+const dirBPrompt = buildDirectionBPrompt('Marta Okonkwo', coreEntry, 'Silas Vance', logs, fTier, aTier, extractedPairs);
 assert.strictEqual(dirBPrompt.length, 2);
-assert.ok(dirBPrompt[0].content.includes('PRESERVE CORE FACTS'), 'Must instruct preservation of core backstory and traits');
-assert.ok(dirBPrompt[0].content.includes('ELIMINATE CONTRADICTIONS'), 'Must instruct elimination of contradictions');
-assert.ok(dirBPrompt[0].content.includes('CLOSE FRIEND'), 'Must specify target friendship tier');
+assert.ok(dirBPrompt[0].content.includes('CONSERVATIVE BY DEFAULT'), 'Must instruct conservative edits by default');
+assert.ok(dirBPrompt[0].content.includes('BOTH PROGRESSION AND DETERIORATION'), 'Must instruct both progression and deterioration');
+assert.ok(dirBPrompt[0].content.includes('PRESERVE ALL OTHER FIELDS'), 'Must forbid changing species/body/equipment');
 assert.ok(dirBPrompt[1].content.includes('Silas repaired her cybernetic arm'), 'User prompt must include relationship log context');
+assert.ok(dirBPrompt[1].content.includes('Good hit! Let me patch up that hydraulic line.'), 'User prompt must include dialogue context');
 
-// Parsing rewritten response
-const rawRewritten = `\`\`\`markdown
-Marta Okonkwo is a stern cyborg quartermaster. While historically slow to trust others, she now regards Silas Vance as one of her closest and most dependable confidants following the defense of the supply depot. She keeps her vigilant watch over the hangar, but Silas is always welcome at her workbench.
+// Direction B Response Parsing
+const validBJson = `\`\`\`json
+{
+  "milestone": "Defended the supply depot shoulder-to-shoulder with Silas and allowed him to repair her cybernetic arm.",
+  "personality": "Blunt and vigilant by nature, though now openly welcoming Silas to her workbench.",
+  "habits": null
+}
 \`\`\``;
-const parsedB = parseDirectionBResponse(rawRewritten);
-assert.ok(parsedB, 'Should extract clean rewritten text');
-assert.ok(!parsedB.startsWith('```'), 'Code fences must be stripped');
-assert.ok(!parsedB.endsWith('```'), 'Trailing fences must be stripped');
-assert.ok(parsedB.includes('Silas Vance as one of her closest'), 'Preserves evolved narrative');
+const parsedB = parseDirectionBResponse(validBJson);
+assert.ok(parsedB, 'Must parse valid JSON response');
+assert.strictEqual(parsedB.milestone, 'Defended the supply depot shoulder-to-shoulder with Silas and allowed him to repair her cybernetic arm.');
+assert.strictEqual(parsedB.personality, 'Blunt and vigilant by nature, though now openly welcoming Silas to her workbench.');
+assert.strictEqual(parsedB.habits, null);
 
-// Conversational preamble stripping
-const withPreamble = `Here is the updated lorebook entry for Marta Okonkwo:
-Marta Okonkwo remains the dedicated quartermaster of the depot, fiercely protective of Silas Vance after their shared battles.`;
-const parsedPreamble = parseDirectionBResponse(withPreamble);
-assert.ok(!parsedPreamble.startsWith('Here is'), 'Conversational preamble must be stripped');
-
-// Reasoning models: In-band thinking tokens followed by clean narrative
-const withThinkingTokens = `<think>
-The protagonist Silas Vance repaired Marta's cybernetic arm and helped defend the depot.
-Her friendship is now in CLOSE FRIEND tier (+70).
-I should keep her cyborg background intact and update her demeanor to be warm and trusting toward Silas.
+// Parsing with <think> reasoning tokens
+const thinkingBJson = `<think>
+Evaluating Marta Okonkwo.
+Friendship crossed into CLOSE FRIEND.
+Personality should reflect subtle trust while habits remain unchanged.
 </think>
-Marta Okonkwo is a stern cyborg quartermaster who guards the supply depot. Following their shared battle against the scavengers, she considers Silas Vance one of her closest and most dependable allies.`;
-const parsedThinkingB = parseDirectionBResponse(withThinkingTokens);
-assert.ok(parsedThinkingB, 'Must parse clean narrative when prefixed with <think>');
-assert.ok(!parsedThinkingB.includes('<think>'), 'Must strip <think> tag');
-assert.ok(!parsedThinkingB.includes('Her friendship is now in CLOSE FRIEND tier'), 'Must strip thinking content');
-assert.ok(parsedThinkingB.startsWith('Marta Okonkwo is a stern cyborg'), 'Narrative begins with character bio');
+{
+  "milestone": "Acknowledged Silas as a trusted comrade after the depot defense.",
+  "personality": null,
+  "habits": null
+}`;
+const parsedThinking = parseDirectionBResponse(thinkingBJson);
+assert.ok(parsedThinking, 'Must parse JSON prefixed with thinking tokens');
+assert.strictEqual(parsedThinking.milestone, 'Acknowledged Silas as a trusted comrade after the depot defense.');
+assert.strictEqual(parsedThinking.personality, null);
 
-// Reasoning models: Multiple thinking tags (<thought>, <thinking>)
-const withAltThinking = `<thought>Pondering relationship update...</thought>
-<thinking>Refining demeanor...</thinking>
-Marta Okonkwo is a stern cyborg quartermaster who now deeply trusts Silas Vance with depot security.`;
-const parsedAlt = parseDirectionBResponse(withAltThinking);
-assert.ok(parsedAlt, 'Must parse narrative with <thought> and <thinking> tags');
-assert.ok(!parsedAlt.includes('<thought>') && !parsedAlt.includes('<thinking>'), 'All thinking tags stripped');
-assert.ok(parsedAlt.startsWith('Marta Okonkwo'), 'Clean bio preserved');
+// Rejecting malformed or reasoning-only dumps
+assert.strictEqual(parseDirectionBResponse('<think>Thinking only...</think>'), null);
+assert.strictEqual(parseDirectionBResponse('{ "milestone": "" }'), null);
+assert.strictEqual(parseDirectionBResponse(null), null);
 
-// Truncated reasoning dump: Model used all tokens inside <think> and produced no bio
-const truncatedDump = `<think>
-I need to rewrite the lorebook entry for Marta Okonkwo.
-Let's analyze the relationship logs:
-1. Silas repaired her arm (+25)
-2. Silas defended the depot (+25)
-Total score is 70...`;
-const parsedDump = parseDirectionBResponse(truncatedDump);
-assert.strictEqual(parsedDump, null, 'Must reject truncated reasoning dump to prevent polluting lorebook with thoughts');
+// Testing patchNpcLorebookEntry with [CORE]
+const patchedCore = patchNpcLorebookEntry(coreEntry, parsedB, 'Day 12, 14:00');
+assert.ok(patchedCore.includes('Species: Human, female cyborg.'), 'Must preserve Species');
+assert.ok(patchedCore.includes('Body: Muscular build, cybernetic left arm, silver cropped hair.'), 'Must preserve Body');
+assert.ok(patchedCore.includes('Worn Equipment: Blast-resistant coveralls, plasma cutter.'), 'Must preserve Equipment');
+assert.ok(patchedCore.includes('Combat Profile: AC 16, HP 45, BAB +3.'), 'Must preserve Combat Profile');
+assert.ok(patchedCore.includes('Personality: Blunt and vigilant by nature, though now openly welcoming Silas to her workbench.'), 'Must update Personality');
+assert.ok(patchedCore.includes('Habits/Behaviors: Avoids eye contact and eats alone.'), 'Must preserve Habits when null');
+assert.ok(patchedCore.includes('- [Day 10] Met Silas at the depot gates.'), 'Must preserve existing chronicle');
+assert.ok(patchedCore.includes('- [Day 12, 14:00] Relationship Milestone: Defended the supply depot shoulder-to-shoulder with Silas and allowed him to repair her cybernetic arm.'), 'Must append relationship milestone with timestamp');
 
-// Pure monologue thinking dump without tags
-const monologueDump = `Thinking Process:
-1. Understand the character and friendship tier.
-2. Silas Vance is now a close friend.
-3. Marta was an isolated loner.`;
-const parsedMonologue = parseDirectionBResponse(monologueDump);
-assert.strictEqual(parsedMonologue, null, 'Must reject conversational thinking monologue');
+// Testing patchNpcLorebookEntry fallback with non-[CORE] entry
+const flatEntry = 'Marta is an independent quartermaster who watches the hangar.';
+const patchedFlat = patchNpcLorebookEntry(flatEntry, { milestone: 'Earned her respect.' }, 'Day 15');
+assert.ok(patchedFlat.startsWith('Marta is an independent quartermaster who watches the hangar.'), 'Must preserve flat text');
+assert.ok(patchedFlat.includes('- [Day 15] Relationship Milestone: Earned her respect.'), 'Must append milestone to flat text');
 
-console.log('✓ Direction B prompt builder and clean markdown text parser verified');
+console.log('✓ Direction B prompt builder, JSON parser, and [CORE] surgical patcher verified');
 
 // ── 4. Ledger & Guardrails ────────────────────────────────────────────────────
 console.log('Testing Sync Ledger & Once-Ever / Same-Tier Guardrails...');

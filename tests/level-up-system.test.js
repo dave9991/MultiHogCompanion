@@ -1014,3 +1014,146 @@ test('Level-Up System: Feature Key Extraction & Smart Title-Based Deduplication'
         'Street Rat (+2 to Stealth and Deception in urban districts)'
     );
 });
+
+test('Level-Up System: Roadmap Declutter — HP/ASI/Slot bookkeeping is never a feature', async () => {
+    const {
+        classifyFeatureNoise,
+        sanitizeFeatureList,
+        normalizeBlueprint,
+        normalizeLevelEntry,
+    } = await import('../level-up-blueprint.js');
+
+    // Classification
+    assert.strictEqual(classifyFeatureNoise('HP Gain: 1d8 + CON'), 'hp');
+    assert.strictEqual(classifyFeatureNoise('Hit Die: d10'), 'hp');
+    assert.strictEqual(classifyFeatureNoise('Gain 1d8+2 hit points'), 'hp');
+    assert.strictEqual(classifyFeatureNoise('Proficiency Bonus +3'), 'prof');
+    assert.strictEqual(classifyFeatureNoise('Ability Score Improvement (or Feat)'), 'asi');
+    assert.strictEqual(classifyFeatureNoise('Level 3 Spell Slots (2 slots)'), 'slots');
+    assert.strictEqual(classifyFeatureNoise('Cantrip Learned'), 'cantrip');
+    // Real features that merely mention HP are preserved
+    assert.strictEqual(classifyFeatureNoise('Second Wind (1d10+Level HP 1/rest)'), null);
+    assert.strictEqual(classifyFeatureNoise('Survivor (Regain 5+CON HP at start of turn if below half HP)'), null);
+
+    assert.deepStrictEqual(
+        sanitizeFeatureList(['Rage', 'HP Gain: 1d12+CON', 'rage', 'Proficiency Bonus +2', 'Reckless Attack']),
+        ['Rage', 'Reckless Attack'],
+    );
+
+    // Level normalization extracts structured data
+    const entry = normalizeLevelEntry({ features: ['Ability Score Improvement', 'Level 2 Spell Slots (3 slots)', 'Arcane Ward'] }, 4);
+    assert.deepStrictEqual(entry.features, ['Arcane Ward']);
+    assert.strictEqual(entry.asi, true);
+    assert.deepStrictEqual(entry.spellSlots, { 2: 3 });
+    assert.strictEqual(normalizeLevelEntry({ features: 'Single String Feature' }, 1).features[0], 'Single String Feature');
+
+    // LLM output with HD noise on every level
+    const noisy = {
+        className: 'Void Monk',
+        hitDie: '1d8',
+        levels: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [String(i + 1), {
+            features: [`Void Technique ${i + 1}`, `HP Gain: 1d8 + CON`, `Hit Die: 1d8`],
+            profBonus: Math.floor(i / 4) + 2,
+        }])),
+    };
+    const parsed = parseBlueprintFromResponse('```json\n' + JSON.stringify(noisy) + '\n```');
+    assert.strictEqual(parsed.hitDie, 'd8');
+    for (let i = 1; i <= 20; i++) {
+        assert.deepStrictEqual(parsed.levels[String(i)].features, [`Void Technique ${i}`]);
+    }
+    // Idempotent
+    assert.deepStrictEqual(normalizeBlueprint(parsed).levels, parsed.levels);
+
+    // Canonical tables: no slot rows / ASI strings / cantrip rows in features
+    const wizard = getCanonicalDndProgression('Wizard');
+    for (let i = 1; i <= 20; i++) {
+        for (const f of wizard.levels[String(i)].features) {
+            assert.strictEqual(classifyFeatureNoise(f), null, `Level ${i} feature "${f}" should not be bookkeeping`);
+        }
+    }
+    assert.strictEqual(wizard.levels['4'].asi, true);
+    assert.ok(wizard.levels['3'].spellSlots, 'Wizard L3 slot grant moves to structured spellSlots');
+
+    // getTierPerks sanitizes stored (legacy) blueprints too
+    const legacy = { hitDie: 'd10', levels: { 5: { features: ['Extra Attack', 'HP Gain: 1d10+CON'], profBonus: 3 } } };
+    assert.deepStrictEqual(getTierPerks(legacy, 5, 1).features, ['Extra Attack']);
+
+    // Prompt forbids bookkeeping in features
+    const prompt = buildBlueprintPrompt({ character: { name: 'A', class: 'Void Monk' } });
+    assert.ok(!/HP gain via Hit Die/i.test(prompt));
+    assert.ok(/DO NOT LIST/i.test(prompt));
+
+    // Commit never writes bookkeeping into the sheet
+    const memo = `[CHARACTER]\nHero (Fighter): 10/10 HP\nLevel: 1\nFeatures: Fighting Style\n[/CHARACTER]\n[XP]\nTotal: 300 / 300 XP (Level 1)\n[/XP]`;
+    const res = applyLevelUpCommit({
+        chatId: 'c',
+        currentMemo: memo,
+        proposal: { targetLevel: 2, hpChange: { newMax: 18 }, newFeatures: ['Action Surge', 'HP Gain: 1d10+2'] },
+    });
+    assert.ok(res.updatedMemo.includes('Action Surge'));
+    assert.ok(!/HP Gain/i.test(res.updatedMemo));
+});
+
+test('Level-Up System: Phase 2 — XP table to 20, level cap, class-match, spell slot growth', async () => {
+    const { XP_LEVEL_THRESHOLDS, blueprintMatchesClass } = await import('../level-up-blueprint.js');
+    const { applySpellSlotGrowth } = await import('../level-up-runner.js');
+
+    // Full 5e table
+    assert.strictEqual(XP_LEVEL_THRESHOLDS.length, 20);
+    assert.strictEqual(XP_LEVEL_THRESHOLDS[9], 64000);
+    assert.strictEqual(XP_LEVEL_THRESHOLDS[10], 85000);
+    assert.strictEqual(XP_LEVEL_THRESHOLDS[19], 355000);
+
+    // Level 10 character is no longer instantly re-eligible (threshold is 85,000, not 64,000)
+    const memoL10 = `[CHARACTER]\nLevel: 10\n[/CHARACTER]\n[XP]\nLevel: 10 | XP: 64000/0\n[/XP]`;
+    const evalL10 = evaluateLevelUpEligibility(memoL10);
+    assert.strictEqual(evalL10.maxThreshold, 85000);
+    assert.strictEqual(evalL10.eligible, false);
+
+    // Commit from 10 -> 11 sets the next threshold to level 12's (100,000)
+    const commitMemo = `[CHARACTER]\nHero (Fighter): 80/80 HP\nLevel: 10\n[/CHARACTER]\n[XP]\nTotal: 85,000 / 85,000 XP (Level 10)\n[/XP]`;
+    const committed = applyLevelUpCommit({
+        chatId: 'c', currentMemo: commitMemo,
+        proposal: { targetLevel: 11, hpChange: { newMax: 90 }, newFeatures: [] },
+    });
+    assert.ok(committed.updatedMemo.includes('/ 100,000 XP (Level 11)'), committed.updatedMemo);
+
+    // Level cap: level 20 can never level up
+    const memoL20 = `[CHARACTER]\nLevel: 20\n[/CHARACTER]\n[XP]\nTotal: 400,000 / 355,000 XP (Level 20)\n[/XP]`;
+    assert.strictEqual(evaluateLevelUpEligibility(memoL20).eligible, false);
+
+    // Blueprint/class matching
+    assert.strictEqual(blueprintMatchesClass({ className: 'Rogue' }, 'Shadow Rogue'), true);
+    assert.strictEqual(blueprintMatchesClass({ className: 'Cyber-Samurai' }, 'Cyber Samurai'), true);
+    assert.strictEqual(blueprintMatchesClass({ className: 'Fighter' }, 'Wizard'), false);
+    assert.strictEqual(blueprintMatchesClass({ className: 'Fighter' }, 'Adventurer'), true);
+    assert.strictEqual(blueprintMatchesClass({ className: 'Fighter' }, ''), true);
+
+    // Spell slot growth in [SPELLS]
+    const spellMemo = `[CHARACTER]\nMira (Wizard): 20/20 HP\nLevel: 4\n[/CHARACTER]\n[SPELLS]\nCantrips: Fire Bolt\nLevel 1 (1/4): Shield\nLevel 2 (0/2): Misty Step\n[/SPELLS]`;
+    const grown = applySpellSlotGrowth(spellMemo, { 2: 3, 3: 2 });
+    assert.ok(grown.includes('Level 2 (1/3): Misty Step'), grown);
+    assert.ok(grown.includes('Level 1 (1/4): Shield'), 'untouched levels remain');
+    assert.ok(/Level 3 \(2\/2\):/.test(grown), 'newly unlocked slot level is added');
+    assert.strictEqual(applySpellSlotGrowth('[CHARACTER]\nX\n[/CHARACTER]', { 2: 3 }), '[CHARACTER]\nX\n[/CHARACTER]');
+    // maximums never shrink
+    assert.ok(applySpellSlotGrowth(spellMemo, { 1: 2 }).includes('Level 1 (1/4): Shield'));
+
+    // End-to-end via commit: wizard L5 grants Level 3 slots
+    const wizardProg = getCanonicalDndProgression('Wizard');
+    const proposal = formulateLevelUpProposal(
+        { protagonist: { name: 'Mira', class: 'Wizard', stats: { CON: 12 }, hp: { max: 20 } } },
+        wizardProg, 5,
+    );
+    assert.deepStrictEqual(proposal.spellSlots, { 3: 2 });
+    const wizMemo = `[CHARACTER]\nMira (Wizard): 20/20 HP\nLevel: 4\n[/CHARACTER]\n[XP]\nTotal: 6,500 / 6,500 XP (Level 4)\n[/XP]\n[SPELLS]\nLevel 3 (0/0):\n[/SPELLS]`;
+    const wizCommit = applyLevelUpCommit({ chatId: 'c', currentMemo: wizMemo, proposal });
+    assert.ok(wizCommit.updatedMemo.includes('Level 3 (2/2)'), wizCommit.updatedMemo);
+
+    // Respec never alters slots
+    const respecProposal = formulateLevelUpProposal(
+        { protagonist: { name: 'Mira', class: 'Wizard', stats: {}, hp: { max: 20 } } },
+        wizardProg, 5, { isRespec: true },
+    );
+    assert.strictEqual(respecProposal.spellSlots, null);
+});

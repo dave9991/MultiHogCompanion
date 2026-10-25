@@ -1681,7 +1681,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
         || '';
 
     const { ensureChatDossier, persistCompanionDossier, syncDossierToWorldInfoBook } = await import('./level-up-scaffold.js');
-    const { getCanonicalDndProgression, hasProgressionBlueprint, generateProgressionBlueprintViaConcierge } = await import('./level-up-blueprint.js');
+    const { getCanonicalDndProgression, hasProgressionBlueprint, generateProgressionBlueprintViaConcierge, blueprintMatchesClass } = await import('./level-up-blueprint.js');
     const { evaluateLevelUpEligibility, decorateXpBarsForLevelUp } = await import('./level-up-runner.js');
     const { openLevelUpModal } = await import('./level-up-ui.js');
 
@@ -1705,7 +1705,14 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
                 dossier.meta.systemLabel = 'PbtA Narrative Engine';
             }
         }
-    } else if (!hasProgressionBlueprint(dossier)) {
+    } else {
+        // A stored blueprint for a different class (re-class / stale data) must not be reused
+        if (hasProgressionBlueprint(dossier) && !blueprintMatchesClass(dossier.progressionBlueprint, dossier.protagonist?.class)) {
+            console.warn(`[MultiHog Companion] Progression blueprint class "${dossier.progressionBlueprint.className}" no longer matches "${dossier.protagonist?.class}"; regenerating.`);
+            dossier.progressionBlueprint = null;
+        }
+    }
+    if (!isPbta && !hasProgressionBlueprint(dossier)) {
         const canonical = getCanonicalDndProgression(dossier.protagonist?.class);
         if (canonical) {
             dossier.progressionBlueprint = canonical;

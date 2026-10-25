@@ -1479,3 +1479,26 @@
 }
 
 
+
+/* Level-Up roadmap: tier grouping + one-feature-per-line */
+#mhc-level-up-modal .mhc-tier-row td {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #e2e8f0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    user-select: none;
+}
+
+#mhc-level-up-modal .mhc-tier-row:hover td {
+    background: rgba(255, 255, 255, 0.09);
+}
+
+#mhc-level-up-modal .mhc-tier-chevron {
+    width: 14px;
+    margin-right: 4px;
+    opacity: 0.7;
+}
+
+#mhc-level-up-modal .mhc-feat-line {
+    padding: 1px 0;
+}

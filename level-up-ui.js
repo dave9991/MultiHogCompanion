@@ -11,7 +11,7 @@
  */
 
 import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, ensureNamedFeature } from './level-up-runner.js';
-import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary } from './level-up-blueprint.js';
+import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, normalizeBlueprint, normalizeLevelEntry } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
 
@@ -80,7 +80,8 @@ export function openLevelUpModal({
         || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse/i.test(dossier.meta.systemLabel))
     );
 
-    let activeBlueprint = blueprint || dossier?.progressionBlueprint || null;
+    // Normalize on load so previously stored/LLM blueprints never show HP/ASI/slot bookkeeping as features
+    let activeBlueprint = normalizeBlueprint(blueprint || dossier?.progressionBlueprint || null);
     const isLoadingBlueprint = !isPbta && !!blueprintPromise && !activeBlueprint;
 
     // Stage selection: PbtA always uses Stage 2 (Playbook Desk).
@@ -510,6 +511,13 @@ export function openLevelUpModal({
 
     const tableContainer = modal.querySelector('#mhc-blueprint-table-container');
 
+    // Signature of the blueprint content that Stage 2 was last derived from
+    const blueprintSignature = (bp) => bp ? JSON.stringify([bp.className, bp.hitDie, bp.levels]) : null;
+    let lastSyncedBlueprintSig = blueprintSignature(activeBlueprint);
+
+    const expandedTiers = new Set();
+    let tiersInitialized = false;
+
     function renderBlueprintTable() {
         if (!tableContainer) return;
         const shimmerPresent = !!modal.querySelector('#mhc-blueprint-shimmer');
@@ -524,37 +532,79 @@ export function openLevelUpModal({
         }
 
         const curLvl = targetLevel || proposal.currentLevel || 1;
-        let rowsHtml = '';
+        const tiers = [
+            { label: 'Tier 1', from: 1, to: 4 },
+            { label: 'Tier 2', from: 5, to: 10 },
+            { label: 'Tier 3', from: 11, to: 16 },
+            { label: 'Tier 4', from: 17, to: 20 },
+        ];
+        const tierOf = (lvl) => tiers.findIndex(t => lvl >= t.from && lvl <= t.to);
+        if (!tiersInitialized) {
+            expandedTiers.add(tierOf(Math.min(20, Math.max(1, curLvl))));
+            tiersInitialized = true;
+        }
+
+        const normalizedLevels = {};
         for (let lvl = 1; lvl <= 20; lvl++) {
-            const lvlData = activeBlueprint.levels[String(lvl)] || activeBlueprint.levels[lvl] || { features: [], profBonus: Math.floor((lvl - 1) / 4) + 2 };
-            const featuresArr = Array.isArray(lvlData.features) ? lvlData.features : (lvlData.features ? [lvlData.features] : []);
-            const prof = lvlData.profBonus || (Math.floor((lvl - 1) / 4) + 2);
+            normalizedLevels[lvl] = normalizeLevelEntry(activeBlueprint.levels[String(lvl)] ?? activeBlueprint.levels[lvl], lvl);
+        }
+        // Only fall back to the classic ASI levels when the blueprint declares none itself
+        const blueprintDeclaresAsi = Object.values(normalizedLevels).some(l => l.asi);
 
-            let milestoneBadge = '';
-            if (lvl === 3) {
-                milestoneBadge = '<span class="mhc-table-milestone mhc-milestone-archetype"><i class="fa-solid fa-star"></i> Archetype Specialization</span>';
-            } else if (lvlData.asi || [4, 8, 12, 16, 19].includes(lvl)) {
-                milestoneBadge = '<span class="mhc-table-milestone mhc-milestone-asi"><i class="fa-solid fa-gem"></i> ASI or Feat</span>';
-            } else if (lvl === 20) {
-                milestoneBadge = '<span class="mhc-table-milestone mhc-milestone-capstone"><i class="fa-solid fa-crown"></i> Capstone</span>';
-            }
-
-            const isCurrent = (lvl === curLvl);
-            const rowClass = isCurrent ? 'mhc-blueprint-row mhc-row-current' : 'mhc-blueprint-row';
-
+        let rowsHtml = '';
+        tiers.forEach((tier, tierIdx) => {
+            const open = expandedTiers.has(tierIdx);
+            const tierFeatCount = Array.from({ length: tier.to - tier.from + 1 }, (_, k) => normalizedLevels[tier.from + k].features.length)
+                .reduce((a, b) => a + b, 0);
             rowsHtml += `
-            <tr class="${rowClass}">
-                <td class="mhc-td-lvl">
-                    <span class="mhc-lvl-num">Level ${lvl}</span>
-                    ${isCurrent ? '<span class="mhc-tag-current">Target</span>' : ''}
-                </td>
-                <td class="mhc-td-prof">+${prof}</td>
-                <td class="mhc-td-feats">
-                    ${milestoneBadge}
-                    <span class="mhc-table-feats-text">${escapeHtml(featuresArr.join(', ') || 'Standard progression')}</span>
+            <tr class="mhc-tier-row" data-tier="${tierIdx}" style="cursor: pointer;">
+                <td colspan="3">
+                    <i class="fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-right'} mhc-tier-chevron"></i>
+                    <strong>${tier.label}</strong> · Levels ${tier.from}–${tier.to}
+                    <span style="opacity: 0.6; font-size: 0.85em;">(${tierFeatCount} abilities)</span>
                 </td>
             </tr>`;
-        }
+
+            for (let lvl = tier.from; lvl <= tier.to; lvl++) {
+                const lvlData = normalizedLevels[lvl];
+                const featuresArr = lvlData.features;
+                const prof = lvlData.profBonus;
+
+                let milestoneBadge = '';
+                const isArchetype = lvlData.subclass
+                    || (lvl === 3)
+                    || featuresArr.some(f => /archetype|specialization/i.test(f));
+                const isAsi = lvlData.asi || (!blueprintDeclaresAsi && [4, 8, 12, 16, 19].includes(lvl));
+                if (isArchetype) {
+                    milestoneBadge += '<span class="mhc-table-milestone mhc-milestone-archetype"><i class="fa-solid fa-star"></i> Archetype Specialization</span>';
+                }
+                if (isAsi) {
+                    milestoneBadge += '<span class="mhc-table-milestone mhc-milestone-asi"><i class="fa-solid fa-gem"></i> ASI or Feat</span>';
+                }
+                if (lvl === 20) {
+                    milestoneBadge += '<span class="mhc-table-milestone mhc-milestone-capstone"><i class="fa-solid fa-crown"></i> Capstone</span>';
+                }
+
+                const isCurrent = (lvl === curLvl);
+                const rowClass = `mhc-blueprint-row${isCurrent ? ' mhc-row-current' : ''}`;
+                const featsHtml = featuresArr.length > 0
+                    ? featuresArr.map(f => `<div class="mhc-feat-line">${escapeHtml(f)}</div>`).join('')
+                    : (isAsi ? '' : '<span style="opacity: 0.4;">—</span>');
+
+                rowsHtml += `
+                <tr class="${rowClass}" data-tier="${tierIdx}" ${open ? '' : 'style="display: none;"'}>
+                    <td class="mhc-td-lvl">
+                        <span class="mhc-lvl-num">Level ${lvl}</span>
+                        ${isCurrent ? '<span class="mhc-tag-current">Target</span>' : ''}
+                    </td>
+                    <td class="mhc-td-prof">+${prof}</td>
+                    <td class="mhc-td-feats">
+                        ${milestoneBadge}
+                        ${featsHtml}
+                    </td>
+                </tr>`;
+            }
+        });
 
         tableContainer.innerHTML = `
         <table class="mhc-blueprint-table">
@@ -562,13 +612,27 @@ export function openLevelUpModal({
                 <tr>
                     <th style="width: 18%;">Level</th>
                     <th style="width: 12%;">Prof</th>
-                    <th style="width: 70%;">Features & Milestones</th>
+                    <th style="width: 70%;">Features &amp; Milestones</th>
                 </tr>
             </thead>
             <tbody>
                 ${rowsHtml}
             </tbody>
         </table>`;
+
+        // Collapse / expand tiers in place (no re-render, preserves scroll)
+        tableContainer.querySelectorAll?.('.mhc-tier-row').forEach(headerRow => {
+            headerRow.addEventListener('click', () => {
+                const idx = parseInt(headerRow.getAttribute('data-tier'), 10);
+                const nowOpen = !expandedTiers.has(idx);
+                if (nowOpen) expandedTiers.add(idx); else expandedTiers.delete(idx);
+                tableContainer.querySelectorAll(`.mhc-blueprint-row[data-tier="${idx}"]`).forEach(r => {
+                    r.style.display = nowOpen ? '' : 'none';
+                });
+                const chev = headerRow.querySelector('.mhc-tier-chevron');
+                if (chev) chev.className = `fa-solid ${nowOpen ? 'fa-chevron-down' : 'fa-chevron-right'} mhc-tier-chevron`;
+            });
+        });
     }
 
     renderBlueprintTable();
@@ -664,6 +728,7 @@ GUIDELINES (D&D LITE PHILOSOPHY):
 2. Distinct Traits vs Abilities: When designing or customizing features, distinguish between passive traits (constant bonuses) and active abilities with rest uses (e.g. "1/1 per short rest" or "2/2 per long rest"). Active powers should include their rest recharge in parentheses.
 3. Dynamic Table Updates: When the player asks to change, add, or customize abilities at any level, emit:
    [UPDATE_LEVEL: <level_number> | <feature1>; <feature2>]
+   NEVER list HP gain, Hit Die, proficiency bonus, Ability Score Improvements, or spell slot counts as features: the engine tracks those separately.
 4. Hit Die Updates: If the player asks to change their Hit Die (d6, d8, d10, or d12), emit:
    [SET_HIT_DIE: <d6|d8|d10|d12>]
 5. Class Name Updates: If the player asks to rename the class, emit:
@@ -688,11 +753,14 @@ GUIDELINES (D&D LITE PHILOSOPHY):
                 for (const match of updateMatches) {
                     const lvlStr = match[1];
                     const featsRaw = match[2];
+                    const lvlNum = parseInt(lvlStr, 10);
+                    if (!(lvlNum >= 1 && lvlNum <= 20)) continue;
                     const feats = featsRaw.split(';').map(f => f.trim()).filter(Boolean);
                     if (feats.length > 0) {
-                        activeBlueprint.levels[lvlStr] = activeBlueprint.levels[lvlStr] || { profBonus: Math.floor((parseInt(lvlStr, 10) - 1) / 4) + 2 };
-                        activeBlueprint.levels[lvlStr].features = feats;
-                        if (typeof toastr !== 'undefined') toastr.info(feats.join(', '), `Level ${lvlStr} Updated`);
+                        const entry = normalizeLevelEntry({ ...(activeBlueprint.levels[lvlStr] || {}), features: feats }, lvlNum);
+                        if (!entry.spellSlots) delete entry.spellSlots;
+                        activeBlueprint.levels[lvlStr] = entry;
+                        if (typeof toastr !== 'undefined') toastr.info(entry.features.join(', ') || 'Cleared', `Level ${lvlStr} Updated`);
                     }
                 }
 
@@ -897,13 +965,15 @@ GUIDELINES (D&D LITE PHILOSOPHY):
 
     // Hook up blueprint promise if generating asynchronously
     if (isLoadingBlueprint && blueprintPromise) {
-        blueprintPromise.then((resolvedBlueprint) => {
+        blueprintPromise.then((rawResolvedBlueprint) => {
             if (!_activeModalElement || _activeModalElement !== modal) return;
+            const resolvedBlueprint = rawResolvedBlueprint ? normalizeBlueprint(rawResolvedBlueprint) : null;
             const shimmerEl = modal.querySelector('#mhc-blueprint-shimmer');
             if (shimmerEl) shimmerEl.remove();
 
             if (resolvedBlueprint) {
                 activeBlueprint = resolvedBlueprint;
+                lastSyncedBlueprintSig = blueprintSignature(resolvedBlueprint);
                 dossier.progressionBlueprint = resolvedBlueprint;
                 persistCompanionDossier(chatId, dossier);
 
@@ -1295,7 +1365,11 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 }
                 persistCompanionDossier(chatId, dossier);
 
-                // Recalculate Stage 2 features and Hit Die
+                // Only re-derive Stage 2 features/HP when the blueprint actually changed since the last sync.
+                // Otherwise keep the user's Stage 2 edits (added/removed features, HP roll) intact.
+                const blueprintChanged = blueprintSignature(activeBlueprint) !== lastSyncedBlueprintSig;
+                lastSyncedBlueprintSig = blueprintSignature(activeBlueprint);
+
                 proposal.hitDie = activeBlueprint.hitDie;
                 proposal.className = activeBlueprint.className;
 
@@ -1307,7 +1381,9 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 const conMod = Math.floor((((dossier?.protagonist?.stats?.CON ?? 10) - 10) / 2));
                 const perks = getTierPerks(activeBlueprint, targetLevel || 1, conMod);
 
-                if (isRespec) {
+                if (!blueprintChanged) {
+                    // Nothing to re-derive: preserve Stage 2 edits
+                } else if (isRespec) {
                     let feats = [];
                     if (activeBlueprint.levels) {
                         for (let l = 1; l <= (targetLevel || 1); l++) {
@@ -1325,6 +1401,9 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                     if (proposal.hpChange) {
                         proposal.hpChange.gain = perks.averageHpGain;
                         proposal.hpChange.newMax = (proposal.hpChange.oldMax || 0) + perks.averageHpGain;
+                        currentHpGain = perks.averageHpGain;
+                        modal.querySelector('#mhc-hp-roll-btn')?.classList.remove('active');
+                        modal.querySelector('#mhc-hp-avg-btn')?.classList.add('active');
                         const avgBtn = modal.querySelector('#mhc-hp-avg-btn');
                         if (avgBtn) avgBtn.textContent = `Take Average (+${perks.averageHpGain})`;
                         const hpDisp = modal.querySelector('#mhc-new-hp-display');
@@ -1375,7 +1454,9 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
         hpRollBtn?.classList.add('active');
         const dieSides = parseInt((proposal.hitDie || 'd8').replace(/\D/g, ''), 10) || 8;
         const rolled = Math.floor(Math.random() * dieSides) + 1;
-        currentHpGain = Math.max(1, rolled);
+        // Same formula as "Take Average": die + CON modifier (min 1 HP per level)
+        const rollConMod = Math.floor((((dossier?.protagonist?.stats?.CON ?? 10) - 10) / 2));
+        currentHpGain = Math.max(1, rolled + rollConMod);
         if (hpDisplay) hpDisplay.textContent = String((proposal.hpChange?.oldMax || 0) + currentHpGain);
     });
 
@@ -1439,10 +1520,14 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                     }
                     if (proposal.hpChange?.newMax) {
                         dossier.protagonist.hp = dossier.protagonist.hp || {};
+                        // Mirror the memo commit: current HP rises by the gain (0 is a valid current HP)
+                        const priorCurrent = Number.isFinite(dossier.protagonist.hp.current)
+                            ? dossier.protagonist.hp.current
+                            : (proposal.hpChange.oldMax || 0);
                         dossier.protagonist.hp.max = proposal.hpChange.newMax;
                         dossier.protagonist.hp.current = Math.min(
                             proposal.hpChange.newMax,
-                            (dossier.protagonist.hp.current || 10) + currentHpGain
+                            priorCurrent + Math.max(0, currentHpGain)
                         );
                     }
                     if (proposal.newFeatures && Array.isArray(proposal.newFeatures)) {

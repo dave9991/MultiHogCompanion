@@ -12,7 +12,13 @@ import { sendConciergeRequest } from './concierge-connection.js';
 /**
  * Standard D&D 5e Cumulative XP thresholds (index 0 = Level 1).
  */
-export const XP_LEVEL_THRESHOLDS = [0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000];
+export const XP_LEVEL_THRESHOLDS = [
+    0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000,
+    85000, 100000, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000,
+];
+
+/** Highest level the XP table can advance to. */
+export const MAX_CHARACTER_LEVEL = 20;
 
 /**
  * Standard D&D 5e SRD Progression Archetypes.
@@ -183,6 +189,124 @@ export const CORE_DND_PROGRESSIONS = {
     },
 };
 
+// ─────────────────────────────────────────────────────────────
+// Blueprint sanitation (roadmap declutter)
+// HP gain, proficiency bonus, ASI and spell-slot bookkeeping are computed by
+// the engine and have dedicated columns/flags. They must never appear as
+// "features" in the roadmap or be written to the character sheet.
+// ─────────────────────────────────────────────────────────────
+
+const HP_NOISE_PATTERNS = [
+    /^\s*(?:HP|Hit\s*Points?|Hit\s*Di(?:e|ce)|HD)\b/i,
+    /\b(?:HP|Hit\s*Points?)\s*(?:gain|increase|per\s*level)\b/i,
+    /\b(?:gain|gains|increase)\s*:?\s*\+?\d*d\d+(?:\s*\+\s*\w+)*\s*(?:HP|hit\s*points?)\b/i,
+];
+const PROF_NOISE_PATTERN = /^\s*proficiency\s*bonus\b/i;
+const ASI_NOISE_PATTERN = /^\s*(?:ability\s*score\s*(?:improvement|increase)|ASI\b)/i;
+const CANTRIP_NOISE_PATTERN = /^\s*(?:new\s*)?cantrips?(?:\s*learned)?\s*$/i;
+const SLOT_NOISE_PATTERN = /^\s*Level\s*(\d)\s*(?:Spell\s*)?Slots?\s*[:(]?\s*(\d+)/i;
+
+/**
+ * Classifies a feature string as engine-computed bookkeeping rather than a real class feature.
+ *
+ * @param {string} feat
+ * @returns {'hp'|'prof'|'asi'|'cantrip'|'slots'|null} Noise category, or null for a real feature.
+ */
+export function classifyFeatureNoise(feat) {
+    if (typeof feat !== 'string') return 'hp';
+    if (HP_NOISE_PATTERNS.some(re => re.test(feat))) return 'hp';
+    if (PROF_NOISE_PATTERN.test(feat)) return 'prof';
+    if (ASI_NOISE_PATTERN.test(feat)) return 'asi';
+    if (CANTRIP_NOISE_PATTERN.test(feat)) return 'cantrip';
+    if (SLOT_NOISE_PATTERN.test(feat)) return 'slots';
+    return null;
+}
+
+/**
+ * Removes engine-computed bookkeeping strings (HP gain, prof bonus, ASI, spell slot rows)
+ * and duplicates from a list of features.
+ *
+ * @param {string[]} list
+ * @returns {string[]}
+ */
+export function sanitizeFeatureList(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const raw of list) {
+        if (typeof raw !== 'string') continue;
+        const feat = raw.trim();
+        if (!feat || classifyFeatureNoise(feat)) continue;
+        const key = feat.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(feat);
+    }
+    return out;
+}
+
+/**
+ * Normalizes one blueprint level entry. Tolerates string/array features, strips
+ * bookkeeping noise into structured fields (asi flag, spellSlots).
+ *
+ * @param {object|string|string[]} raw Raw level entry.
+ * @param {number} level Level number (1–20).
+ * @returns {{features: string[], profBonus: number, asi: boolean, subclass: boolean, spellSlots: object|null}}
+ */
+export function normalizeLevelEntry(raw, level) {
+    const entry = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : { features: raw };
+    let rawFeatures = [];
+    if (Array.isArray(entry.features)) rawFeatures = entry.features;
+    else if (typeof entry.features === 'string' && entry.features.trim()) rawFeatures = [entry.features];
+
+    let asi = !!entry.asi;
+    const spellSlots = (entry.spellSlots && typeof entry.spellSlots === 'object') ? { ...entry.spellSlots } : {};
+    for (const f of rawFeatures) {
+        if (typeof f !== 'string') continue;
+        const kind = classifyFeatureNoise(f);
+        if (kind === 'asi') asi = true;
+        if (kind === 'slots') {
+            const m = f.match(SLOT_NOISE_PATTERN);
+            if (m) spellSlots[m[1]] = parseInt(m[2], 10);
+        }
+    }
+
+    return {
+        features: sanitizeFeatureList(rawFeatures),
+        profBonus: Number(entry.profBonus) || (Math.floor((level - 1) / 4) + 2),
+        asi,
+        subclass: !!entry.subclass,
+        spellSlots: Object.keys(spellSlots).length > 0 ? spellSlots : null,
+    };
+}
+
+/**
+ * Returns a normalized deep copy of a progression blueprint: levels keyed "1".."20",
+ * features as clean arrays, bookkeeping noise removed, hit die canonicalized (e.g. "1d8" → "d8").
+ * Idempotent and safe to call on stored blueprints.
+ *
+ * @param {object} blueprint
+ * @returns {object|null}
+ */
+export function normalizeBlueprint(blueprint) {
+    if (!blueprint || typeof blueprint !== 'object' || !blueprint.levels || typeof blueprint.levels !== 'object') {
+        return blueprint || null;
+    }
+    const levels = {};
+    for (let i = 1; i <= 20; i++) {
+        const raw = blueprint.levels[String(i)] ?? blueprint.levels[i];
+        const entry = normalizeLevelEntry(raw, i);
+        if (!entry.spellSlots) delete entry.spellSlots;
+        levels[String(i)] = entry;
+    }
+    const hdMatch = typeof blueprint.hitDie === 'string' ? blueprint.hitDie.match(/d\s*(4|6|8|10|12)\b/i) : null;
+    return {
+        ...blueprint,
+        hitDie: hdMatch ? `d${hdMatch[1]}` : (blueprint.hitDie || 'd8'),
+        levels,
+    };
+}
+
 /**
  * Checks if a campaign dossier already possesses a valid Progression Blueprint.
  *
@@ -193,6 +317,27 @@ export function hasProgressionBlueprint(dossier) {
     if (!dossier || typeof dossier !== 'object') return false;
     const bp = dossier.progressionBlueprint;
     return !!(bp && typeof bp === 'object' && bp.levels && Object.keys(bp.levels).length > 0);
+}
+
+/**
+ * Checks whether a stored blueprint still describes the character's current class.
+ * Tolerant of casing/punctuation and descriptive prefixes ("Shadow Rogue" matches a Rogue table).
+ * A missing/generic class never invalidates a blueprint.
+ *
+ * @param {object} blueprint Stored progression blueprint.
+ * @param {string} className Character's current class.
+ * @returns {boolean}
+ */
+export function blueprintMatchesClass(blueprint, className) {
+    if (!blueprint || !blueprint.className) return true;
+    if (!className || typeof className !== 'string') return true;
+    const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const a = norm(blueprint.className);
+    const b = norm(className);
+    if (!a || !b || b === 'adventurer' || a === b || a.includes(b) || b.includes(a)) return true;
+    const canonA = getCanonicalDndProgression(blueprint.className)?.className;
+    const canonB = getCanonicalDndProgression(className)?.className;
+    return !!(canonA && canonB && canonA === canonB);
 }
 
 /**
@@ -207,7 +352,7 @@ export function getCanonicalDndProgression(className) {
 
     for (const [key, prog] of Object.entries(CORE_DND_PROGRESSIONS)) {
         if (lower.includes(key)) {
-            return JSON.parse(JSON.stringify(prog));
+            return normalizeBlueprint(JSON.parse(JSON.stringify(prog)));
         }
     }
     return null;
@@ -247,9 +392,10 @@ GUIDELINES (D&D LITE PHILOSOPHY):
 1. Single-Track Progression: Do NOT create or require rigid branching subclass trees or multi-class tables. Keep progression unified, elegant, and single-track (Levels 1 to 20).
 2. Starting Trait Integration: You MUST incorporate and honor the character's ESTABLISHED STARTING TRAITS (${existingFeatures !== 'None specified' ? existingFeatures : 'if any'}) into Level 1 (and early levels) of the progression table so existing abilities granted by the adventure are preserved rather than replaced.
 3. Level 3 Archetype Milestone: At Level 3, grant a signature "Archetype Specialization" feature (e.g. Martial Mastery, Primal Instincts, Arcane Savant) that defines the class fantasy without splintering into sub-tables.
-4. Milestones: Every level must provide tangible progression (HP gain via Hit Die + CON; class traits; ASIs/Feats at Levels 4, 8, 12, 16, 19).
-5. Thematic Depth: Make the abilities uniquely fit the "${cName}" class fantasy. Do not use generic placeholders like "Subclass Feature".
-5. Output Format: You MUST output the progression inside a clean JSON codeblock using this exact structure:
+4. Milestones: Mark ASI/Feat levels (4, 8, 12, 16, 19) with "asi": true. The "features" array lists ONLY named class abilities (1–2 per level; an empty array is fine for ASI-only levels).
+5. Engine-Computed Data — DO NOT LIST: Hit Points / HP gain / Hit Die, proficiency bonus, Ability Score Improvements, spell slot counts, and "cantrip learned" rows are tracked by the game engine and have their own fields. NEVER put them in "features".
+6. Thematic Depth: Make the abilities uniquely fit the "${cName}" class fantasy. Do not use generic placeholders like "Subclass Feature".
+7. Output Format: You MUST output the progression inside a clean JSON codeblock using this exact structure:
 
 \`\`\`json
 {
@@ -259,8 +405,8 @@ GUIDELINES (D&D LITE PHILOSOPHY):
   "levels": {
     "1": { "features": ["Feature 1", "Feature 2"], "profBonus": 2 },
     "2": { "features": ["Feature name (description)"], "profBonus": 2 },
-    "3": { "features": ["Archetype Specialization: Name (description)"], "profBonus": 2 },
-    "4": { "features": ["Ability Score Improvement or Feat"], "asi": true, "profBonus": 2 },
+    "3": { "features": ["Archetype Specialization: Name (description)"], "subclass": true, "profBonus": 2 },
+    "4": { "features": [], "asi": true, "profBonus": 2 },
     ...
     "20": { "features": ["Capstone Feature"], "profBonus": 6 }
   }
@@ -288,14 +434,14 @@ export function parseBlueprintFromResponse(responseText, fallbackClassName = 'Ad
         const parsed = JSON.parse(rawJson.trim());
 
         if (parsed && parsed.levels && typeof parsed.levels === 'object') {
-            return {
+            return normalizeBlueprint({
                 className: parsed.className || fallbackClassName,
                 hitDie: parsed.hitDie || fallbackHitDie,
                 primaryStats: Array.isArray(parsed.primaryStats) ? parsed.primaryStats : ['STR', 'DEX'],
                 subclassTitle: parsed.subclassTitle || null,
                 levels: parsed.levels,
                 createdAt: new Date().toISOString(),
-            };
+            });
         }
     } catch (err) {
         console.warn('[MultiHog Companion] Failed to parse blueprint JSON:', err);
@@ -321,7 +467,7 @@ export function parseBlueprintFromResponse(responseText, fallbackClassName = 'Ad
  */
 export function getTierPerks(blueprint, targetLevel, conModifier = 0) {
     const lvlKey = String(targetLevel);
-    const perkData = blueprint?.levels?.[lvlKey] || {};
+    const perkData = normalizeLevelEntry(blueprint?.levels?.[lvlKey] ?? blueprint?.levels?.[targetLevel], targetLevel);
 
     const hitDie = blueprint?.hitDie || 'd8';
     const dieMax = parseInt(hitDie.replace(/\D/g, ''), 10) || 8;
@@ -330,10 +476,11 @@ export function getTierPerks(blueprint, targetLevel, conModifier = 0) {
 
     return {
         level: targetLevel,
-        features: Array.isArray(perkData.features) ? perkData.features : (perkData.features ? [perkData.features] : []),
-        isAsi: !!perkData.asi,
-        isSubclass: !!perkData.subclass,
-        profBonus: perkData.profBonus || (Math.floor((targetLevel - 1) / 4) + 2),
+        features: perkData.features,
+        isAsi: perkData.asi,
+        isSubclass: perkData.subclass,
+        spellSlots: perkData.spellSlots,
+        profBonus: perkData.profBonus,
         hitDie,
         averageHpGain,
     };
@@ -394,7 +541,7 @@ export async function generateProgressionBlueprintViaConcierge({ character = {},
     }
 
     // High quality balanced fallback if network or LLM fails
-    return {
+    return normalizeBlueprint({
         className: character.class || 'Adventurer',
         hitDie: character.hitDie || 'd8',
         primaryStats: ['STR', 'DEX'],
@@ -421,5 +568,5 @@ export async function generateProgressionBlueprintViaConcierge({ character = {},
             19: { features: ['Ability Score Improvement or Feat'], asi: true, profBonus: 6 },
             20: { features: ['Legendary Avatar Capstone'], profBonus: 6 },
         },
-    };
+    });
 }

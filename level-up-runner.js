@@ -7,7 +7,7 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { XP_LEVEL_THRESHOLDS, getTierPerks, getCanonicalDndProgression } from './level-up-blueprint.js';
+import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList } from './level-up-blueprint.js';
 import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
 
 /**
@@ -145,7 +145,8 @@ export function evaluateLevelUpEligibility(memoText, ruleset = 'dnd5e') {
         maxThreshold = XP_LEVEL_THRESHOLDS[tableIndex] || 300;
     }
 
-    const eligible = currentXp >= maxThreshold && maxThreshold > 0;
+    // No advancement past the level cap (XP table ends at level 20)
+    const eligible = currentXp >= maxThreshold && maxThreshold > 0 && currentLevel < MAX_CHARACTER_LEVEL;
     const surplusXp = Math.max(0, currentXp - maxThreshold);
 
     return {
@@ -247,7 +248,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
                 features.push(...lvlFeatures);
             }
         }
-        features = deduplicateFeatures(features);
+        features = deduplicateFeatures(sanitizeFeatureList(features));
         if (features.length === 0) {
             features = perks.features || [];
         }
@@ -313,6 +314,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
         },
         newFeatures: features,
         activeAbilities,
+        spellSlots: isRespec ? null : (perks.spellSlots || null),
         isAsi: perks.isAsi,
         asiOptions,
         partyChanges,
@@ -422,6 +424,8 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
     let updatedMemo = currentMemo;
     const targetLevel = proposal.targetLevel;
     const newMaxHp = proposal.hpChange?.newMax;
+    // Never write engine-computed bookkeeping (HP gain, ASI, slot rows) to the sheet as features
+    const cleanFeatures = Array.isArray(proposal.newFeatures) ? sanitizeFeatureList(proposal.newFeatures) : null;
 
     // 1. Update [CHARACTER] block
     const charMatch = updatedMemo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
@@ -456,8 +460,8 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         }
 
         // Update Features / Traits / Abilities line
-        if (Array.isArray(proposal.newFeatures)) {
-            const featText = proposal.newFeatures.join(', ');
+        if (cleanFeatures) {
+            const featText = cleanFeatures.join(', ');
             const featureRegex = /(?:Features|Traits|Abilities)\s*:[^\n\r]*/i;
             const hasFeaturesLine = featureRegex.test(charBlock);
 
@@ -484,7 +488,7 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
                             .map(f => f.trim())
                             .filter(Boolean);
                         const existingKeys = new Set(existingFeats.map(f => extractFeatureKey(f)));
-                        const genuinelyNew = proposal.newFeatures.filter(f => !existingKeys.has(extractFeatureKey(f)));
+                        const genuinelyNew = cleanFeatures.filter(f => !existingKeys.has(extractFeatureKey(f)));
                         if (genuinelyNew.length > 0) {
                             const combined = [...existingFeats, ...genuinelyNew].join(', ');
                             charBlock = charBlock.replace(match[0], `${match[1]}${combined}`);
@@ -522,6 +526,11 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
                 updatedMemo = updatedMemo.replace(/(\[\/CHARACTER\])/i, `$1${abBlock}`);
             }
         }
+    }
+
+    // 1c. Grow [SPELLS] slot maximums for casters (Level N (avail/max) lines)
+    if (!isRespec && proposal.spellSlots && typeof proposal.spellSlots === 'object') {
+        updatedMemo = applySpellSlotGrowth(updatedMemo, proposal.spellSlots);
     }
 
     // 2. Update [XP] block
@@ -602,6 +611,41 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         updatedMemo,
         summary,
     };
+}
+
+/**
+ * Raises spell slot maximums in the memo's [SPELLS] block.
+ * `slotGrants` maps slot level -> new total max for that slot level (e.g. { 3: 2 }).
+ * Available slots rise by the same delta; maximums never shrink. A slot level with no
+ * existing line gets a new empty "Level N (max/max):" line. Memos without a [SPELLS]
+ * block are left untouched.
+ *
+ * @param {string} memo State memo text.
+ * @param {Object<string, number>} slotGrants
+ * @returns {string} Updated memo.
+ */
+export function applySpellSlotGrowth(memo, slotGrants) {
+    if (!memo || !slotGrants) return memo;
+    const block = memo.match(/\[SPELLS\]([\s\S]*?)\[\/SPELLS\]/i);
+    if (!block) return memo;
+    let body = block[1];
+    for (const [slotLevel, total] of Object.entries(slotGrants)) {
+        const newMax = Number(total);
+        if (!(newMax > 0)) continue;
+        const re = new RegExp(`(Level\\s*${parseInt(slotLevel, 10)}\\s*\\()(\\d+)\\s*\\/\\s*(\\d+)(\\))`, 'i');
+        if (!re.test(body)) {
+            // Newly unlocked slot level: add an empty line for it
+            body = `${body.replace(/\s+$/, '')}\nLevel ${parseInt(slotLevel, 10)} (${newMax}/${newMax}):\n`;
+            continue;
+        }
+        body = body.replace(re, (m, pre, avail, max, post) => {
+            const oldMax = parseInt(max, 10);
+            if (newMax <= oldMax) return m;
+            const nextAvail = parseInt(avail, 10) + (newMax - oldMax);
+            return `${pre}${nextAvail}/${newMax}${post}`;
+        });
+    }
+    return memo.replace(block[0], `[SPELLS]${body}[/SPELLS]`);
 }
 
 /**

@@ -33,7 +33,7 @@ Developing this extension requires understanding the interaction across three di
 │                   Tier 3: MultiHog Companion                           │
 │                      (Active Workspace)                                │
 │   • Non-invasive runtime monkeypatches    • PbtA Engine & Vitality     │
-│   • Deterministic Event Coordinators      • CYOA Safety Net & Repair   │
+│   • Deterministic Event Coordinators      • On-Demand CYOA Repair     │
 │   • Concierge Dossier Builder & Critic    • Relationship Narrative Sync│
 │   • NameRAG Integration & Fallbacks       • Strict Catalog Enforcement │
 └────────────────────────────────────────────────────────────────────────┘

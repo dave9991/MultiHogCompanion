@@ -65,6 +65,6 @@ When inspecting upstream behavior, look in these modules:
 ## 4. How MultiHog Companion Augments Upstream
 
 1. **Custom Rulesets (PbtA)**: MultiHog Companion provides alternative cartridges and vitality mechanics that plug into the upstream memo processor without breaking standard D&D campaign isolation.
-2. **CYOA Safety Net**: Upstream CYOA button generation can sometimes produce unparseable markdown or drop choices. Companion runs a verification pass and repairs missing choices via quiet prompt generations.
+2. **On-Demand CYOA Repair**: Upstream CYOA button generation can sometimes produce unparseable markdown or drop choices. Companion offers a Wand menu action (`DOM-07`) and `/cyoafix`, `/cyoagen`, `/cyoaretry` slash commands that repair numbered markdown into buttons locally or generate fresh choices. There is no automatic background verification pass.
 3. **Concierge Dossier Builder & Critic**: Enhances the session-zero onboarding process by analyzing user intent, formulating structured world dossiers, running self-critique loops, and generating custom lorebooks.
 4. **NameRAG Interception**: Hooks into character creator name generation buttons to provide semantic name suggestions from local name embedding datasets, with immediate fallback to upstream stock names if NameRAG is unavailable.

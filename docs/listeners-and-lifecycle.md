@@ -72,36 +72,28 @@ A complete message turn in SillyTavern with MultiHog & Companion follows this de
 
 **Rule**: Always use `CHARACTER_MESSAGE_RENDERED` for DOM updates, button attachments, and post-turn analysis.
 
-### The Post-Turn Dual Pipeline
-When `CHARACTER_MESSAGE_RENDERED(messageId, type)` fires, Companion executes two independent, decoupled pipelines:
+### The Post-Turn Pipeline
+When `CHARACTER_MESSAGE_RENDERED(messageId, type)` fires, Companion runs a single pipeline (`EVT-07`, `index.js`):
 
 ```
 [ CHARACTER_MESSAGE_RENDERED(messageId, type) ]
                         │
-    ┌───────────────────┴───────────────────┐
-    ▼                                       ▼
-[ Pipeline A: Narrative Choices ]       [ Pipeline B: Mechanical & Relationship Sync ]
-  • EVT-06 (cyoa-safety-net.js)           • EVT-07 (index.js)
-  • coordinateCyoaForMessage(messageId)   • if (type === 'first_message') return;
-  • Guards active token streaming         • if (!isAdventureActive()) return;
-  • Deduplicates msg/swipe ID             • T+400ms: scheduleSync('CHARACTER_MESSAGE_RENDERED')
-  • Happy Path: choices exist (0 cost)      ↳ Syncs persona & player portrait
-  • Local Repair: regex formats to        • T+600ms: checkAndSyncTierCrossovers()
-    buttons with 0 LLM calls                ↳ Checks NPC affinity scores against tier thresholds
-  • Fallback: quiet prompt choice repair    ↳ Evolves narrative relationship text in lorebook
+                        ▼
+[ Mechanical & Relationship Sync (EVT-07) ]
+  • if (type === 'first_message') return;
+  • if (!isAdventureActive()) return;
+  • T+400ms: scheduleSync('CHARACTER_MESSAGE_RENDERED')
+      ↳ Syncs persona & player portrait
+  • coordinateTierSyncAfterTurn()
+      ↳ awaits MultiHog's Lorebook Agent (rt_lore_agent_step) if isRouterRunning()
+      ↳ checkAndSyncTierCrossovers() — NPC affinity vs tier thresholds
+      ↳ Evolves narrative relationship text in lorebook
 ```
 
-### The Streaming Hand-off Protocol (`CHARACTER_MESSAGE_RENDERED` $\to$ `GENERATION_ENDED`)
-Because SillyTavern can operate with streaming enabled or disabled, choices cannot unconditionally evaluate on either event alone:
+> **CYOA is no longer part of the post-turn pipeline.** The automated CYOA dispatcher (`EVT-06`) and its `GENERATION_ENDED` fallback (`EVT-11`) were retired. CYOA choice repair/generation is now strictly on demand via the Wand menu (`DOM-07`) or `/cyoafix`, `/cyoagen`, `/cyoaretry`, all routed through `coordinateCyoaForMessage`.
 
-* **When Streaming is ON**:
-  1. `CHARACTER_MESSAGE_RENDERED` (`EVT-06`) fires early while tokens are still streaming into the DOM.
-  2. `coordinateCyoaForMessage` detects `isNarratorGenerating() === true` and defers execution.
-  3. Streaming completes $\to$ SillyTavern calls `activateSendButtons()` $\to$ `hideStopButton()`.
-  4. `GENERATION_ENDED` (`EVT-11`) fires $\to$ `coordinateCyoaForMessage` now evaluates the settled complete prose.
-* **When Streaming is OFF (Batch Mode)**:
-  1. `CHARACTER_MESSAGE_RENDERED` evaluates the complete text immediately, setting `_lastAttemptedMessageId = idx` and `_lastAttemptedSwipeId = swipeId`.
-  2. `GENERATION_ENDED` fires right after. Its deduplication guard detects the matching registers and exits immediately with 0 duplicate work.
+### Streaming & On-Demand CYOA
+Because CYOA no longer reacts to `CHARACTER_MESSAGE_RENDERED` / `GENERATION_ENDED`, there is no streaming hand-off to coordinate. The Wand action evaluates the latest *settled* message and fails safely if invoked mid-stream or on an intermediary tool-call turn. `GENERATION_STARTED` (`EVT-09`), `GENERATION_STOPPED` (`EVT-10`), `CHAT_CHANGED` (`EVT-05`) and the stop-click capture (`DOM-06`) only abort an in-flight on-demand generation.
 
 ---
 
@@ -117,9 +109,9 @@ Because SillyTavern is a single-page application with asynchronous operations, m
 | **UI Freeze on Hangs** | An intercepted button or action calls `event.stopImmediatePropagation()` and awaits an external service (e.g. NameRAG or local endpoint) that hangs or times out. | **Timeout Promise Race**: Always wrap async interception in `Promise.race([work, timeoutPromise(4000)])`. If it times out, fall back to stock behavior and emit a `toastr.warning()`. |
 | **DOM Mount Timing** | Attempting to bind click handlers or inspect settings elements before SillyTavern has mounted the extension drawer. | Use delegated event listeners on persistent roots (e.g. `$(document).on('click', '.selector', ...)`) or listen for `EXTENSION_SETTINGS_LOADED`. |
 | **Chat Rename Ordering** | SillyTavern calls `reloadCurrentChat()` *before* emitting `CHAT_RENAMED`. Upstream sees an unmigrated partition on `CHAT_CHANGED` and risks resetting state unless proof is re-armed *before* upstream's rename migration runs. | **`eventSource.makeFirst` Priority + Debounce**: `EVT-02` uses `makeFirst` to run synchronously at T+0ms and re-arm the partition proof. `EVT-03` uses standard FIFO + 150ms debounce to let upstream disk writes settle before lorebooks are scanned and cloned. |
-| **Ghost Swipe Collision** | While a background Stage 2 CYOA generation is running for message swipe $N-1$, the user swipes or clicks regenerate to start swipe $N$. The late-finishing background task commits buttons meant for $N-1$ onto the new swipe $N$. | **`GENERATION_STARTED` Abort Hook (`EVT-09`)**: Immediately severs the active `AbortController` and wipes `_lastAttemptedSwipeId` when foreground generation begins (`dryRun` and `quiet` filtered). |
-| **Truncated Message Choice Leak** | User clicks Stop mid-turn. SillyTavern preserves the incomplete narrative and proceeds to emit `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED`. Downstream choice logic would interpret the lack of choices as a failure and auto-generate buttons on an aborted turn. | **`GENERATION_STOPPED` Shield (`EVT-10`)**: Sets `_wasGenerationStopped = true` at T+0ms. `coordinateCyoaForMessage` drops choice processing on stopped turns unless explicitly forced. |
-| **Historical Choice Context Poisoning** | Messages $1 \dots N-1$ in chat history retain `<choices>`, `<button>`, or markdown numbered option lists. When sent to the LLM on turn $N$, the model echoes stale buttons, hallucinates broken XML tags mid-sentence, or repeats past decisions. | **Outgoing Prompt Sanitizer (`EVT-12`)**: Synchronously scrubs outgoing `eventData.chat` on `CHAT_COMPLETION_PROMPT_READY`. Removes historical choice markup from past turns while strictly preserving `<CYOA_mode>` on the active turn for single-stage generation. |
+| **Ghost Swipe Collision** | While an on-demand CYOA generation is running for message swipe $N-1$, the user swipes or clicks regenerate to start swipe $N$. The late-finishing generation commits buttons meant for $N-1$ onto the new swipe $N$. | **`GENERATION_STARTED` Abort Hook (`EVT-09`)**: Immediately severs the active `AbortController` and wipes `_lastAttemptedSwipeId` when foreground generation begins (`dryRun` and `quiet` filtered). |
+| **Truncated Message Choice Leak** | User clicks Stop mid-turn. SillyTavern preserves the incomplete narrative and proceeds to emit `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED`. A non-forced choice pass would interpret the lack of choices as a failure and generate buttons on an aborted turn. | **`GENERATION_STOPPED` Shield (`EVT-10`)**: Sets `_wasGenerationStopped = true` at T+0ms. `coordinateCyoaForMessage` drops choice processing on stopped turns unless explicitly forced (Wand/slash). |
+| **Historical Choice Context Poisoning** *(Retired — WRK-06)* | Messages $1 \dots N-1$ retain `<choices>` / `<button>` markup, which the LLM may echo on turn $N$. | **Deferred to upstream**: MultiHog natively prunes via `cyoaConfig.stripOldChoicesFromPrompt`. Companion's `EVT-12` outgoing-prompt sanitizer was retired. |
 
 ---
 
@@ -131,10 +123,10 @@ Chat switching is divided into two distinct execution phases:
 #### Phase 1: Immediate State Severance (T+0ms)
 * **Location**: [`cyoa-safety-net.js` (`EVT-05`)](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/cyoa-safety-net.js) & [`index.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js)
 * **Action**: Runs synchronously with zero delay.
-  1. Calls `abortCyoaGeneration('chat_changed')` to instantly trigger the `AbortController` on any background quiet prompt or LLM stream running for the departing chat.
+  1. Calls `abortCyoaGeneration('chat_changed')` to instantly trigger the `AbortController` on any in-flight on-demand CYOA quiet prompt running for the departing chat.
   2. Resets message tracking registers (`_lastAttemptedMessageId`, `_lastAttemptedSwipeId`).
   3. Invokes `refreshConciergeActiveContext()` to clear or sync active session metadata.
-* **Why**: Without immediate severance, a background CYOA repair initiated in Chat A will complete seconds later and erroneously inject buttons into Chat B's DOM.
+* **Why**: Without immediate severance, a CYOA generation initiated in Chat A will complete seconds later and erroneously inject buttons into Chat B's DOM.
 
 #### Phase 2: Deterministic Reconciliation Coordinator (T+500ms)
 * **Location**: [`index.js` (`EVT-04` / `runChatChangedCoordinator`)](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js)
@@ -148,10 +140,10 @@ Chat switching is divided into two distinct execution phases:
 
 ### B. CYOA Dispatch Coordinator (`coordinateCyoaForMessage`)
 * **Location**: [`cyoa-generator.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/cyoa-generator.js)
-* **Problem**: When a message renders, both upstream MultiHog CYOA buttons and Companion safety nets may attempt to parse or generate options, causing duplicate buttons or conflicting prompt requests.
+* **Problem**: Wand, slash commands and the safety-net helpers could otherwise run overlapping parse/generate passes on the same message, causing duplicate buttons or conflicting prompt requests.
 * **Solution**: `coordinateCyoaForMessage` enforces a single pipeline:
   1. Inspect existing message text for valid CYOA choices.
-  2. If missing or malformed and safety net is enabled, initiate repair pass.
+  2. If missing or malformed, run the deterministic markdown auto-repair or (for missing choices) the on-demand generator. Level-up / permadeath turns (WRK-08) are skipped unless `force`d.
   3. Lock the message ID in `_processedCyoaMessageIds` to prevent re-entry.
 
 ### C. Chat Rename Coordination (`makeFirst` + Settlement Window)
@@ -180,4 +172,4 @@ Chat switching is divided into two distinct execution phases:
   * *Upstream Guide*: [`chat-ownership.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/docs/chat-ownership.md) — upstream MultiHog documentation on `createChatCommitGuard` and `pass-affinity.js`.
   * *ST Chats Source*: [`chats.js`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/chats.js) — chat loading and switching internals.
 * **MultiHog Companion Listener Catalog**:
-  * Consult [`LISTENERS.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/LISTENERS.md) for the active list of registered listeners (`EVT-01` through `EVT-12`) and DOM delegations (`DOM-01` through `DOM-06`).
+  * Consult [`LISTENERS.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/LISTENERS.md) for the active list of registered listeners (`EVT-01` through `EVT-12`, of which `EVT-06`, `EVT-11` and `EVT-12` are retired) and DOM delegations (`DOM-01a` through `DOM-07`).

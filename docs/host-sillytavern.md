@@ -147,7 +147,7 @@ Defined in [`events.js#L23`](file:///home/dlittle/ai-stack/sillytavern-test/st-s
 * **Best Practice Filters**:
   * **Dry-Run Check**: Always guard with `if (dryRun) return;` so token-calculation sweeps don't trigger state resets.
   * **Quiet Prompt Check**: If your listener manages foreground UI or user turn state, check `if (type === 'quiet') return;` so that background micro-tasks from other extensions don't abort your foreground handlers.
-  * **In-Flight Cancellation**: Use this hook to immediately abort in-flight background tasks (like Stage 2 CYOA generation or speculative analysis) when the user initiates a new turn, swipe, or regenerate.
+  * **In-Flight Cancellation**: Use this hook to immediately abort in-flight background tasks (like on-demand CYOA generation or speculative analysis) when the user initiates a new turn, swipe, or regenerate.
 
 ---
 
@@ -196,5 +196,5 @@ Defined in [`events.js#L65`](file:///home/dlittle/ai-stack/sillytavern-test/st-s
 * **In-Place Mutation Contract**:
   Unlike observation-only event listeners, `CHAT_COMPLETION_PROMPT_READY` acts as a **synchronous outgoing prompt pipeline filter**. SillyTavern provides the exact `eventData.chat` array that is serialized into the API payload. Extensions mutate `msg.mes` and `msg.content` directly in-place.
 * **Context Poisoning Prevention**:
-  This hook provides the only official mechanism to sanitize prompt context sent over the wire without altering persisted chat records (`.jsonl`) on disk. MultiHog Companion uses this hook (`EVT-12`) to scrub interactive XML (`<choices>`, `<button>`) and numbered decision lists from historical messages ($1 \dots N-1$), while leaving the active user prompt intact so the single-stage CYOA generator has complete instructions.
+  This hook provides the only official mechanism to sanitize prompt context sent over the wire without altering persisted chat records (`.jsonl`) on disk. MultiHog Companion formerly used this hook (`EVT-12`, now **retired** in favor of upstream's native `stripOldChoicesFromPrompt`) to scrub interactive XML (`<choices>`, `<button>`) and numbered decision lists from historical messages ($1 \dots N-1$), while leaving the active user prompt intact so the single-stage CYOA generator has complete instructions.
 

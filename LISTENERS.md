@@ -36,13 +36,13 @@ The following matrix highlights events where **multiple files or upstream MultiH
 
 | Event Type | Participating Files / Handlers | Execution Priority / Order | Status / Risk Rating |
 | :--- | :--- | :--- | :--- |
-| **`CHAT_CHANGED`** | • `cyoa-safety-net.js`<br>• `index.js` (`runChatChangedCoordinator`)<br>• *Upstream MultiHog* | 1. `cyoa-guardian` (sync abort)<br>2. Upstream `onChatChanged` (async state reload)<br>3. `index.js` (Debounced 500ms settlement window -> deterministic sequential coordinator with token invalidation) | 🟢 **RESOLVED**: Arbitrary `setTimeout` ladder eliminated; token invalidation prevents stale cross-chat overwrites. |
-| **`CHAT_RENAMED`** | • `adventure-chat.js`<br>• `index.js`<br>• *Upstream MultiHog* | 1. `adventure-chat.js` (`eventSource.makeFirst`)<br>2. Upstream `onChatRenamedMigrate`<br>3. `index.js` (`setTimeout` 200ms) | 🟡 **MODERATE**: Relies on `eventSource.makeFirst` monkey patch to beat upstream migration. |
+| **`CHAT_CHANGED`** | • `cyoa-safety-net.js`<br>• `index.js` (`runChatChangedCoordinator`)<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (EVT-05 sync abort)<br>2. Upstream `onChatChanged` (async state reload)<br>3. `index.js` (Debounced 500ms settlement window -> deterministic sequential coordinator with token invalidation) | 🟢 **RESOLVED**: Arbitrary `setTimeout` ladder eliminated; token invalidation prevents stale cross-chat overwrites. |
+| **`CHAT_RENAMED`** | • `adventure-chat.js`<br>• `index.js`<br>• *Upstream MultiHog* | 1. `adventure-chat.js` (`eventSource.makeFirst`)<br>2. Upstream `onChatRenamedMigrate`<br>3. `index.js` (150ms debounce) | 🟡 **MODERATE**: Relies on `eventSource.makeFirst` monkey patch to beat upstream migration. |
 | **`CHARACTER_MESSAGE_RENDERED`** | • `index.js` (canonical assistant turn listener)<br>• *Upstream MultiHog* | 1. `index.js` (schedules tier crossover check)<br>2. *(CYOA auto-dispatch retired in favor of DOM-07 Wand action)* | 🟢 **RESOLVED**: Canonical assistant turn trigger for Relationship Sync. Automated CYOA background trigger retired. |
 | **`MESSAGE_RECEIVED`** | • *Upstream MultiHog* | 1. Upstream `onMapArchitectAssistantMessage` | 🟢 **REMOVED**: Redundant Companion listener removed; consolidated into `CHARACTER_MESSAGE_RENDERED`. |
 | **`SETTINGS_UPDATED`** | • `index.js` (`runSettingsUpdatedCoordinator`)<br>• *Upstream MultiHog* | 1. `index.js` (Debounced 600ms settlement window with `_isSettingsSyncActive` mutex gate) | 🟢 **RESOLVED**: Re-entrancy loop eliminated; 4 nested timeouts collapsed into single atomic pass. |
-| **`GENERATION_STARTED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts Stage 2 pass) | 🟢 **LOW**: Clean state-reset hook. |
-| **`GENERATION_STOPPED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts Stage 2 pass) | 🟢 **LOW**: Clean abort handler. |
+| **`GENERATION_STARTED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts in-flight on-demand CYOA generation) | 🟢 **LOW**: Clean state-reset hook. |
+| **`GENERATION_STOPPED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts in-flight on-demand CYOA generation) | 🟢 **LOW**: Clean abort handler. |
 | **`GENERATION_ENDED`** | • *Upstream MultiHog* | *(Companion CYOA auto-dispatch retired in favor of DOM-07 Wand action)* | 🟢 **RETIRED (Companion)**: Automated background trigger replaced with deterministic on-demand Wand/Slash execution. |
 | **`CHAT_COMPLETION_PROMPT_READY`** | • *Upstream MultiHog* | *(Companion CYOA prompt stripping retired in favor of native upstream pruning)* | 🟢 **RETIRED (Companion)**: Decommissioned to defer to upstream MultiHog's native choice pruning and avoid fragile regex parsing of story prose. |
 | **`APP_READY`** | • `index.js` (`setupImagineInterceptor`)<br>• *Upstream MultiHog* | 1. Companion wraps `/imagine` callback | 🟢 **LOW**: Run-once initialization. |
@@ -55,9 +55,8 @@ The following matrix highlights events where **multiple files or upstream MultiH
 When the user switches chats or reloads a chat, multiple asynchronous systems interact with `extensionSettings.rpg_tracker` and the chat metadata. Phase 2 replaced the arbitrary `setTimeout` ladder with a token-invalidated, sequential coordinator:
 
 ```
-T+0ms:    [cyoa-safety-net.js] Abort any active Stage 2 CYOA pass immediately.
+T+0ms:    [cyoa-safety-net.js] Abort any in-flight on-demand CYOA generation immediately.
 T+0ms:    [Upstream MultiHog] onChatChanged begins reading chat metadata and initializing partitions.
-T+0ms:    [index.js] scheduleSync('CHAT_CHANGED', 500) debounced worker armed.
 T+0ms:    [index.js] refreshConciergeActiveContext() triggered.
 T+0ms:    [index.js] token = ++_activeChatChangedToken; arms 500ms settlement timer.
 ─────────────────────────────────────────────────────────────────────────────
@@ -102,22 +101,18 @@ T+150ms:     [index.js] Debounce timer fires after upstream async file writes se
 
 ---
 
-### Timeline: `CHARACTER_MESSAGE_RENDERED` vs `GENERATION_ENDED`
-These events handle post-generation updates. In Phase 2, redundant listeners were eliminated and CYOA generation was unified under a single dispatcher:
+### Timeline: `CHARACTER_MESSAGE_RENDERED` (Post-Turn)
+This is the only post-generation assistant-turn listener. Automated CYOA dispatch (formerly on `CHARACTER_MESSAGE_RENDERED` / `GENERATION_ENDED`) was retired; CYOA now runs only on demand via the Wand menu (`DOM-07`) and `/cyoafix`, `/cyoagen`, `/cyoaretry`.
 
 ```
 Streaming finishes ->
-T+0ms:    [cyoa-safety-net.js] CHARACTER_MESSAGE_RENDERED fires:
-          Calls coordinateCyoaForMessage().
-          If narrator was streaming, defers to GENERATION_ENDED.
-          If narrator finished (or non-streaming), triggers Stage 2 CYOA and records messageId/swipeId.
-T+0ms:    [index.js] CHARACTER_MESSAGE_RENDERED fires:
-          Canonical assistant turn event: scheduleSync('CHARACTER_MESSAGE_RENDERED', 400).
-          setTimeout(600ms): checkAndSyncTierCrossovers() & updateRelationshipSyncUI().
-T+30ms:   [cyoa-safety-net.js] GENERATION_ENDED fires:
-          Calls coordinateCyoaForMessage().
-          If already triggered by CHARACTER_MESSAGE_RENDERED, exits immediately.
-          Otherwise, executes Stage 2 CYOA with complete narrative prose.
+T+0ms:    [index.js] CHARACTER_MESSAGE_RENDERED fires (EVT-07):
+          Ignores type === 'first_message'; aborts if !isAdventureActive().
+          scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)   -> persona / portrait / memo sync.
+          coordinateTierSyncAfterTurn():
+            awaits MultiHog Lorebook Agent (rt_lore_agent_step finish/error) if isRouterRunning(),
+            then checkAndSyncTierCrossovers() & updateRelationshipSyncUI().
+(No CYOA listener fires here. If the user later taps the Wand action, DOM-07 evaluates the latest settled message.)
 ```
 
 ---
@@ -143,7 +138,7 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-01: `APP_READY`
 * **Trigger:** SillyTavern UI and all core/third-party extensions have finished loading and the loader overlay is dismissed.
-* **Registered In:** `index.js` (line 2182)
+* **Registered In:** `index.js` (`initialize`, after `initCyoaSafetyNet`)
 * **Handler:** `setupImagineInterceptor()`
 * **Purpose:** Hijacks `/imagine` slash command callback to inject dynamic aspect ratios for image generation.
 * **Auto-Fire Guarantee:** In `events.js`, `APP_READY` is configured with `autoFireAfterEmit`. If this listener attaches after `APP_READY` has already fired, `eventSource.on` synchronously executes `setupImagineInterceptor()` immediately.
@@ -155,7 +150,7 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-02: `CHAT_RENAMED` (Adventure Rename Guard)
 * **Trigger:** Active chat is renamed (`renameChat` in `script.js`).
-* **Registered In:** `adventure-chat.js` (line 466)
+* **Registered In:** `adventure-chat.js` (`initAdventureChatRenameGuard`)
 * **Registration Method:** `eventSource.makeFirst` (falls back to `eventSource.on`)
 * **Execution Priority:** Guaranteed 1st (`makeFirst` unshifts before upstream MultiHog's listener).
 * **Payload Structure:** `{ avatarId, groupId, oldFileName, newFileName }`
@@ -167,7 +162,7 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-03: `CHAT_RENAMED` (Lorebook Auto-Sync)
 * **Trigger:** Active chat is renamed.
-* **Registered In:** `index.js` (line 2255)
+* **Registered In:** `index.js` (CHAT_RENAMED block, 150ms debounce)
 * **Execution Priority:** Standard FIFO (`eventSource.on`, debounced 150ms).
 * **Handler:** Captures `detail.newFileName` and debounces 150ms before calling `syncCampaignLorebooks({ isAuto: true, chatId: targetChatId })`.
 * **Purpose:** Automatically renames and migrates bound campaign lorebook stacks to match the new chat title after upstream disk migration finishes.
@@ -180,8 +175,8 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-04: `CHAT_CHANGED` (Coordinator — Phase 2 Reconciled)
 * **Trigger:** User switches active chat or current chat is reloaded. Emitted by SillyTavern with `(getCurrentChatId())`.
-* **Registered In:** `index.js` (line 2271; coordinator defined at line 1960)
-* **Handler:** Captures `chatId`, arms a 500ms settlement window, increments `_activeChatChangedToken`, and invokes `runChatChangedCoordinator(activeChatId, token)`.
+* **Registered In:** `index.js` (`runChatChangedCoordinator`)
+* **Handler:** Captures `chatId`, arms a 500ms settlement timer, increments `_activeChatChangedToken`, and invokes `runChatChangedCoordinator(activeChatId, token)`.
 * **Purpose (Phase 2 Reconciliation):**
   1. Awaits 500ms so upstream MultiHog's debounced partition loading settles.
   2. Verifies projection integrity via `checkTrackerProjectionIntegrity` (quarantines damaged partitions if foreign state leaks).
@@ -196,28 +191,26 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-05: `CHAT_CHANGED` (CYOA State Reset — Phase 1 Immediate)
 * **Trigger:** User switches active chat or current chat is reloaded.
-* **Registered In:** `cyoa-safety-net.js` (line 516)
+* **Registered In:** `cyoa-safety-net.js` (`initCyoaSafetyNet`)
 * **Execution Priority:** Synchronous T+0ms (runs immediately without delay).
-* **Handler:** Resets retry tracker, clears pending reminders, aborts active Stage 2 CYOA pass via `abortCyoaGeneration('chat_changed')`.
+* **Handler:** Resets `_wasGenerationStopped` and the attempted message/swipe registers, then aborts any in-flight on-demand CYOA generation via `abortCyoaGeneration('chat_changed')`.
 * **Purpose (Phase 1 Immediate Severance):** Instantly severs the AbortController for any in-flight background CYOA LLM generation or quiet prompt belonging to the *departing* chat.
-* **Blast Radius:** If removed or delayed, a background CYOA generation initiated in Chat A will finish seconds later and append button choices into Chat B's DOM.
+* **Blast Radius:** If removed or delayed, a CYOA generation initiated in Chat A will finish seconds later and append button choices into Chat B's DOM.
 * **Status:** Clean state reset.
 
 ---
 
-### EVT-06: `CHARACTER_MESSAGE_RENDERED` (Relationship Narrative Sync / Canonical Assistant Turn)
-* **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM. Emitted as `(messageId, type)`.
-* **Registered In:** `index.js:2331` (Relationship Narrative Sync & Persona Alignment)
-* **Payload Structure:** `(messageId: number, type?: string)`
-* **Handler:** Schedules `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` to evaluate NPC relationship tier crossovers and active persona synchronization.
-* **Architecture Evolution:** The automated CYOA background dispatcher in `cyoa-safety-net.js` was **retired** in favor of [`DOM-07`](#4-dom-event-delegation-registry-documenton) (Wand Menu & Slash Commands), eliminating race conditions with tool-calling and reasoning models.
-* **Optimization Status:** **OPTIMIZED (Phase 3)**. Dedicated strictly to narrative relationship milestones and persona alignment.
+### EVT-06: `CHARACTER_MESSAGE_RENDERED` [RETIRED] (Formerly CYOA Safety Net Dispatcher)
+* **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM.
+* **Status:** 🔴 **RETIRED (CYOA)**. The automated CYOA dispatcher in `cyoa-safety-net.js` was decommissioned in favor of [`DOM-07`](#dom-07) (Wand Menu & Slash Commands), eliminating race conditions with tool-calling and reasoning models.
+* **Successor:** Relationship Narrative Sync and persona alignment on this event are documented under [`EVT-07`](#evt-07-character_message_rendered-relationship--vitality-sync--pipeline-b), the sole active `CHARACTER_MESSAGE_RENDERED` listener.
+* **Anchor Preserved:** `[CATALOG: EVT-06]` preserved in `cyoa-safety-net.js` for architectural traceability.
 
 ---
 
 ### EVT-07: `CHARACTER_MESSAGE_RENDERED` (Relationship & Vitality Sync — Pipeline B)
 * **Trigger:** SillyTavern finishes rendering an assistant/character message in the DOM.
-* **Registered In:** `index.js` (line 2445)
+* **Registered In:** `index.js` (`coordinateTierSyncAfterTurn` listener)
 * **Payload Structure:** `(messageId: number, type?: string)`
 * **Handler:** Canonical assistant turn event:
   1. **Greeting Guard:** Ignores `type === 'first_message'`.
@@ -232,7 +225,7 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-08: `SETTINGS_UPDATED` (Ruleset & State Sync Coordinator)
 * **Trigger:** Emitted globally by SillyTavern whenever core or any extension persists settings (`saveSettingsDebounced`).
-* **Registered In:** `index.js` (line 2297; coordinator defined at line 2013)
+* **Registered In:** `index.js` (`runSettingsUpdatedCoordinator`)
 * **Handler:** Debounces 600ms and executes `runSettingsUpdatedCoordinator()` protected by the Two-Tier Shield.
 * **The Two-Tier Anti-Recursion Shield:**
   1. **Shield 1 (Self-Inflicted Write Consumption):** `if (isPersistingPbtaChatState()) { clearPersistingPbtaChatState(); return; }`. Consumes and absorbs events generated by Companion's own PbtA state persistence.
@@ -250,29 +243,29 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ### EVT-09: `GENERATION_STARTED` (CYOA Foreground Generation Guard)
 * **Trigger:** Emitted when SillyTavern begins generation for Send, Regenerate, Swipe, Continue, or Impersonate.
-* **Registered In:** `cyoa-safety-net.js` (line 496)
+* **Registered In:** `cyoa-safety-net.js` (`initCyoaSafetyNet`)
 * **Payload Structure:** `(type: string, params: object, dryRun: boolean)`
 * **Handler:**
   1. **Dry-Run Guard:** Ignores token calculation passes (`if (dryRun) return;`).
   2. **Quiet Prompt Guard:** Ignores background API calls from other extensions (`if (type === 'quiet') return;`).
-  3. **Immediate Abort:** Calls `abortCyoaGeneration('generation_started')` to abort the `AbortController` of any in-flight background CYOA LLM request.
+  3. **Immediate Abort:** Calls `abortCyoaGeneration('generation_started')` to abort the `AbortController` of any in-flight on-demand CYOA LLM request.
   4. **State Reset:** Resets `_wasGenerationStopped = false`, `_lastAttemptedMessageId = -1`, `_lastAttemptedSwipeId = -1`.
-* **The "Ghost Swipe" Collision Hazard:** If a user receives a turn without buttons and quickly clicks Swipe or Regenerate, an in-flight background choice generation pass would otherwise finish seconds later and inject buttons meant for the previous abandoned swipe into the new swipe.
+* **The "Ghost Swipe" Collision Hazard:** If a user receives a turn without buttons and quickly clicks Swipe or Regenerate, an in-flight on-demand choice generation pass would otherwise finish seconds later and inject buttons meant for the previous abandoned swipe into the new swipe.
 * **Status:** Clean abort handler with dryRun and quiet filters.
 
 ---
 
 ### EVT-10: `GENERATION_STOPPED` (CYOA Stop Guard & Aborted Message Shield)
 * **Trigger:** User clicks the Stop generation button in SillyTavern UI (`stopGeneration()` in `script.js`).
-* **Registered In:** `cyoa-safety-net.js` (line 508)
+* **Registered In:** `cyoa-safety-net.js` (`initCyoaSafetyNet`)
 * **Execution Priority:** Synchronous T+0ms upon stop emission.
 * **Handler:**
   1. Sets `_wasGenerationStopped = true`.
   2. Resets `_lastAttemptedMessageId = -1` and `_lastAttemptedSwipeId = -1`.
-  3. Aborts active background Stage 2 CYOA requests via `abortCyoaGeneration('generation_stopped')`.
-* **The "Truncated Message Choice Leak" Hazard:** When a user stops generation mid-turn, SillyTavern preserves the partial truncated message and still emits `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED`. Without the `_wasGenerationStopped` shield, the safety net would interpret the truncated text as "missing choices" and start an unwanted choice generation pass on an abandoned turn.
-* **Dual-Layer Stop Defense:** `EVT-10` handles stops during host narrative streaming (Stage 1), while [`DOM-06`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/cyoa-safety-net.js#L526) intercepts stop/cancel clicks during background CYOA generation (Stage 2).
-* **Blast Radius:** Clicking Stop would abort text streaming but allow background Stage 2 CYOA generation to continue and erroneously inject buttons into incomplete messages.
+  3. Aborts any in-flight on-demand CYOA request via `abortCyoaGeneration('generation_stopped')`.
+* **The "Truncated Message Choice Leak" Hazard:** When a user stops generation mid-turn, SillyTavern preserves the partial truncated message and still emits `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED`. Without the `_wasGenerationStopped` shield, a non-forced `coordinateCyoaForMessage` call would interpret the truncated text as "missing choices" and start an unwanted choice generation pass on an abandoned turn. An explicit forced Wand/slash invocation clears the flag and proceeds.
+* **Dual-Layer Stop Defense:** `EVT-10` handles stops during host narrative streaming, while [`DOM-06`](#dom-06) intercepts stop/cancel clicks while an on-demand CYOA generation is in flight.
+* **Blast Radius:** Clicking Stop would abort text streaming but allow an in-flight CYOA generation to continue and erroneously inject buttons into incomplete messages.
 * **Status:** Clean abort handler with aborted message shielding.
 
 ---
@@ -293,15 +286,15 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 
 ## 4. DOM Event Delegation Registry (`$(document).on`)
 
-| Handler ID | Event Namespace & Target Selector | File & Line | Mechanism / Action | Hardening Status |
+| Handler ID | Event Namespace & Target Selector | File | Mechanism / Action | Hardening Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **DOM-01a** | `click.mhc_quickstart_sanitizer`<br>`#rt-quickstart-begin`, `#rt-cr-generate-btn`, `.rt-quickstart-genre-btn` | `index.js:2201` | **Pre-flight Sanitizer (Click):** Before character generation starts, checks if active chat is standard D&D and purges stale PbtA prompts from `stockPrompts`. Halts upstream click asynchronously until cleansing completes. | 🟢 **ACTIVE (Hardened)**: Blocks upstream race condition on generation start. |
-| **DOM-01b** | `keydown.mhc_quickstart_sanitizer`<br>`#rt-quickstart-name`, `#rt-cr-name` | `index.js:2126` | **Pre-flight Sanitizer (Enter Key):** Catches keyboard submissions when user presses Enter inside name input fields. | 🟢 **ACTIVE (Phase 3)**: Guarantees prompt sanitization even when user bypasses mouse clicks. |
-| **DOM-02** | `click.mhc_namerag_qs`<br>`#rt-quickstart-roll-name` | `namerag-hooks.js:532` | **Hijack with Context-Aware Query:** Calls `e.stopImmediatePropagation()`. Extracts `#rt-quickstart-instructions` and gender clues to query NameRAG with 4s timeout. Falls back to offline character generator and emits warning toast on failure. | 🟢 **HARDENED (Context-Aware)**: Timeout added; offline fallback; user notified via toast if NameRAG unavailable. |
-| **DOM-03** | `click.mhc_namerag_cr`<br>`#rt-cr-random-name` | `namerag-hooks.js:564` | **Hijack with Context-Aware Query:** Extracts Character Creator background, appearance, traits, class, and gender to query specific NameRAG candidates with 4s timeout. | 🟢 **HARDENED (Context-Aware)**: Re-enables button on error; emits warning toast. |
-| **DOM-04** | `click.mhc_namerag_ob`<br>`#rt-ob-roll-name` | `namerag-hooks.js:608` | **Hijack with Context-Aware Query:** Same resilient fallback and context query as DOM-02. | 🟢 **HARDENED (Context-Aware)**: Re-enables button on error; emits warning toast. |
-| **DOM-05** | `click.mhc_namerag_begin`<br>`#rt-quickstart-begin` | `namerag-hooks.js:640` | **Pre-fill Observer:** If name field is empty, rolls context-aware NameRAG candidate to seed character creation. | 🟢 **HARDENED (Context-Aware)**: Wrapped in try/catch; falls back gracefully. |
-| **DOM-06** | Native Capture Phase Click<br>`.mes_stop, #mes_stop, .rt-cyoa-cancel-btn` | `cyoa-safety-net.js:410` | **Native `document.addEventListener('click', ..., true)` (Capture Phase):** Catches user clicking Stop anywhere in the UI to immediately abort in-flight Stage 2 CYOA. | 🟢 **CLEAN**: Uses capture phase (`true`). |
-| **DOM-07** | `click.mhc_wand_cyoa`<br>`#mhc_wand_cyoa_fix_reroll`, `#extensionsMenuButton` | `index.js:2283` | **Wand Menu CYOA Fix/Reroll Trigger:** Executes `handleWandCyoaFixOrReroll`. Strictly evaluates latest message in chat (`chat[chat.length - 1]`). If plain numbered markdown choices exist, auto-repairs them into interactive buttons (0 tokens). If missing or already present, triggers choice generator to formulate fresh choices. Fails safely on toolcall system cards or incomplete turns without mutating history. | 🟢 **ACTIVE (Hardened)**: Guarded against toolcall collisions and empty narrator turns. |
+| <a id="dom-01a"></a>**DOM-01a** | `click.mhc_quickstart_sanitizer`<br>`#rt-quickstart-begin`, `#rt-cr-generate-btn`, `.rt-quickstart-genre-btn` | `index.js` | **Pre-flight Sanitizer (Click):** Before character generation starts, checks if active chat is standard D&D and purges stale PbtA prompts from `stockPrompts`. Halts upstream click asynchronously until cleansing completes. | 🟢 **ACTIVE (Hardened)**: Blocks upstream race condition on generation start. |
+| <a id="dom-01b"></a>**DOM-01b** | `keydown.mhc_quickstart_sanitizer`<br>`#rt-quickstart-name`, `#rt-cr-name` | `index.js` | **Pre-flight Sanitizer (Enter Key):** Catches keyboard submissions when user presses Enter inside name input fields. | 🟢 **ACTIVE (Phase 3)**: Guarantees prompt sanitization even when user bypasses mouse clicks. |
+| <a id="dom-02"></a>**DOM-02** | `click.mhc_namerag_qs`<br>`#rt-quickstart-roll-name` | `namerag-hooks.js` | **Hijack with Context-Aware Query:** Calls `e.stopImmediatePropagation()`. Extracts `#rt-quickstart-instructions` and gender clues to query NameRAG with 4s timeout. Falls back to offline character generator and emits warning toast on failure. | 🟢 **HARDENED (Context-Aware)**: Timeout added; offline fallback; user notified via toast if NameRAG unavailable. |
+| <a id="dom-03"></a>**DOM-03** | `click.mhc_namerag_cr`<br>`#rt-cr-random-name` | `namerag-hooks.js` | **Hijack with Context-Aware Query:** Extracts Character Creator background, appearance, traits, class, and gender to query specific NameRAG candidates with 4s timeout. | 🟢 **HARDENED (Context-Aware)**: Re-enables button on error; emits warning toast. |
+| <a id="dom-04"></a>**DOM-04** | `click.mhc_namerag_ob`<br>`#rt-ob-roll-name` | `namerag-hooks.js` | **Hijack with Context-Aware Query:** Same resilient fallback and context query as DOM-02. | 🟢 **HARDENED (Context-Aware)**: Re-enables button on error; emits warning toast. |
+| <a id="dom-05"></a>**DOM-05** | `click.mhc_namerag_begin`<br>`#rt-quickstart-begin` | `namerag-hooks.js` | **Pre-fill Observer:** If name field is empty, rolls context-aware NameRAG candidate to seed character creation. | 🟢 **HARDENED (Context-Aware)**: Wrapped in try/catch; falls back gracefully. |
+| <a id="dom-06"></a>**DOM-06** | Native Capture Phase Click<br>`.mes_stop, #mes_stop, .rt-cyoa-cancel-btn` | `cyoa-safety-net.js` | **Native `document.addEventListener('click', ..., true)` (Capture Phase):** Catches user clicking Stop anywhere in the UI to immediately abort any in-flight on-demand CYOA generation. | 🟢 **CLEAN**: Uses capture phase (`true`). |
+| <a id="dom-07"></a>**DOM-07** | `click.mhc_wand_cyoa`<br>`#mhc_wand_cyoa_fix_reroll`, `#extensionsMenuButton` | `index.js` | **Wand Menu CYOA Fix/Reroll Trigger:** Executes `handleWandCyoaFixOrReroll`. Strictly evaluates latest message in chat (`chat[chat.length - 1]`). If plain numbered markdown choices exist, auto-repairs them into interactive buttons (0 tokens). If missing or already present, triggers choice generator to formulate fresh choices. Fails safely on toolcall system cards or incomplete turns without mutating history. | 🟢 **ACTIVE (Hardened)**: Guarded against toolcall collisions and empty narrator turns. |
 
 

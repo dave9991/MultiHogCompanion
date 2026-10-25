@@ -35,12 +35,12 @@
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **WRK-01** | **Synthetic Cartridge Ruleset Injection** | 🔴 **HIGH**: Upstream lacks any cartridge/ruleset plugin interface. | [`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine) | [`ADR-MP-01 (window.fetch)`](./MONKEYPATCHES.md#adr-mp-01-synthetic-pbta-ruleset-injection-via-windowfetch) | Medium (Requires upstream plugin loader). |
 | **WRK-02** | **Character Creator Macro Poisoning & AST Syntax Errors** | 🟡 **MODERATE**: Upstream prompt contains literal `{{char}}`, `{{user}}`, `{{...}}`. | [`FEAT-06 (NameRAG)`](./FEATURES.md#feat-06-namerag-diverse-protagonist--npc-generator)<br>QuickStart / Card Gen | [`ADR-MP-07 (generateRaw)`](./MONKEYPATCHES.md#adr-mp-07-outgoing-prompt-macro-syntax-sanitizer-generateraw-interception)<br>[`DOM-01a / DOM-01b`](./LISTENERS.md#dom-01a) | High (Upstream escapes its prompt strings). |
-| **WRK-03** | **Stock D&D Settings Pollution & Prompt Bleed** | 🟡 **MODERATE**: Upstream shares single global `stockPrompts` object. | [`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)<br>Standard D&D Play | [`ADR-MP-05 (stockPrompts)`](./MONKEYPATCHES.md#adr-mp-05-in-memory-upstream-settings-cleansing-stockprompts-mutation)<br>[`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator)<br>[`DOM-01a / DOM-01b`](./LISTENERS.md#dom-01a) | High (Upstream scopes prompts by chat). |
-| **WRK-04** | **Chat Rename Inversion & Partition Reset Race** | 🔴 **CRITICAL**: ST reloads chat before firing `CHAT_RENAMED`. | [`FEAT-05 (Lorebook Sync)`](./FEATURES.md#feat-05-dynamic-campaign-lorebook-sync) | [`ADR-MP-06 (Restart Flag)`](./MONKEYPATCHES.md#adr-mp-06-window_mhcpendingfreshrestart-cross-tick-launch-semaphore)<br>[`EVT-02 (makeFirst)`](./LISTENERS.md#evt-02-chat_renamed-early-hook-priority-partition-proof-re-arm)<br>[`EVT-03 (Debounce)`](./LISTENERS.md#evt-03-chat_renamed-debounced-campaign-lorebook-sync) | Low (Core ST event ordering contract). |
-| **WRK-05** | **Unstarted Chat Premature Sync & LLM Triggering** | 🟡 **MODERATE**: Upstream runs background passes on blank chats. | [`FEAT-04 (Rel Sync)`](./FEATURES.md#feat-04-relationship-narrative-sync)<br>[`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine) | [`unstarted-chat-sync-guard.js`](./unstarted-chat-sync-guard.js)<br>[`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator) | High (Upstream adds `isAdventureActive()` check). |
+| **WRK-03** | **Stock D&D Settings Pollution & Prompt Bleed** | 🟡 **MODERATE**: Upstream shares single global `stockPrompts` object. | [`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)<br>Standard D&D Play | [`ADR-MP-05 (stockPrompts)`](./MONKEYPATCHES.md#adr-mp-05-in-memory-upstream-settings-cleansing-stockprompts-mutation)<br>[`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled)<br>[`DOM-01a / DOM-01b`](./LISTENERS.md#dom-01a) | High (Upstream scopes prompts by chat). |
+| **WRK-04** | **Chat Rename Inversion & Partition Reset Race** | 🔴 **CRITICAL**: ST reloads chat before firing `CHAT_RENAMED`. | [`FEAT-05 (Lorebook Sync)`](./FEATURES.md#feat-05-dynamic-campaign-lorebook-sync) | [`ADR-MP-06 (Restart Flag)`](./MONKEYPATCHES.md#adr-mp-06-cross-tick-campaign-restart-coordination-flag)<br>[`EVT-02 (makeFirst)`](./LISTENERS.md#evt-02-chat_renamed-adventure-rename-guard)<br>[`EVT-03 (Debounce)`](./LISTENERS.md#evt-03-chat_renamed-lorebook-auto-sync) | Low (Core ST event ordering contract). |
+| **WRK-05** | **Unstarted Chat Premature Sync & LLM Triggering** | 🟡 **MODERATE**: Upstream runs background passes on blank chats. | [`FEAT-04 (Rel Sync)`](./FEATURES.md#feat-04-relationship-narrative-sync)<br>[`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine) | [`adventure-chat.js`](./adventure-chat.js) (`isChatClean`, `isAdventureActive`)<br>[`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled) | High (Upstream adds `isAdventureActive()` check). |
 | **WRK-06** | **Historical CYOA Context Poisoning [RETIRED]** | ⚪ **RETIRED**: Defer to upstream MultiHog's native `stripOldChoicesFromPrompt`. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | Retired ([`EVT-12`](./LISTENERS.md#evt-12-chat_completion_prompt_ready-retired-formerly-outgoing-cyoa-prompt-sanitizer)) | Retired (Upstream native feature). |
-| **WRK-07** | **Truncated Message Stop Button Choice Injection** | 🟡 **MODERATE**: ST emits message rendered on user stop click. | [`FEAT-03 (CYOA Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback) | [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-abort-hook-for-background-cyoa)<br>[`DOM-06 (Capture Stop)`](./LISTENERS.md#dom-06) | Low (SillyTavern event design choice). |
-| **WRK-08** | **Level-Up & Permadeath Pause Protocol Shield** | 🟡 **MODERATE**: Upstream protocol commands narrative pause without choices. | [`FEAT-03 (CYOA Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback) | [`cyoa-safety-net.js`](./cyoa-safety-net.js) (`isLevelUpPending`, `isProtagonistDead`) | Medium (Upstream includes explicit turn pause flag). |
+| **WRK-07** | **Truncated Message Stop Button Choice Injection** | 🟡 **MODERATE**: ST emits message rendered on user stop click. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-cyoa-stop-guard--aborted-message-shield)<br>[`DOM-06 (Capture Stop)`](./LISTENERS.md#dom-06) | Low (SillyTavern event design choice). |
+| **WRK-08** | **Level-Up & Permadeath Pause Protocol Shield** | 🟡 **MODERATE**: Upstream protocol commands narrative pause without choices. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`cyoa-safety-net.js`](./cyoa-safety-net.js) (`isLevelUpPending`, `isProtagonistDead`) | Medium (Upstream includes explicit turn pause flag). |
 
 ---
 
@@ -95,7 +95,7 @@ Upstream MultiHog escapes its instruction literals or SillyTavern provides a `ra
 
 * **Target Surface:** Upstream Shared Settings (`extensionSettings.rpg_tracker.stockPrompts`)
 * **Associated Feature:** [`FEAT-01 (PbtA Cartridge Engine)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)
-* **Associated Mechanisms:** [`ADR-MP-05 (stockPrompts Mutation)`](./MONKEYPATCHES.md#adr-mp-05-in-memory-upstream-settings-cleansing-stockprompts-mutation), [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator), [`DOM-01a / DOM-01b`](./LISTENERS.md#dom-01a)
+* **Associated Mechanisms:** [`ADR-MP-05 (stockPrompts Mutation)`](./MONKEYPATCHES.md#adr-mp-05-in-memory-upstream-settings-cleansing-stockprompts-mutation), [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled), [`DOM-01a / DOM-01b`](./LISTENERS.md#dom-01a)
 
 #### The Upstream Defect
 Upstream MultiHog stores all system prompts in a single shared object: `extensionSettings.rpg_tracker.stockPrompts`. When running a PbtA campaign, Companion writes PbtA system prompts into this object. When the user later switches to a standard D&D 5e chat or opens the QuickStart drawer, stale PbtA instructions remain in `stockPrompts` and contaminate D&D gameplay and character creation.
@@ -117,7 +117,7 @@ Upstream MultiHog scopes its `stockPrompts` per chat partition rather than globa
 
 * **Target Surface:** SillyTavern Chat Switch vs Upstream Partition Migration (`script.js:renameChat`)
 * **Associated Feature:** [`FEAT-05 (Dynamic Lorebook Sync)`](./FEATURES.md#feat-05-dynamic-campaign-lorebook-sync)
-* **Associated Mechanisms:** [`ADR-MP-06 (_mhcPendingFreshRestart Flag)`](./MONKEYPATCHES.md#adr-mp-06-window_mhcpendingfreshrestart-cross-tick-launch-semaphore), [`EVT-02 (makeFirst Priority)`](./LISTENERS.md#evt-02-chat_renamed-early-hook-priority-partition-proof-re-arm), [`EVT-03 (150ms Settlement Window)`](./LISTENERS.md#evt-03-chat_renamed-debounced-campaign-lorebook-sync)
+* **Associated Mechanisms:** [`ADR-MP-06 (_mhcPendingFreshRestart Flag)`](./MONKEYPATCHES.md#adr-mp-06-cross-tick-campaign-restart-coordination-flag), [`EVT-02 (makeFirst Priority)`](./LISTENERS.md#evt-02-chat_renamed-adventure-rename-guard), [`EVT-03 (150ms Settlement Window)`](./LISTENERS.md#evt-03-chat_renamed-lorebook-auto-sync)
 
 #### The Upstream Defect
 In SillyTavern's `renameChat()` (`script.js`), it executes `await reloadCurrentChat()` *before* emitting `CHAT_RENAMED`. This means `CHAT_CHANGED` fires *first*, momentarily presenting an unmigrated partition to upstream MultiHog. Upstream risks seeing an unfamiliar key and initializing a blank partition, wiping campaign state.
@@ -136,15 +136,15 @@ SillyTavern emits `CHAT_RENAMED` *before* reloading the chat DOM, or exposes an 
 
 ### WRK-05: Unstarted Chat Premature Sync & LLM Triggering (Upstream Premature Activation Defect)
 
-* **Target Surface:** MultiHog Background Workers on New Chats (`unstarted-chat-sync-guard.js`)
+* **Target Surface:** MultiHog Background Workers on New Chats (guarded by `adventure-chat.js`)
 * **Associated Feature:** [`FEAT-04 (Relationship Sync)`](./FEATURES.md#feat-04-relationship-narrative-sync), [`FEAT-01 (PbtA Cartridge Engine)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)
-* **Associated Mechanisms:** [`unstarted-chat-sync-guard.js`](./unstarted-chat-sync-guard.js), [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-primary-reconciliation-coordinator)
+* **Associated Mechanisms:** [`adventure-chat.js`](./adventure-chat.js) (`isChatClean`, `isAdventureActive`), [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled)
 
 #### The Upstream Defect
 When a user opens a brand new, empty chat before generating Turn 1, background listeners and auto-sync systems in MultiHog and extensions attempt to evaluate party rosters, relationship meters, and auto-apply prompts against an empty message array. This triggers unnecessary LLM calls and writes default state into unstarted sessions.
 
 #### Companion Mitigation
-Companion provides `unstarted-chat-sync-guard.js` with `isChatClean()` and `isAdventureActive()` guards. Relationship scans, PbtA setup assertions, and background LLM passes are strictly suppressed until the user has sent their first turn.
+Companion provides `isChatClean()` and `isAdventureActive()` guards in `adventure-chat.js`. Relationship scans, PbtA setup assertions, and background LLM passes are strictly suppressed until the user has sent their first turn.
 
 #### Blast Radius If Removed
 Switching to an empty chat triggers ghost LLM requests, consumes user token budget, and generates unrequested relationship metadata before the story begins.
@@ -174,19 +174,19 @@ Companion retired its runtime regex prompt-stripping interceptors to:
 ### WRK-07: Truncated Message Stop Button Choice Injection (Host Post-Stop Event Hazard)
 
 * **Target Surface:** SillyTavern Post-Stop Event Bus (`script.js:stopGeneration`)
-* **Associated Feature:** [`FEAT-03 (CYOA Fast Single-Stage Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback)
-* **Associated Mechanisms:** [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-abort-hook-for-background-cyoa), [`DOM-06 (Capture Phase Stop Listener)`](./LISTENERS.md#dom-06)
+* **Associated Feature:** [`FEAT-03 (CYOA On-Demand Choice Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair)
+* **Associated Mechanisms:** [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-cyoa-stop-guard--aborted-message-shield), [`DOM-06 (Capture Phase Stop Listener)`](./LISTENERS.md#dom-06)
 
 #### The Host Event Hazard
-When a user clicks Stop mid-turn, SillyTavern halts streaming and commits the truncated partial message to the chat DOM. **Crucially, SillyTavern then proceeds to emit `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED` for that partial message!** Downstream choice generators interpret the absence of choices as a failure and fire an unwanted LLM call to append buttons to an aborted, incomplete sentence.
+When a user clicks Stop mid-turn, SillyTavern halts streaming and commits the truncated partial message to the chat DOM. **Crucially, SillyTavern then proceeds to emit `CHARACTER_MESSAGE_RENDERED` and `GENERATION_ENDED` for that partial message!** A choice generator that interprets the absence of choices as a failure would fire an unwanted LLM call to append buttons to an aborted, incomplete sentence. Since the CYOA subsystem is now on-demand (Wand / slash commands), the remaining exposure is an in-flight generation, or a non-forced invocation against the truncated turn.
 
 #### Companion Mitigation
-1. `EVT-10` (`GENERATION_STOPPED`) sets `_wasGenerationStopped = true` at T+0ms and aborts background quiet prompts.
-2. `DOM-06` uses native capture-phase event listening on `.mes_stop` to instantly sever in-flight CYOA controllers before upstream's click handlers run.
-3. The CYOA coordinator checks `_wasGenerationStopped` and drops choice processing on stopped turns.
+1. `EVT-10` (`GENERATION_STOPPED`) sets `_wasGenerationStopped = true` at T+0ms and aborts any in-flight on-demand CYOA generation.
+2. `DOM-06` uses native capture-phase event listening on `.mes_stop` (and the CYOA cancel button) to instantly sever in-flight CYOA controllers before upstream's click handlers run.
+3. `coordinateCyoaForMessage` checks `_wasGenerationStopped` and drops non-forced choice processing on stopped turns (an explicit forced Wand/slash invocation clears the flag and proceeds).
 
 #### Blast Radius If Removed
-Clicking Stop aborts the narrator streaming text, but seconds later a background choice generator completes and injects interactive buttons onto an abandoned, half-formed sentence.
+Clicking Stop aborts the narrator streaming text, but an in-flight choice generation completes and injects interactive buttons onto an abandoned, half-formed sentence.
 
 #### Retirement Criteria
 SillyTavern suppresses post-generation message events when generation is terminated via `stopGeneration()`.
@@ -196,7 +196,7 @@ SillyTavern suppresses post-generation message events when generation is termina
 ### WRK-08: Level-Up & Permadeath Pause Protocol Shield
 
 * **Target Surface:** Upstream `<level_up_protocol>` (`constants.js#L515`) and Deceased Character States
-* **Associated Feature:** [`FEAT-03 (CYOA Fast Single-Stage Pipeline)`](./FEATURES.md#feat-03-cyoa-fast-single-stage-pipeline-with-safety-net-fallback)
+* **Associated Feature:** [`FEAT-03 (CYOA On-Demand Choice Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair)
 * **Associated Mechanisms:** [`cyoa-safety-net.js`](./cyoa-safety-net.js) (`isLevelUpPending`, `isProtagonistDead`)
 
 #### The Upstream Defect / Protocol Collision
@@ -206,11 +206,11 @@ Upstream MultiHog's `<level_up_protocol>` commands the narrator to immediately h
 3. *"Output nothing after this block; pause until the player responds."*
 4. *"Never auto-resolve or narrate past a pending level-up."*
 
-Because the narrator obeys protocol and outputs zero `<choices>` markup, Companion's CYOA Safety Net (`FEAT-03`) erroneously misinterprets the turn as a failed generation. It automatically invokes Stage 2 fallback and appends standard story actions (e.g. `<button>⚔️ Press on into the crypt</button>`), tempting players to click a story action and narrate past the pending level-up without applying stat/feat advancements. A similar collision occurs when a character suffers permanent death (`Status: Dead`), where the safety net generates death saving throw choices for an already deceased character.
+Because the narrator obeys protocol and outputs zero `<choices>` markup, a Wand / slash CYOA invocation (`FEAT-03`) on that turn would see "no choices", generate fresh ones, and append standard story actions (e.g. `<button>⚔️ Press on into the crypt</button>`), tempting players to click a story action and narrate past the pending level-up without applying stat/feat advancements. A similar collision occurs when a character suffers permanent death (`Status: Dead`), where on-demand CYOA generation would produce death saving throw choices for an already deceased character.
 
 #### Companion Mitigation
 `coordinateCyoaForMessage` inspects message prose and state memo before evaluating choice generation:
-1. **Level-Up Guard (`isLevelUpPending`)**: Detects `⬆ LEVEL UP`, `Awaiting your choice before the story continues`, or PbtA `Level Up! Choose an Advance:`. If detected, CYOA generation is safely paused, returning `false` with zero LLM overhead.
+1. **Level-Up Guard (`isLevelUpPending`)**: Detects `⬆ LEVEL UP`, `Awaiting your choice before the story continues`, or PbtA `Level Up! Choose an Advance:`. If detected (and the call is not `force`d), CYOA generation is safely paused, returning `false` with zero LLM overhead.
 2. **Permadeath Guard (`isProtagonistDead`)**: Scans `[CHARACTER]` for `Status: Dead/Deceased/Slain/Killed`. If true, button generation is completely suppressed, preserving the final ending narrative.
 
 #### Blast Radius If Removed

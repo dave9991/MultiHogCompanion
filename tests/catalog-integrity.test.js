@@ -146,4 +146,90 @@ for (const tag of requiredCatalogTags) {
 }
 console.log(`✓ All ${requiredCatalogTags.length} required [CATALOG: ...] anchor tags verified in source code`);
 
+// 8. Verify documentation references resolve (guards against catalog drift after refactors/retirements)
+console.log('Verifying catalog/doc file references and cross-doc anchors resolve...');
+const docFiles = [
+    'FEATURES.md', 'WORKAROUNDS.md', 'LISTENERS.md', 'MONKEYPATCHES.md',
+    ...fs.readdirSync(path.join(extensionRoot, 'docs')).filter(f => f.endsWith('.md')).map(f => path.join('docs', f)),
+];
+
+// GitHub-style heading slug
+const slugify = (h) => h.trim().toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s/g, '-');
+
+const anchorsByDoc = {};
+for (const rel of docFiles) {
+    const text = fs.readFileSync(path.join(extensionRoot, rel), 'utf8');
+    const anchors = new Set();
+    for (const m of text.matchAll(/^#{1,6}\s+(.+)$/gm)) anchors.add(slugify(m[1]));
+    for (const m of text.matchAll(/<a id="([^"]+)"><\/a>/g)) anchors.add(m[1]);
+    anchorsByDoc[rel] = anchors;
+}
+
+// Locate a bare filename in this extension, the upstream framework or SillyTavern core (if checked out)
+const searchRoots = [
+    extensionRoot,
+    path.resolve(extensionRoot, '..', 'SillyTavern-MultihogDnDFramework'),
+    path.resolve(extensionRoot, '..', '..', 'st-source', 'public'),
+].filter(p => fs.existsSync(p));
+const basenameCache = new Map();
+function existsAnywhere(name) {
+    if (basenameCache.has(name)) return basenameCache.get(name);
+    const walk = (dir, depth) => {
+        if (depth > 6) return false;
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (e.name === 'node_modules' || e.name === '.git') continue;
+            if (e.isFile() && e.name === name) return true;
+            if (e.isDirectory() && walk(path.join(dir, e.name), depth + 1)) return true;
+        }
+        return false;
+    };
+    const found = searchRoots.some(r => walk(r, 0));
+    basenameCache.set(name, found);
+    return found;
+}
+const upstreamCheckedOut = searchRoots.length > 1;
+
+for (const rel of docFiles) {
+    const docPath = path.join(extensionRoot, rel);
+    const text = fs.readFileSync(docPath, 'utf8');
+
+    // 8a. Markdown links to local files / anchors
+    for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+        let target = m[1];
+        if (/^(https?:|mailto:)/.test(target)) continue;
+        const [filePart, anchor] = target.split('#');
+        let resolved = docPath;
+        if (filePart) {
+            resolved = filePart.startsWith('file://')
+                ? decodeURIComponent(filePart.slice('file://'.length))
+                : path.resolve(path.dirname(docPath), filePart);
+            // Absolute file:// links written for another checkout location: re-root by extension folder name
+            if (filePart.startsWith('file://') && !fs.existsSync(resolved)) {
+                const idx = resolved.indexOf('/MultiHogCompanion/');
+                if (idx >= 0) resolved = path.join(extensionRoot, resolved.slice(idx + '/MultiHogCompanion/'.length));
+                else continue; // link into upstream/ST trees: checked via basename scan below, not here
+            }
+            assert.ok(fs.existsSync(resolved), `${rel}: link target "${target}" does not exist`);
+        }
+        if (anchor && /\.md$/.test(resolved)) {
+            const key = path.relative(extensionRoot, resolved);
+            if (anchorsByDoc[key]) {
+                assert.ok(anchorsByDoc[key].has(anchor), `${rel}: anchor "#${anchor}" not found in ${key}`);
+            }
+        }
+    }
+
+    // 8b. Backticked `*.js` names must exist in the extension (or upstream/ST trees when checked out)
+    for (const m of text.matchAll(/`([A-Za-z0-9_-]+\.js)(?::\d+)?`/g)) {
+        const name = m[1];
+        if (fs.existsSync(path.join(extensionRoot, name))) continue;
+        if (upstreamCheckedOut && existsAnywhere(name)) continue;
+        if (!upstreamCheckedOut) continue; // cannot verify upstream/ST names without the sibling checkouts
+        assert.fail(`${rel}: references \`${name}\`, which exists neither in MultiHogCompanion nor in the upstream/ST source trees (stale catalog entry?)`);
+    }
+}
+console.log(`✓ File references and cross-doc anchors verified across ${docFiles.length} documents`);
+
 console.log('--- ALL ARCHITECTURE & CATALOG INTEGRITY CHECKS PASSED CLEANLY! ---');

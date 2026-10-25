@@ -494,6 +494,12 @@ export async function forceRenderTrackerView(s, chatId, memo, { persist = false 
         }
     }
 
+    // 4b. Decorate XP progress bars if ready for level up
+    try {
+        const { decorateXpBarsForLevelUp } = await import('./level-up-runner.js');
+        decorateXpBarsForLevelUp();
+    } catch (_) {}
+
     if (persist) {
         // 5. State manager
         try {

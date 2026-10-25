@@ -1868,7 +1868,7 @@ async function initUI() {
 }
 
 /**
- * Injects the MultiHog Companion CYOA Fix / Reroll button into SillyTavern's Wand menu.
+ * Injects the MultiHog Companion CYOA Fix / Reroll and Level-Up / Respec buttons into SillyTavern's Wand menu.
  */
 export function initWandMenu() {
     if (typeof document === 'undefined') return;
@@ -1886,7 +1886,156 @@ export function initWandMenu() {
         `;
         wandContainer.appendChild(btn);
     }
+
+    // [CATALOG: FEAT-10] Dynamic Level-Up / Respec Wand item
+    let levelUpBtn = document.getElementById('mhc_wand_level_up_respec');
+    if (!levelUpBtn) {
+        levelUpBtn = document.createElement('div');
+        levelUpBtn.id = 'mhc_wand_level_up_respec';
+        levelUpBtn.classList.add('list-group-item', 'flex-container', 'flexGap5');
+        wandContainer.appendChild(levelUpBtn);
+    }
+
+    // Inspect active eligibility to determine label & icon
+    try {
+        const rpgSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
+            || globalThis.extension_settings?.rpg_tracker
+            || {};
+        const curMemo = rpgSettings.currentMemo
+            || (typeof document !== 'undefined' ? document.getElementById('rpg-tracker-memo')?.value : null)
+            || '';
+        import('./level-up-runner.js').then(({ evaluateLevelUpEligibility }) => {
+            const status = evaluateLevelUpEligibility(curMemo);
+            if (status.eligible) {
+                levelUpBtn.title = 'Milestone reached! Open Level-Up Desk to advance character';
+                levelUpBtn.setAttribute('data-is-level-up', 'true');
+                levelUpBtn.innerHTML = `
+                    <div class="fa-solid fa-circle-arrow-up extensionsMenuExtensionButton" style="color: #fbbf24;"></div>
+                    <span>⬆ Level Up Available (Lvl ${status.currentLevel} → ${status.nextLevel})</span>
+                `;
+            } else {
+                levelUpBtn.title = 'Review build, tweak feats, or adjust stats with the Leveling Concierge';
+                levelUpBtn.setAttribute('data-is-level-up', 'false');
+                levelUpBtn.innerHTML = `
+                    <div class="fa-solid fa-arrows-rotate extensionsMenuExtensionButton"></div>
+                    <span>Respec / Edit Character Sheet</span>
+                `;
+            }
+        }).catch(() => {});
+    } catch (_) {}
 }
+
+/**
+ * Launches the autonomous Level-Up / Respec Concierge modal.
+ *
+ * @param {object} [options={}]
+ * @param {boolean} [options.isRespec=false] Whether to run in respec mode.
+ */
+export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
+    const s = getSettings();
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const chatId = ctx?.chatId || s.currentChatId || 'default';
+    
+    // Upstream MultiHog DnD Framework stores its active memo & partitions in extension_settings.rpg_tracker
+    const rpgSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
+        || globalThis.extension_settings?.rpg_tracker
+        || ctx?.extensionSettings?.rpg_tracker
+        || {};
+    const currentMemo = rpgSettings.currentMemo
+        || (typeof document !== 'undefined' ? document.getElementById('rpg-tracker-memo')?.value : null)
+        || s.currentMemo
+        || '';
+
+    const { ensureChatDossier, syncDossierToWorldInfoBook } = await import('./level-up-scaffold.js');
+    const { getCanonicalDndProgression, hasProgressionBlueprint, generateProgressionBlueprintViaConcierge } = await import('./level-up-blueprint.js');
+    const { evaluateLevelUpEligibility, decorateXpBarsForLevelUp } = await import('./level-up-runner.js');
+    const { openLevelUpModal } = await import('./level-up-ui.js');
+
+    const dossier = ensureChatDossier(chatId, s, { memo: currentMemo });
+    const isPbta = isPbtaChat(chatId, rpgSettings, s)
+        || isPbtAActive(chatId, rpgSettings, s)
+        || dossier.meta?.systemKey === 'pbta'
+        || !!dossier.protagonist?.isPbta
+        || !!dossier.protagonist?.playbook;
+
+    const eligibility = evaluateLevelUpEligibility(currentMemo, isPbta ? 'pbta' : dossier.meta?.systemKey);
+
+    let blueprintPromise = null;
+
+    // If PbtA, bypass 1–20 D&D progression blueprint generation
+    if (isPbta) {
+        dossier.progressionBlueprint = null;
+        if (dossier.meta) {
+            dossier.meta.systemKey = 'pbta';
+            if (!dossier.meta.systemLabel || dossier.meta.systemLabel.includes('5e')) {
+                dossier.meta.systemLabel = 'PbtA Narrative Engine';
+            }
+        }
+    } else if (!hasProgressionBlueprint(dossier)) {
+        const canonical = getCanonicalDndProgression(dossier.protagonist?.class);
+        if (canonical) {
+            dossier.progressionBlueprint = canonical;
+        } else {
+            // Kick off async Concierge generation without blocking modal display
+            blueprintPromise = generateProgressionBlueprintViaConcierge({
+                character: dossier.protagonist,
+                genre: dossier.meta?.genre || 'fantasy',
+                worldRules: dossier.meta?.systemLabel || '',
+            }).then(bp => {
+                if (bp) {
+                    dossier.progressionBlueprint = bp;
+                    if (s.chatStates && chatId) {
+                        s.chatStates[chatId] = s.chatStates[chatId] || {};
+                        s.chatStates[chatId].companionDossier = dossier;
+                    }
+                    if (ctx?.chat_metadata) {
+                        ctx.chat_metadata.mhc_dossier = dossier;
+                        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
+                    }
+                    if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext?.()?.saveSettingsDebounced === 'function') {
+                        SillyTavern.getContext().saveSettingsDebounced();
+                    }
+                }
+                return bp;
+            });
+        }
+    }
+
+    // Ensure Campaign_<ChatTitle> World Info Lorebook is synced
+    syncDossierToWorldInfoBook(chatId, dossier).catch(() => {});
+
+    // If character does not have sufficient XP to level up, enforce Respec mode
+    const effectiveIsRespec = isRespec || !eligibility.eligible;
+
+    const targetLevel = isPbta
+        ? null
+        : (effectiveIsRespec
+            ? (dossier.protagonist?.level || eligibility.currentLevel || 1)
+            : (eligibility.nextLevel || eligibility.currentLevel + 1 || 2));
+
+    // Two-Stage Progression Flow:
+    // Stage 1 (Class Definition) is presented if an invented/homebrew D&D class does not yet have a progression codex.
+    // Once the codex exists (or for canonical classes), it goes straight to Stage 2 (Level Up / Respec).
+    const canonicalProg = getCanonicalDndProgression(dossier.protagonist?.class);
+    const hasBlueprintAlready = hasProgressionBlueprint(dossier) || !!canonicalProg;
+    const initialStage = (!isPbta && !hasBlueprintAlready) ? 1 : 2;
+
+    openLevelUpModal({
+        chatId,
+        dossier,
+        blueprint: dossier.progressionBlueprint,
+        blueprintPromise,
+        targetLevel,
+        isRespec: effectiveIsRespec,
+        initialStage,
+        rpgSettings,
+        onComplete: () => {
+            decorateXpBarsForLevelUp(isPbta);
+            initWandMenu();
+        },
+    });
+}
+
 
 
 // ── PbtA Detection & State Recovery ──────────────────────────────────────────────
@@ -2145,6 +2294,58 @@ async function runInitialLoadCoordinator() {
 }
 
 /**
+ * Waits for MultiHog Lorebook Agent completion if actively running.
+ * @param {number} [timeoutMs=30000]
+ * @returns {Promise<void>}
+ */
+export async function waitForLoreAgentCompletion(timeoutMs = 30000) {
+    let isRunning = false;
+    try {
+        const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
+        isRunning = typeof router.isRouterRunning === 'function' && router.isRouterRunning();
+    } catch (_) {}
+
+    if (!isRunning) return;
+    if (typeof document === 'undefined') return;
+
+    return new Promise(resolve => {
+        let timer = null;
+        const handler = e => {
+            const detail = e.detail;
+            if (detail?.metadata?.source === 'lorebook_agent' && (detail.type === 'finish' || detail.type === 'error')) {
+                cleanup();
+                resolve();
+            }
+        };
+
+        const cleanup = () => {
+            if (timer) clearTimeout(timer);
+            try {
+                document.removeEventListener('rt_lore_agent_step', handler);
+            } catch (_) {}
+        };
+
+        timer = setTimeout(() => {
+            cleanup();
+            resolve();
+        }, timeoutMs);
+
+        document.addEventListener('rt_lore_agent_step', handler);
+    });
+}
+
+/**
+ * Deterministic turn coordinator: waits for Lorebook Agent if running,
+ * then executes tier crossover evaluation and refreshes UI.
+ */
+export async function coordinateTierSyncAfterTurn() {
+    if (!isAdventureActive()) return;
+    await waitForLoreAgentCompletion(30000);
+    await checkAndSyncTierCrossovers();
+    updateRelationshipSyncUI();
+}
+
+/**
  * Extension entry point.
  */
 jQuery(async () => {
@@ -2360,6 +2561,22 @@ jQuery(async () => {
         });
     });
 
+    $(document).off('click.mhc_level_up_xp', '.mhc-xp-level-up-ready');
+    // [CATALOG: DOM-08] See LISTENERS.md — XP Bar Level-Up Trigger
+    $(document).on('click.mhc_level_up_xp', '.mhc-xp-level-up-ready', async function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        await launchLevelUpOrRespecDesk({ isRespec: false });
+    });
+
+    $(document).off('click.mhc_wand_level_up', '#mhc_wand_level_up_respec');
+    // [CATALOG: DOM-09] See LISTENERS.md — Wand Menu Level-Up / Respec Trigger
+    $(document).on('click.mhc_wand_level_up', '#mhc_wand_level_up_respec', async function (e) {
+        e.preventDefault();
+        const isLevelUp = this.getAttribute('data-is-level-up') === 'true';
+        await launchLevelUpOrRespecDesk({ isRespec: !isLevelUp });
+    });
+
 
     let _chatRenamedTimer = null;
     // [CATALOG: EVT-03]
@@ -2394,57 +2611,6 @@ jQuery(async () => {
             void runChatChangedCoordinator(activeChatId, token);
         }, 500);
     });
-/**
- * Waits for MultiHog Lorebook Agent completion if actively running.
- * @param {number} [timeoutMs=30000]
- * @returns {Promise<void>}
- */
-export async function waitForLoreAgentCompletion(timeoutMs = 30000) {
-    let isRunning = false;
-    try {
-        const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
-        isRunning = typeof router.isRouterRunning === 'function' && router.isRouterRunning();
-    } catch (_) {}
-
-    if (!isRunning) return;
-    if (typeof document === 'undefined') return;
-
-    return new Promise(resolve => {
-        let timer = null;
-        const handler = e => {
-            const detail = e.detail;
-            if (detail?.metadata?.source === 'lorebook_agent' && (detail.type === 'finish' || detail.type === 'error')) {
-                cleanup();
-                resolve();
-            }
-        };
-
-        const cleanup = () => {
-            if (timer) clearTimeout(timer);
-            try {
-                document.removeEventListener('rt_lore_agent_step', handler);
-            } catch (_) {}
-        };
-
-        timer = setTimeout(() => {
-            cleanup();
-            resolve();
-        }, timeoutMs);
-
-        document.addEventListener('rt_lore_agent_step', handler);
-    });
-}
-
-/**
- * Deterministic turn coordinator: waits for Lorebook Agent if running,
- * then executes tier crossover evaluation and refreshes UI.
- */
-export async function coordinateTierSyncAfterTurn() {
-    if (!isAdventureActive()) return;
-    await waitForLoreAgentCompletion(30000);
-    await checkAndSyncTierCrossovers();
-    updateRelationshipSyncUI();
-}
 
     // [CATALOG: EVT-07]
     // Canonical assistant turn listener: executes once the message is committed to DOM

@@ -43,6 +43,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 | **FEAT-07** | **Media & Aspect-Ratio Bridge** | [`index.js`](./index.js) (`setupImagineInterceptor`) | None | [`EVT-01`](./LISTENERS.md#evt-01-app_ready) | [`ADR-MP-02`](./MONKEYPATCHES.md#adr-mp-02-slash-command-callback-wrapping-imagine) |
 | **FEAT-08** | **Partition History Integrity Guard** | [`history-integrity-guard.js`](./history-integrity-guard.js) | None | Slash Command `/mhc-history-check` | None (Direct File / Storage Inspection) |
 | **FEAT-09** | **D&D 5e & PbtA Unified Subfooter Alignment Engine** | [`dnd-fixes.js`](./dnd-fixes.js)<br>[`pbta-ruleset.js`](./pbta-ruleset.js) | None | [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled) | None (Pure MultiHog Settings API) |
+| **FEAT-10** | **Autonomous Level-Up Concierge & Class Progression Codex** | [`level-up-runner.js`](./level-up-runner.js)<br>[`level-up-ui.js`](./level-up-ui.js)<br>[`level-up-blueprint.js`](./level-up-blueprint.js)<br>[`level-up-scaffold.js`](./level-up-scaffold.js) | [`WRK-08`](./WORKAROUNDS.md#wrk-08-level-up--permadeath-pause-protocol-shield) | [`DOM-08`](./LISTENERS.md#dom-08)<br>[`DOM-09`](./LISTENERS.md#dom-09) | None (Pure MultiHog Settings & State Memo API) |
 
 ---
 
@@ -153,3 +154,22 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
   * **100% Native MultiHog Overrides:** Stored directly in MultiHog's `customSyspromptLibrary` (`unlocked_base`) and `cyoaConfig.customPromptText` with zero monkeypatching.
   * **Transparent Controls:** Dedicated drawer under the Ruleset tab with real-time status (`● Applied` / `○ Stock Default`), enabled toggle, and one-click `[Reapply Fixes]` / `[Revert to Stock]` actions.
 * **Associated Mechanisms:** Pure MultiHog Settings API and [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled).
+
+---
+
+### FEAT-10: Autonomous Level-Up Concierge & Class Progression Codex
+* **Overview:** Replaces upstream MultiHog's prompt-halting level-up protocol with an out-of-band, deterministic advancement engine and 1–20 class progression codex.
+* **Core Capabilities:**
+  * **Prompt Sanitization:** Disables `syspromptModules.level_up_protocol` across all chats, freeing the storyteller LLM from character sheet accounting and preventing mid-sentence narrative disruption.
+  * **Deterministic Detection:** Code-level XP evaluation against thresholds (D&D 5e: 300, 900, 2,700...) or PbtA rollover buckets (`0/5`).
+  * **Unobtrusive UI Triggers:** XP bar pulses gold with a clickable `[ ⬆ Level Up Available ]` badge (`DOM-08`), and the Wand menu dynamically alternates between `⬆ Level Up` and `🔄 Respec` (`DOM-09`).
+  * **Auto-Scaffolding Dossier Stub:** Instantly generates a campaign record for unconfigured or Instant Action chats without requiring Session Zero.
+  * **1–20 Class Progression Codex (D&D Lite):** Employs a streamlined "D&D Lite" single-track archetype model without rigid branching subclass trees. Level 3 grants an iconic Archetype Specialization feature (e.g. Martial Mastery, Primal Instincts, Arcane Savant), while unique thematic flavor (Totem Warrior, Assassin, Eldritch traits) is granted dynamically via Feats and the Leveling Concierge. Completely avoids upstream memo syntax corruption.
+  * **Two-Stage Progression Architecture (Stage 1 Codex <-> Stage 2 Desk):** Separates macro class architecture from micro level-up advancement:
+    * **Stage 1 (Class Definition & 1–20 Codex):** For new or homebrew classes, players first review the complete 1–20 progression roadmap table, edit Hit Dice or class names, and converse with the Class Architect Concierge (`[UPDATE_LEVEL: ...]`, `[SET_HIT_DIE: ...]`) to live-update the table before advancing.
+    * **Stage 2 (Level Up / Respec Desk):** Focuses on immediate advancement—HP gain (average vs roll), ASI/Feats, current level perks, party lockstep growth, and active trait tuning.
+    * **Seamless Two-Way Navigation:** Established characters go straight to Stage 2, but a prominent header button (`[📜 Class Definition & Roadmap]`) allows toggling back to Stage 1 at any time. Clicking `Proceed to Level Up / Respec ➔` returns smoothly to Stage 2 with all changes synchronized.
+  * **Hybrid Review Dossier & Leveling Concierge:** Interactive modal for HP gain (average vs roll), ASI/Feats, class perks, party sync, and an embedded conversational Leveling Guide with dynamic boon granting (`[ADD_FEATURE: ...]`) and surgical State Memo patching.
+  * **PbtA Playbook Tuning & Strict Ruleset Isolation:** In PbtA narrative campaigns, the desk dynamically morphs into the **Playbook Tuning Desk** (or **Playbook Advancement Desk**). It displays Harm Capacity (e.g. 0/4) and Armor rather than Hit Points, lists active Playbook Moves rather than D&D features, bans all D20/D&D mechanics (no Hit Dice, no numeric levels, no spell slots, no DC/saving throws), and runs a specialized PbtA Playbook Guide Concierge.
+* **Associated Mechanisms:** [`DOM-08`](./LISTENERS.md#dom-08), [`DOM-09`](./LISTENERS.md#dom-09), and [`WRK-08`](./WORKAROUNDS.md#wrk-08-level-up--permadeath-pause-protocol-shield).
+

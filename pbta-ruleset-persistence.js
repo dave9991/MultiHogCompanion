@@ -600,7 +600,7 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
         weapon_proficiencies: true,
         attacks_per_round: true,
         saving_throws: true,
-        level_up_protocol: true,
+        level_up_protocol: false, // [CATALOG: FEAT-10] Suppressed in favor of Autonomous Level-Up Concierge
         homebrew_and_custom_classes: true,
         resting: true,
         loot: true,

@@ -194,7 +194,7 @@ export const CORE_DND_PROGRESSIONS = {
         levels: {
             1: { features: ['Bardic Inspiration (d6, CHA/long rest)', 'Spellcasting'], spellSlots: { 1: 2 }, profBonus: 2 },
             2: { features: ['Jack of All Trades (+1/2 prof to non-proficient checks)', 'Song of Rest (d6)'], spellSlots: { 1: 3 }, profBonus: 2 },
-            3: { features: ['Bardic College Specialization: Cutting Words & Bonus Lore', 'Expertise (2 skills)'], subclass: true, spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
+            3: { features: ['Cutting Words & Bonus Lore (Bardic College Specialization)', 'Expertise (2 skills)'], subclass: true, spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
             4: { features: [], asi: true, spellSlots: { 1: 4, 2: 3 }, profBonus: 2 },
             5: { features: ['Bardic Inspiration (d8)', 'Font of Inspiration (Regain on short rest)'], spellSlots: { 1: 4, 2: 3, 3: 2 }, profBonus: 3 },
             6: { features: ['Countercharm (Advantage vs Frightened/Charmed for allies)', 'Additional Magical Secrets (2 spells from any class)'], spellSlots: { 1: 4, 2: 3, 3: 3 }, profBonus: 3 },
@@ -220,7 +220,7 @@ export const CORE_DND_PROGRESSIONS = {
         primaryStats: ['WIS', 'CON', 'DEX'],
         levels: {
             1: { features: ['Druidic', 'Spellcasting'], spellSlots: { 1: 2 }, profBonus: 2 },
-            2: { features: ['Wild Shape (2/rest, CR 1/2)', 'Druid Circle Specialization: Natural Recovery'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
+            2: { features: ['Wild Shape (2/rest, CR 1/2)', 'Natural Recovery (Druid Circle Specialization)'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
             3: { features: ['Circle Spells (Always-prepared terrain magic)'], spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
             4: { features: ['Wild Shape Improvement (Swim speed)'], asi: true, spellSlots: { 1: 4, 2: 3 }, profBonus: 2 },
             5: { features: ['Primal Communion (Advantage on Nature/Survival in wild terrain)'], spellSlots: { 1: 4, 2: 3, 3: 2 }, profBonus: 3 },
@@ -248,7 +248,7 @@ export const CORE_DND_PROGRESSIONS = {
         levels: {
             1: { features: ['Unarmored Defense (10+DEX+WIS)', 'Martial Arts (1d4 unarmed strike, bonus unarmed attack)'], profBonus: 2 },
             2: { features: ['Ki (2 points/short rest: Flurry of Blows, Patient Defense, Step of the Wind)', 'Unarmored Movement (+10 ft)'], profBonus: 2 },
-            3: { features: ['Monastic Tradition: Open Hand Technique (Knock prone or push on Flurry)', 'Deflect Missiles'], subclass: true, profBonus: 2 },
+            3: { features: ['Open Hand Technique (Knock prone or push on Flurry)', 'Deflect Missiles'], subclass: true, profBonus: 2 },
             4: { features: ['Slow Fall (Reduce falling damage by 5 x Level)'], asi: true, profBonus: 2 },
             5: { features: ['Extra Attack (1)', 'Stunning Strike (1 Ki: CON save or stunned)', 'Martial Arts (1d6)'], profBonus: 3 },
             6: { features: ['Ki-Empowered Strikes (Unarmed strikes count as magical)', 'Wholeness of Body (Heal 3 x Level HP 1/day)', 'Unarmored Movement (+15 ft)'], profBonus: 3 },
@@ -275,7 +275,7 @@ export const CORE_DND_PROGRESSIONS = {
         levels: {
             1: { features: ['Favored Enemy (Advantage on tracking & lore)', 'Natural Explorer (Deft Explorer)'], profBonus: 2 },
             2: { features: ['Fighting Style', 'Spellcasting (Hunter\'s Mark)'], spellSlots: { 1: 2 }, profBonus: 2 },
-            3: { features: ['Ranger Conclave Specialization: Colossus Slayer (+1d8 to wounded targets)', 'Primeval Awareness'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
+            3: { features: ['Colossus Slayer (+1d8 to wounded targets)', 'Primeval Awareness'], subclass: true, spellSlots: { 1: 3 }, profBonus: 2 },
             4: { features: [], asi: true, profBonus: 2 },
             5: { features: ['Extra Attack (1)'], spellSlots: { 1: 4, 2: 2 }, profBonus: 3 },
             6: { features: ['Favored Enemy & Greater Explorer Improvement (+5 ft speed, climb/swim)'], profBonus: 3 },
@@ -300,7 +300,7 @@ export const CORE_DND_PROGRESSIONS = {
         hitDie: 'd6',
         primaryStats: ['CHA', 'CON', 'DEX'],
         levels: {
-            1: { features: ['Spellcasting', 'Sorcerous Origin: Draconic Resilience (13+DEX AC & +1 HP/lvl)'], subclass: true, spellSlots: { 1: 2 }, profBonus: 2 },
+            1: { features: ['Spellcasting', 'Draconic Resilience (13+DEX AC & +1 HP/lvl)'], subclass: true, spellSlots: { 1: 2 }, profBonus: 2 },
             2: { features: ['Font of Magic (Sorcery Points equal to Level; Flexible Casting)'], spellSlots: { 1: 3 }, profBonus: 2 },
             3: { features: ['Metamagic (2 options: Twinned Spell, Quickened Spell, Careful Spell, Subtle Spell)'], spellSlots: { 1: 4, 2: 2 }, profBonus: 2 },
             4: { features: [], asi: true, spellSlots: { 1: 4, 2: 3 }, profBonus: 2 },
@@ -327,7 +327,7 @@ export const CORE_DND_PROGRESSIONS = {
         hitDie: 'd8',
         primaryStats: ['CHA', 'CON', 'DEX'],
         levels: {
-            1: { features: ['Otherworldly Patron: Dark One\'s Blessing (CHA+Level temp HP on kill)', 'Pact Magic (Short Rest Slots)'], subclass: true, spellSlots: { 1: 1 }, profBonus: 2 },
+            1: { features: ['Dark One\'s Blessing (CHA+Level temp HP on kill)', 'Pact Magic (Short Rest Slots)'], subclass: true, spellSlots: { 1: 1 }, profBonus: 2 },
             2: { features: ['Eldritch Invocations (2 invocations: Agonizing Blast, Devil\'s Sight)'], spellSlots: { 1: 2 }, profBonus: 2 },
             3: { features: ['Pact Boon (Pact of the Blade, Chain, or Tome)'], spellSlots: { 2: 2 }, profBonus: 2 },
             4: { features: [], asi: true, profBonus: 2 },
@@ -385,8 +385,119 @@ export function classifyFeatureNoise(feat) {
 }
 
 /**
- * Removes engine-computed bookkeeping strings (HP gain, prof bonus, ASI, spell slot rows)
- * and duplicates from a list of features.
+ * Normalizes a trait, feature, or ability string into MultiHog's interactive pill syntax:
+ * `Name (hover tooltip description)` (or bare `Name` if there is no description).
+ *
+ * MultiHog's `renderPills` splits on commas at parenthesis depth 0 and matches
+ * `/^(.+?)\s*\((.+)\)$/` to separate the pill badge title from its hover tooltip
+ * (and extracts `X/Y` resource badges from inside the parentheses).
+ *
+ * - Converts `Name: description` or `Name — description` into `Name (description)`.
+ * - Merges `Name (1/1 per rest): description` or `Name: description (1/1 per rest)`
+ *   into `Name (description; 1/1 per rest)`.
+ * - Replaces nested `(` `)` inside the outer description with `[` `]` so `splitSmart`
+ *   never miscounts parenthesis depth.
+ * - Preserves short category prefixes like `Feat: Sentinel` or `Feat: Sentinel (desc)`.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function formatTraitAsPill(raw) {
+    if (typeof raw !== 'string') return '';
+    let s = raw
+        .trim()
+        .replace(/^[-*•]\s*/, '')
+        .replace(/^\(\((?:PILLS|PLS|PILL)\)\)\s*/i, '')
+        .trim();
+    if (!s) return '';
+
+    const sanitizeInnerParens = (desc) => desc.replace(/\(/g, '[').replace(/\)/g, ']').trim();
+
+    // Case 1: Ends with ')' — find the matching opening '(' for that final ')'
+    if (s.endsWith(')')) {
+        let depth = 0;
+        let openIdx = -1;
+        for (let i = s.length - 1; i >= 0; i--) {
+            if (s[i] === ')') depth++;
+            else if (s[i] === '(') {
+                depth--;
+                if (depth === 0) {
+                    openIdx = i;
+                    break;
+                }
+            }
+        }
+        if (openIdx > 0) {
+            let head = s.slice(0, openIdx).trim();
+            let desc = s.slice(openIdx + 1, -1).trim();
+
+            // Check if head has a colon (e.g. "Second Wind: Regain 1d10+Level HP (1/1 per short rest)")
+            // Preserve short prefix labels like "Feat: Sentinel"
+            const colonIdx = head.indexOf(':');
+            if (colonIdx > 0) {
+                const prefix = head.slice(0, colonIdx).trim();
+                const afterColon = head.slice(colonIdx + 1).trim();
+                const isShortCategoryPrefix = /^(?:feat|boon)$/i.test(prefix) && !afterColon.includes(',');
+                if (!isShortCategoryPrefix && afterColon) {
+                    head = prefix;
+                    desc = desc ? `${afterColon}; ${desc}` : afterColon;
+                }
+            }
+            return `${head} (${sanitizeInnerParens(desc)})`;
+        }
+    }
+
+    // Case 2: Does not end with ')' — check for top-level colon (e.g. "Darkvision: See 60 ft in dim light, 30 ft in dark"
+    // or "Second Wind (1/1 per short rest): Regain 1d10+Level HP")
+    let colonIdx = -1;
+    let pDepth = 0;
+    for (let i = 0; i < s.length; i++) {
+        if (s[i] === '(') pDepth++;
+        else if (s[i] === ')') pDepth = Math.max(0, pDepth - 1);
+        else if (s[i] === ':' && pDepth === 0) {
+            colonIdx = i;
+            break;
+        }
+    }
+    if (colonIdx > 0) {
+        const left = s.slice(0, colonIdx).trim();
+        const right = s.slice(colonIdx + 1).trim();
+        const leftParenMatch = left.match(/^(.+?)\s*\((.+)\)$/);
+        // Preserve short category/sub-title labels like "Feat: Sentinel" or "Custom Totem: Eagle Eye"
+        // that have no mechanical description, commas, or numbers.
+        const isShortTitleWithoutDesc = !leftParenMatch
+            && !right.includes(',')
+            && !/[+-]?\d/.test(right)
+            && right.split(/\s+/).length <= 3;
+        if (isShortTitleWithoutDesc) {
+            return `${left}: ${right}`;
+        }
+        if (right) {
+            if (leftParenMatch) {
+                const name = leftParenMatch[1].trim();
+                const tag = leftParenMatch[2].trim();
+                return `${name} (${sanitizeInnerParens(`${right}; ${tag}`)})`;
+            }
+            return `${left} (${sanitizeInnerParens(right)})`;
+        }
+    }
+
+    // Case 3: Top-level dash separator "Trait Name — description" or "Trait Name - description"
+    const dashMatch = s.match(/^([^(—–-]+?)\s+(?:—|–|-)\s+(.+)$/);
+    if (dashMatch) {
+        const name = dashMatch[1].trim();
+        const desc = dashMatch[2].trim();
+        if (name && desc) {
+            return `${name} (${sanitizeInnerParens(desc)})`;
+        }
+    }
+
+    return s;
+}
+
+/**
+ * Removes engine-computed bookkeeping strings (HP gain, prof bonus, ASI, spell slot rows),
+ * normalizes each feature into MultiHog pill syntax (`Name (description)`), and deduplicates.
  *
  * @param {string[]} list
  * @returns {string[]}
@@ -397,8 +508,10 @@ export function sanitizeFeatureList(list) {
     const out = [];
     for (const raw of list) {
         if (typeof raw !== 'string') continue;
-        const feat = raw.trim();
-        if (!feat || classifyFeatureNoise(feat)) continue;
+        const trimmed = raw.trim();
+        if (!trimmed || classifyFeatureNoise(trimmed)) continue;
+        const feat = formatTraitAsPill(trimmed);
+        if (!feat) continue;
         const key = feat.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
@@ -558,8 +671,9 @@ GUIDELINES (D&D LITE PHILOSOPHY):
 3. Level 3 Archetype Milestone: At Level 3, grant a signature "Archetype Specialization" feature (e.g. Martial Mastery, Primal Instincts, Arcane Savant) that defines the class fantasy without splintering into sub-tables.
 4. Milestones: Mark ASI/Feat levels (4, 8, 12, 16, 19) with "asi": true. The "features" array lists ONLY named class abilities (1–2 per level; an empty array is fine for ASI-only levels).
 5. Engine-Computed Data — DO NOT LIST: Hit Points / HP gain / Hit Die, proficiency bonus, Ability Score Improvements, spell slot counts, and "cantrip learned" rows are tracked by the game engine and have their own fields. NEVER put them in "features".
-6. Thematic Depth: Make the abilities uniquely fit the "${cName}" class fantasy. Do not use generic placeholders like "Subclass Feature".
-7. Output Format: You MUST output the progression inside a clean JSON codeblock using this exact structure:
+6. MultiHog Pill Rendering Format: The character sheet renders every feature as an interactive hover-pill using "Feature Name (concise hover tooltip description)". Always put the mechanical effect, bonus, or rest recharge inside parentheses after the feature name—NEVER use colons ("Name: description") or dashes ("Name - description") outside parentheses, and never nest parentheses inside parentheses (use [brackets] inside parentheses if needed).
+7. Thematic Depth: Make the abilities uniquely fit the "${cName}" class fantasy. Do not use generic placeholders like "Subclass Feature".
+8. Output Format: You MUST output the progression inside a clean JSON codeblock using this exact structure:
 
 \`\`\`json
 {
@@ -567,9 +681,9 @@ GUIDELINES (D&D LITE PHILOSOPHY):
   "hitDie": "${hitDie}",
   "primaryStats": ["STR", "DEX"],
   "levels": {
-    "1": { "features": ["Feature 1", "Feature 2"], "profBonus": 2 },
-    "2": { "features": ["Feature name (description)"], "profBonus": 2 },
-    "3": { "features": ["Archetype Specialization: Name (description)"], "subclass": true, "profBonus": 2 },
+    "1": { "features": ["Feature 1 (passive benefit)", "Feature 2 (1/1 per short rest)"], "profBonus": 2 },
+    "2": { "features": ["Feature Name (concise mechanical description)"], "profBonus": 2 },
+    "3": { "features": ["Signature Archetype Feature (defines class specialization)"], "subclass": true, "profBonus": 2 },
     "4": { "features": [], "asi": true, "profBonus": 2 },
     ...
     "20": { "features": ["Capstone Feature"], "profBonus": 6 }

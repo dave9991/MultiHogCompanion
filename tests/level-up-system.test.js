@@ -1339,3 +1339,62 @@ test('Level-Up System: Phase 4 — All 12 Core SRD Classes, Word-Boundary Lookup
         globalThis.toastr = prevToastr;
     }
 });
+
+test('Level-Up System: MultiHog Pill Rendering Format Normalization (formatTraitAsPill & Traits Commit)', async () => {
+    const { formatTraitAsPill, sanitizeFeatureList } = await import('../level-up-blueprint.js');
+
+    // 1. Standard pill syntax is preserved unchanged
+    assert.strictEqual(formatTraitAsPill('Unarmored Defense (10+DEX+CON)'), 'Unarmored Defense (10+DEX+CON)');
+    assert.strictEqual(formatTraitAsPill('Fighting Style'), 'Fighting Style');
+    assert.strictEqual(formatTraitAsPill('Feat: Sentinel'), 'Feat: Sentinel');
+
+    // 2. Colons, dashes, and nested parens are normalized into Name (tooltip) so MultiHog's renderPills never shatters on commas
+    assert.strictEqual(
+        formatTraitAsPill('Darkvision: See 60 ft in dim light, 30 ft in darkness'),
+        'Darkvision (See 60 ft in dim light, 30 ft in darkness)',
+    );
+    assert.strictEqual(
+        formatTraitAsPill('Street Rat — +2 to Stealth in urban districts'),
+        'Street Rat (+2 to Stealth in urban districts)',
+    );
+    assert.strictEqual(
+        formatTraitAsPill('Second Wind (1/1 per short rest): Regain 1d10+Level HP'),
+        'Second Wind (Regain 1d10+Level HP; 1/1 per short rest)',
+    );
+    assert.strictEqual(
+        formatTraitAsPill('Second Wind: Regain 1d10+Level HP (1/1 per short rest)'),
+        'Second Wind (Regain 1d10+Level HP; 1/1 per short rest)',
+    );
+    assert.strictEqual(
+        formatTraitAsPill('Rage (2/day, +2 dmg (melee))'),
+        'Rage (2/day, +2 dmg [melee])',
+    );
+
+    // 3. sanitizeFeatureList automatically applies formatTraitAsPill
+    assert.deepStrictEqual(
+        sanitizeFeatureList(['Danger Sense: Advantage on DEX saves vs traps, spells']),
+        ['Danger Sense (Advantage on DEX saves vs traps, spells)'],
+    );
+
+    // 4. Commit to a [CHARACTER] block without a Traits/Features line inserts 'Traits:' (which is in MultiHog STOCK_FIELD_RULES as 'pills')
+    const bareMemo = `[CHARACTER]\nGarrick (Barbarian): 15/15 HP\nLevel: 1\n[/CHARACTER]\n[XP]\nTotal: 300 / 300 XP (Level 1)\n[/XP]`;
+    const commitRes = applyLevelUpCommit({
+        chatId: 'garrick_chat',
+        currentMemo: bareMemo,
+        proposal: {
+            targetLevel: 2,
+            hpChange: { newMax: 24 },
+            newFeatures: ['Reckless Attack: Advantage on melee attacks, enemies gain advantage'],
+            activeAbilities: ['Rage (2/2 per day): Resistance to bludgeoning, piercing, slashing'],
+        },
+    });
+    assert.strictEqual(commitRes.success, true);
+    assert.ok(
+        commitRes.updatedMemo.includes('Traits: Reckless Attack (Advantage on melee attacks, enemies gain advantage)'),
+        'New line defaults to Traits: with pill-formatted description',
+    );
+    assert.ok(
+        commitRes.updatedMemo.includes('Rage (Resistance to bludgeoning, piercing, slashing; 2/2 per day)'),
+        '[ABILITIES] entries are also normalized into pill syntax with resource counter preserved',
+    );
+});

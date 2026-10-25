@@ -7,7 +7,7 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList } from './level-up-blueprint.js';
+import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList, formatTraitAsPill } from './level-up-blueprint.js';
 import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
 
@@ -595,7 +595,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
     } else if (options.currentMemo || options.memo) {
         activeAbilities = parseAbilitiesBlockFromMemo(options.currentMemo || options.memo || '');
     }
-    activeAbilities = deduplicateFeatures(activeAbilities);
+    activeAbilities = deduplicateFeatures(activeAbilities.map(a => formatTraitAsPill(a)).filter(Boolean));
 
     return {
         targetLevel,
@@ -827,39 +827,31 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         // Update Features / Traits / Abilities line
         if (cleanFeatures) {
             const featText = cleanFeatures.join(', ');
-            const featureRegex = /(?:Features|Traits|Abilities)\s*:[^\n\r]*/i;
-            const hasFeaturesLine = featureRegex.test(charBlock);
+            const featureLineRe = /((?:\(\((?:PILLS|PLS)\)\)\s*)?(?:Features|Traits|Abilities)\s*:\s*(?:\(\((?:PILLS|PLS)\)\)\s*)?)([^\n\r]*)/i;
+            const existingMatch = charBlock.match(featureLineRe);
 
             if (isRespec) {
                 // In Respec mode: replace the line cleanly with the exact approved list
-                if (hasFeaturesLine) {
-                    if (/Features\s*:/i.test(charBlock)) {
-                        charBlock = charBlock.replace(/(Features\s*:[^\n\r]*)/i, `Features: ${featText}`);
-                    } else if (/Traits\s*:/i.test(charBlock)) {
-                        charBlock = charBlock.replace(/(Traits\s*:[^\n\r]*)/i, `Traits: ${featText}`);
-                    } else if (/Abilities\s*:/i.test(charBlock)) {
-                        charBlock = charBlock.replace(/(Abilities\s*:[^\n\r]*)/i, `Abilities: ${featText}`);
-                    }
+                if (existingMatch) {
+                    charBlock = charBlock.replace(existingMatch[0], `${existingMatch[1]}${featText}`);
                 } else if (featText) {
-                    charBlock = `${charBlock.trim()}\nFeatures: ${featText}\n`;
+                    // Use 'Traits:' for new lines because 'traits' is in MultiHog's STOCK_FIELD_RULES as 'pills'
+                    charBlock = `${charBlock.trim()}\nTraits: ${featText}\n`;
                 }
             } else {
                 // In Level-Up mode: only append new features that aren't already present
-                if (hasFeaturesLine) {
-                    const match = charBlock.match(/((?:Features|Traits|Abilities)\s*:\s*)([^\n\r]*)/i);
-                    if (match) {
-                        const existingFeats = splitTopLevelPillItems(match[2])
-                            .map(f => f.trim())
-                            .filter(Boolean);
-                        const existingKeys = new Set(existingFeats.map(f => extractFeatureKey(f)));
-                        const genuinelyNew = cleanFeatures.filter(f => !existingKeys.has(extractFeatureKey(f)));
-                        if (genuinelyNew.length > 0) {
-                            const combined = [...existingFeats, ...genuinelyNew].join(', ');
-                            charBlock = charBlock.replace(match[0], `${match[1]}${combined}`);
-                        }
+                if (existingMatch) {
+                    const existingFeats = splitTopLevelPillItems(existingMatch[2])
+                        .map(f => formatTraitAsPill(f))
+                        .filter(Boolean);
+                    const existingKeys = new Set(existingFeats.map(f => extractFeatureKey(f)));
+                    const genuinelyNew = cleanFeatures.filter(f => !existingKeys.has(extractFeatureKey(f)));
+                    if (genuinelyNew.length > 0) {
+                        const combined = [...existingFeats, ...genuinelyNew].join(', ');
+                        charBlock = charBlock.replace(existingMatch[0], `${existingMatch[1]}${combined}`);
                     }
                 } else if (featText) {
-                    charBlock = `${charBlock.trim()}\nFeatures: ${featText}\n`;
+                    charBlock = `${charBlock.trim()}\nTraits: ${featText}\n`;
                 }
             }
         }
@@ -871,7 +863,7 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
     if (Array.isArray(proposal.activeAbilities)) {
         const abMatch = updatedMemo.match(/\[ABILITIES\]([\s\S]*?)\[\/ABILITIES\]/i);
         const abLines = proposal.activeAbilities
-            .map(a => a.trim().replace(/^[-*•–—]\s*/, ''))
+            .map(a => formatTraitAsPill(a))
             .filter(Boolean);
 
         if (abMatch) {

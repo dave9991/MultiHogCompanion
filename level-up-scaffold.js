@@ -174,7 +174,8 @@ export function parseCharacterBlockFromMemo(memoText) {
         // 4. Features / Traits / Abilities
         const featMatch = raw.match(/(?:Features|Traits|Abilities)\s*:\s*([^\n\r]+)/i);
         if (featMatch) {
-            result.features = splitTopLevelPillItems(featMatch[1])
+            const cleanFeatsStr = featMatch[1].replace(/^\(\((?:PILLS|PLS|PILL)\)\)\s*/i, '').trim();
+            result.features = splitTopLevelPillItems(cleanFeatsStr)
                 .map(f => f.trim())
                 .filter(Boolean);
         } else {

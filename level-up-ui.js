@@ -11,7 +11,7 @@
  */
 
 import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection } from './level-up-runner.js';
-import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, normalizeBlueprint, normalizeLevelEntry } from './level-up-blueprint.js';
+import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, normalizeBlueprint, normalizeLevelEntry, formatTraitAsPill } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
@@ -831,11 +831,11 @@ Hit Die: ${activeBlueprint?.hitDie || proposal.hitDie || 'd8'}
 Current Progression Table:
 ${formatBlueprintSummary(activeBlueprint)}
 
-GUIDELINES (D&D LITE PHILOSOPHY):
+GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
 1. Single-Track Progression: We use a streamlined single-track model from 1 to 20 with no rigid branching subclass trees or multi-class requirements.
-2. Distinct Traits vs Abilities: When designing or customizing features, distinguish between passive traits (constant bonuses) and active abilities with rest uses (e.g. "1/1 per short rest" or "2/2 per long rest"). Active powers should include their rest recharge in parentheses.
+2. MultiHog Interactive Pill Syntax: The character sheet renders every feature as a hoverable pill using "Feature Name (concise hover tooltip description)". Distinguish between passive traits (constant bonuses) and active abilities with rest uses (e.g. "Feature Name (effect; 1/1 per short rest)"). NEVER use colons ("Name: description") or dashes ("Name - description") outside parentheses.
 3. Dynamic Table Updates: When the player asks to change, add, or customize abilities at any level, emit:
-   [UPDATE_LEVEL: <level_number> | <feature1>; <feature2>]
+   [UPDATE_LEVEL: <level_number> | <Feature Name 1 (description)>; <Feature Name 2 (description)>]
    NEVER list HP gain, Hit Die, proficiency bonus, Ability Score Improvements, or spell slot counts as features: the engine tracks those separately.
 4. Hit Die Updates: If the player asks to change their Hit Die (d6, d8, d10, or d12), emit:
    [SET_HIT_DIE: <d6|d8|d10|d12>]
@@ -1286,8 +1286,10 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
    - To remove an active power: [REMOVE_ABILITY: Ability Name]
    - To relocate a misplaced passive trait into active abilities: [MOVE_TO_ABILITIES: Trait Name]
    - To relocate an active ability into passive traits: [MOVE_TO_FEATURES: Ability Name]
-4. CRITICAL FORMATTING REQUIREMENT:
-   - EVERY ability and trait MUST begin with its title/name! Never output a bare description without an ability name.
+4. CRITICAL FORMATTING REQUIREMENT (MULTIHOG PILL RENDERER):
+   - MultiHog renders both [CHARACTER] Traits and [ABILITIES] entries as interactive hover-pills using the exact syntax: Name (hover tooltip description).
+   - EVERY ability and trait MUST begin with its title/name, followed by its mechanical effect and any X/Y rest counter INSIDE parentheses so MultiHog extracts the X/Y resource badge and places the description into the hover tooltip.
+   - NEVER use colons ("Name: description") or dashes ("Name - description") outside parentheses, and NEVER nest parentheses inside parentheses (use [brackets] inside parentheses if needed).
    - Example Active Power: Misfortune Gambit (Reroll a failed check from critical misfortune; 1/1 per long rest)
    - Example Passive Perk: Street Rat (+2 to Stealth in urban districts)
 5. Single-Track Progression: Streamlined D&D Lite model. No rigid subclass branching. The class remains "${proposal.className}".
@@ -1309,7 +1311,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             const addMatches = [...reply.matchAll(/\[ADD_FEATURE:\s*([^\]]+)\]/gi)];
             for (const match of addMatches) {
                 const rawFeat = match[1].trim();
-                const feat = isPbta ? formatMoveAsPill(rawFeat) : rawFeat;
+                const feat = isPbta ? formatMoveAsPill(rawFeat) : formatTraitAsPill(rawFeat);
                 if (feat) {
                     const key = extractFeatureKey(feat);
                     const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === key);
@@ -1328,7 +1330,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 const featureName = match[1].trim();
                 const targetKey = extractFeatureKey(featureName);
                 const rawNewText = ensureNamedFeature(featureName, match[2].trim());
-                const newText = isPbta ? formatMoveAsPill(rawNewText) : rawNewText;
+                const newText = isPbta ? formatMoveAsPill(rawNewText) : formatTraitAsPill(rawNewText);
                 const idx = proposal.newFeatures.findIndex(f => extractFeatureKey(f) === targetKey);
                 if (idx >= 0) {
                     proposal.newFeatures[idx] = newText;
@@ -1364,7 +1366,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             proposal.activeAbilities = proposal.activeAbilities || [];
             const addAbilityMatches = [...reply.matchAll(/\[ADD_ABILITY:\s*([^\]]+)\]/gi)];
             for (const match of addAbilityMatches) {
-                const ab = match[1].trim();
+                const ab = formatTraitAsPill(match[1].trim());
                 if (ab) {
                     const key = extractFeatureKey(ab);
                     const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === key);
@@ -1382,7 +1384,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             for (const match of updateAbilityMatches) {
                 const abilityName = match[1].trim();
                 const targetKey = extractFeatureKey(abilityName);
-                const newText = ensureNamedFeature(abilityName, match[2].trim());
+                const newText = formatTraitAsPill(ensureNamedFeature(abilityName, match[2].trim()));
                 const idx = proposal.activeAbilities.findIndex(a => extractFeatureKey(a) === targetKey);
                 if (idx >= 0) {
                     proposal.activeAbilities[idx] = newText;

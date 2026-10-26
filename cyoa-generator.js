@@ -510,9 +510,23 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
         if (!isNaN(dedicatedTokens) && dedicatedTokens > 0) {
             return Math.floor(dedicatedTokens);
         }
+        // Let the dedicated connection profile / preset determine the token budget
+        return 0;
     }
 
-    // 3. Main API: dynamically derive from context window
+    // 3. Preset-configured max tokens takes precedence
+    const configuredMaxTokens = Number(
+        ctx.chatCompletionSettings?.openai_max_tokens ||
+        globalThis.oai_settings?.openai_max_tokens ||
+        ctx.amountGen ||
+        globalThis.amount_gen ||
+        0
+    );
+    if (configuredMaxTokens > 0) {
+        return Math.floor(configuredMaxTokens);
+    }
+
+    // 4. Main API: dynamically derive from context window if unconfigured
     const mainApi = ctx.mainApi || globalThis.main_api || 'openai';
     let contextLimit = 0;
 
@@ -567,15 +581,6 @@ export function resolveCyoaMaxTokens({ rpgSettings, connSettings, messages, cont
     const minFloor = contextLimit >= 8192 ? 4096 : Math.min(2048, contextLimit - estimatedPromptTokens);
     if (availableBudget < minFloor) {
         availableBudget = minFloor;
-    }
-
-    const configuredMaxTokens = Number(
-        ctx.chatCompletionSettings?.openai_max_tokens ||
-        globalThis.oai_settings?.openai_max_tokens ||
-        0
-    );
-    if (configuredMaxTokens >= 4096 && availableBudget > configuredMaxTokens) {
-        availableBudget = configuredMaxTokens;
     }
 
     return Math.floor(availableBudget);

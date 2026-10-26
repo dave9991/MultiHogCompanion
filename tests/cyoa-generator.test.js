@@ -292,8 +292,24 @@ assert.ok(fastPipelinePrompt.userPrompt.includes('Turn-Start Baseline'), 'Fast p
 assert.ok(fastPipelinePrompt.userPrompt.includes('IMMEDIATE TACTICAL SITUATION & NARRATIVE DELTA'), 'Fast pipeline must include tactical situation delta');
 console.log('✓ Fast Pipelined prompt synthesis verified');
 
-// ── 7. Dynamic Context Headroom ──
-console.log('7. Testing resolveCyoaMaxTokens Dynamic Context Headroom...');
+// ── 7. Dynamic Context Headroom & Preset Respect ──
+console.log('7. Testing resolveCyoaMaxTokens Dynamic Context Headroom & Preset Respect...');
+const mockCtxSmallPreset = {
+    mainApi: 'openai',
+    chatCompletionSettings: { openai_max_context: 16384, openai_max_tokens: 1024 },
+};
+const presetBudget = resolveCyoaMaxTokens({
+    context: mockCtxSmallPreset,
+    messages: [{ role: 'user', content: 'Short prompt' }],
+});
+assert.strictEqual(presetBudget, 1024, 'Preset configured max tokens must be strictly respected');
+
+const profileConnBudget = resolveCyoaMaxTokens({
+    connSettings: { connectionSource: 'profile', maxTokens: 0 },
+    context: mockCtxSmallPreset,
+});
+assert.strictEqual(profileConnBudget, 0, 'Connection profile with maxTokens: 0 must return 0 to delegate to profile preset');
+
 const mockCtxLarge = {
     mainApi: 'openai',
     chatCompletionSettings: { openai_max_context: 16384 },
@@ -302,14 +318,14 @@ const largeBudget = resolveCyoaMaxTokens({
     context: mockCtxLarge,
     messages: [{ role: 'user', content: 'Short prompt' }],
 });
-assert.ok(largeBudget >= 4096, `Budget for 16k context must provide reasoning headroom (got ${largeBudget})`);
+assert.ok(largeBudget >= 4096, `Unconfigured budget for 16k context must provide reasoning headroom (got ${largeBudget})`);
 
 const explicitBudget = resolveCyoaMaxTokens({
     rpgSettings: { cyoaMaxTokens: 750 },
-    context: mockCtxLarge,
+    context: mockCtxSmallPreset,
 });
-assert.strictEqual(explicitBudget, 750, 'Explicit cyoaMaxTokens must override auto context budget');
-console.log('✓ resolveCyoaMaxTokens dynamically scales context headroom and honors user overrides');
+assert.strictEqual(explicitBudget, 750, 'Explicit cyoaMaxTokens must override auto context budget and preset');
+console.log('✓ resolveCyoaMaxTokens strictly respects preset configured length and honors user overrides');
 
 // ── 8. Serialization Exclusion for World Info ──
 console.log('8. Testing serializeDossierToMarkdown with includeCyoa: false for World Info...');

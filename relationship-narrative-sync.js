@@ -65,6 +65,60 @@ async function sendLlmPrompt(connSettings, messages) {
 // ── 1. MultiHog Tier Math (Percentage-of-Max Thresholds) ───────────────────────
 
 /**
+ * Sanitizes and validates an LLM-proposed [CORE] field value ('Personality' or 'Habits/Behaviors').
+ * Rejects nullish keywords, echoed field headers followed by placeholders, and ellipsis truncations ("...").
+ * @param {unknown} rawVal
+ * @param {'personality'|'habits'|string} [field='']
+ * @returns {string|null}
+ */
+export function sanitizeCoreFieldUpdate(rawVal, field = '') {
+    if (typeof rawVal !== 'string') return null;
+    let val = rawVal.trim();
+    if (!val) return null;
+
+    // Strip surrounding quotes if the model double-wrapped the string
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1).trim();
+    }
+
+    // Strip echoed field header prefixes (e.g. "Personality: ...", "**Habits/Behaviors:** ...")
+    const headerPrefixRegex = /^habits/i.test(field)
+        ? /^(?:[*_~`#>\-\s])*(?:Habits\s*(?:\/|&|and)\s*Behaviors|Habits|Behaviors)(?:[*_~`]*)\s*:\s*/i
+        : /^personality/i.test(field)
+            ? /^(?:[*_~`#>\-\s])*(?:Personality|Demeanor)(?:[*_~`]*)\s*:\s*/i
+            : /^(?:[*_~`#>\-\s])*(?:Personality|Demeanor|Habits\s*(?:\/|&|and)\s*Behaviors|Habits|Behaviors)(?:[*_~`]*)\s*:\s*/i;
+
+    while (headerPrefixRegex.test(val)) {
+        val = val.replace(headerPrefixRegex, '').trim();
+    }
+
+    if (!val) return null;
+
+    // Reject explicit no-change / nullish sentinel strings (properly grouped so 'none' inside prose is NOT matched)
+    if (/^(?:null|nil|none|n\/a|na|no\s+changes?|unchanged|same(?:\s+as\s+before)?|keep\s+existing|not\s+applicable|nothing|\(no\s+changes?\)|\[no\s+changes?\]|\(unchanged\)|\[unchanged\]|\(none\)|\[none\])$/i.test(val)) {
+        return null;
+    }
+
+    // Reject strings composed solely of dots, ellipses, dashes, brackets, or punctuation
+    if (/^[\s.…\-_*~`[\]()'"/\\:;!?]+$/.test(val)) {
+        return null;
+    }
+
+    // Reject ellipsis placeholders/truncations (e.g. "...", "Personality: ...", "... now warmer toward X")
+    if (/\.{3,}|…/.test(val)) {
+        return null;
+    }
+
+    // Require meaningful descriptive prose (at least 8 alphanumeric characters)
+    const alphaNumCount = (val.match(/[A-Za-z0-9]/g) || []).length;
+    if (alphaNumCount < 8) {
+        return null;
+    }
+
+    return val;
+}
+
+/**
  * Surgically patches a labeled section (e.g. 'Personality' or 'Habits/Behaviors')
  * inside a [CORE] block string without modifying other sections.
  * Matches MultiHog upstream router-utils.js patchLabeledSection.
@@ -84,6 +138,24 @@ export function patchLabeledSection(text, field, newContent) {
         fieldPatterns = ['Personality'];
     } else if (/^habits/i.test(field)) {
         fieldPatterns = ['Habits/Behaviors', 'Habits & Behaviors', 'Habits', 'Behaviors'];
+    }
+
+    const sanitizedValue = (/^(?:personality|habits)/i.test(field))
+        ? sanitizeCoreFieldUpdate(String(newContent), field)
+        : String(newContent).trim();
+
+    if (!sanitizedValue) {
+        return { ok: false, text: body };
+    }
+
+    const escapedPatterns = fieldPatterns.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const leadingLabelRegex = new RegExp(`^(?:[*_~\\s])*(?:${escapedPatterns.join('|')})(?:[*_~]*)\\s*:\\s*`, 'i');
+    let replacementValue = sanitizedValue;
+    while (leadingLabelRegex.test(replacementValue)) {
+        replacementValue = replacementValue.replace(leadingLabelRegex, '').trim();
+    }
+    if (!replacementValue) {
+        return { ok: false, text: body };
     }
 
     const otherHeaders = [
@@ -115,13 +187,13 @@ export function patchLabeledSection(text, field, newContent) {
         return esc;
     }).join('|');
 
-    const escapedPatterns = fieldPatterns.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    // Anchor both the target header and the terminating lookahead header to line boundaries
+    // so mid-sentence colons (e.g. "values relationship: trust") cannot truncate or mis-match sections.
     const targetFieldRegex = new RegExp(
-        `(?:(${escapedPatterns.join('|')})\\s*:)([\\s\\S]*?)(?=(?:${otherHeadersRegexStr})\\s*:|$)`,
+        `(?:^|\\n)([ \\t]*(?:${escapedPatterns.join('|')})\\s*:)([\\s\\S]*?)(?=\\n[ \\t]*(?:${otherHeadersRegexStr})\\s*:|$)`,
         'i'
     );
     const fieldMatch = body.match(targetFieldRegex);
-    const replacementValue = String(newContent).trim();
 
     if (!fieldMatch) {
         const fieldName = fieldPatterns[0] || field.trim();
@@ -132,9 +204,10 @@ export function patchLabeledSection(text, field, newContent) {
     }
 
     const matchedFieldName = fieldMatch[1];
-    const targetSubstring = `${matchedFieldName}:${fieldMatch[2]}`;
-    const replacement = `${matchedFieldName}: ${replacementValue}\n`;
-    return { ok: true, text: body.replace(targetSubstring, replacement) };
+    const targetSubstring = `${matchedFieldName}${fieldMatch[2]}`;
+    const trailingEndsAtEof = (fieldMatch.index + fieldMatch[0].length) >= body.length;
+    const replacement = `${matchedFieldName} ${replacementValue}${trailingEndsAtEof ? '\n' : ''}`;
+    return { ok: true, text: body.replace(targetSubstring, () => replacement) };
 }
 
 /**
@@ -162,20 +235,22 @@ export function patchNpcLorebookEntry(existingContent, update, timestamp = '') {
 
     if (coreMatch) {
         let coreInner = coreMatch[1];
-        if (update.personality) {
-            const pRes = patchLabeledSection(coreInner, 'Personality', update.personality);
+        const cleanPersonality = sanitizeCoreFieldUpdate(update.personality, 'personality');
+        if (cleanPersonality) {
+            const pRes = patchLabeledSection(coreInner, 'Personality', cleanPersonality);
             if (pRes.ok) coreInner = pRes.text;
         }
-        if (update.habits) {
-            const hRes = patchLabeledSection(coreInner, 'Habits/Behaviors', update.habits);
+        const cleanHabits = sanitizeCoreFieldUpdate(update.habits, 'habits');
+        if (cleanHabits) {
+            const hRes = patchLabeledSection(coreInner, 'Habits/Behaviors', cleanHabits);
             if (hRes.ok) coreInner = hRes.text;
         }
 
-        let updatedEntry = existingContent.replace(coreMatch[0], `[CORE]${coreInner}[/CORE]`);
+        let updatedEntry = existingContent.replace(coreMatch[0], () => `[CORE]${coreInner}[/CORE]`);
 
         // Append milestone to chronicle below [/CORE]
-        const coreCloseIdx = updatedEntry.indexOf('[/CORE]');
-        const afterCore = updatedEntry.slice(coreCloseIdx + 7);
+        const coreCloseIdx = updatedEntry.search(/\[\/CORE\]/i);
+        const afterCore = coreCloseIdx >= 0 ? updatedEntry.slice(coreCloseIdx + 7) : '';
         if (/##\s*(?:Narrative\s+)?Chronicle/i.test(afterCore)) {
             updatedEntry = updatedEntry.trimEnd() + `\n${milestoneLine}`;
         } else {
@@ -348,6 +423,63 @@ Evaluate ${safeNpc}'s starting friendship and affection toward ${safePc}:`;
 }
 
 /**
+ * Extracts and parses a balanced JSON object from raw model output,
+ * resilient to stray braces in preambles or inside string literals.
+ * @param {string} text
+ * @returns {object|null}
+ */
+function parseBalancedJsonObject(text) {
+    if (!text || typeof text !== 'string') return null;
+
+    const candidates = [];
+    let depth = 0;
+    let startIdx = -1;
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        if (ch === '\\' && inString) {
+            escape = true;
+            continue;
+        }
+        if (ch === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+
+        if (ch === '{') {
+            if (depth === 0) startIdx = i;
+            depth++;
+        } else if (ch === '}') {
+            if (depth > 0) {
+                depth--;
+                if (depth === 0 && startIdx !== -1) {
+                    candidates.push(text.slice(startIdx, i + 1));
+                    startIdx = -1;
+                }
+            }
+        }
+    }
+
+    // Prefer the last valid JSON object in the output (after any preamble/scratchpad)
+    for (let i = candidates.length - 1; i >= 0; i--) {
+        try {
+            const parsed = JSON.parse(candidates[i]);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed;
+            }
+        } catch (_) {}
+    }
+    return null;
+}
+
+/**
  * Direction A: Parses the JSON response from the evaluator model.
  * Strips reasoning/thinking tags before matching JSON to prevent scratchpad braces from being parsed.
  * @param {string} rawText
@@ -356,18 +488,15 @@ Evaluate ${safeNpc}'s starting friendship and affection toward ${safePc}:`;
 export function parseDirectionAResponse(rawText) {
     if (!rawText || typeof rawText !== 'string') return null;
     const cleanText = stripThinkingContent(rawText);
-    const jsonMatch = cleanText.match(/\{[\s\S]*?\}/) || rawText.match(/\{[\s\S]*?\}/);
-    if (!jsonMatch) return null;
-    try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (typeof parsed.friendship === 'number' && typeof parsed.affection === 'number') {
-            return {
-                friendship: Math.max(-150, Math.min(150, Math.round(parsed.friendship))),
-                affection: Math.max(-150, Math.min(150, Math.round(parsed.affection))),
-                reason: String(parsed.reason || '').trim(),
-            };
-        }
-    } catch (_) {}
+    const parsed = parseBalancedJsonObject(cleanText) || parseBalancedJsonObject(rawText);
+    if (!parsed) return null;
+    if (typeof parsed.friendship === 'number' && typeof parsed.affection === 'number') {
+        return {
+            friendship: Math.max(-150, Math.min(150, Math.round(parsed.friendship))),
+            affection: Math.max(-150, Math.min(150, Math.round(parsed.affection))),
+            reason: String(parsed.reason || '').trim(),
+        };
+    }
     return null;
 }
 
@@ -400,16 +529,17 @@ The relationship between ${safeNpc} and the protagonist ${safePc} has crossed a 
 Your job is to generate a relationship chronicle milestone and, ONLY IF STRICTLY WARRANTED, a conservative nuance to their demeanor.
 
 CRITICAL GUIDELINES:
-1. CONSERVATIVE BY DEFAULT: Characters rarely undergo total personality overhauls. A cynical, blunt character remains cynical and blunt; an enemy who becomes an ally is still cautious. In most cases, NO changes to Personality or Habits are needed.
-2. BOTH PROGRESSION AND DETERIORATION: Relationships can deepen or deteriorate. If the bond dropped to a negative tier (Bitter, Hostile, Distrustful), document the grievance or falling out in the milestone, and adjust demeanor accordingly if warranted. If the bond improved, record how trust or affection was earned.
-3. PRESERVE ALL OTHER FIELDS: Never modify or invent Species, Body, Equipment, Background, or Combat Profile.
-4. MILESTONE: Always provide a concise 1-2 sentence chronicle entry summarizing the moment or shift in standing between ${safeNpc} and ${safePc}.
+1. CONSERVATIVE BY DEFAULT: Characters rarely undergo total personality overhauls. A cynical, blunt character remains cynical and blunt; an enemy who becomes an ally is still cautious. In most cases, NO changes to Personality or Habits are needed — return literal JSON null for both.
+2. FULL FIELD REPLACEMENT (NEVER USE "..." OR PLACEHOLDERS): When "personality" or "habits" is non-null, your string value REPLACES the entire existing section in [CORE]. You MUST retain all of ${safeNpc}'s existing core traits/habits and weave in the subtle nuance toward ${safePc}. NEVER output "...", "Personality: ...", "unchanged", or a short fragment that discards their existing baseline description. Do NOT prefix the string with the field label ("Personality:" or "Habits/Behaviors:").
+3. BOTH PROGRESSION AND DETERIORATION: Relationships can deepen or deteriorate. If the bond dropped to a negative tier (Bitter, Hostile, Distrustful), document the grievance or falling out in the milestone, and adjust demeanor accordingly if warranted. If the bond improved, record how trust or affection was earned.
+4. PRESERVE ALL OTHER FIELDS: Never modify or invent Species, Body, Equipment, Background, or Combat Profile.
+5. MILESTONE: Always provide a concise 1-2 sentence chronicle entry summarizing the moment or shift in standing between ${safeNpc} and ${safePc}.
 
 Respond STRICTLY in valid JSON format with NO markdown code fences (\`\`\`) and NO conversational filler:
 {
   "milestone": "<concise 1-2 sentence relationship milestone log>",
-  "personality": <updated Personality string ONLY if demeanor shifted toward ${safePc}, otherwise null>,
-  "habits": <updated Habits/Behaviors string ONLY if recurring behaviors toward ${safePc} changed, otherwise null>
+  "personality": <complete updated Personality string preserving existing traits + nuance toward ${safePc} ONLY if warranted, otherwise null>,
+  "habits": <complete updated Habits/Behaviors string preserving existing habits + nuance toward ${safePc} ONLY if warranted, otherwise null>
 }`;
 
     const userPrompt = `NPC NAME: ${safeNpc}
@@ -438,7 +568,7 @@ Evaluate the relationship milestone and any subtle demeanor adjustments:`;
 
 /**
  * Direction B: Parses and cleans the structured milestone response.
- * Strips reasoning tokens, code fences, and conversational preambles.
+ * Strips reasoning tokens, code fences, conversational preambles, echoed labels, and ellipsis placeholders.
  * @param {string} rawText
  * @returns {{ milestone: string, personality: string | null, habits: string | null } | null}
  */
@@ -450,28 +580,18 @@ export function parseDirectionBResponse(rawText) {
     let clean = stripThinkingContent(rawText);
     clean = clean.replace(/^```(?:json|markdown|text)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
-    const jsonMatch = clean.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    const parsed = parseBalancedJsonObject(clean);
+    if (!parsed) return null;
 
-    try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        const milestone = typeof parsed.milestone === 'string' && parsed.milestone.trim().length > 0
-            ? parsed.milestone.trim()
-            : null;
-        if (!milestone) return null;
-
-        const personality = typeof parsed.personality === 'string' && parsed.personality.trim().length > 0 && !/^null|none|no change$/i.test(parsed.personality.trim())
-            ? parsed.personality.trim()
-            : null;
-
-        const habits = typeof parsed.habits === 'string' && parsed.habits.trim().length > 0 && !/^null|none|no change$/i.test(parsed.habits.trim())
-            ? parsed.habits.trim()
-            : null;
-
-        return { milestone, personality, habits };
-    } catch (_) {
+    const rawMilestone = typeof parsed.milestone === 'string' ? parsed.milestone.trim() : '';
+    if (!rawMilestone || /^(?:null|nil|none|n\/a|\.+|…+)$/i.test(rawMilestone)) {
         return null;
     }
+
+    const personality = sanitizeCoreFieldUpdate(parsed.personality, 'personality');
+    const habits = sanitizeCoreFieldUpdate(parsed.habits, 'habits');
+
+    return { milestone: rawMilestone, personality, habits };
 }
 
 // ── 3. Connection & State Helpers ─────────────────────────────────────────────
@@ -479,6 +599,7 @@ export function parseDirectionBResponse(rawText) {
 /**
  * Reads MultiHog's configured State Tracker connection parameters.
  * Falls back to default if not configured.
+ * Leaves maxTokens at 0 so resolveConciergeMaxTokens can allocate proper reasoning headroom.
  * @returns {object}
  */
 export function getStateTrackerConnectionSettings() {
@@ -493,7 +614,7 @@ export function getStateTrackerConnectionSettings() {
         openaiUrl: s.openaiUrl || '',
         openaiKey: s.openaiKey || '',
         openaiModel: s.openaiModel || '',
-        maxTokens: 1024,
+        maxTokens: 0,
     };
 }
 
@@ -515,14 +636,21 @@ const inMemorySyncLedger = new Map();
 
 /**
  * Retrieves the relationship sync ledger for a chat.
+ * Guards against cross-chat bleed if an explicit chatId differs from the currently active chat.
  * @param {string} [chatId]
  * @returns {Record<string, object>}
  */
 export function getRelationshipSyncLedger(chatId = '') {
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
     if (ctx?.chat_metadata) {
-        ctx.chat_metadata.mhc_rel_narrative_sync = ctx.chat_metadata.mhc_rel_narrative_sync || {};
-        return ctx.chat_metadata.mhc_rel_narrative_sync;
+        const currentChatId = ctx.getCurrentChatId?.()
+            || ctx.chatId
+            || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : '')
+            || '';
+        if (!chatId || !currentChatId || chatId === currentChatId) {
+            ctx.chat_metadata.mhc_rel_narrative_sync = ctx.chat_metadata.mhc_rel_narrative_sync || {};
+            return ctx.chat_metadata.mhc_rel_narrative_sync;
+        }
     }
     const key = chatId || 'default';
     if (!inMemorySyncLedger.has(key)) {
@@ -836,9 +964,10 @@ export async function checkAndSyncTierCrossovers() {
             const lastATierLabel = lastRec?.lastSyncedTier?.affection;
 
             // Tier boundary check: If NPC has never been initialized in this chat's ledger,
-            // this is NOT a tier crossover. Record baseline tier without triggering rewrite/toast.
+            // this is NOT a tier crossover. Record baseline tier (including neutral 0,0)
+            // without triggering rewrite/toast so subsequent tier shifts are detected properly.
             if (!lastRec?.initialized || !lastFTierLabel) {
-                if (vals && (vals.friendship !== 0 || vals.affection !== 0)) {
+                if (vals && typeof vals === 'object') {
                     updateRelationshipSyncLedger(fullId, {
                         initialized: true,
                         lastSyncedTier: {
@@ -855,7 +984,9 @@ export async function checkAndSyncTierCrossovers() {
             }
 
             // Tier boundary check: If tiers haven't changed, NO-OP!
-            if (lastFTierLabel === curFTier.label && lastATierLabel === curATier.label) {
+            const fChanged = lastFTierLabel !== curFTier.label;
+            const aChanged = lastATierLabel !== curATier.label;
+            if (!fChanged && !aChanged) {
                 continue;
             }
 
@@ -894,6 +1025,16 @@ export async function checkAndSyncTierCrossovers() {
             const messages = buildDirectionBPrompt(npcName, entry.content, pcName, recentLogs, curFTier, curATier, dialoguePairs);
             try {
                 const rawOutput = await sendLlmPrompt(connSettings, messages);
+
+                // Guard against chat switches while the LLM request was in flight
+                const latestChatId = ctx.getCurrentChatId?.()
+                    || ctx.chatId
+                    || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+                    || '';
+                if (activeChatId && latestChatId && latestChatId !== activeChatId) {
+                    break;
+                }
+
                 const updatePayload = parseDirectionBResponse(rawOutput);
                 if (updatePayload && updatePayload.milestone) {
                     const patchedContent = patchNpcLorebookEntry(entry.content, updatePayload, inGameTime);
@@ -928,7 +1069,12 @@ export async function checkAndSyncTierCrossovers() {
                         updated++;
 
                         if (typeof toastr !== 'undefined' && extSettings[EXTENSION_NAME]?.showToasts !== false) {
-                            toastr.info(`📖 ${npcName}'s narrative evolved to ${curFTier.label}`, 'Relationship Narrative Sync');
+                            const evolvedTierDesc = fChanged && aChanged
+                                ? `${curFTier.label} & ${curATier.label}`
+                                : fChanged
+                                    ? curFTier.label
+                                    : curATier.label;
+                            toastr.info(`📖 ${npcName}'s narrative evolved to ${evolvedTierDesc}`, 'Relationship Narrative Sync');
                         }
                     }
                 }
@@ -948,10 +1094,16 @@ export async function checkAndSyncTierCrossovers() {
  * @returns {object}
  */
 export function getRelationshipSyncStatus() {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const activeChatId = ctx?.getCurrentChatId?.()
+        || ctx?.chatId
+        || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+        || '';
     const extSettings = getExtSettings();
     const rpg = getMultiHogSettings();
-    const relValues = rpg.npcRelationshipValues || {};
-    const ledger = getRelationshipSyncLedger();
+    const partitionRelValues = (activeChatId && rpg.chatStates?.[activeChatId]?.npcRelationshipValues) || null;
+    const relValues = partitionRelValues || rpg.npcRelationshipValues || {};
+    const ledger = getRelationshipSyncLedger(activeChatId);
 
     const barsEnabled = rpg.npcRelationshipBars !== false;
     const syncEnabled = extSettings[EXTENSION_NAME]?.enableRelationshipNarrativeSync !== false;

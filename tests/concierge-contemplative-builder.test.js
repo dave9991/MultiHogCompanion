@@ -385,13 +385,13 @@ weakness: Chloroform & bright magnesium flares
         });
         assert.equal(generousBudget, null);
 
-        // Small chat reply limit (e.g. 500 tokens) boosts to >= 8192 so reasoning models do not truncate
-        const boostedBudget = resolveConciergeMaxTokens({
+        // Small chat reply limit (e.g. 500 tokens) returns null so SillyTavern strictly respects the preset limit untouched
+        const presetBudget = resolveConciergeMaxTokens({
             settings,
             messages: [{ role: 'user', content: 'Hello' }],
             context: { chatCompletionSettings: { openai_max_context: 32768, openai_max_tokens: 500 } },
         });
-        assert.ok(boostedBudget >= 8192, `Expected boosted budget >= 8192, got ${boostedBudget}`);
+        assert.equal(presetBudget, null, 'Must return null so SillyTavern strictly respects preset limit untouched');
 
         // Truncated reasoning_content with empty content does not leak raw chain-of-thought
         const truncatedCoTResp = {

@@ -90,6 +90,42 @@ export function hasImagePayload(messages) {
 }
 
 /**
+ * Resolves the configured token limit from settings, completion presets, or live context.
+ * Returns 0 if unconfigured.
+ *
+ * @param {object} settings
+ * @param {object} [context]
+ * @returns {number}
+ */
+export function resolvePresetOrConfiguredTokens(settings, context = null) {
+    if (settings?.maxTokens && Number(settings.maxTokens) > 0) {
+        return Math.floor(Number(settings.maxTokens));
+    }
+    const ctx = context || getContext();
+    if (settings?.completionPresetId && typeof ctx.getPresetManager === 'function') {
+        const pm = ctx.getPresetManager('openai') || ctx.getPresetManager();
+        const preset = pm?.getCompletionPresetByName?.(settings.completionPresetId);
+        if (preset?.openai_max_tokens && Number(preset.openai_max_tokens) > 0) {
+            return Number(preset.openai_max_tokens);
+        }
+        if (preset?.genamt && Number(preset.genamt) > 0) {
+            return Number(preset.genamt);
+        }
+    }
+    const liveConfigured = Number(
+        ctx?.chatCompletionSettings?.openai_max_tokens ||
+        globalThis.oai_settings?.openai_max_tokens ||
+        ctx?.amountGen ||
+        globalThis.amount_gen ||
+        0
+    );
+    if (liveConfigured > 0) {
+        return liveConfigured;
+    }
+    return 0;
+}
+
+/**
  * Send a request via SillyTavern Connection Profile.
  */
 async function sendViaProfile(context, settings, messages, { signal = null, stream = false } = {}) {
@@ -107,21 +143,33 @@ async function sendViaProfile(context, settings, messages, { signal = null, stre
         throw new Error(`Connection profile "${settings.connectionProfileId}" not found.`);
     }
 
-    const raw = await service.sendRequest(
-        settings.connectionProfileId,
-        messages,
-        maxTokens,
-        {
-            stream: !!stream,
-            extractData: true,
-            includePreset: true,
-            includeInstruct: true,
-            signal,
-        },
-    );
+    let profileOriginalPreset = null;
+    try {
+        if (settings.completionPresetId && profile.preset !== settings.completionPresetId) {
+            profileOriginalPreset = profile.preset;
+            profile.preset = settings.completionPresetId;
+        }
 
-    // Extract text from result
-    return extractTextFromApiResponse(raw);
+        const raw = await service.sendRequest(
+            settings.connectionProfileId,
+            messages,
+            maxTokens,
+            {
+                stream: !!stream,
+                extractData: true,
+                includePreset: true,
+                includeInstruct: true,
+                signal,
+            },
+        );
+
+        // Extract text from result
+        return extractTextFromApiResponse(raw);
+    } finally {
+        if (profile && profileOriginalPreset !== null) {
+            profile.preset = profileOriginalPreset;
+        }
+    }
 }
 
 /**
@@ -136,10 +184,11 @@ async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
     const headers = { 'Content-Type': 'application/json' };
     if (settings.openaiKey) headers['Authorization'] = `Bearer ${settings.openaiKey}`;
 
+    const resolvedTokens = resolvePresetOrConfiguredTokens(settings);
     const body = {
         model: settings.openaiModel || 'gpt-4o-mini',
         messages,
-        max_tokens: settings.maxTokens > 0 ? settings.maxTokens : 8192,
+        max_tokens: resolvedTokens > 0 ? resolvedTokens : 8192,
         temperature: 0.7,
     };
 
@@ -183,12 +232,13 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
         return { role: msg.role, content: String(msg.content || '') };
     });
 
+    const resolvedTokens = resolvePresetOrConfiguredTokens(settings);
     const body = {
         model: settings.ollamaModel,
         messages: ollamaMessages,
         stream: false,
         options: {
-            num_predict: settings.maxTokens > 0 ? settings.maxTokens : 8192,
+            num_predict: resolvedTokens > 0 ? resolvedTokens : 8192,
             temperature: 0.7,
         },
     };
@@ -377,8 +427,9 @@ export function extractTextFromApiResponse(data) {
 
 /**
  * Resolves the response token limit for Concierge requests over the default SillyTavern connection.
- * Preserves the user's preset limit when it is already generous (>= 8192) or unconfigured (null),
- * and boosts small chat reply limits (< 8192) so reasoning models never truncate mid-blueprint.
+ * If the user configured an explicit maxTokens override (> 0), returns that number.
+ * When maxTokens is 0 (or unset), returns null so SillyTavern strictly respects its
+ * preset-configured response length untouched without artificial boosting.
  *
  * @param {object} [opts]
  * @param {object} [opts.settings]
@@ -386,61 +437,11 @@ export function extractTextFromApiResponse(data) {
  * @param {object} [opts.context]
  * @returns {number|null}
  */
-export function resolveConciergeMaxTokens({ settings, messages, context } = {}) {
+export function resolveConciergeMaxTokens({ settings } = {}) {
     if (settings?.maxTokens && Number(settings.maxTokens) > 0) {
         return Math.floor(Number(settings.maxTokens));
     }
-
-    const ctx = context || getContext();
-    const configuredMaxTokens = Number(
-        ctx?.chatCompletionSettings?.openai_max_tokens ||
-        globalThis.oai_settings?.openai_max_tokens ||
-        ctx?.amountGen ||
-        globalThis.amount_gen ||
-        0
-    );
-
-    // If no preset response cap is visible or the user already configured >= 8192 tokens,
-    // return null so SillyTavern uses its native preset limit untouched.
-    if (!configuredMaxTokens || isNaN(configuredMaxTokens) || configuredMaxTokens >= 8192) {
-        return null;
-    }
-
-    // Otherwise, the active chat reply length (< 8192, e.g. 500 or 2048) would choke
-    // reasoning models + full blueprint scaffolding. Dynamically scale up to context headroom.
-    let contextLimit = Number(
-        ctx?.chatCompletionSettings?.openai_max_context ||
-        globalThis.oai_settings?.openai_max_context ||
-        ctx?.maxContext ||
-        globalThis.max_context ||
-        0
-    );
-    if ((!contextLimit || isNaN(contextLimit)) && typeof globalThis.getMaxContextTokens === 'function') {
-        try {
-            contextLimit = Number(globalThis.getMaxContextTokens()) || 0;
-        } catch (_) {}
-    }
-    if (!contextLimit || isNaN(contextLimit) || contextLimit <= 0) {
-        contextLimit = 16384;
-    }
-
-    let promptChars = 0;
-    if (Array.isArray(messages)) {
-        for (const msg of messages) {
-            if (typeof msg?.content === 'string') {
-                promptChars += msg.content.length;
-            } else if (Array.isArray(msg?.content)) {
-                for (const part of msg.content) {
-                    if (part && typeof part.text === 'string') {
-                        promptChars += part.text.length;
-                    }
-                }
-            }
-        }
-    }
-    const estimatedPromptTokens = Math.max(Math.ceil(promptChars / 3.2) + 250, 400);
-    const available = contextLimit - estimatedPromptTokens - 256;
-    return Math.max(configuredMaxTokens, Math.min(16384, Math.max(4096, available)));
+    return null;
 }
 
 /**

@@ -9,9 +9,12 @@ import {
     getRelationshipSyncLedger,
     updateRelationshipSyncLedger,
     extractRecentDialoguePairs,
+    sanitizeCoreFieldUpdate,
     patchLabeledSection,
     patchNpcLorebookEntry,
     getInGameTimestamp,
+    getStateTrackerConnectionSettings,
+    checkAndSyncTierCrossovers,
 } from '../relationship-narrative-sync.js';
 
 console.log('--- Running Relationship Narrative Sync Test Suite ---');
@@ -208,6 +211,77 @@ const patchedFlat = patchNpcLorebookEntry(flatEntry, { milestone: 'Earned her re
 assert.ok(patchedFlat.startsWith('Marta is an independent quartermaster who watches the hangar.'), 'Must preserve flat text');
 assert.ok(patchedFlat.includes('- [Day 15] Relationship Milestone: Earned her respect.'), 'Must append milestone to flat text');
 
+// Regression: Rejecting "...", "Personality: ...", "Habits/Behaviors: ...", and placeholder strings
+const ellipsisBJson = JSON.stringify({
+    milestone: 'Shared a quiet drink with Silas after the patrol.',
+    personality: 'Personality: ...',
+    habits: '...',
+});
+const parsedEllipsis = parseDirectionBResponse(ellipsisBJson);
+assert.ok(parsedEllipsis, 'Milestone should still parse when personality/habits are ellipsis placeholders');
+assert.strictEqual(parsedEllipsis.personality, null, 'Must reject "Personality: ..." as null');
+assert.strictEqual(parsedEllipsis.habits, null, 'Must reject "..." as null');
+
+const patchedWithEllipsis = patchNpcLorebookEntry(coreEntry, {
+    milestone: 'Shared a quiet drink with Silas after the patrol.',
+    personality: 'Personality: ...',
+    habits: '...',
+}, 'Day 13');
+assert.ok(patchedWithEllipsis.includes('Personality: Cautious, blunt, slow to trust anyone.'), 'Original Personality must NOT be overwritten with "..."');
+assert.ok(patchedWithEllipsis.includes('Habits/Behaviors: Avoids eye contact and eats alone.'), 'Original Habits/Behaviors must NOT be overwritten with "..."');
+assert.ok(!patchedWithEllipsis.includes('Personality: ...'), 'Must never write "Personality: ..." into [CORE]');
+
+// Regression: Preserving valid updates that contain the substring "none" (e.g. "none of her former hostility", "nonetheless")
+const noneInProseJson = JSON.stringify({
+    milestone: 'Dropped her guard around Silas after he kept her secret.',
+    personality: 'Personality: Blunt and practical, yet shows none of her former hostility toward Silas.',
+    habits: 'Habits/Behaviors: Nonetheless still checks the hangar locks twice, though she now saves a seat for Silas.',
+});
+const parsedNoneInProse = parseDirectionBResponse(noneInProseJson);
+assert.ok(parsedNoneInProse, 'Must parse response containing "none" in prose');
+assert.strictEqual(
+    parsedNoneInProse.personality,
+    'Blunt and practical, yet shows none of her former hostility toward Silas.',
+    'Must preserve valid personality containing "none" and strip echoed "Personality:" prefix'
+);
+assert.strictEqual(
+    parsedNoneInProse.habits,
+    'Nonetheless still checks the hangar locks twice, though she now saves a seat for Silas.',
+    'Must preserve valid habits containing "Nonetheless" and strip echoed "Habits/Behaviors:" prefix'
+);
+
+// Regression: Line-anchored section matching (mid-sentence colons & dollar signs)
+const colonAndDollarCore = `[CORE]
+Species: Human
+Personality: Values relationship: loyalty above all; shows strengths: grit. Demands a $500 retainer.
+Brief Background: Former bounty hunter.
+Habits/Behaviors: Counts her $100 bills in silence.
+[/CORE]`;
+const patchedColonCore = patchNpcLorebookEntry(colonAndDollarCore, {
+    milestone: 'Waived her fee for Silas.',
+    personality: 'Values relationship: loyalty above all; charges $0 to Silas and trusts his word.',
+    habits: null,
+}, 'Day 14');
+assert.ok(
+    patchedColonCore.includes('Personality: Values relationship: loyalty above all; charges $0 to Silas and trusts his word.\nBrief Background: Former bounty hunter.'),
+    'Must replace entire Personality line cleanly without mid-sentence truncation at "relationship:" or "strengths:"'
+);
+assert.ok(
+    !patchedColonCore.includes('Demands a $500 retainer'),
+    'Must not leave dangling tail from old Personality line'
+);
+assert.ok(
+    patchedColonCore.includes('Habits/Behaviors: Counts her $100 bills in silence.'),
+    'Must preserve Habits/Behaviors with $ amounts intact'
+);
+
+// Regression: Balanced JSON extraction with stray braces in preamble
+const preambleWithBraces = `Note: transitioning from {NEUTRAL} to {FRIENDLY}.
+{"milestone": "Fought back-to-back in the Undercity.", "personality": null, "habits": null}`;
+const parsedWithBraces = parseDirectionBResponse(preambleWithBraces);
+assert.ok(parsedWithBraces, 'Must extract valid JSON even when preamble contains {braces}');
+assert.strictEqual(parsedWithBraces.milestone, 'Fought back-to-back in the Undercity.');
+
 console.log('✓ Direction B prompt builder, JSON parser, and [CORE] surgical patcher verified');
 
 // ── 4. Ledger & Guardrails ────────────────────────────────────────────────────
@@ -352,6 +426,30 @@ const ledgerAfterPassive = getRelationshipSyncLedger(mockChatId);
 assert.strictEqual(ledgerAfterPassive['Eldoria_NPCs::3'].initialSource, 'default_neutral', 'Must be marked default_neutral');
 assert.strictEqual(ledgerAfterPassive['Eldoria_NPCs::3'].initialized, true, 'Must be marked initialized');
 console.log('✓ Passive scan initializes unrecorded NPCs with neutral baseline without triggering LLM calls');
+
+// Verify reasoning headroom in getStateTrackerConnectionSettings
+const trackerConn = getStateTrackerConnectionSettings();
+assert.strictEqual(trackerConn.maxTokens, 0, 'State tracker connection settings must not hardcode a 1024-token cap');
+
+// Verify neutral (0,0) NPC catchup in checkAndSyncTierCrossovers so subsequent crossover is not swallowed
+mockRpgTracker.chatStateProjectionOwner = mockChatId;
+mockRpgTracker.currentMemo = '[CHARACTER]\nSilas Vance: 10/10 HP\n[/CHARACTER]';
+mockRpgTracker.chatStates[mockChatId].currentMemo = '[CHARACTER]\nSilas Vance: 10/10 HP\n[/CHARACTER]';
+mockRpgTracker.chatStates[mockChatId].npcRelationshipValues['Eldoria_NPCs::4'] = { friendship: 0, affection: 0 };
+
+const prevGetContext = globalThis.SillyTavern.getContext;
+globalThis.SillyTavern.getContext = () => ({
+    ...prevGetContext(),
+    chat: [
+        { is_user: false, mes: 'The tavern is quiet.' },
+        { is_user: true, mes: 'I approach the counter.' },
+    ],
+});
+
+const catchupRes = await checkAndSyncTierCrossovers();
+assert.strictEqual(catchupRes.updated, 0, 'First sighting of (0,0) NPC should only record baseline');
+assert.strictEqual(ledgerAfterPassive['Eldoria_NPCs::4']?.initialized, true, 'Neutral (0,0) NPC must be initialized in ledger on first check');
+assert.strictEqual(ledgerAfterPassive['Eldoria_NPCs::4']?.lastSyncedTier?.friendship, 'NEUTRAL/ACQUAINTANCE');
 
 console.log('--- ALL RELATIONSHIP NARRATIVE SYNC TESTS PASSED CLEANLY! ---');
 

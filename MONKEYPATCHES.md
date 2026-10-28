@@ -89,7 +89,7 @@ Upstream MultiHog implements an official hook (e.g., `setRulesetProvider(() => r
 
 #### Context & Justification
 SillyTavern's built-in `/imagine` slash command generates images using fixed default dimensions (typically 1:1 square). In RPG campaigns, scene backgrounds require wide landscape ratios (e.g. 16:9 or 832×480), whereas NPC portraits require vertical portrait ratios (e.g. 9:16 or 480×832). 
-SillyTavern provides no dynamic aspect ratio callback for `/imagine`.
+Furthermore, SillyTavern's `/imagine` implementation mutates global singleton `extension_settings.sd` in-memory during execution and restores it on completion. When automated background generation and manual user actions fire concurrently, overlapping executions poison each other's settings, causing inverted aspect ratios or settings corruption.
 
 #### Mechanism
 1. On `APP_READY`, resolves `SlashCommandParser.commands['imagine']`.
@@ -100,10 +100,11 @@ SillyTavern provides no dynamic aspect ratio callback for `/imagine`.
      - Detects whether the generation is a character portrait or a scene/location background via `isSceneGenerationRequest`:
        - Checks active location reroll state (armed via [`DOM-10`](./LISTENERS.md#dom-10) when clicking "🤖 AI Generate" or "🔄 Regenerate" on location modals).
        - Checks active DOM modals (`Set Location Image`, location prompt review, or preview dialogs).
-       - Matches prompt text against the active campaign location name or path from the memo/dossier.
+       - Matches prompt text against the active campaign location name or path from the memo/dossier OR recent chat message footers (`*(Location: ...)*` / `(Location: ...)`) for D&D 5e parity.
        - Evaluates scene/landscape/establishing shot keyword heuristics.
-     - Injects `sceneWidth` × `sceneHeight` (16:9 landscape) for locations and scenes, or `portraitWidth` × `portraitHeight` (1:1 square) for NPC/character portraits.
-   - Delegates to `originalCallback.call(this, modifiedArgs, modifiedValue)`.
+     - Injects `sceneWidth` × `sceneHeight` (16:9 landscape) and `faces=false` for locations and scenes (bypassing SillyTavern core's 1.5× portrait multiplier), or `portraitWidth` × `portraitHeight` for NPC/character portraits.
+   - **Sequential FIFO Mutex Queue:** Serializes executions through a promise queue (`_imagineQueue`) so concurrent `/imagine` requests never run simultaneously or poison shared `extension_settings.sd`.
+   - **Chat-Switch Stale Job Invalidation:** Enforces chat boundary guards: if the user switches chats while an automated generation is waiting in queue, the stale job is cleanly discarded without executing in or polluting the new chat.
 
 #### Blast Radius (What Breaks If Removed)
 * The Smart Aspect-Ratio & Crop Bridge will stop working; all `/imagine` generations will revert to SillyTavern's global default resolution.

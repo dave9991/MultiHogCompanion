@@ -178,13 +178,14 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 ### EVT-04: `CHAT_CHANGED` (Coordinator — Phase 2 Reconciled)
 * **Trigger:** User switches active chat or current chat is reloaded. Emitted by SillyTavern with `(getCurrentChatId())`.
 * **Registered In:** `index.js` (`runChatChangedCoordinator`)
-* **Handler:** Captures `chatId`, arms a 500ms settlement timer, increments `_activeChatChangedToken`, and invokes `runChatChangedCoordinator(activeChatId, token)`.
+* **Handler:** Captures `chatId`, updates `setActiveImagineChatId(activeChatId)` and `clearActiveLocationReroll()`, arms a 500ms settlement timer, increments `_activeChatChangedToken`, and invokes `runChatChangedCoordinator(activeChatId, token)`.
 * **Purpose (Phase 2 Reconciliation):**
   1. Awaits 500ms so upstream MultiHog's debounced partition loading settles.
-  2. Verifies projection integrity via `checkTrackerProjectionIntegrity` (quarantines damaged partitions if foreign state leaks).
-  3. Enforces ruleset consistency via `ensureActiveChatRulesetConsistency` (cleanses D&D 5e prompts if stock chat, or hydrates PbtA cartridge if PbtA campaign).
-  4. Synchronizes live persona and portrait to current chat via `runSync('CHAT_CHANGED')`.
-  5. Updates UI badges, Lorebook Sync UI, NameRAG adhoc prompt, and relationship sync.
+  2. Isolates image generation: resets pending location rerolls and drops stale queued background `/imagine` requests from the previous chat.
+  3. Verifies projection integrity via `checkTrackerProjectionIntegrity` (quarantines damaged partitions if foreign state leaks).
+  4. Enforces ruleset consistency via `ensureActiveChatRulesetConsistency` (cleanses D&D 5e prompts if stock chat, or hydrates PbtA cartridge if PbtA campaign).
+  5. Synchronizes live persona and portrait to current chat via `runSync('CHAT_CHANGED')`.
+  6. Updates UI badges, Lorebook Sync UI, NameRAG adhoc prompt, and relationship sync.
 * **Cancellation Guard:** Token checked on every continuation (`if (token !== _activeChatChangedToken) return;`). If the user rapidly switches chats again, pending work instantly aborts.
 * **Blast Radius:** Switching between D&D and PbtA campaigns will contaminate prompts; damaged partitions will not be quarantined; relationship tiers will not display.
 * **Optimization Status:** **OPTIMIZED (Phase 2)**. Staggered `setTimeout` ladder eliminated; token invalidation prevents stale cross-chat overwrites.

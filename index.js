@@ -82,6 +82,7 @@ import {
     isSceneGenerationRequest,
     handleLocationRerollClick,
     wrapImagineCommand,
+    setActiveImagineChatId,
 } from './aspect-ratio-bridge.js';
 export {
     markLocationRerollActive,
@@ -91,6 +92,7 @@ export {
     getActiveCampaignLocation,
     isSceneGenerationRequest,
     handleLocationRerollClick,
+    setActiveImagineChatId,
 };
 import {
     generateCyoaChoices,
@@ -2348,6 +2350,8 @@ jQuery(async () => {
     // [CATALOG: EVT-04]
     eventSource.on(event_types.CHAT_CHANGED, (chatId) => {
         const activeChatId = (chatId && typeof chatId === 'string') ? chatId : getActiveChatId();
+        setActiveImagineChatId(activeChatId);
+        clearActiveLocationReroll();
         logRulesetEvent('CHAT_CHANGED', { activeChatId });
         if (typeof refreshConciergeActiveContext === 'function') {
             void refreshConciergeActiveContext().catch(() => {});

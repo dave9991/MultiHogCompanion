@@ -74,6 +74,25 @@ import {
     applyRepairedMessage,
 } from './cyoa-safety-net.js';
 import {
+    markLocationRerollActive,
+    clearActiveLocationReroll,
+    isLocationRerollActive,
+    isLocationPopupVisible,
+    getActiveCampaignLocation,
+    isSceneGenerationRequest,
+    handleLocationRerollClick,
+    wrapImagineCommand,
+} from './aspect-ratio-bridge.js';
+export {
+    markLocationRerollActive,
+    clearActiveLocationReroll,
+    isLocationRerollActive,
+    isLocationPopupVisible,
+    getActiveCampaignLocation,
+    isSceneGenerationRequest,
+    handleLocationRerollClick,
+};
+import {
     generateCyoaChoices,
     buildCyoaPrompt,
     extractChoicesMarkup,
@@ -893,38 +912,7 @@ export function setupImagineInterceptor() {
         if (imagineCmd._mhcIntercepted) return;
 
         // [CATALOG: ADR-MP-02] See MONKEYPATCHES.md — /imagine Slash Command Callback Wrapping
-        const originalCallback = imagineCmd.callback;
-
-        imagineCmd.callback = async function (args, trigger) {
-            const settings = getSettings();
-
-            if (settings.enableAspectRatioBridge) {
-                // MultiHog's signature: quiet=true, gallery=false, extend=false
-                const isQuiet = String(args?.quiet).toLowerCase() === 'true';
-                const isNoGallery = String(args?.gallery).toLowerCase() === 'false';
-                const isNoExtend = String(args?.extend).toLowerCase() === 'false';
-                const isMultiHog = isQuiet && isNoGallery && isNoExtend;
-
-                // Intervene only if MultiHog didn't provide width/height
-                if (isMultiHog && args.width === undefined && args.height === undefined) {
-                    const promptText = String(trigger || args?._unnamed || '');
-                    // MultiHog scene system prompts always include keywords like 'wide shot', 'landscape', or 'scene'
-                    const isScene = /wide shot|cinematic wide|landscape|establishing shot/i.test(promptText);
-
-                    if (isScene) {
-                        // 16:9 widescreen for scenes (matches ~512x512 pixel budget to prevent VRAM spill)
-                        args.width = Number(settings.sceneWidth) || 672;
-                        args.height = Number(settings.sceneHeight) || 384;
-                    } else {
-                        // 1:1 square for character/NPC portraits
-                        args.width = Number(settings.portraitWidth) || 512;
-                        args.height = Number(settings.portraitHeight) || 512;
-                    }
-                }
-            }
-
-            return await originalCallback(args, trigger);
-        };
+        wrapImagineCommand(imagineCmd, getSettings, ctx);
 
         imagineCmd._mhcIntercepted = true;
         console.log('[MultiHog Companion] Smart Aspect-Ratio & Crop Bridge: /imagine interceptor registered.');
@@ -2330,6 +2318,12 @@ jQuery(async () => {
         e.preventDefault();
         const isLevelUp = this.getAttribute('data-is-level-up') === 'true';
         await launchLevelUpOrRespecDesk({ isRespec: !isLevelUp });
+    });
+
+    $(document).off('click.mhc_loc_reroll', '.menu_button, button, [id*="rt-loc-image"]');
+    // [CATALOG: DOM-10] See LISTENERS.md — Location Image Reroll Interception & Aspect Ratio Bridge
+    $(document).on('click.mhc_loc_reroll', '.menu_button, button, [id*="rt-loc-image"]', function (e) {
+        handleLocationRerollClick(this);
     });
 
 

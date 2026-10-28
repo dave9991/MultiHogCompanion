@@ -97,8 +97,12 @@ SillyTavern provides no dynamic aspect ratio callback for `/imagine`.
 3. Wraps `imagineCmd.callback`:
    - Inspects the command args and prompt text.
    - If Companion's Aspect Ratio Bridge is enabled and the user did not supply explicit `--width`/`--height` parameters:
-     - Detects whether the generation is a character portrait or a scene background.
-     - Appends the configured resolution arguments to the command argument string.
+     - Detects whether the generation is a character portrait or a scene/location background via `isSceneGenerationRequest`:
+       - Checks active location reroll state (armed via [`DOM-10`](./LISTENERS.md#dom-10) when clicking "🤖 AI Generate" or "🔄 Regenerate" on location modals).
+       - Checks active DOM modals (`Set Location Image`, location prompt review, or preview dialogs).
+       - Matches prompt text against the active campaign location name or path from the memo/dossier.
+       - Evaluates scene/landscape/establishing shot keyword heuristics.
+     - Injects `sceneWidth` × `sceneHeight` (16:9 landscape) for locations and scenes, or `portraitWidth` × `portraitHeight` (1:1 square) for NPC/character portraits.
    - Delegates to `originalCallback.call(this, modifiedArgs, modifiedValue)`.
 
 #### Blast Radius (What Breaks If Removed)

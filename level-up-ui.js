@@ -319,8 +319,8 @@ export function openLevelUpModal({
                 <span class="mhc-hp-val" id="mhc-new-hp-display">${proposal.hpChange.oldMax}</span>
             </div>
             <div class="mhc-hp-pill" style="border-color: rgba(255, 255, 255, 0.15);">
-                <span class="mhc-hp-label">Hit Die:</span>
-                <span class="mhc-hp-val">${proposal.hitDie}</span>
+                <span class="mhc-hp-label">Hit Dice:</span>
+                <span class="mhc-hp-val" style="color: #60a5fa;"><i class="fa-solid fa-dice-d20"></i> ${proposal.hitDie} (${proposal.targetLevel}/${proposal.targetLevel})</span>
             </div>
             <div class="mhc-hp-toggle-group">
                 <span style="font-size: 0.85em; color: #9ca3af; align-self: center;"><i class="fa-solid fa-lock"></i> Maintained at Level ${proposal.currentLevel}</span>
@@ -341,6 +341,13 @@ export function openLevelUpModal({
                 <button class="menu_button mhc-hp-btn active" id="mhc-hp-avg-btn">Take Average (+${proposal.hpChange.gain})</button>
                 <button class="menu_button mhc-hp-btn" id="mhc-hp-roll-btn">Roll ${proposal.hitDie}</button>
             </div>
+        </div>
+        <div class="mhc-hp-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06); justify-content: flex-start; gap: 8px;">
+            <div class="mhc-hp-pill" style="border-color: rgba(255, 255, 255, 0.15);">
+                <span class="mhc-hp-label">Hit Dice Pool:</span>
+                <span class="mhc-hp-val" style="color: #60a5fa;"><i class="fa-solid fa-dice-d20"></i> ${proposal.hitDie} (${proposal.targetLevel}/${proposal.targetLevel})</span>
+            </div>
+            <span style="font-size: 0.82em; color: #9ca3af; align-self: center;"><i class="fa-solid fa-circle-check" style="color: #60a5fa;"></i> 1 Hit Die per character level</span>
         </div>
         `}
     </div>

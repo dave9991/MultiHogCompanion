@@ -1603,3 +1603,53 @@ test('Level-Up System: Trait vs Ability Classification, Roadmap Badges, Codex Sy
     assert.strictEqual(pill3, 'Misfortune Gambit (Reroll a failed check from critical misfortune; 1/1 per long rest)');
     assert.strictEqual(classifyFeatureKind(pill3), 'ability');
 });
+
+test('Level-Up System: D&D 5e deterministic code-generated Hit Dice (HD) management', async () => {
+    // 1. Level-Up normalizes existing HD line to targetLevel / targetLevel
+    const normalMemo = `[CHARACTER]\nHero (Rogue): 18/18 HP\nLevel: 2\nHD: d8 (2/2)\nTraits: Sneak Attack\nStatus: Healthy\n[/CHARACTER]`;
+    const resNormal = applyLevelUpCommit({
+        chatId: 'test_hd',
+        currentMemo: normalMemo,
+        proposal: { targetLevel: 3, hitDie: 'd8', hpChange: { newMax: 23 } },
+    });
+    assert.ok(resNormal.updatedMemo.includes('HD: d8 (3/3)'), 'Level-up must set HD to d8 (3/3)');
+    assert.ok(!resNormal.updatedMemo.includes('HD: d8 (2/2)'), 'Old HD line must be replaced');
+
+    // 2. Self-heals hallucinated builder HD (e.g. 14/14 at Level 3)
+    const corruptMemo = `[CHARACTER]\nHero (Rogue): 14/14 HP\nLevel: 2\nHD: d8 (14/14)\nTraits: Sneak Attack\nStatus: Healthy\n[/CHARACTER]`;
+    const resCorrupt = applyLevelUpCommit({
+        chatId: 'test_hd',
+        currentMemo: corruptMemo,
+        proposal: { targetLevel: 3, hitDie: 'd8', hpChange: { newMax: 18 } },
+    });
+    assert.ok(resCorrupt.updatedMemo.includes('HD: d8 (3/3)'), 'Corrupt 14/14 must be healed to 3/3');
+    assert.ok(!resCorrupt.updatedMemo.includes('14/14'), 'Corrupt 14/14 must not exist in memo');
+
+    // 3. Synthesizes missing HD line before Status:
+    const missingHdMemo = `[CHARACTER]\nHero (Fighter): 20/20 HP\nLevel: 2\nTraits: Second Wind\nStatus: Healthy\n[/CHARACTER]`;
+    const resMissing = applyLevelUpCommit({
+        chatId: 'test_hd',
+        currentMemo: missingHdMemo,
+        proposal: { targetLevel: 3, hitDie: 'd10', hpChange: { newMax: 28 } },
+    });
+    assert.ok(resMissing.updatedMemo.includes('HD: d10 (3/3)\nStatus: Healthy'), 'Missing HD line must be synthesized before Status:');
+
+    // 4. Respec mode normalizes HD without level advancement
+    const respecMemo = `[CHARACTER]\nHero (Wizard): 12/12 HP\nLevel: 3\nHD: d6 (1/3)\nTraits: Arcane Recovery\nStatus: Healthy\n[/CHARACTER]`;
+    const resRespec = applyLevelUpCommit({
+        chatId: 'test_hd',
+        currentMemo: respecMemo,
+        isRespec: true,
+        proposal: { targetLevel: 3, hitDie: 'd6' },
+    });
+    assert.ok(resRespec.updatedMemo.includes('HD: d6 (3/3)'), 'Respec must refresh HD pool to d6 (3/3)');
+
+    // 5. PbtA sheets remain untouched (no HD line injected)
+    const pbtaMemo = `[CHARACTER]\nProtagonist (The Blade)\nStats: Cool +1, Hard +2\nHarm: 0/4\nMoves: Strike Fast\n[/CHARACTER]`;
+    const resPbta = applyLevelUpCommit({
+        chatId: 'test_hd',
+        currentMemo: pbtaMemo,
+        proposal: { isPbta: true, playbookName: 'The Blade', targetLevel: 2 },
+    });
+    assert.ok(!resPbta.updatedMemo.includes('HD:'), 'PbtA sheets must never receive an HD line');
+});

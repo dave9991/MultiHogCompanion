@@ -983,6 +983,18 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
             });
         }
 
+        // Update Hit Dice: strictly deterministic D&D 5e (HD: dX (targetLevel/targetLevel))
+        const hdDie = (proposal.hitDie || 'd8').toLowerCase();
+        const hdLine = `HD: ${hdDie} (${targetLevel}/${targetLevel})`;
+        const hdPattern = /^\s*(?:Hit\s*Di(?:ce|e)|HD)\s*:\s*[^\n\r]+/im;
+        if (hdPattern.test(charBlock)) {
+            charBlock = charBlock.replace(hdPattern, hdLine);
+        } else if (/^\s*Status\s*:/im.test(charBlock)) {
+            charBlock = charBlock.replace(/^(\s*Status\s*:)/im, `${hdLine}\n$1`);
+        } else {
+            charBlock = `${charBlock.trimEnd()}\n${hdLine}\n`;
+        }
+
         // Apply ASI if chosen
         if (proposal.asiChoice?.type === 'asi') {
             const { stat1, amount1, stat2, amount2 } = proposal.asiChoice;

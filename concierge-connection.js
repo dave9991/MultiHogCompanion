@@ -33,7 +33,107 @@ export function getConciergeConnectionSettings() {
         openaiKey: s.conciergeOpenaiKey || '',
         openaiModel: s.conciergeOpenaiModel || '',
         maxTokens: Number(s.conciergeMaxTokens) > 0 ? Number(s.conciergeMaxTokens) : 0,
+        // Hard wall-clock cap per LLM request (seconds). 0 disables.
+        timeoutSec: Number.isFinite(Number(s.conciergeTimeoutSec)) && s.conciergeTimeoutSec !== undefined && s.conciergeTimeoutSec !== ''
+            ? Math.max(0, Number(s.conciergeTimeoutSec))
+            : DEFAULT_REQUEST_TIMEOUT_SEC,
+        // Ollama context window; Ollama's own default (2-4k) silently truncates the big Builder prompt.
+        ollamaNumCtx: Number(s.conciergeOllamaNumCtx) > 0 ? Number(s.conciergeOllamaNumCtx) : DEFAULT_OLLAMA_NUM_CTX,
+        ollamaRepeatPenalty: Number(s.conciergeOllamaRepeatPenalty) > 0 ? Number(s.conciergeOllamaRepeatPenalty) : 1.1,
     };
+}
+
+export const DEFAULT_REQUEST_TIMEOUT_SEC = 300;
+export const DEFAULT_OLLAMA_NUM_CTX = 16384;
+
+/** Thrown when the model is detected repeating itself and generation was aborted. */
+export class ConciergeLoopError extends Error {
+    constructor(message = 'The model appears to be stuck in a repetition loop.') {
+        super(message);
+        this.name = 'ConciergeLoopError';
+    }
+}
+
+/** Thrown when a request exceeds the configured wall-clock timeout. */
+export class ConciergeTimeoutError extends Error {
+    constructor(seconds) {
+        super(`The model did not finish within ${seconds}s.`);
+        this.name = 'ConciergeTimeoutError';
+    }
+}
+
+/**
+ * Detects degenerate repetition at the tail of streamed text.
+ * Catches (a) a chunk of 20-400 chars repeated 4+ times back-to-back and
+ * (b) the same long line emitted 6+ times in the recent tail.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function detectRepetition(text) {
+    if (!text || typeof text !== 'string' || text.length < 120) return false;
+    const tail = text.slice(-2400);
+
+    // (a) back-to-back periodic repetition
+    const maxP = Math.min(400, Math.floor(tail.length / 4));
+    for (let p = 20; p <= maxP; p++) {
+        const unit = tail.slice(-p);
+        if (!unit.trim()) continue;
+        if (tail.slice(-2 * p, -p) === unit && tail.slice(-3 * p, -2 * p) === unit && tail.slice(-4 * p, -3 * p) === unit) {
+            return true;
+        }
+    }
+
+    // (b) same long line repeated many times (not necessarily adjacent)
+    const counts = new Map();
+    for (const raw of tail.split('\n')) {
+        const line = raw.trim();
+        if (line.length < 24) continue;
+        const n = (counts.get(line) || 0) + 1;
+        if (n >= 6) return true;
+        counts.set(line, n);
+    }
+    return false;
+}
+
+/**
+ * Reads a fetch Response body line-by-line (ndjson / SSE), invoking onLine for each non-empty line.
+ */
+async function readResponseLines(res, onLine) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf('\n')) >= 0) {
+                const line = buffer.slice(0, idx).trim();
+                buffer = buffer.slice(idx + 1);
+                if (line) onLine(line);
+            }
+        }
+        const rest = (buffer + decoder.decode()).trim();
+        if (rest) onLine(rest);
+    } finally {
+        try { reader.releaseLock?.(); } catch (_) {}
+    }
+}
+
+/** Rejects as soon as the signal aborts (for APIs that ignore AbortSignal). */
+function raceAbort(promise, signal, getReason) {
+    if (!signal) return promise;
+    return new Promise((resolve, reject) => {
+        const onAbort = () => reject(getReason());
+        if (signal.aborted) return onAbort();
+        signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(
+            v => { signal.removeEventListener('abort', onAbort); resolve(v); },
+            e => { signal.removeEventListener('abort', onAbort); reject(e); },
+        );
+    });
 }
 
 export function updateConciergeConnectionSettings(patch) {
@@ -173,9 +273,22 @@ async function sendViaProfile(context, settings, messages, { signal = null, stre
 }
 
 /**
+ * Finalizes streamed output. A reply that is only reasoning means the token budget was
+ * burned on thinking, which is reported explicitly instead of surfacing as a parse error.
+ */
+function finalizeStreamedText(content, thinking) {
+    const text = extractTextFromApiResponse({ choices: [{ message: { content, reasoning_content: thinking } }] });
+    const structured = /\[(?:UPDATE_DOSSIER|CONCIERGE_STATE|DOSSIER_CRITIQUE|NOOP)\]|<(?:choices|button)\b|\{[\s\S]*\}/i.test(text || '');
+    if (!content.trim() && thinking.trim() && (!text || !structured)) {
+        throw new Error('The model spent its entire token budget thinking and produced no answer. Raise the max-token limit or use a non-thinking model.');
+    }
+    return text;
+}
+
+/**
  * Send a request directly to an OpenAI-compatible endpoint.
  */
-async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
+async function sendViaDirectOpenAI(settings, messages, { signal = null, guard = null } = {}) {
     let base = (settings.openaiUrl || '').replace(/\/+$/, '');
     if (!base.endsWith('/v1') && !base.includes('/v1/')) {
         base += '/v1';
@@ -190,6 +303,7 @@ async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
         messages,
         max_tokens: resolvedTokens > 0 ? resolvedTokens : 8192,
         temperature: 0.7,
+        ...(guard ? { stream: true } : {}),
     };
 
     const res = await fetch(url, {
@@ -204,6 +318,26 @@ async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
         throw new Error(`OpenAI API error (${res.status}): ${errText}`);
     }
 
+    if (guard && res.body?.getReader) {
+        let content = '';
+        let thinking = '';
+        await readResponseLines(res, line => {
+            if (!line.startsWith('data:')) return;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === '[DONE]') return;
+            try {
+                const delta = JSON.parse(payload).choices?.[0]?.delta || {};
+                if (typeof delta.content === 'string') content += delta.content;
+                const r = delta.reasoning_content ?? delta.reasoning;
+                if (typeof r === 'string') thinking += r;
+                guard.onChunk(content, thinking);
+            } catch (e) {
+                if (e?.name === 'ConciergeLoopError') throw e;
+            }
+        });
+        return finalizeStreamedText(content, thinking);
+    }
+
     const data = await res.json();
     return extractTextFromApiResponse(data);
 }
@@ -211,7 +345,7 @@ async function sendViaDirectOpenAI(settings, messages, { signal = null } = {}) {
 /**
  * Send a request directly to an Ollama endpoint.
  */
-async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
+async function sendViaDirectOllama(settings, messages, { signal = null, guard = null } = {}) {
     const base = (settings.ollamaUrl || 'http://localhost:11434').replace(/\/+$/, '');
     const url = `${base}/api/chat`;
 
@@ -236,10 +370,12 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
     const body = {
         model: settings.ollamaModel,
         messages: ollamaMessages,
-        stream: false,
+        stream: !!guard,
         options: {
             num_predict: resolvedTokens > 0 ? resolvedTokens : 8192,
             temperature: 0.7,
+            num_ctx: settings.ollamaNumCtx > 0 ? settings.ollamaNumCtx : DEFAULT_OLLAMA_NUM_CTX,
+            repeat_penalty: settings.ollamaRepeatPenalty > 0 ? settings.ollamaRepeatPenalty : 1.1,
         },
     };
 
@@ -253,6 +389,22 @@ async function sendViaDirectOllama(settings, messages, { signal = null } = {}) {
     if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`Ollama API error (${res.status}): ${errText}`);
+    }
+
+    if (guard && res.body?.getReader) {
+        let content = '';
+        let thinking = '';
+        await readResponseLines(res, line => {
+            try {
+                const obj = JSON.parse(line);
+                if (typeof obj.message?.content === 'string') content += obj.message.content;
+                if (typeof obj.message?.thinking === 'string') thinking += obj.message.thinking;
+                guard.onChunk(content, thinking);
+            } catch (e) {
+                if (e?.name === 'ConciergeLoopError') throw e;
+            }
+        });
+        return finalizeStreamedText(content, thinking);
     }
 
     const data = await res.json();
@@ -552,23 +704,68 @@ export async function sendRoutedLlmRequest(settings, messages, signalOrOptions =
         return msg;
     });
 
-    // 1. Profile Mode
-    if (settings.connectionSource === 'profile' && settings.connectionProfileId) {
-        return await sendViaProfile(context, settings, sanitizedMessages, { signal });
+    // Abort plumbing: caller signal + wall-clock timeout + loop detection all funnel through one controller.
+    const controller = new AbortController();
+    let abortReason = null;
+    const abortWith = (err) => {
+        if (!abortReason) abortReason = err;
+        controller.abort();
+    };
+    const getReason = () => abortReason || Object.assign(new Error('Request aborted.'), { name: 'AbortError' });
+    const onExternalAbort = () => abortWith(Object.assign(new Error('Request aborted by user.'), { name: 'AbortError' }));
+    if (signal) {
+        if (signal.aborted) onExternalAbort();
+        else signal.addEventListener('abort', onExternalAbort, { once: true });
     }
+    const timeoutSec = Number(settings.timeoutSec ?? DEFAULT_REQUEST_TIMEOUT_SEC);
+    const timer = timeoutSec > 0 ? setTimeout(() => abortWith(new ConciergeTimeoutError(timeoutSec)), timeoutSec * 1000) : null;
 
-    // 2. Direct OpenAI
-    if (settings.connectionSource === 'openai' && settings.openaiUrl) {
-        return await sendViaDirectOpenAI(settings, sanitizedMessages, { signal });
+    // Streaming guard (direct endpoints only): live progress + repetition detection.
+    let lastCheckLen = 0;
+    const wantsGuard = options.detectLoops !== false || typeof options.onProgress === 'function';
+    const guard = wantsGuard ? {
+        onChunk(content, thinking) {
+            const total = content.length + thinking.length;
+            if (typeof options.onProgress === 'function') {
+                try { options.onProgress({ content, thinking, chars: content.length, thinkingChars: thinking.length }); } catch (_) {}
+            }
+            if (options.detectLoops !== false && total - lastCheckLen >= 200) {
+                lastCheckLen = total;
+                if (detectRepetition(content) || detectRepetition(thinking)) {
+                    const err = new ConciergeLoopError();
+                    abortWith(err);
+                    throw err;
+                }
+            }
+        },
+    } : null;
+    const sigOpts = { signal: controller.signal, guard };
+
+    try {
+        // 1. Profile Mode
+        if (settings.connectionSource === 'profile' && settings.connectionProfileId) {
+            return await raceAbort(sendViaProfile(context, settings, sanitizedMessages, { signal: controller.signal }), controller.signal, getReason);
+        }
+
+        // 2. Direct OpenAI
+        if (settings.connectionSource === 'openai' && settings.openaiUrl) {
+            return await sendViaDirectOpenAI(settings, sanitizedMessages, sigOpts);
+        }
+
+        // 3. Direct Ollama
+        if (settings.connectionSource === 'ollama' && settings.ollamaModel) {
+            return await sendViaDirectOllama(settings, sanitizedMessages, sigOpts);
+        }
+
+        // 4. Default SillyTavern Connection
+        return await raceAbort(sendViaDefault(context, settings, sanitizedMessages, { signal: controller.signal, callerName }), controller.signal, getReason);
+    } catch (err) {
+        if (abortReason) throw abortReason;
+        throw err;
+    } finally {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener?.('abort', onExternalAbort);
     }
-
-    // 3. Direct Ollama
-    if (settings.connectionSource === 'ollama' && settings.ollamaModel) {
-        return await sendViaDirectOllama(settings, sanitizedMessages, { signal });
-    }
-
-    // 4. Default SillyTavern Connection
-    return await sendViaDefault(context, settings, sanitizedMessages, { signal, callerName });
 }
 
 /**
@@ -576,9 +773,10 @@ export async function sendRoutedLlmRequest(settings, messages, signalOrOptions =
  *
  * @param {Array<{role: string, content: string|Array}>} messages
  * @param {AbortSignal|null} [signal]
+ * @param {{ onProgress?: Function, detectLoops?: boolean }} [extra] Live stream progress callback (direct endpoints)
  * @returns {Promise<string>}
  */
-export async function sendConciergeRequest(messages, signal = null) {
+export async function sendConciergeRequest(messages, signal = null, extra = {}) {
     const settings = getConciergeConnectionSettings();
-    return await sendRoutedLlmRequest(settings, messages, { signal, callerName: 'PbtA Concierge' });
+    return await sendRoutedLlmRequest(settings, messages, { ...extra, signal, callerName: 'PbtA Concierge' });
 }

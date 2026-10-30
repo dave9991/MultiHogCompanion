@@ -10,6 +10,9 @@ import {
     getConciergeConnectionSettings,
     updateConciergeConnectionSettings,
     sendConciergeRequest,
+    ConciergeLoopError,
+    ConciergeTimeoutError,
+    detectRepetition,
 } from './concierge-connection.js';
 import {
     readImageAsDataUrl,
@@ -83,6 +86,12 @@ let chatHistory = [];
 let changelog = [];
 let pendingAttachments = [];
 let isGenerating = false;
+/** Active Builder/Judge/Talker turn: { controller, cancelled } — lets Stop/reset cancel and invalidate stale work. */
+let activeTurn = null;
+/** Max prior chat messages sent to each LLM pass (blueprint carries long-term state). */
+const MAX_PASS_HISTORY = 24;
+/** Max chars of a failed Builder reply echoed back on retry (never feed a loop back to the model). */
+const MAX_RETRY_ECHO_CHARS = 1500;
 let activeImports = [];
 let activeNameRagSeeds = '';
 let activeNameRagKey = '';
@@ -260,7 +269,16 @@ export function resetConciergeState({ showGreeting = true } = {}) {
     chatHistory = [];
     changelog = [];
     pendingAttachments = [];
+    if (activeTurn) {
+        activeTurn.cancelled = true;
+        try { activeTurn.controller.abort(); } catch (_) {}
+        activeTurn = null;
+    }
     isGenerating = false;
+    const stopBtnEl = typeof document !== 'undefined' ? document.getElementById?.('mhc_stop_btn') : null;
+    if (stopBtnEl) stopBtnEl.style.display = 'none';
+    const sendBtnEl = typeof document !== 'undefined' ? document.getElementById?.('mhc_send_btn') : null;
+    if (sendBtnEl) sendBtnEl.disabled = false;
     activeNameRagSeeds = '';
     activeNameRagKey = '';
     window._mhcLastBuilderTransaction = null;
@@ -644,7 +662,7 @@ function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
 
     let html = '';
     if (imageSrc) {
-        html += `<img class="mhc-thumb-preview" src="${imageSrc}" alt="Attached Image">`;
+        html += `<img class="mhc-thumb-preview" src="${escapeHtml(imageSrc)}" alt="Attached Image">`;
     }
 
     if (text) {
@@ -653,7 +671,7 @@ function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-            .replace(/\*(.*?)\*/g, '<i>$1</i>')
+            .replace(/\*(?!\s)([^*\n]+?)\*/g, '<i>$1</i>')
             .replace(/\n/g, '<br>');
         html += `<div>${formatted}</div>`;
     }
@@ -671,6 +689,7 @@ function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
     bubble.innerHTML = html;
     stream.appendChild(bubble);
     stream.scrollTop = stream.scrollHeight;
+    return bubble;
 }
 
 /**
@@ -738,7 +757,7 @@ function updateConnectionDropdowns() {
     profileSelect.empty();
     profileSelect.append('<option value="">-- Select Profile --</option>');
     profiles.forEach(p => {
-        profileSelect.append(`<option value="${p.id}">${p.name || p.id}</option>`);
+        profileSelect.append(`<option value="${escapeHtml(String(p.id))}">${escapeHtml(String(p.name || p.id))}</option>`);
     });
 
     if (s.connectionSource === 'profile') {
@@ -762,7 +781,7 @@ function populateInspirationDropdowns() {
     charSelect.append('<option value="">-- Choose Character --</option>');
     chars.forEach((c, idx) => {
         if (c?.name) {
-            charSelect.append(`<option value="${idx}">${c.name}</option>`);
+            charSelect.append(`<option value="${idx}">${escapeHtml(String(c.name))}</option>`);
         }
     });
 
@@ -782,8 +801,26 @@ function populateInspirationDropdowns() {
     }
 
     bookNames.forEach(b => {
-        loreSelect.append(`<option value="${b}">${b}</option>`);
+        loreSelect.append(`<option value="${escapeHtml(String(b))}">${escapeHtml(String(b))}</option>`);
     });
+}
+
+/**
+ * Clip a failed Builder reply before echoing it back for a retry. A looping/garbage reply is
+ * replaced entirely so the model is never conditioned on its own degenerate output.
+ */
+function clipRetryEcho(raw) {
+    const text = String(raw || '');
+    if (detectRepetition(text)) return '[previous reply discarded: repetitive output]';
+    return text.length > MAX_RETRY_ECHO_CHARS ? `${text.slice(0, MAX_RETRY_ECHO_CHARS)}\n[…truncated]` : text;
+}
+
+/** True when a generation failed because it was stopped by the user, looped, or timed out. */
+function classifyTurnAbort(err) {
+    if (err?.name === 'AbortError') return 'user';
+    if (err instanceof ConciergeLoopError || err?.name === 'ConciergeLoopError') return 'loop';
+    if (err instanceof ConciergeTimeoutError || err?.name === 'ConciergeTimeoutError') return 'timeout';
+    return null;
 }
 
 /**
@@ -795,6 +832,15 @@ async function handleUserSend() {
     const input = $('#mhc_chat_input');
     const text = input.val().trim();
     if (!text && !pendingAttachments.length) return;
+
+    // Rollback snapshot: a failed/stopped turn restores everything to exactly this state.
+    const rollback = {
+        dossier: JSON.parse(JSON.stringify(activeDossier)),
+        historyLength: chatHistory.length,
+        changelogLength: changelog.length,
+        text,
+        attachments: [...pendingAttachments],
+    };
 
     input.val('');
     const attachmentsToProcess = [...pendingAttachments];
@@ -838,7 +884,7 @@ async function handleUserSend() {
 
     // Display user bubble
     const displayUserText = text || '(Provided inspiration details)';
-    appendChatBubble('user', displayUserText, imageSrcForDisplay);
+    const userBubbleEl = appendChatBubble('user', displayUserText, imageSrcForDisplay);
 
     // Format LLM message payload
     let userMsgLlmContent;
@@ -864,12 +910,39 @@ async function handleUserSend() {
     const typingBubble = document.createElement('div');
     typingBubble.className = 'mhc-bubble mhc-bubble-assistant';
     typingBubble.id = 'mhc_typing_indicator';
-    typingBubble.innerHTML = '<i>🎩 The Concierge is contemplating the fiction...</i>';
+    typingBubble.innerHTML = '<i class="mhc-stage">🎩 The Concierge is contemplating the fiction...</i><div class="mhc-stream-preview" style="margin-top:6px;font-size:0.78em;opacity:0.65;white-space:pre-wrap;word-break:break-word;"></div>';
     stream.appendChild(typingBubble);
     stream.scrollTop = stream.scrollHeight;
 
+    const turn = { controller: new AbortController(), cancelled: false };
+    activeTurn = turn;
     isGenerating = true;
     $('#mhc_send_btn').prop('disabled', true);
+    $('#mhc_stop_btn').show();
+
+    const setStage = (html) => {
+        const el = typingBubble.querySelector('.mhc-stage');
+        if (el) el.innerHTML = html;
+        const prev = typingBubble.querySelector('.mhc-stream-preview');
+        if (prev) prev.textContent = '';
+    };
+    // Live stream preview (direct Ollama/OpenAI endpoints): char counter + tail of output so loops are visible.
+    let lastPreviewAt = 0;
+    const llm = (messages) => sendConciergeRequest(messages, turn.controller.signal, {
+        onProgress: ({ content, thinking, chars, thinkingChars }) => {
+            const now = Date.now();
+            if (now - lastPreviewAt < 150) return;
+            lastPreviewAt = now;
+            const prev = typingBubble.querySelector('.mhc-stream-preview');
+            if (!prev) return;
+            const tail = (content || thinking || '').slice(-220).replace(/\s+/g, ' ');
+            const looping = detectRepetition(content || thinking || '');
+            prev.textContent = `${looping ? '⚠️ repeating… ' : ''}${chars} chars${thinkingChars ? ` + ${thinkingChars} thinking` : ''} — …${tail}`;
+            const box = document.getElementById('mhc_chat_messages');
+            if (box) box.scrollTop = box.scrollHeight;
+        },
+    });
+    const recentHistory = () => chatHistory.slice(-MAX_PASS_HISTORY);
 
     try {
         const refreshNameRagSeedsIfNeeded = async () => {
@@ -919,7 +992,7 @@ async function handleUserSend() {
 
         // ── Stage 1: The Builder (Pass 1 — Contemplation & Extraction) ─────
         if (typingEl) {
-            typingEl.innerHTML = '<i>🎩 The Concierge is contemplating &amp; scaffolding the blueprint...</i>';
+            setStage('<i>🎩 The Concierge is contemplating &amp; scaffolding the blueprint...</i>');
         }
 
         const builderMessages = [
@@ -928,7 +1001,7 @@ async function handleUserSend() {
                 name: 'System',
                 content: buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds),
             },
-            ...chatHistory.map(formatHistoryMessage),
+            ...recentHistory().map(formatHistoryMessage),
         ];
 
         let builderAttempts = 0;
@@ -943,7 +1016,7 @@ async function handleUserSend() {
 
         while (builderAttempts < maxBuilderAttempts) {
             builderAttempts++;
-            builderRawResponse = await sendConciergeRequest(currentBuilderMessages);
+            builderRawResponse = await llm(currentBuilderMessages);
             const preNameRagResponse = builderRawResponse;
             let turnNameRagResolutions = [];
 
@@ -982,11 +1055,11 @@ async function handleUserSend() {
             // If syntax errors occurred and attempts remain, retry with error feedback
             if (builderAttempts < maxBuilderAttempts && builderReport.errors.length > 0) {
                 if (typingEl) {
-                    typingEl.innerHTML = '<i>🎩 The Concierge is recalibrating the blueprint...</i>';
+                    setStage('<i>🎩 The Concierge is recalibrating the blueprint...</i>');
                 }
                 currentBuilderMessages = [
                     ...builderMessages,
-                    { role: 'assistant', name: 'PbtA_Builder', content: builderRawResponse },
+                    { role: 'assistant', name: 'PbtA_Builder', content: clipRetryEcho(builderRawResponse) },
                     {
                         role: 'system',
                         name: 'System',
@@ -995,11 +1068,11 @@ async function handleUserSend() {
                 ];
             } else if (builderAttempts < maxBuilderAttempts && !builderReport.hasMutations && !builderReport.isNoop) {
                 if (typingEl) {
-                    typingEl.innerHTML = '<i>🎩 The Concierge is recalibrating the blueprint...</i>';
+                    setStage('<i>🎩 The Concierge is recalibrating the blueprint...</i>');
                 }
                 currentBuilderMessages = [
                     ...builderMessages,
-                    { role: 'assistant', name: 'PbtA_Builder', content: builderRawResponse },
+                    { role: 'assistant', name: 'PbtA_Builder', content: clipRetryEcho(builderRawResponse) },
                     {
                         role: 'system',
                         name: 'System',
@@ -1039,7 +1112,7 @@ async function handleUserSend() {
             if (shouldJudge) {
                 try {
                     if (typingEl) {
-                        typingEl.innerHTML = '<i>⚖️ The Concierge is grading blueprint depth &amp; entanglement...</i>';
+                        setStage('<i>⚖️ The Concierge is grading blueprint depth &amp; entanglement...</i>');
                     }
                     const criticMessages = [
                         {
@@ -1059,12 +1132,12 @@ async function handleUserSend() {
                         },
                     ];
 
-                    const criticRawResponse = await sendConciergeRequest(criticMessages);
+                    const criticRawResponse = await llm(criticMessages);
                     critiqueResult = parseDossierCritique(criticRawResponse);
 
                     if (critiqueResult.shouldRevise) {
                         if (typingEl) {
-                            typingEl.innerHTML = `<i>🔨 The Concierge is executing a second architectural pass (${critiqueResult.grade} · ${critiqueResult.score}/100)...</i>`;
+                            setStage(`<i>🔨 The Concierge is executing a second architectural pass (${critiqueResult.grade} · ${critiqueResult.score}/100)...</i>`);
                         }
                         const refinerMessages = [
                             {
@@ -1072,7 +1145,7 @@ async function handleUserSend() {
                                 name: 'System',
                                 content: buildConciergeRefinerContext(activeDossier, changelog, critiqueResult, activeNameRagSeeds),
                             },
-                            ...chatHistory.map(formatHistoryMessage),
+                            ...recentHistory().map(formatHistoryMessage),
                             {
                                 role: 'user',
                                 name: 'System',
@@ -1080,7 +1153,7 @@ async function handleUserSend() {
                             },
                         ];
 
-                        let refinerRawResponse = await sendConciergeRequest(refinerMessages);
+                        let refinerRawResponse = await llm(refinerMessages);
                         let refinerNameRagResolutions = [];
                         if (extension_settings?.multihog_companion?.enableNameRag !== false) {
                             try {
@@ -1117,7 +1190,10 @@ async function handleUserSend() {
                         }
                     }
                 } catch (judgeErr) {
+                    // Stop (or reset) must cancel the whole turn; any other failure only skips the optional Judge/Refiner.
+                    if (classifyTurnAbort(judgeErr) === 'user' || turn.cancelled) throw judgeErr;
                     console.warn('[PbtA Concierge] Contemplative Judge/Refiner pass skipped due to error:', judgeErr);
+                    globalThis.toastr?.warning(`Blueprint Judge/Refiner skipped: ${judgeErr?.message || judgeErr}`, 'PbtA Concierge');
                 }
             }
         } else if (finalStatus === 'NOOP') {
@@ -1150,7 +1226,7 @@ async function handleUserSend() {
 
         // ── Stage 2: The Talker (Conversational Session Zero GM) ───────────
         if (typingEl) {
-            typingEl.innerHTML = '<i>🎩 The Concierge is contemplating the fiction...</i>';
+            setStage('<i>🎩 The Concierge is contemplating the fiction...</i>');
         }
 
         const talkerInstruction = buildTalkerInstructionNotice(finalStatus, builderSummaryText, builderReport?.errors);
@@ -1161,7 +1237,7 @@ async function handleUserSend() {
                 name: 'System',
                 content: buildConciergeTalkerContext(activeDossier, changelog, activeNameRagSeeds),
             },
-            ...chatHistory.map(formatHistoryMessage),
+            ...recentHistory().map(formatHistoryMessage),
             {
                 role: 'system',
                 name: 'System',
@@ -1171,13 +1247,20 @@ async function handleUserSend() {
 
         let finalChatBubbleText = '';
         try {
-            const talkerResponse = await sendConciergeRequest(talkerMessages);
-            finalChatBubbleText = stripConciergeStateBlocks(talkerResponse) || talkerResponse;
+            const talkerResponse = await llm(talkerMessages);
+            finalChatBubbleText = (stripConciergeStateBlocks(talkerResponse) || talkerResponse || '').trim();
+            if (!finalChatBubbleText) {
+                console.warn('[PbtA Concierge] Talker returned an empty reply, using Builder summary.');
+                globalThis.toastr?.warning('The Concierge returned an empty reply; showing the blueprint summary instead.', 'PbtA Concierge');
+                finalChatBubbleText = builderSummaryText ? `I have noted: ${builderSummaryText}` : 'The Concierge had nothing to say this turn — try rephrasing.';
+            }
         } catch (talkerErr) {
+            if (classifyTurnAbort(talkerErr) || turn.cancelled) throw talkerErr;
             console.warn('[PbtA Concierge] Talker error, falling back to basic response:', talkerErr);
             finalChatBubbleText = builderSummaryText ? `I have noted: ${builderSummaryText}` : 'Could not generate conversational response.';
         }
 
+        if (turn.cancelled) return;
         typingBubble.remove();
 
         // Render clean bubble to the user (with debug trace button if failure occurred)
@@ -1191,12 +1274,41 @@ async function handleUserSend() {
         });
         saveDraft();
     } catch (err) {
+        // Reset already tore down this turn's UI/state; nothing to roll back.
+        if (turn.cancelled) return;
         typingBubble.remove();
-        console.error('[PbtA Concierge] Request failed:', err);
-        appendChatBubble('assistant', `⚠️ **Error communicating with Concierge:** ${err.message || String(err)}`);
+
+        // Roll the turn back completely so nothing dangles and the user can simply resend.
+        activeDossier = rollback.dossier;
+        chatHistory.length = Math.min(chatHistory.length, rollback.historyLength);
+        changelog.length = Math.min(changelog.length, rollback.changelogLength);
+        userBubbleEl?.remove();
+        pendingAttachments = rollback.attachments;
+        renderAttachmentTray();
+        $('#mhc_chat_input').val(rollback.text);
+        updateBlueprintDeck();
+        saveDraft();
+
+        const kind = classifyTurnAbort(err);
+        if (kind === 'user') {
+            globalThis.toastr?.info('Generation stopped. Your message was restored — edit it or press Send to retry.', 'PbtA Concierge');
+        } else {
+            console.error('[PbtA Concierge] Request failed:', err);
+            const hint = kind === 'loop'
+                ? 'The model got stuck repeating itself and was stopped. Your message was restored — press Send to retry (a lower temperature, repeat penalty, or a different model can help).'
+                : kind === 'timeout'
+                    ? `${err.message} Your message was restored — press Send to retry.`
+                    : `${err.message || String(err)} Your message was restored — press Send to retry.`;
+            appendChatBubble('assistant', `⚠️ **Concierge request stopped:** ${hint}`);
+            globalThis.toastr?.warning(kind === 'loop' ? 'Local model loop detected — generation stopped.' : 'Concierge request failed.', 'PbtA Concierge');
+        }
     } finally {
-        isGenerating = false;
-        $('#mhc_send_btn').prop('disabled', false);
+        if (activeTurn === turn) {
+            activeTurn = null;
+            isGenerating = false;
+            $('#mhc_stop_btn').hide();
+            $('#mhc_send_btn').prop('disabled', false);
+        }
     }
 }
 
@@ -1691,6 +1803,9 @@ function bindModalEvents() {
 
     // Send on button or Enter (Shift+Enter for newline)
     $('#mhc_send_btn').on('click', handleUserSend);
+    $('#mhc_stop_btn').on('click', () => {
+        if (activeTurn) activeTurn.controller.abort();
+    });
     $('#mhc_chat_input').on('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();

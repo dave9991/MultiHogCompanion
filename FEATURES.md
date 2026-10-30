@@ -69,6 +69,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
   * **Smart-Gated Critic & Judge:** Heuristic gate evaluates mutation scale and routes complex world updates through an adversarial Critic & Refiner pass.
   * **Talker Instruction Notices:** Injects anti-hallucination guardrails and structured state notices into the Concierge interactive conversation drawer.
   * **Diagnostic Inspector:** Real-time visual debugger (`/mhc-history-check`, inspect trace) providing transparent audit logs of every dossier transformation.
+  * **Stop / Loop Guard / Rollback:** Every turn has an `AbortController` (⏹ Stop button), a wall-clock timeout (`conciergeTimeoutSec`, default 300s), and — on direct Ollama/OpenAI endpoints — token streaming with a live preview and `detectRepetition` loop auto-abort (`ConciergeLoopError`). Any stopped/failed turn is fully rolled back (dossier, history, changelog, input text, attachments). Ollama requests send `num_ctx` (`conciergeOllamaNumCtx`, default 16384) and `repeat_penalty` (`conciergeOllamaRepeatPenalty`, default 1.1). Per-pass history is capped and failed Builder replies are never echoed back verbatim on retry. Profile/default ST connections cannot stream, so they get Stop + timeout only.
 * **Associated Mechanisms:** Pure additive API integrated into the MultiHog Companion drawer.
 
 ---

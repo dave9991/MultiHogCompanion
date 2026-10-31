@@ -13,6 +13,7 @@
 
 import { serializeDossierToMarkdown } from './concierge-parser.js';
 import { formatInitialPbtaMemo } from './pbta-ruleset.js';
+import { getStagedCanonEntries, writeStagedCanon } from './concierge-canon.js';
 import {
     loadMainNpcSectionNames,
     buildNpcEntryContent,
@@ -271,6 +272,38 @@ async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, secti
     } catch (err) {
         console.warn('[PbtA Concierge] Campaign lorebook distribution encountered error:', err);
         return {};
+    }
+}
+
+/**
+ * Writes staged Archivist-mode lore into the `{prefix}_Canon` lorebook (vectorized entries)
+ * and registers the book on the chat so MultiHog's keyword/vector matching can see it.
+ * No-op in Vibe mode (nothing staged).
+ *
+ * @param {string} chatId
+ */
+async function injectCanonBook(chatId) {
+    try {
+        if (!getStagedCanonEntries().length) return null;
+        const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
+        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
+            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
+            : (chatId || '');
+        const res = await writeStagedCanon(prefix, {
+            afterSave: async (bookName, bookData) => {
+                if (typeof router.updateWorldInfoCache === 'function') await router.updateWorldInfoCache(bookName, bookData);
+                if (typeof router.rememberCampaignBook === 'function') router.rememberCampaignBook(bookName);
+            },
+        });
+        if (res?.written) {
+            globalThis.toastr?.info(`Canon lorebook "${res.bookName}": ${res.written} entries added.`);
+        }
+        return res;
+    } catch (err) {
+        console.warn('[PbtA Concierge] Canon lorebook write failed:', err);
+        globalThis.toastr?.warning('Could not write the Canon lorebook; your lore was not saved to the campaign.');
+        return null;
     }
 }
 
@@ -601,6 +634,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             } catch (loreErr) {
                 console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
             }
+
+            // Archivist mode: full imported lore → {prefix}_Canon (vector-matchable)
+            await injectCanonBook(chatId);
 
             // ── 4b. Seed Day 0 World Skeleton ({prefix}_Skeleton) for World Progression ──
             onProgress('🌍 Seeding Day 0 World Skeleton for macro progression...', 78);

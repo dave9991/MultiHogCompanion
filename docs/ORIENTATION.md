@@ -62,3 +62,9 @@ Developing this extension requires understanding the interaction across three di
 3. **Mandatory Catalog Sync & Anchors**: Every registered event listener, DOM delegation, and runtime monkeypatch must have an anchor tag in code (`// [CATALOG: EVT-XX]`, `// [CATALOG: DOM-XX]`, `// [CATALOG: ADR-MP-XX]`) and be documented in `LISTENERS.md` or `MONKEYPATCHES.md`. `tests/catalog-integrity.test.js` verifies this on every test run.
 4. **Resilient Fallbacks**: Never allow an external service (NameRAG, local LLM, endpoint) or monkeypatched UI action to stall indefinitely. Wrap asynchronous operations in timeouts (e.g. 4 seconds) and show user-facing `toastr.warning` notices on failure.
 5. **Always Run Tests**: Verify that `npm test` passes completely before concluding any turn.
+
+## 4. Concierge Input Modes (Vibe vs Archivist)
+The Session Zero Concierge sizes its input in [`concierge-canon.js`](../concierge-canon.js) (~6,000 tokens, override chip in the attachment tray):
+* **Vibe mode** (splash/small lore): scaffold a draft immediately — the original flow, untouched.
+* **Archivist mode** (big lorebook/doc): attach-time chunk + LLM label (regex fallback) → staged in memory → first send is a **briefing turn** (`[CANON_INVENTORY]` + `[SUGGESTED_STARTS]` chips, no dossier) → later sends add a retrieved `[CANON_FOCUS]` slice and honor `[PROMOTE_CANON: Name]` → at launch everything is written to `{prefix}_Canon` (`vectorized: true`, order 50) and registered via `rememberCampaignBook`.
+* No new listeners or monkey patches; all logic is inside the Concierge UI/runner (FEAT-02).

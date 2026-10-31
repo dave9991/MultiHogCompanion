@@ -102,6 +102,7 @@ export async function runWorldArchivistPass(bookName, entries, onStatus = () => 
 
     for (const e of entries) {
         if (totalWords + e.wordCount > ARCHIVIST_MAX_INPUT_WORDS) {
+            onStatus(`Lorebook "${bookName}" is large: summary covers the first ${entryBlocks.length} of ${entries.length} entries (full text goes to Canon).`);
             entryBlocks.push(`\n... [Remaining ${entries.length - entryBlocks.length} entries truncated to fit synthesis budget]`);
             break;
         }
@@ -130,7 +131,8 @@ Output ONLY the structured Setting Brief.`;
         return stripThinkingContent(brief).trim();
     } catch (err) {
         console.warn('[PbtA Concierge] World Archivist pass failed, falling back to extractive summary:', err);
-        return entryBlocks.slice(0, 5).join('\n\n');
+        onStatus('Archivist summary failed; using an excerpt of the first entries instead.');
+        return entryBlocks.slice(0, 5).join('\n\n').slice(0, 8000);
     }
 }
 
@@ -142,7 +144,7 @@ Output ONLY the structured Setting Brief.`;
  * @param {object} rawBook
  * @param {(status: string) => void} [onStatus]
  * @param {string} [protagonistName='']
- * @returns {Promise<{ block: string, mode: 'direct'|'synthesized', totalWords: number }>}
+ * @returns {Promise<{ block: string, mode: 'direct'|'synthesized', totalWords: number, entries: Array }>}
  */
 export async function processLorebookForConcierge(bookName, rawBook, onStatus = () => {}, protagonistName = '') {
     const cleaned = sanitizeLorebookEntries(rawBook, protagonistName);
@@ -156,11 +158,11 @@ export async function processLorebookForConcierge(bookName, rawBook, onStatus = 
     if (totalWords <= DIRECT_FEED_WORD_LIMIT) {
         const textParts = cleaned.map(e => `### [${e.title}]\n${e.content}`);
         const block = `\n[INSPIRATION_LOREBOOK: ${bookName}]\n${textParts.join('\n\n')}\n[/INSPIRATION_LOREBOOK]\n`;
-        return { block: resolveCardMacros(block, protagonistName), mode: 'direct', totalWords };
+        return { block: resolveCardMacros(block, protagonistName), mode: 'direct', totalWords, entries: cleaned };
     }
 
     // 2. Dense Lorebook: Sub-Agent Pass
     const brief = await runWorldArchivistPass(bookName, cleaned, onStatus);
     const block = `\n[INSPIRATION_LOREBOOK_BRIEF: ${bookName}]\n${brief}\n[/INSPIRATION_LOREBOOK_BRIEF]\n`;
-    return { block: resolveCardMacros(block, protagonistName), mode: 'synthesized', totalWords };
+    return { block: resolveCardMacros(block, protagonistName), mode: 'synthesized', totalWords, entries: cleaned };
 }

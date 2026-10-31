@@ -308,6 +308,7 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)\]/gi, '')
         .replace(/\[NOOP\][\s\S]*?(?:\[\/NOOP\]|$)/gi, '')
         .replace(/\[BUILDER_REPORT:[^\n\]]+\]/gi, '')
+        .replace(/\[PROMOTE_CANON:[^\n\]]*\]/gi, '')
         .replace(/```(?:text|markdown)?\s*```/gi, '')
         .trim();
 }

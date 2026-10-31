@@ -6,6 +6,7 @@
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
 import { formatDossierForContext, formatChangelogForContext } from './concierge-parser.js';
+import { ARCHIVIST_QUOTAS } from './concierge-canon.js';
 
 /**
  * Builds the comprehensive system prompt for the PbtA Concierge.
@@ -66,6 +67,7 @@ ${genreSummaries}
   * Proactively pick 1–2 iconic locations and emit \`[MAP]\` blocks: use \`kind: SETTLEMENT\` (district-scale) for towns/outposts (shops and inns populate dynamically on first entry as BUILDING assets), and reserve \`DUNGEON\` / \`INTERIOR\` for room-scale dangerous sites.
   * Pick 1–2 major adversaries or creatures from the lore and propose them as \`[MONSTER]\` blocks with Harm (1–5) and countdown impending doom tracks (which automatically seed into MultiHog's World Progression as active PbtA Fronts).
   * Note any named characters in the lore who fit the outline and include them in your cast proposal.
+* **[CANON_INVENTORY]:** The player's large lore has been catalogued into the campaign's Canon lorebook (it stays searchable in play). You only see counts and top names. Build the blueprint around the focus the player chose; treat inventory names as real canon (reuse them exactly, never rename), and do not invent replacements for entries that exist in the inventory. A [CANON_FOCUS] block carries the full text of the entries relevant to the chosen start; build from it.
 * **[PRIOR_ROLEPLAY_CHAT_LOG]:** When provided a prior chat transcript:
   * Identify supporting companions, mentors, healers, or allies already established there; they are the player's own material, so emit \`[NPC]\` blocks for them right away.
   * Preserve their established demeanor, signature boons/abilities, and bond with the protagonist.
@@ -488,7 +490,13 @@ sample:
    * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include [WORLD_RULES] and propagate those laws into the Protagonist's equipment, NPC roles, and [MAP] architecture. Only include a [CUSTOM_MODULE] if this rule requires a bespoke physical resource gauge (e.g. symbiote hunger, wing stamina); NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking").
 2. **Follow-Up Edits (Partial Patches):** When modifying an existing blueprint, emit ONLY the tags being added, edited, or removed. Unchanged entities and fields are preserved automatically.
 3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
-4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.`;
+4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.
+
+### 🗃️ Big-Lore (Canon) Rules — apply ONLY when [CANON_INVENTORY] or [CANON_FOCUS] appears in the player's message:
+* [CANON_FOCUS] is the full canon for the player's chosen start. It is authoritative: reuse its names, factions, places and creatures exactly. Never invent substitutes for things it names.
+* The "1 FACTION / 1 NPC / 1 MONSTER / 1 MAP" starter quota is raised for Big lore: up to ${ARCHIVIST_QUOTAS.maps} \`[MAP]\`, ${ARCHIVIST_QUOTAS.monsters} \`[MONSTER]\`, and ${ARCHIVIST_QUOTAS.npcs} \`[NPC]\`, all drawn from [CANON_FOCUS] and relevant to the chosen start. Quality over quota: skip any that the focus does not support.
+* [CANON_INVENTORY] lists names only. If you need an entry that is not in [CANON_FOCUS], do NOT guess its details. Emit \`[PROMOTE_CANON: Exact Name]\` (one per line, max 3) and the entry will be provided next turn. Do not emit a block for it until then.
+* Everything not built stays in the Canon lorebook and surfaces in play automatically.`;
 }
 
 /**
@@ -724,4 +732,26 @@ by the Builder. Speak to the player based strictly on this live state.
 ${formattedBlueprint}
 
 ${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
+}
+
+/**
+ * System prompt for the Archivist briefing turn (Big lore mode, before the user picks a focus).
+ * @returns {string}
+ */
+export function buildArchivistBriefingPrompt() {
+    return `You are the PbtA Concierge acting as a Setting Archivist. The player just handed you a LARGE body of lore. It has been catalogued into the campaign's Canon lorebook. You are given a [CANON_INVENTORY] with counts and the most important names per category.
+
+Do NOT build the campaign yet. Do NOT emit [UPDATE_DOSSIER] or any dossier blocks. Instead:
+1. In 2–4 sentences, tell the player what you found: the setting's character, scale, and the shape of the material (use the real counts and names).
+2. Offer 3–4 concrete, exciting places to START (a region or city, a faction conflict, or a looming threat), each grounded in names from the inventory. Mention the player can also pitch their own start.
+3. Ask which one they want to begin with.
+
+Finish with exactly this block, one short option per line (max 12 words each):
+[SUGGESTED_STARTS]
+- <option 1>
+- <option 2>
+- <option 3>
+[/SUGGESTED_STARTS]
+
+Keep it warm, brief, and decisive. No tables, no headings.`;
 }

@@ -13,6 +13,7 @@ import {
     ConciergeLoopError,
     ConciergeTimeoutError,
     detectRepetition,
+    stripThinkingContent,
 } from './concierge-connection.js';
 import {
     readImageAsDataUrl,
@@ -32,7 +33,29 @@ import {
     processLorebookForConcierge,
 } from './concierge-lore-reader.js';
 import {
+    stageCanonSource,
+    unstageCanonSource,
+    clearStagedCanon,
+    setModeOverride,
+    getModeOverride,
+    getCurrentMode,
+    getStagedTokenTotal,
+    getStagedCanonEntries,
+    buildInventoryBlock,
+    shouldBrief,
+    markBriefed,
+    parseSuggestedStarts,
+    isVectorsWorldInfoEnabled,
+    retrieveCanonSlice,
+    buildFocusBlock,
+    parsePromoteRequests,
+    resolvePromoteRequests,
+    markSlicePromoted,
+    getPromotedSet,
+} from './concierge-canon.js';
+import {
     buildConciergeSystemPrompt,
+    buildArchivistBriefingPrompt,
     buildConciergeBuilderContext,
     buildConciergeCriticContext,
     buildConciergeRefinerContext,
@@ -85,6 +108,7 @@ let loadedCampaignOriginTitle = null;
 let chatHistory = [];
 let changelog = [];
 let pendingAttachments = [];
+let pendingPromotions = []; // Canon entry names the Concierge asked to pull in next turn
 let isGenerating = false;
 /** Active Builder/Judge/Talker turn: { controller, cancelled } — lets Stop/reset cancel and invalidate stale work. */
 let activeTurn = null;
@@ -269,6 +293,8 @@ export function resetConciergeState({ showGreeting = true } = {}) {
     chatHistory = [];
     changelog = [];
     pendingAttachments = [];
+    clearStagedCanon();
+    pendingPromotions = [];
     if (activeTurn) {
         activeTurn.cancelled = true;
         try { activeTurn.controller.abort(); } catch (_) {}
@@ -693,6 +719,47 @@ function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
 }
 
 /**
+ * Stage a source for Archivist-mode Canon ingest (labels it when total size warrants).
+ * Failures never block the import; they toast and the regular prompt path still works.
+ */
+async function stageSourceForCanon(source, label) {
+    startImportProgress(`Canon: ${label}`);
+    try {
+        const res = await stageCanonSource(source, {
+            send: (messages, signal) => sendConciergeRequest(messages, signal),
+            onStatus: msg => toastr?.info(msg),
+            onFallback: () => toastr?.warning('Some lore was labeled with the offline fallback (LLM labeling unavailable).'),
+        });
+        if (res.mode === 'archivist') {
+            toastr?.success(`Archivist mode: ${res.entries.length} canon entries catalogued.`);
+        }
+    } catch (err) {
+        toastr?.warning(`Canon cataloguing skipped for "${label}": ${err.message}`);
+    } finally {
+        stopImportProgress(`Canon: ${label}`);
+    }
+}
+
+async function attachLoreSource(name, loreRes) {
+    pendingAttachments.push({
+        type: 'lore',
+        name,
+        promptAddition: loreRes.block,
+        mode: loreRes.mode,
+        entries: loreRes.entries,
+    });
+    await stageSourceForCanon({ name, type: 'lore', entries: loreRes.entries }, name);
+}
+
+async function stageDocForCanon(name, text) {
+    const words = String(text || '').split(/\s+/).length;
+    if (words > 5000) {
+        toastr?.warning(`"${name}" is ${words} words; the chat prompt sees the first 5,000. The full text is catalogued to Canon when Archivist mode is active.`);
+    }
+    await stageSourceForCanon({ name, type: 'doc', text }, name);
+}
+
+/**
  * Render the attachment tray chips.
  */
 function renderAttachmentTray() {
@@ -723,6 +790,23 @@ function renderAttachmentTray() {
         tray.append(chip);
     });
 
+    // 1b. Mode chip: Auto / Quick vibe / Big lore
+    if (pendingAttachments.some(a => a.type === 'lore' || a.type === 'doc')) {
+        const mode = getCurrentMode();
+        const ov = getModeOverride();
+        const modeChip = $(`
+            <div class="mhc-chip" title="Quick vibe: scaffold immediately. Big lore: catalogue everything into a Canon lorebook.">
+                <span>${mode === 'archivist' ? '🗃️ Big lore' : '✨ Quick vibe'} (~${getStagedTokenTotal()} tok)</span>
+                <select class="mhc-mode-override" style="margin-left:6px;">
+                    <option value="auto" ${ov === 'auto' ? 'selected' : ''}>Auto</option>
+                    <option value="vibe" ${ov === 'vibe' ? 'selected' : ''}>Quick vibe</option>
+                    <option value="archivist" ${ov === 'archivist' ? 'selected' : ''}>Big lore</option>
+                </select>
+            </div>
+        `);
+        tray.append(modeChip);
+    }
+
     // 2. Active in-progress import chips
     activeImports.forEach(label => {
         const loadingChip = $(`
@@ -734,9 +818,20 @@ function renderAttachmentTray() {
         tray.append(loadingChip);
     });
 
+    $('.mhc-mode-override').on('change', async function () {
+        setModeOverride($(this).val());
+        // Re-stage so an override to Big lore labels already-attached sources now.
+        for (const att of pendingAttachments) {
+            if (att.type === 'lore') await stageSourceForCanon({ name: att.name, type: 'lore', entries: att.entries || [] }, att.name);
+            if (att.type === 'doc') await stageSourceForCanon({ name: att.name, type: 'doc', text: att.text }, att.name);
+        }
+        renderAttachmentTray();
+    });
+
     $('.mhc-chip-remove').on('click', function () {
         const idx = parseInt($(this).attr('data-index'), 10);
-        pendingAttachments.splice(idx, 1);
+        const removed = pendingAttachments.splice(idx, 1)[0];
+        if (removed && (removed.type === 'lore' || removed.type === 'doc')) unstageCanonSource(removed.name);
         renderAttachmentTray();
     });
 }
@@ -824,6 +919,47 @@ function classifyTurnAbort(err) {
 }
 
 /**
+ * Render "where to start" quick-reply chips under the latest assistant bubble.
+ * Clicking a chip fills the input and sends it.
+ */
+function renderStartChips(starts) {
+    $('.mhc-start-chips').remove();
+    if (!starts?.length) return;
+    const wrap = $('<div class="mhc-start-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"></div>');
+    for (const label of starts) {
+        const chip = $('<button type="button" class="mhc-chip mhc-start-chip" style="cursor:pointer;"></button>').text(`▶ ${label}`);
+        chip.on('click', () => {
+            $('.mhc-start-chips').remove();
+            $('#mhc_chat_input').val(`Let's start with: ${label}`);
+            handleUserSend();
+        });
+        wrap.append(chip);
+    }
+    $('#mhc_chat_messages').append(wrap);
+    const box = document.getElementById('mhc_chat_messages');
+    if (box) box.scrollTop = box.scrollHeight;
+}
+
+/**
+ * Offer one-click "pull in from Canon" chips for entries the Concierge asked to promote.
+ */
+function renderPromoteChips(found) {
+    $('.mhc-start-chips').remove();
+    const wrap = $('<div class="mhc-start-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"></div>');
+    const chip = $('<button type="button" class="mhc-chip mhc-start-chip" style="cursor:pointer;"></button>')
+        .text(`📥 Pull in from Canon: ${found.map(e => e.name).join(', ')}`);
+    chip.on('click', () => {
+        $('.mhc-start-chips').remove();
+        $('#mhc_chat_input').val(`Build out ${found.map(e => e.name).join(' and ')} from the canon.`);
+        handleUserSend();
+    });
+    wrap.append(chip);
+    $('#mhc_chat_messages').append(wrap);
+    const box = document.getElementById('mhc_chat_messages');
+    if (box) box.scrollTop = box.scrollHeight;
+}
+
+/**
  * Process a user submission.
  */
 async function handleUserSend() {
@@ -852,6 +988,14 @@ async function handleUserSend() {
     let imagePayload = null;
     let documentPromptAdditions = '';
 
+    // Big lore: the model sees a compact Canon inventory instead of raw lore/doc blocks.
+    const canonEntries = getCurrentMode() === 'archivist' ? getStagedCanonEntries() : [];
+    const useCanonInventory = canonEntries.length > 0;
+    const briefingTurn = shouldBrief();
+    if (useCanonInventory && attachmentsToProcess.some(a => a.type === 'lore' || a.type === 'doc')) {
+        documentPromptAdditions += buildInventoryBlock(canonEntries);
+    }
+
     for (const att of attachmentsToProcess) {
         if (att.type === 'image') {
             imageSrcForDisplay = att.dataUrl;
@@ -863,6 +1007,7 @@ async function handleUserSend() {
                 activeDossier.protagonist.portraitSrc = att.dataUrl;
             }
         } else if (att.type === 'doc') {
+            if (useCanonInventory) continue;
             documentPromptAdditions += formatDocumentPromptBlock(att.name, att.text, 5000, activeDossier?.protagonist?.name || '');
         } else if (att.type === 'char') {
             if (att.avatar && !imageSrcForDisplay) {
@@ -875,7 +1020,23 @@ async function handleUserSend() {
         } else if (att.type === 'chat') {
             documentPromptAdditions += formatChatTranscriptPromptBlock(att.chatData, att.name, 40, activeDossier?.protagonist?.name || '');
         } else if (att.type === 'lore') {
+            if (useCanonInventory) continue;
             documentPromptAdditions += `\n${att.promptAddition}\n`;
+        }
+    }
+
+    // Big lore (post-briefing): add the full canon for what the player is asking about, plus
+    // any entries the Concierge asked to promote last turn. Already-shown entries aren't repeated.
+    if (useCanonInventory && !briefingTurn) {
+        const forced = resolvePromoteRequests(pendingPromotions, canonEntries).found;
+        pendingPromotions = [];
+        const slice = [
+            ...forced,
+            ...retrieveCanonSlice(canonEntries, text, { exclude: getPromotedSet() }),
+        ].filter((e, i, a) => a.indexOf(e) === i);
+        if (slice.length) {
+            documentPromptAdditions += buildFocusBlock(slice);
+            markSlicePromoted(slice);
         }
     }
 
@@ -945,6 +1106,29 @@ async function handleUserSend() {
     const recentHistory = () => chatHistory.slice(-MAX_PASS_HISTORY);
 
     try {
+        // ── Archivist briefing turn: summarize the catalogued lore and ask where to start ──
+        if (briefingTurn) {
+            const typingStage = typingBubble.querySelector('.mhc-stage');
+            if (typingStage) typingStage.innerHTML = '<i>🗃️ The Archivist is reviewing the catalogued lore...</i>';
+            const reply = await llm([
+                { role: 'system', name: 'System', content: buildArchivistBriefingPrompt() },
+                { role: 'user', name: 'Player', content: userMsgLlmContent },
+            ]);
+            if (turn.cancelled) return;
+            const { text: briefingText, starts } = parseSuggestedStarts(stripThinkingContent(reply || ''));
+            typingBubble.remove();
+            const bubbleText = briefingText || 'Your lore is catalogued. Where would you like to start?';
+            appendChatBubble('assistant', bubbleText);
+            renderStartChips(starts);
+            chatHistory.push({ role: 'assistant', content: bubbleText });
+            markBriefed();
+            if (!isVectorsWorldInfoEnabled(extension_settings)) {
+                toastr?.info('Tip: enable SillyTavern → Vector Storage → "Enable for World Info" so Canon entries also match by meaning, not just keywords.');
+            }
+            saveDraft();
+            return;
+        }
+
         const refreshNameRagSeedsIfNeeded = async () => {
             if (extension_settings?.multihog_companion?.nameRagEnhanceConcierge === false || extension_settings?.multihog_companion?.enableNameRag === false) {
                 return;
@@ -1263,6 +1447,16 @@ async function handleUserSend() {
         if (turn.cancelled) return;
         typingBubble.remove();
 
+        // Big lore: the Concierge may request canon entries it can't see in full yet.
+        if (useCanonInventory) {
+            const requested = parsePromoteRequests(`${builderRawResponse}\n${finalChatBubbleText}`);
+            const { found } = resolvePromoteRequests(requested, getStagedCanonEntries());
+            if (found.length) {
+                pendingPromotions = found.map(e => e.name);
+                renderPromoteChips(found);
+            }
+        }
+
         // Render clean bubble to the user (with debug trace button if failure occurred)
         appendChatBubble('assistant', finalChatBubbleText, null, Boolean(builderFailed));
 
@@ -1339,14 +1533,11 @@ async function handleFilesSelected(files) {
                         startImportProgress(`${card.name}'s Worldbook`);
                         try {
                             const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
-                            pendingAttachments.push({
-                                type: 'lore',
-                                name: `${card.name}'s Lorebook`,
-                                promptAddition: loreRes.block,
-                                mode: loreRes.mode,
-                            });
+                            await attachLoreSource(`${card.name}'s Lorebook`, loreRes);
                             toastr?.info(`Imported embedded worldbook for "${card.name}".`);
-                        } catch (_) {}
+                        } catch (err) {
+                            toastr?.error(`Embedded worldbook for "${card.name}" could not be imported: ${err.message}`);
+                        }
                         finally {
                             stopImportProgress(`${card.name}'s Worldbook`);
                         }
@@ -1372,17 +1563,16 @@ async function handleFilesSelected(files) {
                             msg => toastr?.info(msg),
                             activeDossier?.protagonist?.name || '',
                         );
-                        pendingAttachments.push({
-                            type: 'lore',
-                            name: file.name.replace(/\.json$/i, ''),
-                            promptAddition: loreRes.block,
-                            mode: loreRes.mode,
-                        });
+                        await attachLoreSource(file.name.replace(/\.json$/i, ''), loreRes);
                         toastr?.success(`Imported lorebook: "${file.name}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
                         renderAttachmentTray();
                         continue;
                     }
-                } catch (_) {}
+                } catch (err) {
+                    if (handledAsLore) {
+                        toastr?.error(`Lorebook "${file.name}" could not be imported: ${err.message}`);
+                    }
+                }
                 if (handledAsLore) continue;
             }
 
@@ -1418,6 +1608,7 @@ async function handleFilesSelected(files) {
                             text: doc.text,
                         });
                         toastr?.info(`Extracted text from "${doc.filename}".`);
+                        await stageDocForCanon(doc.filename, doc.text);
                     }
                 } catch (err) {
                     toastr?.error(`Could not parse document "${file.name}": ${err.message}`);
@@ -1659,15 +1850,12 @@ function bindModalEvents() {
                 startImportProgress(`${card.name}'s Worldbook`);
                 try {
                     const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
-                    pendingAttachments.push({
-                        type: 'lore',
-                        name: `${card.name}'s Lorebook`,
-                        promptAddition: loreRes.block,
-                        mode: loreRes.mode,
-                    });
+                    await attachLoreSource(`${card.name}'s Lorebook`, loreRes);
                     renderAttachmentTray();
                     toastr?.info(`Imported embedded worldbook for "${card.name}".`);
-                } catch (_) {}
+                } catch (err) {
+                    toastr?.error(`Embedded worldbook for "${card.name}" could not be imported: ${err.message}`);
+                }
                 finally {
                     stopImportProgress(`${card.name}'s Worldbook`);
                 }
@@ -1786,12 +1974,7 @@ function bindModalEvents() {
             }
 
             const loreRes = await processLorebookForConcierge(bookName, bookData, msg => toastr?.info(msg), activeDossier?.protagonist?.name || '');
-            pendingAttachments.push({
-                type: 'lore',
-                name: bookName,
-                promptAddition: loreRes.block,
-                mode: loreRes.mode,
-            });
+            await attachLoreSource(bookName, loreRes);
             renderAttachmentTray();
             toastr?.success(`Imported lorebook: "${bookName}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
         } catch (err) {

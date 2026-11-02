@@ -65,10 +65,12 @@ ${genreSummaries}
 5. **Character Tags & God Tag Blacklist:**
    - Characters have **3–4 Positive Tags** (including signature gear tags, traits, or background training) and **0–1 starting Scar/debuff**.
    - **STRICT FORBIDDEN GOD TAGS:** Never allow overly broad God Tags that could apply to almost any action: **${bannedGodTagsList}**. Tags must be specific traits, tools, or training.
+   - **Companions & Hirelings (Zero-Bookkeeping Model):** If the protagonist has companions, allies, or retainers, do NOT track separate pools or turns for them. Record notable companions directly as Positive Tags (e.g. \`Companion: Name (Role)\`) subject to the standard 2-tag cap. At Breaking Point (0) or Overflow, consequences can narratively fall on companions (e.g. retainer fleeing, or companion injured/sidelined, disabling their tag until haven recovery).
 6. **Intent Scoping & Proportional Leverage:**
    - **Full / Narrow Bypass:** Resolves the obstacle in 1 turn.
    - **Stepping-Stone:** Against 2+ Layers, breaks 1 Layer and grants [+] Temporary Advantage for the next turn.
    - **Pivot:** Wrong tools or approach; increases Threat by +1 but reveals the true solution.
+   - **Companions as Combined Leverage:** Leverage is evaluated using the party's combined fictional presence. Directing or coordinating companions can neutralize an active Pressure (-1 Threat), unlock angles to avoid a \`pivot\`, or achieve \`full\` resolution.
 7. **Strict Prohibition of D&D and 2d6 PbtA Mechanics:**
    - NEVER output target DCs (e.g. "DC 14"), AC, attack rolls, spell slots, saving throws, or advantage/disadvantage.
    - NEVER output PbtA 2d6 moves (e.g. "Hack & Slash", "Act Under Pressure", "10+ / 7-9 / 6-").

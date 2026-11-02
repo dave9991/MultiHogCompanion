@@ -185,7 +185,7 @@ Status: Unsearched`,
             'Veteran Mercenary (Frontline battle tactics and armor comfort)',
             'Heavy Shield (Sturdy oak shield for parrying)',
             'Trap-Wise (Keen eye for floor plates and tripwires)',
-            'Iron Stomach (Resistant to spoiled water and foul rations)',
+            'Companion: Brother Marcus (Cleric — blesses blades and wards off undead)',
         ],
         archetypes: [
             'The Sellsword',
@@ -1071,7 +1071,7 @@ export function resolveAction(state, {
             remaining: 0,
             directive: (
                 "Player retreated at 0 pool with Flee Grace active. Escape succeeds! " +
-                "Do NOT trigger lethal overflow; instead, destroy a gear tag or inflict a permanent Scar."
+                "Do NOT trigger lethal overflow; instead, destroy a gear tag, sideline a companion, or inflict a permanent Scar."
             ),
         };
     }
@@ -1177,11 +1177,12 @@ CORE LAWS OF FAE RESOLUTION:
    - Above Zero (Pool > 0): STRAIN ONLY. Narrate parrying shock, bruised muscles, winded breath, near-misses, cold sweat, or sensory static. NEVER narrate disabling wounds, broken bones, or permanent madness while a pool is above 0!
    - Reaching Zero (Pool == 0): BREAKING POINT CLAMP. Clamping at 0 is the exact narrative moment the character's guard breaks and they suffer their tangible injury or breakdown (their pool's zero_debuff).
    - Taking Loss at 0: OVERFLOW. Triggers the pool's on_overflow consequence (redirect, scar_and_ko, scene_fail, or lethal).
-5. INTENT SCOPING & PROPORTIONAL LEVERAGE:
+5. INTENT SCOPING & PROPORTIONAL LEVERAGE (TAGS + GEAR + PARTY):
+   - Leverage is evaluated using personal tags, tools, terrain, and active companions/party members.
    - Threat 0 (Trivial/Mook): Do NOT roll. Narrate effortless brush-aside with 0 attrition.
    - Narrow / Bypass Intent (Flee, slip past, grab clue): Resolves encounter in 1 turn ("full").
-   - Total Intent vs 2+/Y Layers Left: Resolves as "stepping_stone" (-1 Layer, cross off a Barrier, grant [+] Advantage: Setup for next turn).
-   - Wrong Tools / Zero Leverage: Resolves as "pivot" (+1 Threat, action connects, reveals necessary angle).
+   - Total Intent vs 2+/Y Layers Left: Resolves as "stepping_stone" (-1 Layer, cross off a Barrier, grant [+] Advantage: Setup for next turn). Coordinating companions or a decisive silver bullet can achieve "full" resolution or neutralize a listed Pressure (-1 Threat).
+   - Wrong Tools / Zero Leverage: Resolves as "pivot" (+1 Threat, action connects, reveals necessary angle). Directing a relevant companion unlocks angles to avoid a "pivot".
 
 CORE LOOP (every turn):
 ${coreLoopStep1}
@@ -1203,8 +1204,8 @@ Each line provides 4 Fudge dice (-1, 0, or +1 each), summing to a total from -4 
 
 ATTRITION FORMULA:
 Attrition = max(0, Threat + 4dF - MatchedPosTags + MatchedNegTags + GenreShift)
-- Threat (1 to 4): Baseline encounter threat. Adjusted by +1 if entering a Pressure without prep, or -1 if neutralizing a Pressure.
-- Positive Tags (max 2): Each matched character tag subtracts -1 from Attrition. (Plus 1 extra if an active [Advantage] tag is consumed).
+- Threat (1 to 4): Baseline encounter threat. Adjusted by +1 if entering a Pressure without prep, or -1 if neutralizing a Pressure via environment or coordinated companion maneuver.
+- Positive Tags (max 2): Each matched character, gear, or companion tag subtracts -1 from Attrition. (Plus 1 extra if an active [Advantage] tag is consumed).
   CRITICAL: If the target Pool is at 0, POSITIVE TAGS ARE DISABLED (0 tags apply)!
 - Negative Tags: Each active Scar or debuff hindering the action adds +1 to Attrition.
 - Genre Shift: -1 (Pulp), 0 (Gritty), +1 (Brutal/Horror).
@@ -1218,7 +1219,7 @@ OUTCOME TIERS:
 - Pool > 0 & Attrition > 0 → POOL_STRAIN: Deduct Attrition from pool. Narrate as near-misses, fatigue, winded breath, or dread. NO disabling wounds!
 - Pool drops to <= 0 → BREAKING_POINT_CLAMP: Clamp pool at exactly 0. Narrate the character's breaking point trauma. Add pool's zero_debuff to Scars & Debuffs.
 - Pool at 0 & Attrition > 0 → OVERFLOW:
-  • If Flee Grace is active and player is retreating: GRACE_RETREAT_WITH_SCAR (escape succeeds; lose a gear tag or take a permanent Scar).
+  • If Flee Grace is active and player is retreating: GRACE_RETREAT_WITH_SCAR (escape succeeds; destroy a gear tag, sideline a companion, or inflict a permanent Scar).
   • Otherwise execute pool's on_overflow rule (redirect, scar_and_ko, scene_fail, or lethal).
 
 ROLL FORMAT (Strict SillyTavern Colorization):
@@ -1252,7 +1253,7 @@ Status: Alerted / Entrenched / Stalking
 ENCOUNTER HP TRACKS LEVERAGE LAYERS (NOT CREATURE HIT POINTS):
 - A 2/2 HP encounter has 2 Leverage Barriers protecting it from total defeat.
 - Narrow / Bypass Intent (slip past, escape, grab relic) resolves in 1 turn regardless of layers remaining.
-- Total Intent against 2+/Y HP resolves as stepping_stone: strips 1 Layer (2/2 -> 1/2 HP), crosses off a Barrier, and grants [+] Advantage: Setup for the next turn.
+- Total Intent achieves "full" resolution when 1 layer remains (1/Y HP) OR when leveraging a decisive environmental/party silver bullet. Total Intent against 2+/Y HP defaults to stepping_stone: strips 1 Layer (2/2 -> 1/2 HP), crosses off a Barrier, and grants [+] Advantage: Setup for the next turn.
 
 ENCOUNTER THREAT SCALE (1 to 4):
 - Threat 1 (Minor): Light hazard, mook squad (1/1 HP).
@@ -1262,7 +1263,7 @@ ENCOUNTER THREAT SCALE (1 to 4):
 
 STRICT THREAT MODIFIERS (max +/- 1):
 - +1 Threat: Player charges directly into an active Pressure without prep, OR attempts a pivot action.
-- -1 Threat (min 1): Player cleverly neutralizes an active Pressure using the environment.
+- -1 Threat (min 1): Player uses a clever environmental interaction or coordinated companion maneuver that directly neutralizes one of the listed Pressures.
 
 TWO-TIER STRAIN VS TRAUMA RULE:
 - Never narrate broken limbs or permanent damage when HP/Pool > 0.
@@ -1327,7 +1328,7 @@ CHARACTER ADVANCEMENT (MILESTONES):
 Every 3 to 5 completed scenes (when Scenes reached target, e.g. Scenes: 4/4):
 {{user}} chooses ONE milestone advance:
 1. Heal a Scar: Permanently remove 1 Negative Tag (Scar) or restore +1 lost Max Pool capacity.
-2. New Capability: Acquire 1 new Positive Tag (or signature gear tag) earned in the fiction.
+2. New Capability: Acquire 1 new Positive Tag (personal trait, signature gear, or loyal companion tag) earned in the fiction.
 3. Hardened Reserve: Increase any Pool's Max capacity by +1 (hard ceiling of 12).
 Reset Scenes and XP counter to 0/target upon advancing: *(Milestone Reached! Choose an Advance: Heal a Scar, New Positive Tag, or +1 Max Pool)*.
 </xp_system>`;
@@ -1340,19 +1341,12 @@ Reset Scenes and XP counter to 0/target upon advancing: *(Milestone Reached! Cho
  */
 export function buildFaePartyContent() {
     return `<[PARTY]_mechanics>
-On joining: state *(Name joins the party)* and declare their profile in [PARTY] format.
-Every companion tracks their own Primary Pool and tags:
-[PARTY]
-Name (Archetype): 8/8 HP | Pool: Health (8/8)
-((PILLS)) Positive Tags: Tag 1 (detail), Tag 2 (detail)
-((PILLS)) Boons: Tactical Support (Grants [+] Advantage when coordinating)
-((PILLS)) Scars & Debuffs: None
-Status: Healthy
-[/PARTY]
-
-COMPANION ATTRITION:
-Companions absorb strain alongside the protagonist. When a companion's pool hits 0, they clamp and suffer a Trauma Debuff.
-Taking further damage at 0 forces them out of the scene or inflicts a permanent Scar.
+COMPANIONS, HIRELINGS & ADVENTURING PARTIES (ZERO-BOOKKEEPING MODEL):
+Rather than tracking separate pools or turns for companions, companions are folded directly into Leverage and Tags:
+1. Protagonist-Anchored Pools: Track ONLY {{user}}'s 2–3 core resource pools (representing the collective stamina, morale, and supplies of the group).
+2. Companions as Fictional Leverage: Evaluate Proportional Leverage using the party's combined fictional presence. Coordinating companions can achieve "full" resolution, neutralize a listed Pressure (-1 Threat), or provide specialized capability so an action is not forced into a "pivot".
+3. Companions as Positive Tags (2-Tag Cap): Record notable companions or hirelings as Positive Tags in [CHARACTER] (e.g., "Companion: Sister Valeria (Cleric)" or "Retainer: Torchbearer"). When they assist in the declared action, they count as 1 of the max 2 Positive Tags (-1 Attrition).
+4. Companions as Narrative Buffer: At Breaking Point (0), scar_and_ko, or GRACE_RETREAT_WITH_SCAR, consequences can manifest narratively on a companion (e.g., retainer fleeing, or "(-) Companion Wounded: Valeria" disabling their tag until haven_or_specialist recovery).
 </[PARTY]_mechanics>`;
 }
 
@@ -1456,7 +1450,7 @@ Status: Healthy
 [/CHARACTER]
 
 PILL FORMATTING:
-- Positive Tags: Name (descriptive detail in parentheses).
+- Positive Tags: Name (descriptive detail in parentheses). Can include personal traits, signature gear, or companions, e.g. Companion: Name (Role — detail).
 - Scars & Debuffs: Prefix harmful debuffs with (-) for red pills, e.g. (-) ${primary.zero_debuff} (Trauma). Active temporary advantage tags prefix with (+) for green pills, e.g. (+) Advantage: Setup (-1 Attrition).`,
 
         combat: `Active encounter and situational obstacles in FAE.
@@ -1705,6 +1699,11 @@ export function buildTailoredFaeDocumentation(genreKey = 'cosmic_horror') {
   - **Narrow / Bypass Intent:** Resolves the obstacle in 1 turn ("full").
   - **Total Intent vs 2+ Layers:** Resolves as "stepping_stone" (-1 Layer, grants [+] Advantage for next turn).
   - **Wrong Tools:** Resolves as "pivot" (+1 Threat, reveals the true solution).
+* **Companions & Parties (Zero-Bookkeeping Model):**
+  - **Protagonist-Anchored Pools:** Track only {{user}}'s 2–3 resource pools representing the entire group.
+  - **Companions as Fictional Leverage:** Party presence can achieve "full" resolution, neutralize Pressures (-1 Threat), or prevent a "pivot".
+  - **Companions as Positive Tags:** Recorded as \`Companion: Name (Role)\` subject to the 2-tag cap (-1 Attrition).
+  - **Companions as Narrative Buffer:** Breaking point or overflow consequences can manifest on companions (fleeing, taking wounds, or disabling tags).
 
 ---
 
@@ -1758,7 +1757,7 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
         charName ? `NAME: ${charName}.` : null,
         `ARCHETYPE: Choose ONE FAE Archetype (e.g. ${archetypesSnippet}). Output as "Name (Archetype)". FORBIDDEN: No D&D classes or subclasses (no Fighter, Wizard, Paladin, etc.).`,
         `RESOURCE POOLS: ${poolsStr}. Primary pool mirrors HP.`,
-        `POSITIVE TAGS: Pick 4 distinct descriptive tags (skills, gear, background, or traits with detail in parentheses): ${tagsSnippet}.`,
+        `POSITIVE TAGS: Pick 4 distinct descriptive tags (personal traits, signature gear, background, or "Companion: Name (Role — detail)" if the scenario includes friends/companions/party): ${tagsSnippet}.`,
         `KNOBS: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${knobs.base_attrition_shift >= 0 ? '+' + knobs.base_attrition_shift : knobs.base_attrition_shift} | Overflow: ${knobs.overflow_default}.`,
         `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or polyhedral damage dice. Use 4dF Attrition, Positive Tags, and Scars/Debuffs in [CHARACTER].`,
         `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6" (NEVER use a colon inside ((BAR...)), e.g. write ((BARBLUE)) or ((BARGOLD)), and do NOT append Zero Debuff/Recovery text on the bar line), FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`,

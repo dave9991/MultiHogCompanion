@@ -632,19 +632,45 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
     const locStr = options.location || (isObj ? (faeStateOrGenreKey.theKick?.startingLocation || faeStateOrGenreKey.maps?.[0]?.site) : null) || 'Starting Location';
     blocks.push(`[LOCATION]\n${locStr}\n[/LOCATION]`);
 
+    // Fold companions into [CHARACTER] positive tags per Zero-Bookkeeping Model (Section 2.4)
+    let companions = [];
+    if (isObj && faeStateOrGenreKey.config?.partyMode !== 'solo' && Array.isArray(faeStateOrGenreKey.npcs)) {
+        companions = faeStateOrGenreKey.npcs.filter(n =>
+            n && n.name && /companion|party|sidekick|follower|partner|ally|friend|crew|squad/i.test(n.role || 'companion')
+        );
+        if (companions.length > 0) {
+            state.character = state.character || {};
+            if (!Array.isArray(state.character.positive_tags)) {
+                state.character.positive_tags = [];
+            }
+            for (const comp of companions) {
+                const cName = (comp.name || 'Companion').trim();
+                let cArchetype = comp.archetype || comp.playbook || '';
+                if (!cArchetype) {
+                    const rawRole = (comp.role || 'Companion').replace(/\s*\([^)]*\)/g, '').trim();
+                    cArchetype = rawRole || 'Companion';
+                }
+                cArchetype = cArchetype.replace(/[()]/g, '').trim() || 'Companion';
+
+                const alreadyMentioned = state.character.positive_tags.some(tag =>
+                    String(tag).toLowerCase().includes(cName.toLowerCase())
+                );
+                if (!alreadyMentioned) {
+                    state.character.positive_tags.push(`Companion: ${cName} (${cArchetype})`);
+                }
+            }
+        }
+    }
+
     // [CHARACTER]
     blocks.push(formatFaeCharacterMemoBlock(state));
 
     // [PARTY] if companion NPCs exist and partyMode !== 'solo'
-    if (isObj && faeStateOrGenreKey.config?.partyMode !== 'solo' && Array.isArray(faeStateOrGenreKey.npcs)) {
-        const companions = faeStateOrGenreKey.npcs.filter(n =>
-            n && n.name && /companion|party|sidekick|follower|partner|ally|friend|crew|squad/i.test(n.role || 'companion')
-        );
-        if (companions.length > 0) {
-            const partyLines = ['[PARTY]'];
-            const primaryPool = Object.values(state.pools || {})[0] || { label: 'Health', max: 8 };
-            const primaryLabel = primaryPool.label || 'Health';
-            const primaryMax = primaryPool.max || 8;
+    if (companions.length > 0) {
+        const partyLines = ['[PARTY]'];
+        const primaryPool = Object.values(state.pools || {})[0] || { label: 'Health', max: 8 };
+        const primaryLabel = primaryPool.label || 'Health';
+        const primaryMax = primaryPool.max || 8;
 
             for (let i = 0; i < companions.length; i++) {
                 const comp = companions[i];
@@ -687,7 +713,6 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
             partyLines.push('[/PARTY]');
             blocks.push(partyLines.join('\n'));
         }
-    }
 
     // [DUNGEON] if maps exist
     if (isObj && faeStateOrGenreKey.maps?.[0]?.site) {

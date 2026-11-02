@@ -513,7 +513,7 @@ export function applyPbtaAdvanceSelection(proposal, advanceSelection) {
  */
 export const FAE_MILESTONE_CATALOG = [
     { id: 'heal_scar', label: 'Heal a Scar (Remove 1 Negative Tag / Scar OR restore +1 lost Max Pool capacity)' },
-    { id: 'new_capability', label: 'New Capability (Acquire 1 new Positive Tag or signature Gear Tag)' },
+    { id: 'new_capability', label: 'New Capability (personal trait, signature gear, or loyal companion tag)' },
     { id: 'hardened_reserve', label: 'Hardened Reserve (Increase any Pool Max capacity by +1, up to 12)' },
 ];
 

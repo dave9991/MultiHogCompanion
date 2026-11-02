@@ -17,6 +17,7 @@ import {
     buildFaeCartridge,
     buildTailoredFaeDocumentation,
     toMultihogBarMarker,
+    buildFaePartyContent,
 } from '../fae-ruleset.js';
 import {
     formatFaeCharacterMemoBlock,
@@ -66,7 +67,14 @@ describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => 
         assert.strictEqual(isGodTag('Service Revolver (Sidearm)'), false);
         assert.strictEqual(isGodTag('Heavy Shield (Parrying oak)'), false);
         assert.strictEqual(isGodTag('Trap-Wise (Keen perception)'), false);
-        assert.strictEqual(isGodTag('Iron Stomach (Ration tolerance)'), false);
+        assert.strictEqual(isGodTag('Companion: Brother Marcus (Cleric — blesses blades and wards off undead)'), false);
+    });
+
+    test('FAE_GENRES.osr_dungeon.defaultPositiveTags includes Brother Marcus companion tag', () => {
+        assert.ok(
+            FAE_GENRES.osr_dungeon.defaultPositiveTags.some(t => t.includes('Companion: Brother Marcus')),
+            'Expected OSR Dungeon default positive tags to include Companion: Brother Marcus'
+        );
     });
 
     test('sanitizeFaePositiveTags strips God Tags and caps at 4', () => {
@@ -170,6 +178,7 @@ describe('Freeform Attrition Engine (FAE) — Section 8 Deterministic Spec Walkt
         assert.strictEqual(state.pools.sanity.current, 0);
         assert.ok(result.directive.includes('Flee Grace active'));
         assert.ok(result.directive.includes('Do NOT trigger lethal overflow'));
+        assert.ok(result.directive.includes('sideline a companion'));
     });
 });
 
@@ -603,5 +612,16 @@ Status: Healthy
         assert.strictEqual(reconciled.changed, true);
         assert.strictEqual(reconciled.state.character.scenes_completed, 1);
         assert.ok(reconciled.memo.includes('Scenes: 1/4 | XP: 1/4'));
+    });
+
+    test('buildFaePartyContent describes ZERO-BOOKKEEPING MODEL and folded mechanics', () => {
+        const partyXml = buildFaePartyContent();
+        assert.ok(partyXml.includes('ZERO-BOOKKEEPING MODEL'), 'Must describe ZERO-BOOKKEEPING MODEL');
+        assert.ok(partyXml.includes('Protagonist-Anchored Pools'), 'Must mention Protagonist-Anchored Pools');
+        assert.ok(partyXml.includes('Companions as Fictional Leverage'), 'Must mention Companions as Fictional Leverage');
+        assert.ok(partyXml.includes('Companions as Positive Tags'), 'Must mention Companions as Positive Tags');
+        assert.ok(partyXml.includes('Companions as Narrative Buffer'), 'Must mention Companions as Narrative Buffer');
+        assert.ok(!partyXml.includes('Every companion tracks their own Primary Pool'), 'Must NOT have separate companion pool tracking');
+        assert.ok(!partyXml.includes('Name (Archetype): 8/8 HP'), 'Must NOT declare individual creature HP stats');
     });
 });

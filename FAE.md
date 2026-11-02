@@ -46,6 +46,15 @@ To maintain high-stakes grit without cartoonish gore:
 * **Pool > 0 (Strain):** Attrition is narrated purely as close shaves, bruised muscles, ragged breathing, frayed nerves, or sensory static. The Referee must **never** narrate broken bones, severed limbs, or mortal wounds while a pool remains above zero.
 * **Pool == 0 or Overflow (Trauma):** Only when the Breaking Point is reached or overflow occurs does the narrative inflict tangible bodily trauma, panic, or gear destruction.
 
+### 6. Companions, Hirelings, and Adventuring Parties (Zero-Bookkeeping Model)
+FAE is protagonist-centered, but genres like OSR dungeon crawls or squad sci-fi frequently involve companions, retainers, or party members. Rather than tracking separate pools or turns for companions, **companions are folded directly into Leverage and Tags**:
+1. **Protagonist-Anchored Pools:** Track ONLY {{user}}'s 2–3 core resource pools (representing the collective stamina, morale, and supplies of the group led by the protagonist).
+2. **Companions as Fictional Leverage (Primary Role):** Evaluate Proportional Leverage using the party's *combined* fictional presence.
+   - *Scope & Scale:* Coordinating companions can achieve `full` resolution, neutralize a listed `Pressure` ($-1$ Threat), or provide the fictional positioning to avoid a `pivot`.
+   - *Unlocking Angles:* Directing a relevant companion to handle or assist with a task (e.g. cleric banishing undead, rogue picking locks) grants valid Leverage so an action is not forced into a `pivot`.
+3. **Companions as Positive Tags (Subject to the 2-Tag Cap):** Notable companions or hirelings can be recorded as Positive Tags in `[CHARACTER]` (e.g., `Companion: Sister Valeria (Cleric)` or `Companion: Brother Marcus (Cleric)`). When they assist in the declared action, they count as 1 of the max 2 Positive Tags ($-1$ Attrition). Because the 2-tag ceiling never changes, adding companions never breaks the attrition math.
+4. **Companions as Narrative Buffer (At Breaking Point / Overflow):** When a pool clamps at `0`, triggers `scar_and_ko`, or resolves a `GRACE_RETREAT_WITH_SCAR`, consequences can manifest narratively on a companion—such as a retainer panicking and fleeing, or taking an injury (`(-) Companion Wounded: Marcus`) that disables their tag until `haven_or_specialist` recovery.
+
 ---
 
 ## ⚔️ Native FAE Encounter Blocks
@@ -104,6 +113,16 @@ FAE characters evolve through fictional experience rather than numeric stat infl
 
 FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery profiles, and positive tags:
 
+| Genre | Tone & Themes | Primary Resource Pools | Default Starting Positive Tags |
+| :--- | :--- | :--- | :--- |
+| **🐙 Cosmic Horror Investigation** (`cosmic_horror`) | 1920s Lovecraftian Investigation | `Health (8)`, `Sanity (8)` | `Ex-Military`, `Calm`, `Quiet`, `Service Revolver` |
+| **🗝️ OSR Dungeon Crawl** (`osr_dungeon`) | Dark Fantasy Dungeon Delve | `Health (10)`, `Resolve (6)`, `Torch & Supplies (6)` | `Veteran Mercenary`, `Heavy Shield`, `Trap-Wise`, `Companion: Brother Marcus (Cleric)` |
+| **🪓 Survival Horror** (`survival_horror`) | Isolated Slasher / Biohazard | `Grit (8)`, `Panic (6)`, `Ammunition (4)` | `Survivor`, `Fast Reflexes`, `First Aid Kit`, `Pump Shotgun` |
+| **☣️ Post-Apocalyptic** (`post_apocalyptic`) | Wasteland Scavenger | `Health (8)`, `Rads (6)`, `Scrap (6)` | `Scavenger`, `Wasteland Survival`, `Geiger Counter`, `Scrap Rifle` |
+| **🕶️ Cyberpunk Noir** (`cyberpunk_noir`) | Neon Corporate Dystopia | `Edge (8)`, `Chrome (8)`, `Cred (6)` | `Street Samurai`, `Subdermal Plating`, `Cyberdeck`, `Heavy Pistol` |
+| **🚀 Deep Space Survival** (`deep_space`) | Derelict Sci-Fi Horror | `Hull (8)`, `Oxygen (6)`, `Power (6)` | `Systems Engineer`, `EVA Specialist`, `Plasma Cutter`, `Heavy Loader Rig` |
+| **🤠 Weird West** (`weird_west`) | Occult Frontier Delve | `Grit (8)`, `Iron (6)`, `Hex (6)` | `Gunslinger`, `Quick Draw`, `Winchester Repeater`, `Deadeye` |
+
 ### 1. 🐙 Cosmic Horror Investigation (`cosmic_horror`)
 * **Tone:** 1920s Call of Cthulhu / Caves of Madness.
 * **Resource Pools:**
@@ -111,15 +130,17 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Sanity (8/8)`: Mental resilience against cosmic truth, recovery via `haven_or_specialist`. Passive drain: $-1$ on `day_pass`.
 * **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`.
 * **Archetypes:** The Antiquarian, The Alienist, The Private Investigator, The Occult Scholar, The Reluctant Heir.
+* **Positive Tags:** `Ex-Military (Combat training)`, `Calm (Steady nerves)`, `Quiet (Light footwork)`, `Service Revolver (.38 sidearm)`.
 
 ### 2. 🗝️ OSR Dungeon Crawl (`osr_dungeon`)
-* **Tone:** Classic Old-School Renaissance dungeon survival.
+* **Tone:** Classic Old-School Renaissance dungeon survival (Dark Fantasy Delve).
 * **Resource Pools:**
-  - `Grit (10/10)`: Stamina and blood, recovery via `camp_or_sleep`.
-  - `Torches (6/6)`: Illumination and fuel, recovery via `haven_or_specialist`. Passive drain: $-1$ on `scene_transition`.
-  - `Armor (4/4)`: Shield and plate durability, recovery via `camp_or_sleep`. Overflow redirects to `Grit`.
-* **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`.
-* **Archetypes:** The Torchbearer, The Sellsword, The Hedge Wizard, The Dungeoneer, The Tomb Robber.
+  - `Health (10/10)`: Physical fortitude and parrying shock, recovery via `camp_or_sleep`.
+  - `Resolve (6/6)`: Frayed nerves and morale, recovery via `scene_breather`. Overflow redirects to `Health`.
+  - `Torch & Supplies (6/6)`: Illumination and rations, recovery via `haven_or_specialist`. Passive drain: $-1$ on `camp_or_sleep`. Overflow redirects to `Resolve`.
+* **Knobs:** Flee Grace: `OFF`, Shift: `0`, Overflow: `lethal`.
+* **Archetypes:** The Sellsword, The Grave Robber, The Torchbearer, The Hedge Cleric, The Outcast Mage.
+* **Positive Tags:** `Veteran Mercenary (Frontline battle tactics and armor comfort)`, `Heavy Shield (Sturdy oak shield for parrying)`, `Trap-Wise (Keen eye for floor plates and tripwires)`, `Companion: Brother Marcus (Cleric — blesses blades and wards off undead)`.
 
 ### 3. 🪓 Survival Horror / Slasher (`survival_horror`)
 * **Tone:** Resident Evil / Silent Hill / Isolated slasher.

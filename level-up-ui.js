@@ -527,7 +527,7 @@ export function openLevelUpModal({
                 <div class="mhc-fae-milestone-option" data-milestone-id="new_capability" style="padding: 6px 0;">
                     <label class="mhc-radio-label" style="display: flex; align-items: center; gap: 8px;">
                         <input type="radio" name="mhc_fae_milestone_pick" value="new_capability" />
-                        <strong>New Capability (Positive Tag or Signature Gear)</strong>
+                        <strong>New Capability (personal trait, signature gear, or loyal companion tag)</strong>
                     </label>
                     <div class="mhc-fae-milestone-detail" data-milestone-detail="new_capability" style="margin: 6px 0 4px 24px; display: none; flex-direction: column; gap: 6px;">
                         <select id="mhc_fae_tag_select" class="text_pole">

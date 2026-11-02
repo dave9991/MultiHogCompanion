@@ -220,6 +220,9 @@ test('FAE Concierge System Prompts & Builder Prompt Routing', () => {
     assert.ok(faePrompt.includes('Strict Prohibition of D&D and 2d6 PbtA Mechanics'));
     assert.ok(faePrompt.includes('NEVER output PbtA 2d6 moves'));
     assert.ok(faePrompt.includes('STRICT FORBIDDEN GOD TAGS'));
+    assert.ok(faePrompt.includes('Zero-Bookkeeping Model'));
+    assert.ok(faePrompt.includes('Companion: Name (Role)'));
+    assert.ok(faePrompt.includes('Companions as Combined Leverage'));
     assert.ok(faePrompt.includes('osr_dungeon'));
     assert.ok(faePrompt.includes('cyberpunk_noir'));
 
@@ -465,6 +468,8 @@ describe('Stage 2: Quick Start Party Override, Footer All-Pools, CYOA Pool Disam
         assert.ok(withParty.includes('NAME: Lou.'), 'Must mention Lou in name line');
         assert.ok(withParty.includes('Torch & Supplies'), 'Must list OSR pools in Quick Start instructions');
         assert.ok(withParty.includes('secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6"'));
+        assert.ok(withParty.includes('Companion: Name (Role — detail)'), 'Must mention companion format in Positive Tags prompt');
+        assert.ok(withParty.includes('Companion: Brother Marcus'), 'Must list Brother Marcus in OSR dungeon snippet');
 
         const solo = buildFaeQuickStartInstructions('osr_dungeon', 'Lou', 'Lou wanders into the crypt alone');
         assert.ok(!solo.includes('PARTY OVERRIDE'), 'Must NOT include party override when solo');
@@ -589,6 +594,7 @@ Status: Healthy
         assert.ok(memo.includes('Lou (The Sellsword): 10/10 HP | Pool: Health (10/10)'), 'Must format protagonist with OSR pool stats');
         assert.ok(memo.includes('((BARBLUE)) Resolve: 6/6'), 'Must include secondary Resolve bar');
         assert.ok(memo.includes('((BARGOLD)) Torch & Supplies: 6/6'), 'Must include secondary Torch & Supplies bar');
+        assert.ok(memo.includes('Companion: Bran (Torchbearer)'), 'Must fold companion into protagonist Positive Tags in [CHARACTER]');
 
         // Verify Party
         assert.ok(memo.includes('[PARTY]'), 'Must include [PARTY] block for companions');
@@ -631,5 +637,25 @@ Status: Healthy
         assert.ok(!memo.includes('[PARTY]'), 'Must NOT include [PARTY] when partyMode is solo');
         assert.ok(!memo.includes('Bran'));
         assert.ok(memo.includes('[COMBAT]\nActive: false\n[/COMBAT]'));
+    });
+
+    test('8. formatInitialFaeMemo does not duplicate companion if already present in positive_tags', () => {
+        const dossier = {
+            genreKey: 'osr_dungeon',
+            config: { partyMode: 'party' },
+            protagonist: {
+                name: 'Lou',
+                archetype: 'The Sellsword',
+                positiveTags: ['Companion: Bran (Torchbearer)', 'Shield Wall (defense)'],
+            },
+            npcs: [
+                { name: 'Bran', role: 'companion', archetype: 'Torchbearer' },
+            ],
+        };
+        const memo = formatInitialFaeMemo(dossier);
+        const charBlockMatch = memo.match(/\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/);
+        const charTags = charBlockMatch ? charBlockMatch[0] : '';
+        const charMatches = charTags.match(/Companion:\s*Bran/gi) || [];
+        assert.equal(charMatches.length, 1, 'Companion must only appear once in [CHARACTER] Positive Tags');
     });
 });

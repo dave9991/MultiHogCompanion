@@ -42,7 +42,7 @@ Characters begin with **3 to 4 Positive Tags** and **0 to 1 Negative Tag (Scar)*
 * **Scope:** A good tag should apply to roughly 25–30% of situations in the genre (e.g., `Ex-Military`, `Calm`, `Quiet`, `Occult Scholar`, `Shield-Bearer`, `Trap-Wise`).
 * **No "God Tags":** Universal adjectives that apply to almost any roll (`Lucky`, `Smart`, `Competent`, `Fast`, `Heroic`) are forbidden.
 * **Gear as Tags:** Signature equipment (`Service Revolver`, `Heavy Shield`, `Crowbar`, `Grappling Hook`) acts as a Positive Tag and can be temporarily lost, depleted, or broken as a narrative consequence.
-* **Hard Stacking Cap:** The code enforces a strict maximum of **2 Positive Tags** per action ($-1$ Attrition each).
+* **Hard Stacking Cap:** The code enforces a strict maximum of **2 Positive Character/Companion Tags** per action ($-1$ Attrition each). An earned `[Advantage]` tag from a prior `stepping_stone` turn stacks on top of this cap for an extra $-1$.
 * **Negative Tags / Scars:** Active debuffs or permanent scars apply $+1$ Attrition each when relevant to the action.
 
 ### 2.4 Companions, Hirelings, and Adventuring Parties (Zero-Bookkeeping Model)
@@ -60,9 +60,9 @@ FAE is protagonist-centered, but genres like OSR dungeon crawls or squad sci-fi 
 
 | Knob Name | Values | Mechanical Effect |
 | :--- | :--- | :--- |
-| **`flee_grace_toggle`** | `true` / `false` | If `true`, declaring a full retreat while a pool is at `0` **cannot trigger lethal overflow**; any rolled attrition converts into a permanent Scar or lost gear/companion tag. If `false`, fleeing through hazards at `0` can trigger death/overflow. |
+| **`flee_grace_toggle`** | `true` / `false` | If `true`, declaring a full retreat while a pool is at `0` **cannot trigger lethal overflow**; if the retreat rolls $\ge 1$ attrition (which would otherwise overflow), it converts into a semantic Scar or lost gear/companion tag chosen by the Narrator. (If attrition rolls `0`, they escape cleanly). |
 | **`base_attrition_shift`** | `-1`, `0`, `+1` | `-1` = Pulp / Action (breezy). `0` = Standard Gritty. `+1` = Brutal Survival / Horror. |
-| **`overflow_default`** | `lethal` / `scar_and_ko` / `scene_fail` | Defines the default consequence when a primary pool takes attrition while already at `0`. |
+| **`overflow_default`** | `lethal` / `scar_and_ko` / `scene_fail` | Defines the fallback consequence when a pool at `0` takes attrition and has no pool-specific `on_overflow`. |
 
 ---
 
@@ -77,26 +77,26 @@ FAE is protagonist-centered, but genres like OSR dungeon crawls or squad sci-fi 
 2. **Stage 2: Taking Attrition at `0` (Overflow Trigger):**
    * If a pool is **already at `0`** at the start of the turn (or prior to a passive drain tick) and takes $\ge 1$ attrition, the pool's `on_overflow` rule executes:
      * **`redirect:<pool_name>`:** Routes the attrition directly into another specified pool (e.g., `Torchlight` overflow drains `Resolve`).
-     * **`scar_and_ko`:** The character is knocked out, captured, or forced out of the scene, wakes up later at `1` point, loses `1` Max Pool point permanently, and gains a permanent Negative Tag (Scar).
+     * **`scar_and_ko`:** The character is knocked out, captured, or forced out of the scene, wakes up later at `1` point, loses `1` Max Pool point permanently, and gains a permanent Negative Tag (Scar) chosen by the Narrator to fit the fiction.
      * **`scene_fail`:** The character survives, but the objective is lost—they are forced to retreat empty-handed.
      * **`lethal`:** The character dies or goes irredeemably mad. The LLM narrates a fitting finale.
 
-### 3.2 Recovery Tiers
+### 3.2 Recovery Tiers (Strict Tier Assignment)
 
-Each pool specifies how it can be restored:
+Each pool specifies its minimum required recovery tier:
 
-* **`scene_breather` ($+2$ points):** Catching your breath, bandaging wounds, or having a stiff drink in a safe spot (max once per scene). Cannot clear a `0` debuff.
-* **`camp_or_sleep` ($+\text{Half Max}$):** A full night's rest in a secure location. Clears `zero_debuff` if designated by the pool, **but triggers any `on_camp_rest` passive drains** (such as consuming rations or burning down a day in a cursed zone).
-* **`haven_or_specialist` ($\text{Full Restore}$):** Returning to town, visiting a hospital/cleric, or spending downtime in therapy. Clears all `zero_debuff` conditions without triggering wilderness upkeep.
+* **`scene_breather` ($+2$ points):** Catching your breath, steadying nerves, or having a stiff drink in a safe spot (max once per scene, tracked via `breather_available`). Only restores pools assigned to `scene_breather` (such as `Resolve`) and cannot clear a `0` debuff.
+* **`camp_or_sleep` ($+\text{Half Max}$):** A full night's rest in a secure location. Restores `camp_or_sleep` and `scene_breather` pools and clears their `zero_debuff`, **but triggers any `camp_or_sleep` passive drains** (such as consuming rations).
+* **`haven_or_specialist` ($\text{Full Restore}$):** Returning to town, visiting a hospital/cleric, or spending downtime in therapy. Restores all pools and clears all `zero_debuff` conditions without triggering wilderness upkeep.
 
 ### 3.3 Dual / Passive Drain (Optional Upkeep & Environmental Clocks)
 
-In addition to losing points when directly challenged by an action roll, any pool can be configured with an optional **`passive_drain`** rule that ticks down automatically on specific narrative triggers:
+In addition to losing points when directly challenged by an action roll, any pool can be configured with an optional **`passive_drain`** rule that ticks down automatically on specific `event_type` triggers:
 
 * **Common Passive Drain Triggers:**
-  * **`on_camp_rest` (Resource Upkeep):** Whenever the player executes a `camp_or_sleep` recovery to heal `Health`, `Supplies` automatically drains by $-1$ (consuming food/firewood).
-  * **`on_day_pass` (Environmental Aura / "Caves of Madness"):** Every day spent inside a cursed zone, haunted expedition, or radiation zone automatically drains `Sanity` (or `Health`) by $-1$, regardless of player tags.
-  * **`on_scene_transition` (Torchlight / Oxygen Clock):** Moving to a new room or delve depth automatically drains `Torchlight` or `Oxygen` by $-1$, turning exploration into a tense pacing clock.
+  * **`camp_or_sleep` (Resource Upkeep):** Whenever the player executes a `camp_or_sleep` recovery to heal `Health`, `torch_and_supplies` automatically drains by $-1$ (consuming food/fuel).
+  * **`day_pass` (Environmental Aura / "Caves of Madness"):** Every day spent inside a cursed zone, haunted expedition, or radiation zone automatically drains `Sanity` (or `Health`) by $-1$, regardless of player tags.
+  * **`scene_transition` (Torchlight / Oxygen Clock):** Moving to a new room or delve depth automatically drains `Torchlight` or `Oxygen` by $-1$ (while resetting `breather_available = True` for the new scene).
 * **Interaction with Zero & Overflow:** Passive drain is **unmitigated by character tags**. It **does** obey the **Zero Clamp** (hitting `0` warns you first), and if a pool is *already* at `0` when passive drain ticks, it triggers `on_overflow` (e.g., starving at `0 Supplies` during a rest redirects damage into `Resolve` or `Health`).
 
 ### 3.4 Character Advancement
@@ -174,7 +174,7 @@ Status: Unsearched
 
 ### 5.1 Primary Action Tool: `resolve_action()`
 
-When the encounter is **Threat 1–4**, the LLM evaluates the player's action (without pre-judging the dice roll or attrition amount) and calls `resolve_action()` with:
+When the encounter is **Threat 1–4**, the LLM evaluates the player's action (**never** pre-judging the dice roll or predicting whether a pool will hit `0` prior to calling the tool) and calls `resolve_action()` with:
 
 * **`pool_name` (`string`):** The specific pool placed at risk (`"health"`, `"sanity"`, `"resolve"`, `"torch_and_supplies"`).
 * **`threat_level` (`integer` 1 to 4):** The Encounter's base Threat ($\pm 1$ if modified by a Pressure interaction). *(Note: Threat 0 is resolved in narration without calling this tool).*
@@ -182,7 +182,7 @@ When the encounter is **Threat 1–4**, the LLM evaluates the player's action (w
   * `"full"`: Completes the player's Intent and reduces Encounter Layers to `0/Y HP` (or bypasses the encounter).
   * `"stepping_stone"`: Strips `1` Layer from the Encounter (`X/Y -> X-1/Y HP`), crosses off a `Leverage Barrier`, and grants a temporary `[Advantage]` tag ($-1$ Attrition on the next turn).
   * `"pivot"`: Action connects at $+1$ Threat, proves why current leverage cannot finish the target, and reveals the required angle.
-* **`matched_positive_tags` (`array` of strings, max 2):** Up to 2 character/companion/gear tags (plus any active temporary `[Advantage]` tag from a prior stepping-stone turn).
+* **`matched_positive_tags` (`array` of strings, max 2):** Up to 2 character/companion/gear tags (any active temporary `[Advantage]` tag is added automatically on top of this cap).
 * **`matched_negative_tags` (`array` of strings):** Any active Scars or situational debuffs hindering the action.
 * **`is_retreating` (`boolean`):** `true` if the player's primary intent is fleeing/exiting the danger zone.
 
@@ -204,7 +204,8 @@ When the player rests, transitions to a new major delve area, or spends a day in
   "knobs": {
     "flee_grace_toggle": true,
     "base_attrition_shift": 0,
-    "overflow_default": "scar_and_ko"
+    "overflow_default": "scar_and_ko",
+    "breather_available": true
   },
   "character": {
     "name": "Arthur Pendelton",
@@ -247,7 +248,8 @@ When the player rests, transitions to a new major delve area, or spends a day in
   "knobs": {
     "flee_grace_toggle": false,
     "base_attrition_shift": 0,
-    "overflow_default": "lethal"
+    "overflow_default": "lethal",
+    "breather_available": true
   },
   "character": {
     "name": "Kaelen the Delver",
@@ -316,6 +318,7 @@ def apply_pool_loss(state: dict, pool_name: str, amount: int, source_note: str =
         pool["current"] = 0
         if pool["zero_debuff"] not in state["character"]["negative_tags"]:
             state["character"]["negative_tags"].append(pool["zero_debuff"])
+        overflow_rule = pool.get("on_overflow", state["knobs"]["overflow_default"])
         return {
             "outcome": "BREAKING_POINT_CLAMP",
             "pool": pool_name,
@@ -324,7 +327,7 @@ def apply_pool_loss(state: dict, pool_name: str, amount: int, source_note: str =
             "directive": (
                 f"{source_note} TRAUMA / BREAKING POINT: {pool_name} drops to 0 and clamps! "
                 f"Narrate an actual wound or breakdown ('{pool['zero_debuff']}'). "
-                f"Positive tags are now disabled for {pool_name} and any further loss triggers '{pool['on_overflow']}'."
+                f"Positive tags are now disabled for {pool_name} and any further loss triggers '{overflow_rule}'."
             )
         }
 
@@ -350,7 +353,7 @@ def apply_pool_loss(state: dict, pool_name: str, amount: int, source_note: str =
 def handle_overflow(state: dict, pool_name: str, attrition: int, source_note: str = "") -> dict:
     """Executes terminal or redirect rules when a pool at 0 takes additional attrition."""
     pool = state["pools"][pool_name]
-    rule = pool["on_overflow"]
+    rule = pool.get("on_overflow", state["knobs"]["overflow_default"])
 
     # 1. Cascading Redirect (e.g., Supplies -> Resolve -> Health)
     if rule.startswith("redirect:"):
@@ -358,7 +361,7 @@ def handle_overflow(state: dict, pool_name: str, attrition: int, source_note: st
         redirect_note = f"{source_note} [{pool_name} at 0 -> Overflow redirected to {target_pool}!] "
         return apply_pool_loss(state, target_pool, attrition, redirect_note)
 
-    # 2. Scar and Knock Out
+    # 2. Scar and Knock Out (LLM chooses semantic Scar name to fit the scene)
     if rule == "scar_and_ko":
         pool["max"] = max(1, pool["max"] - 1)
         pool["current"] = 1
@@ -398,8 +401,16 @@ def handle_overflow(state: dict, pool_name: str, attrition: int, source_note: st
 
 
 def trigger_event_or_rest(state: dict, event_type: str) -> dict:
-    """Handles recovery tiers AND passive drain triggers (e.g., 'camp_or_sleep', 'day_pass')."""
+    """Handles recovery tiers AND passive drain triggers ('camp_or_sleep', 'day_pass', 'scene_transition')."""
     logs = []
+
+    if event_type in ["scene_transition", "camp_or_sleep", "haven_or_specialist"]:
+        state["knobs"]["breather_available"] = True
+
+    if event_type == "scene_breather":
+        if not state["knobs"].get("breather_available", True):
+            return {"event": event_type, "summary": "Breather already used this scene."}
+        state["knobs"]["breather_available"] = False
 
     # 1. Process Passive Drains First (e.g., eating rations at camp, or losing Sanity each day)
     for p_name, pool in state["pools"].items():
@@ -445,14 +456,15 @@ def resolve_action(
 
     pool = state["pools"][pool_name]
     was_at_zero = (pool["current"] == 0)
+    neg_tags = list(matched_negative_tags)  # Copy to avoid mutating caller list
 
     # 1. Enforce Tag Caps & Zero-State Rule
     if was_at_zero:
         effective_pos_tags = []  # Positive tags disabled when pool is at 0
-        if pool["zero_debuff"] not in matched_negative_tags:
-            matched_negative_tags.append(pool["zero_debuff"])
+        if pool["zero_debuff"] not in neg_tags:
+            neg_tags.append(pool["zero_debuff"])
     else:
-        effective_pos_tags = matched_positive_tags[:2]  # Hard cap at 2 character tags
+        effective_pos_tags = matched_positive_tags[:2]  # Hard cap at 2 character/companion tags
         if state["character"].get("temp_advantage"):
             effective_pos_tags.append(state["character"]["temp_advantage"])
             state["character"]["temp_advantage"] = None
@@ -465,7 +477,7 @@ def resolve_action(
         effective_threat
         + dice_roll
         - len(effective_pos_tags)
-        + len(matched_negative_tags)
+        + len(neg_tags)
         + state["knobs"]["base_attrition_shift"]
     )
     attrition = max(0, raw_cost)
@@ -484,7 +496,7 @@ def resolve_action(
     }
     scale_note = scale_directives.get(progress_scale, scale_directives["full"])
 
-    # 4. Handle Zero-Cost or Grace Retreat before standard pool loss
+    # 4. Handle Zero-Cost (No Overflow) or Grace Retreat (Replaces Overflow when attrition > 0)
     if attrition == 0:
         return {
             "outcome": "UNFAZED_PROGRESS",
@@ -501,8 +513,8 @@ def resolve_action(
             "attrition": attrition,
             "pool_remaining": 0,
             "directive": (
-                "Player retreated at 0 pool with Flee Grace active. Escape succeeds! "
-                "Do NOT trigger lethal overflow; instead, destroy a gear tag, sideline a companion, or inflict a permanent Scar."
+                "Player retreated at 0 pool with Flee Grace active and took overflow attrition. Escape succeeds! "
+                "Do NOT trigger lethal overflow; instead, Narrator selects a fitting gear tag to lose, companion to sideline, or permanent Scar."
             )
         }
 
@@ -543,7 +555,7 @@ def resolve_action(
   > Old trench discipline takes over before fear can even register. Keeping your breathing slow and deliberate, you sweep the iron spade in practiced, overlapping arcs. Two crows clip the flat of the blade with dull thuds and tumble into the weeds; the rest wheel back into the fog, their eerie, synchronized silence failing to rattle your nerves. You reach the Ford, wrench the door open, and slide behind the wheel untouched.
   > `[Encounter Resolved: 0/1 HP | Sanity: 3/8 | Health: 8/8 — 0 Attrition (Protected by: Calm, Ex-Military)]`
 
-### Turn 2: Searching the Whispering Study (`2/2 -> 1/2 HP`, Hitting the Zero Clamp)
+### Turn 2: Searching the Whispering Study (`2/2 -> 1/2 HP`)
 
 * **User:** `"Once inside the manor study, I lock the oak door and comb through the leather-bound journals on the desk to learn how to stop the summoning ritual."`
 * **LLM (Pre-Roll Evaluation & Tool Call):**
@@ -589,7 +601,7 @@ def resolve_action(
   * `roll_4df()` $\rightarrow$ `-1`.
   * `raw_cost` $= 2\text{ (threat)} - 1\text{ (dice)} - 0\text{ (pos)} + 1\text{ (neg\_tag)} = 2$.
   * Pool is at `0` and took `2` attrition, **but** `is_retreating` and `flee_grace_toggle` are both `True`.
-  * **Returns:** `{"outcome": "GRACE_RETREAT_WITH_SCAR", "dice": -1, "attrition": 2, "pool_remaining": 0, "directive": "Player retreated at 0 pool with Flee Grace active. Escape succeeds! Do NOT trigger lethal overflow; instead, destroy a gear tag, sideline a companion, or inflict a permanent Scar."}`
+  * **Returns:** `{"outcome": "GRACE_RETREAT_WITH_SCAR", "dice": -1, "attrition": 2, "pool_remaining": 0, "directive": "Player retreated at 0 pool with Flee Grace active and took overflow attrition. Escape succeeds! Do NOT trigger lethal overflow; instead, Narrator selects a fitting gear tag to lose, companion to sideline, or permanent Scar."}`
 * **LLM Narration:**
   > As the wallpaper bulges inward with the sound of a hundred scrabbling claws, you heave a mahogany chair through the leaded bay window and dive out into the rain. You hit the wet turf rolling, the ciphered ledger clutched tight against your ribs, and scramble into the Ford—dropping your **Service Revolver** into the mud as your shaking hands jam the key into the ignition. You fishtail down the gravel drive and make it back to the streetlights of Arkham alive with the mill's location, though the dark outside your headlights now feels alive and hungry.
   > `[Escape Successful via Flee Grace! | Sanity: 0/8 | Lost Gear Tag: "Service Revolver" | Gained Scar: "Nyctophobia (Fear of the Dark)"]`

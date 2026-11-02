@@ -29,11 +29,11 @@
             <!-- TAB 1: RULESET ENGINE (DEFAULT & PRIMARY)                     -->
             <!-- ============================================================== -->
             <div class="mhc-tab-content active" id="mhc_tab_ruleset">
-                <!-- ── Ruleset Engine (PbtA & D&D 5e) ── -->
+                <!-- ── Ruleset Engine (PbtA, FAE & D&D 5e) ── -->
                 <div class="inline-drawer mhc-pbta-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
                     <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <span style="font-size: 0.9em;"><b>🎲 Ruleset Engine:</b> PbtA &amp; D&amp;D 5e</span>
+                            <span style="font-size: 0.9em;"><b>🎲 Ruleset Engine:</b> PbtA, FAE &amp; D&amp;D 5e</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand ruleset settings and session zero">
                             <span id="mhc_ruleset_status" style="font-size: 0.7em; font-weight: bold; padding: 1px 6px; border-radius: 3px; border: 1px solid rgba(255,180,60,0.4); background: rgba(255,180,60,0.15); color: #ffcc88; white-space: nowrap;">⚔️ D&amp;D 5e Active</span>
@@ -65,36 +65,105 @@
                                 <span>Manual Presets &amp; Quick Start</span>
                             </div>
 
-                            <p style="font-size: 0.82em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
-                                Swaps D&amp;D math for <b>Powered by the Apocalypse</b>: 2d6 rolls (10+ Full Success, 7–9 Mixed Success, 6- Miss / GM Move) and Harm clocks. <i>You never roll dice manually—SillyTavern supplies 2d6 secretly to the Ref.</i>
-                            </p>
-
-                            <!-- Genre Selector -->
+                            <!-- Ruleset Engine Mode Selector -->
                             <div style="margin-bottom: 10px;">
-                                <label style="font-size: 0.8em; font-weight: bold; opacity: 0.85; display: block; margin-bottom: 4px;">Choose Genre Preset:</label>
-                                <select id="mhc_pbta_genre" class="text_pole" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.88em;">
-                                    <option value="fantasy">⚔️ Fantasy (Dungeon World / Fellowship)</option>
-                                    <option value="scifi">🚀 Sci-Fi / Cyberpunk (The Sprawl / Scum)</option>
-                                    <option value="anime">✨ Anime / Shonen (Masks / Heroic)</option>
-                                    <option value="horror">🩸 Modern / Monster Hunter (Monster of the Week)</option>
-                                    <option value="western">🤠 Western / Weird West (Deadlands / Dust)</option>
-                                    <option value="pirate">🏴‍☠️ Swashbuckling / High Seas (7th Sea / Pirate World)</option>
-                                    <option value="mecha">🤖 Giant Mecha (Beam Saber / Lancer)</option>
-                                    <option value="cosmic_horror">🐙 Cosmic / Eldritch Horror (Call of Cthulhu / Tremulus)</option>
-                                    <option value="survival_horror">🪓 Survival / Slasher Horror (Resident Evil / Final Girl)</option>
-                                    <option value="post_apocalyptic">☣️ Post-Apocalyptic / Wasteland (Apocalypse World / Fallout)</option>
-                                    <option value="gothic_heist">🕵️ Victorian / Gothic Heist (Blades in the Dark / Dishonored)</option>
-                                    <option value="slice_of_life">🍵 Slice of Life / Cozy Drama (Wanderhome / Yazeba)</option>
+                                <label style="font-size: 0.8em; font-weight: bold; opacity: 0.85; display: block; margin-bottom: 4px;">Ruleset Engine Mode:</label>
+                                <select id="mhc_ruleset_mode_select" class="text_pole" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.88em;">
+                                    <option value="pbta">🎲 Powered by the Apocalypse (PbtA — 2d6 Moves &amp; Harm)</option>
+                                    <option value="fae">🕯️ Freeform Attrition Engine (FAE — 4dF Pools &amp; Leverage)</option>
                                 </select>
                             </div>
 
-                            <!-- Live Genre Info Card -->
-                            <div id="mhc_pbta_info" style="font-size: 0.82em; background: rgba(255,255,255,0.04); border-left: 3px solid #88ccff; padding: 8px 10px; margin-bottom: 10px; border-radius: 0 4px 4px 0;">
-                                <div id="mhc_pbta_stats_preview" style="font-weight: bold; color: #aaddff; margin-bottom: 3px;">
-                                    Stats: Might, Agility, Wits, Heart, Arcana
+                            <!-- PbtA Controls Group -->
+                            <div id="mhc_pbta_controls_group">
+                                <p style="font-size: 0.82em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
+                                    Swaps D&amp;D math for <b>Powered by the Apocalypse</b>: 2d6 rolls (10+ Full Success, 7–9 Mixed Success, 6- Miss / GM Move) and Harm clocks. <i>You never roll dice manually—SillyTavern supplies 2d6 secretly to the Ref.</i>
+                                </p>
+
+                                <!-- Genre Selector -->
+                                <div style="margin-bottom: 10px;">
+                                    <label style="font-size: 0.8em; font-weight: bold; opacity: 0.85; display: block; margin-bottom: 4px;">Choose Genre Preset:</label>
+                                    <select id="mhc_pbta_genre" class="text_pole" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.88em;">
+                                        <option value="fantasy">⚔️ Fantasy (Dungeon World / Fellowship)</option>
+                                        <option value="scifi">🚀 Sci-Fi / Cyberpunk (The Sprawl / Scum)</option>
+                                        <option value="anime">✨ Anime / Shonen (Masks / Heroic)</option>
+                                        <option value="horror">🩸 Modern / Monster Hunter (Monster of the Week)</option>
+                                        <option value="western">🤠 Western / Weird West (Deadlands / Dust)</option>
+                                        <option value="pirate">🏴‍☠️ Swashbuckling / High Seas (7th Sea / Pirate World)</option>
+                                        <option value="mecha">🤖 Giant Mecha (Beam Saber / Lancer)</option>
+                                        <option value="cosmic_horror">🐙 Cosmic / Eldritch Horror (Call of Cthulhu / Tremulus)</option>
+                                        <option value="survival_horror">🪓 Survival / Slasher Horror (Resident Evil / Final Girl)</option>
+                                        <option value="post_apocalyptic">☣️ Post-Apocalyptic / Wasteland (Apocalypse World / Fallout)</option>
+                                        <option value="gothic_heist">🕵️ Victorian / Gothic Heist (Blades in the Dark / Dishonored)</option>
+                                        <option value="slice_of_life">🍵 Slice of Life / Cozy Drama (Wanderhome / Yazeba)</option>
+                                    </select>
                                 </div>
-                                <div id="mhc_pbta_moves_preview" style="opacity: 0.75; font-size: 0.95em;">
-                                    Key Moves: Hack &amp; Slash, Volley, Defy Danger, Cast a Spell
+
+                                <!-- Live Genre Info Card -->
+                                <div id="mhc_pbta_info" style="font-size: 0.82em; background: rgba(255,255,255,0.04); border-left: 3px solid #88ccff; padding: 8px 10px; margin-bottom: 10px; border-radius: 0 4px 4px 0;">
+                                    <div id="mhc_pbta_stats_preview" style="font-weight: bold; color: #aaddff; margin-bottom: 3px;">
+                                        Stats: Might, Agility, Wits, Heart, Arcana
+                                    </div>
+                                    <div id="mhc_pbta_moves_preview" style="opacity: 0.75; font-size: 0.95em;">
+                                        Key Moves: Hack &amp; Slash, Volley, Defy Danger, Cast a Spell
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- FAE Controls Group -->
+                            <div id="mhc_fae_controls_group" style="display: none;">
+                                <p style="font-size: 0.82em; opacity: 0.8; margin: 0 0 10px 0; line-height: 1.4;">
+                                    Swaps D&amp;D math for the <b>Freeform Attrition Engine (FAE)</b>: 4dF attrition rolls, narrative resource pools (Grit, Sanity, Supplies), proportional leverage, and Two-Stage Zero (Strain vs Trauma). <i>Dice rolled secretly in background.</i>
+                                </p>
+
+                                <!-- FAE Genre Selector -->
+                                <div style="margin-bottom: 10px;">
+                                    <label style="font-size: 0.8em; font-weight: bold; opacity: 0.85; display: block; margin-bottom: 4px;">Choose FAE Genre Skeleton:</label>
+                                    <select id="mhc_fae_genre" class="text_pole" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.88em;">
+                                        <option value="cosmic_horror">🐙 Cosmic Horror Investigation (Sanity, Health, Cthulhu / Madness)</option>
+                                        <option value="osr_dungeon">🗝️ OSR Dungeon Crawl (Grit, Torches, Gear, Gold)</option>
+                                        <option value="survival_horror">🪓 Survival Horror / Slasher (Grit, Panic, Ammunition)</option>
+                                        <option value="post_apocalyptic">☣️ Post-Apocalyptic Wasteland (Health, Rads, Scrap, Fuel)</option>
+                                        <option value="cyberpunk_noir">🕶️ Cyberpunk Noir (Edge, Chrome, Cred, Glitch)</option>
+                                        <option value="deep_space">🚀 Deep Space Survival (Oxygen, Hull Integrity, Power, Sanity)</option>
+                                        <option value="weird_west">🤠 Weird West / Occult Frontier (Grit, Iron, Luck, Hex)</option>
+                                    </select>
+                                </div>
+
+                                <!-- Live FAE Genre Info Card -->
+                                <div id="mhc_fae_info" style="font-size: 0.82em; background: rgba(255,255,255,0.04); border-left: 3px solid #d896ff; padding: 8px 10px; margin-bottom: 10px; border-radius: 0 4px 4px 0;">
+                                    <div id="mhc_fae_pools_preview" style="font-weight: bold; color: #e0b0ff; margin-bottom: 3px;">
+                                        Resource Pools: Health (8/8), Sanity (8/8)
+                                    </div>
+                                    <div id="mhc_fae_knobs_preview" style="opacity: 0.75; font-size: 0.95em;">
+                                        Knobs: Flee Grace (ON) | Shift: Standard (0) | Overflow: Scar &amp; KO
+                                    </div>
+                                </div>
+
+                                <!-- FAE Genre Knobs Inline Quick-Controls -->
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; background: rgba(0,0,0,0.15); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
+                                    <div style="grid-column: span 2; display: flex; align-items: center; justify-content: space-between;">
+                                        <label class="checkbox_label" style="font-size: 0.8em; cursor: pointer; display: flex; align-items: center; margin: 0;">
+                                            <input type="checkbox" id="mhc_fae_flee_grace" checked style="margin-right: 6px;">
+                                            <span>Flee Grace at 0 Pool</span>
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <label style="font-size: 0.75em; opacity: 0.8; display: block; margin-bottom: 2px;">Attrition Shift:</label>
+                                        <select id="mhc_fae_attrition_shift" class="text_pole" style="width: 100%; font-size: 0.82em; padding: 2px 4px;">
+                                            <option value="-1">-1 (Pulp / Breezy)</option>
+                                            <option value="0" selected>0 (Standard Gritty)</option>
+                                            <option value="1">+1 (Brutal Survival)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style="font-size: 0.75em; opacity: 0.8; display: block; margin-bottom: 2px;">Zero Overflow Default:</label>
+                                        <select id="mhc_fae_overflow_default" class="text_pole" style="width: 100%; font-size: 0.82em; padding: 2px 4px;">
+                                            <option value="scar_and_ko" selected>Scar &amp; KO</option>
+                                            <option value="lethal">Lethal / Madness</option>
+                                            <option value="scene_fail">Scene Failure</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
 
@@ -117,7 +186,7 @@
 
                             <!-- Action Buttons -->
                             <div style="display: flex; flex-direction: column; gap: 8px;">
-                                <div style="display: flex; gap: 8px;">
+                                <div id="mhc_pbta_actions_group" style="display: flex; gap: 8px;">
                                     <button id="mhc_pbta_load_cartridge" class="menu_button interactable" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.85em; padding: 6px 8px;" title="Configures this chat's prompts and modules for PbtA without starting a new character">
                                         <i class="fa-solid fa-gamepad"></i>
                                         <span>Load Cartridge</span>
@@ -126,6 +195,18 @@
                                     <button id="mhc_pbta_quickstart" class="menu_button interactable" style="flex: 1.2; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.85em; padding: 6px 8px; background: rgba(80,180,120,0.2); border-color: rgba(80,180,120,0.5); color: #bbeecc;" title="Applies PbtA and immediately generates character and starts the adventure!">
                                         <i class="fa-solid fa-bolt"></i>
                                         <span>⚡ Quick Start PbtA</span>
+                                    </button>
+                                </div>
+
+                                <div id="mhc_fae_actions_group" style="display: none; gap: 8px;">
+                                    <button id="mhc_fae_load_cartridge" class="menu_button interactable" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.85em; padding: 6px 8px;" title="Configures this chat's prompts and modules for FAE without starting a new character">
+                                        <i class="fa-solid fa-fire-flame-curved"></i>
+                                        <span>🕯️ Load FAE Cartridge</span>
+                                    </button>
+
+                                    <button id="mhc_fae_quickstart" class="menu_button interactable" style="flex: 1.2; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 0.85em; padding: 6px 8px; background: rgba(170,90,250,0.2); border-color: rgba(170,90,250,0.5); color: #e0b0ff;" title="Applies FAE and immediately generates character and starts the adventure!">
+                                        <i class="fa-solid fa-bolt"></i>
+                                        <span>⚡ Quick Start FAE</span>
                                     </button>
                                 </div>
 

@@ -10,6 +10,8 @@
 import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
+import { FAE_GENRES, sanitizeFaePositiveTags, isGodTag, createInitialFaeState } from './fae-ruleset.js';
+import { parseFaeStateFromMemo, formatFaeCharacterMemoBlock, normalizeFaePill } from './fae-state-sync.js';
 
 /**
  * Extracts the canonical identity key of a feature or ability (text before '(', ':', or '[').
@@ -186,6 +188,12 @@ export function extractConciergeDirectives(text) {
         'MOVE_TO_ABILITIES',
         'MOVE_TO_FEATURES',
         'SET_STAT',
+        'ADD_TAG',
+        'REMOVE_TAG',
+        'ADD_SCAR',
+        'REMOVE_SCAR',
+        'SET_POOL',
+        'SET_KNOB',
     ]);
 
     const directives = [];
@@ -501,6 +509,227 @@ export function applyPbtaAdvanceSelection(proposal, advanceSelection) {
 }
 
 /**
+ * Canonical FAE milestone choices (every 3–5 completed scenes).
+ */
+export const FAE_MILESTONE_CATALOG = [
+    { id: 'heal_scar', label: 'Heal a Scar (Remove 1 Negative Tag / Scar OR restore +1 lost Max Pool capacity)' },
+    { id: 'new_capability', label: 'New Capability (Acquire 1 new Positive Tag or signature Gear Tag)' },
+    { id: 'hardened_reserve', label: 'Hardened Reserve (Increase any Pool Max capacity by +1, up to 12)' },
+];
+
+/**
+ * Resolves the canonical FAE genre key ('cosmic_horror', 'osr_dungeon', etc.) from a dossier or memo text.
+ *
+ * @param {object} dossier
+ * @param {string} [memoText='']
+ * @returns {string}
+ */
+export function resolveFaeGenreKey(dossier, memoText = '') {
+    const candidates = [
+        dossier?.meta?.genre,
+        dossier?.meta?.systemKey,
+    ].filter(Boolean).map(s => String(s).trim().toLowerCase());
+
+    for (const c of candidates) {
+        if (FAE_GENRES[c]) return c;
+    }
+
+    const label = (dossier?.meta?.systemLabel || '').toLowerCase();
+    if (label) {
+        for (const g of Object.values(FAE_GENRES)) {
+            if (label.includes(g.id.toLowerCase()) || g.label.toLowerCase().includes(label)) {
+                return g.id;
+            }
+        }
+        if (label.includes('cosmic') || label.includes('cthulhu') || label.includes('madness')) return 'cosmic_horror';
+        if (label.includes('osr') || label.includes('dungeon')) return 'osr_dungeon';
+        if (label.includes('survival') || label.includes('resident') || label.includes('silent hill')) return 'survival_horror';
+        if (label.includes('apocalyp') || label.includes('wasteland') || label.includes('fallout')) return 'post_apocalyptic';
+        if (label.includes('cyberpunk') || label.includes('noir') || label.includes('sprawl')) return 'cyberpunk_noir';
+        if (label.includes('space') || label.includes('alien') || label.includes('vacuum')) return 'deep_space';
+        if (label.includes('west') || label.includes('weird west') || label.includes('cowboy')) return 'weird_west';
+    }
+
+    // Inspect pools in dossier?.protagonist?.pools or memoText
+    const poolsMap = dossier?.protagonist?.pools || {};
+    const poolKeys = Object.keys(poolsMap).map(k => k.toLowerCase());
+    const poolLabels = Object.values(poolsMap).map(p => (p.label || '').toLowerCase());
+    const allPoolText = [...poolKeys, ...poolLabels, String(memoText).toLowerCase()].join(' ');
+
+    if (/sanity/i.test(allPoolText)) {
+        if (/oxygen|power|vacuum|hull/i.test(allPoolText)) return 'deep_space';
+        return 'cosmic_horror';
+    }
+    if (/torch|rations/i.test(allPoolText)) return 'osr_dungeon';
+    if (/ammo|battery|nerve/i.test(allPoolText)) return 'survival_horror';
+    if (/water|filter|rads|radiation/i.test(allPoolText)) return 'post_apocalyptic';
+    if (/heat|trace|chrome|cred/i.test(allPoolText)) return 'cyberpunk_noir';
+    if (/oxygen|hull/i.test(allPoolText)) return 'deep_space';
+    if (/trail|grit/i.test(allPoolText)) return 'weird_west';
+
+    return 'cosmic_horror';
+}
+
+/**
+ * Builds the structured FAE Milestone options for a character.
+ *
+ * @param {object} dossier Campaign dossier.
+ * @param {object} proposal Current proposal.
+ * @returns {Array<object>}
+ */
+export function buildFaeMilestoneOptions(dossier, proposal) {
+    const genreKey = proposal?.genreKey || resolveFaeGenreKey(dossier);
+    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const pools = proposal?.pools || genre.pools || {};
+    const currentPositive = proposal?.positiveTags || proposal?.newFeatures || [];
+    const ownedTagKeys = new Set(currentPositive.map(t => extractFeatureKey(t)));
+
+    const suggestedTags = (genre.defaultPositiveTags || []).filter(
+        t => !ownedTagKeys.has(extractFeatureKey(t))
+    );
+
+    const scars = Array.isArray(proposal?.negativeTags) ? [...proposal.negativeTags] : [];
+
+    const reducedPools = [];
+    for (const [k, p] of Object.entries(pools)) {
+        const baselineMax = genre.pools?.[k]?.max ?? 8;
+        if (p.max < baselineMax) {
+            reducedPools.push({
+                key: k,
+                label: p.label || k,
+                currentMax: p.max,
+                baselineMax,
+            });
+        }
+    }
+
+    const hardenedTargets = Object.entries(pools).map(([k, p]) => ({
+        key: k,
+        label: p.label || k,
+        current: p.current,
+        max: p.max,
+        nextMax: Math.min(12, p.max + 1),
+        disabled: p.max >= 12,
+    }));
+
+    return FAE_MILESTONE_CATALOG.map(item => {
+        if (item.id === 'heal_scar') {
+            return {
+                ...item,
+                scars,
+                reducedPools,
+                exhausted: scars.length === 0 && reducedPools.length === 0,
+            };
+        }
+        if (item.id === 'new_capability') {
+            return {
+                ...item,
+                suggestedTags,
+                exhausted: false,
+            };
+        }
+        if (item.id === 'hardened_reserve') {
+            return {
+                ...item,
+                pools: hardenedTargets,
+                exhausted: hardenedTargets.every(t => t.disabled),
+            };
+        }
+        return { ...item };
+    });
+}
+
+/**
+ * Applies an FAE milestone selection to a proposal object.
+ *
+ * @param {object} proposal
+ * @param {object} milestoneSelection
+ * @returns {object}
+ */
+export function applyFaeMilestoneSelection(proposal, milestoneSelection) {
+    if (!proposal || !milestoneSelection) return proposal;
+    if (milestoneSelection.applied) return proposal;
+
+    const type = milestoneSelection.type || milestoneSelection.id;
+
+    if (type === 'heal_scar') {
+        const targetScar = (milestoneSelection.scar || '').trim();
+        const restorePoolKey = milestoneSelection.restorePool;
+
+        if (targetScar) {
+            const cleanTarget = targetScar.replace(/^\(-\)\s*/, '').trim().toLowerCase();
+            const targetKey = extractFeatureKey(cleanTarget);
+            if (Array.isArray(proposal.negativeTags)) {
+                proposal.negativeTags = proposal.negativeTags.filter(s => {
+                    const cleanS = s.replace(/^\(-\)\s*/, '').trim().toLowerCase();
+                    return cleanS !== cleanTarget && extractFeatureKey(cleanS) !== targetKey;
+                });
+            }
+            if (Array.isArray(proposal.scars)) {
+                proposal.scars = proposal.scars.filter(s => {
+                    const cleanS = s.replace(/^\(-\)\s*/, '').trim().toLowerCase();
+                    return cleanS !== cleanTarget && extractFeatureKey(cleanS) !== targetKey;
+                });
+            }
+        } else if (restorePoolKey && proposal.pools) {
+            const pKey = String(restorePoolKey).toLowerCase();
+            const poolEntry = Object.entries(proposal.pools).find(([k, p]) =>
+                k.toLowerCase() === pKey || (p.label && p.label.toLowerCase() === pKey)
+            );
+            if (poolEntry) {
+                const pool = poolEntry[1];
+                pool.max = Math.min(12, (pool.max || 8) + 1);
+                pool.current = Math.min(pool.max, (pool.current || 0) + 1);
+                milestoneSelection.restorePool = poolEntry[0];
+            }
+        } else if (Array.isArray(proposal.negativeTags) && proposal.negativeTags.length > 0) {
+            proposal.negativeTags.shift();
+            if (Array.isArray(proposal.scars) && proposal.scars.length > 0) {
+                proposal.scars.shift();
+            }
+        }
+        milestoneSelection.applied = true;
+    } else if (type === 'new_capability') {
+        const rawTag = (milestoneSelection.tag || '').trim();
+        if (rawTag && !isGodTag(rawTag)) {
+            const norm = normalizeFaePill(rawTag, 'Capability');
+            proposal.positiveTags = Array.isArray(proposal.positiveTags) ? proposal.positiveTags : [];
+            const key = extractFeatureKey(norm);
+            const existingIdx = proposal.positiveTags.findIndex(t => extractFeatureKey(t) === key);
+            if (existingIdx >= 0) {
+                proposal.positiveTags[existingIdx] = norm;
+            } else {
+                proposal.positiveTags.push(norm);
+            }
+            proposal.newFeatures = [...proposal.positiveTags];
+            milestoneSelection.tag = norm;
+            milestoneSelection.applied = true;
+        } else {
+            milestoneSelection.rejected = true;
+            milestoneSelection.applied = false;
+        }
+    } else if (type === 'hardened_reserve') {
+        const poolTarget = milestoneSelection.pool;
+        if (poolTarget && proposal.pools) {
+            const pKey = String(poolTarget).toLowerCase();
+            const poolEntry = Object.entries(proposal.pools).find(([k, p]) =>
+                k.toLowerCase() === pKey || (p.label && p.label.toLowerCase() === pKey)
+            );
+            if (poolEntry) {
+                const pool = poolEntry[1];
+                pool.max = Math.min(12, (pool.max || 8) + 1);
+                pool.current = Math.min(pool.max, (pool.current || 0) + 1);
+                milestoneSelection.pool = poolEntry[0];
+            }
+        }
+        milestoneSelection.applied = true;
+    }
+
+    proposal.faeMilestone = milestoneSelection;
+    return proposal;
+}
+
+/**
  * Evaluates whether the character has accumulated sufficient XP to advance a level.
  *
  * @param {string} memoText State memo text.
@@ -521,10 +750,34 @@ export function evaluateLevelUpEligibility(memoText, ruleset = null, options = {
     const charScope = charBlockMatch ? charBlockMatch[1] : text;
     const hasDndXpBlock = /\[XP\][\s\S]*?\[\/XP\]/i.test(text) || /\bLevel\s*:\s*\d+/i.test(charScope);
 
+    const isFae = ruleset === 'fae'
+        || Boolean(ruleset && FAE_GENRES[String(ruleset).toLowerCase()] && (ruleset !== 'cosmic_horror' && ruleset !== 'survival_horror' && ruleset !== 'post_apocalyptic' || /FAE Knobs:|Positive Tags:|Scenes:\s*\d+/i.test(charScope)))
+        || (ruleset !== 'dnd5e' && ruleset !== 'pbta' && (/FAE Knobs:/i.test(charScope) || /\(\(PILLS\)\)\s*Positive Tags:/i.test(charScope) || /Scenes:\s*\d+/i.test(charScope)));
+
+    if (isFae) {
+        const match = charScope.match(/Scenes:\s*(\d+)(?:\s*\/\s*(\d+))?/i)
+            || text.match(/Scenes:\s*(\d+)(?:\s*\/\s*(\d+))?/i)
+            || charScope.match(/XP:\s*(\d+)(?:\s*\/\s*(\d+))?/i)
+            || text.match(/XP:\s*(\d+)(?:\s*\/\s*(\d+))?/i);
+        const cur = match ? parseInt(match[1], 10) : 0;
+        const fallbackMax = Number(options?.pacingScenes || options?.pacingXp) > 0 ? Number(options.pacingScenes || options.pacingXp) : 4;
+        const max = match && match[2] ? parseInt(match[2], 10) : fallbackMax;
+        const eligible = cur >= max && max > 0;
+        return {
+            eligible,
+            currentXp: cur,
+            maxThreshold: max,
+            currentLevel: 1,
+            nextLevel: 2,
+            ruleset: 'fae',
+            surplusXp: Math.max(0, cur - max),
+        };
+    }
+
     // Explicit ruleset wins; when omitted (null/undefined), auto-detect PbtA only if Harm is present and D&D Level/[XP] is not
-    const isPbta = ruleset === 'pbta'
+    const isPbta = !isFae && (ruleset === 'pbta'
         || Boolean(ruleset && PBTA_GENRES[String(ruleset).toLowerCase()])
-        || (ruleset !== 'dnd5e' && !hasDndXpBlock && /Harm\s*:\s*\d+\/\d+/i.test(charScope));
+        || (ruleset !== 'dnd5e' && !hasDndXpBlock && /Harm\s*:\s*\d+\/\d+/i.test(charScope)));
 
     if (isPbta) {
         const xpMatch = charScope.match(/XP:\s*(\d+)(?:\s*\/\s*(\d+))?/i)
@@ -610,13 +863,99 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
     const isRespec = !!options.isRespec;
     const char = dossier?.protagonist || (dossier?.features || dossier?.name ? dossier : {});
     const sysKeyLower = (dossier?.meta?.systemKey || '').toLowerCase();
-    const isPbta = options.isPbta
+
+    const isFae = options.isFae
+        || dossier?.meta?.ruleset === 'fae'
+        || Boolean(dossier?.meta?.systemKey && FAE_GENRES[String(dossier.meta.systemKey).toLowerCase()])
+        || Boolean(dossier?.protagonist?.pools && Object.keys(dossier.protagonist.pools).length > 0)
+        || /FAE Knobs:|Positive Tags:/i.test(options.currentMemo || '');
+
+    if (isFae) {
+        const genreKey = resolveFaeGenreKey(dossier, options.currentMemo || '');
+        const liveFaeState = options.currentMemo ? parseFaeStateFromMemo(options.currentMemo, genreKey) : null;
+        const characterName = liveFaeState?.character?.name || char.name || 'Survivor';
+        const className = liveFaeState?.character?.archetype || char.archetype || char.playbook || char.class || 'Survivor';
+        const pacingScenes = Number(dossier?.config?.pacingScenes) || Number(liveFaeState?.character?.scenes_target) || 4;
+
+        let pools = {};
+        if (liveFaeState?.pools && Object.keys(liveFaeState.pools).length > 0) {
+            pools = JSON.parse(JSON.stringify(liveFaeState.pools));
+        } else if (char.pools && Object.keys(char.pools).length > 0) {
+            pools = JSON.parse(JSON.stringify(char.pools));
+        } else {
+            pools = createInitialFaeState(genreKey).pools;
+        }
+
+        const knobs = liveFaeState?.knobs
+            ? { ...liveFaeState.knobs }
+            : (dossier?.config?.knobs
+                ? { ...dossier.config.knobs }
+                : (char.knobs
+                    ? { ...char.knobs }
+                    : { ...(FAE_GENRES[genreKey]?.knobs || { flee_grace_toggle: true, base_attrition_shift: 0, overflow_default: 'scar_and_ko' }) }));
+
+        let rawPosTags = liveFaeState?.character?.positive_tags
+            || char.positive_tags
+            || char.positiveTags
+            || char.tags
+            || FAE_GENRES[genreKey]?.defaultPositiveTags
+            || [];
+        if (!Array.isArray(rawPosTags)) rawPosTags = [rawPosTags];
+        const positiveTags = rawPosTags.map(t => normalizeFaePill(t, 'Positive Tag')).filter(Boolean);
+
+        let rawNegTags = liveFaeState?.character?.negative_tags
+            || char.negative_tags
+            || char.negativeTags
+            || char.scars
+            || [];
+        if (!Array.isArray(rawNegTags)) rawNegTags = [rawNegTags];
+        const negativeTags = rawNegTags.map(t => {
+            let clean = String(t).trim();
+            if (clean.startsWith('(-)')) clean = clean.replace(/^\(-\)\s*/, '');
+            return normalizeFaePill(clean, 'Debuff');
+        }).filter(Boolean);
+
+        const primaryKey = Object.keys(pools)[0];
+        const primaryPool = pools[primaryKey];
+
+        const proposal = {
+            isFae: true,
+            isPbta: false,
+            isRespec,
+            genreKey,
+            pacingScenes,
+            characterName,
+            className,
+            pools,
+            knobs,
+            positiveTags,
+            negativeTags,
+            newFeatures: [...positiveTags],
+            scars: [...negativeTags],
+            targetLevel: null,
+            currentLevel: null,
+            hitDie: null,
+            hpChange: {
+                oldMax: primaryPool?.max || 8,
+                gain: 0,
+                newMax: primaryPool?.max || 8,
+                mode: 'fae',
+            },
+            status: liveFaeState?.character?.status || char.status || 'Healthy',
+            partyChanges: [],
+            faeMilestone: options.faeMilestone || null,
+        };
+        proposal.milestoneOptions = buildFaeMilestoneOptions(dossier, proposal);
+        return proposal;
+    }
+
+    const isPbta = !isFae && (options.isPbta
         || sysKeyLower === 'pbta'
         || Boolean(sysKeyLower && PBTA_GENRES[sysKeyLower])
         || !!char.isPbta
         || !!char.playbook
         || !!char.harm
-        || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel));
+        || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel)));
 
     if (isPbta) {
         const genreKey = resolvePbtaGenreKey(dossier);
@@ -809,6 +1148,76 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
 export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = false, rpgSettings = null }) {
     if (!currentMemo || typeof currentMemo !== 'string') {
         return { success: false, updatedMemo: currentMemo, summary: 'No active state memo found.' };
+    }
+
+    if (proposal.isFae) {
+        if (!isRespec && proposal.faeMilestone && !proposal.faeMilestone.applied) {
+            applyFaeMilestoneSelection(proposal, proposal.faeMilestone);
+        }
+
+        const genreKey = proposal.genreKey || 'cosmic_horror';
+        const state = parseFaeStateFromMemo(currentMemo, genreKey);
+
+        state.pools = JSON.parse(JSON.stringify(proposal.pools));
+        state.knobs = { ...(proposal.knobs || state.knobs) };
+        state.character = state.character || {};
+        state.character.positive_tags = [...(proposal.positiveTags || proposal.newFeatures || [])];
+        state.character.negative_tags = [...(proposal.negativeTags || [])];
+
+        if (!isRespec) {
+            const cur = state.character.scenes_completed ?? 0;
+            const max = state.character.scenes_target ?? (proposal.pacingScenes || 4);
+            state.character.scenes_completed = Math.max(0, cur - max);
+        }
+
+        const newCharBlock = formatFaeCharacterMemoBlock(state);
+        let updatedMemo = currentMemo;
+        if (/\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i.test(updatedMemo)) {
+            updatedMemo = updatedMemo.replace(/\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i, newCharBlock);
+        } else {
+            updatedMemo = `${newCharBlock}\n\n${updatedMemo}`;
+        }
+
+        if (rpgSettings) {
+            rpgSettings.currentMemo = updatedMemo;
+            if (typeof globalThis._rpgUpdateUIMemo === 'function') {
+                globalThis._rpgUpdateUIMemo(updatedMemo);
+            }
+            if (rpgSettings.chatStates && chatId && rpgSettings.chatStates[chatId]) {
+                rpgSettings.chatStates[chatId].currentMemo = updatedMemo;
+                for (const key of ['faeCampaignDossier', 'pbtaCampaignDossier', 'companionDossier']) {
+                    const proto = rpgSettings.chatStates[chatId][key]?.protagonist;
+                    if (proto) {
+                        proto.pools = JSON.parse(JSON.stringify(proposal.pools));
+                        proto.positiveTags = [...(proposal.positiveTags || [])];
+                        proto.negativeTags = [...(proposal.negativeTags || [])];
+                        rpgSettings.chatStates[chatId][key].config = rpgSettings.chatStates[chatId][key].config || {};
+                        rpgSettings.chatStates[chatId][key].config.knobs = { ...(proposal.knobs || {}) };
+                    }
+                }
+            }
+            if (typeof document !== 'undefined') {
+                const memoEl = document.getElementById('rpg-tracker-memo');
+                if (memoEl) {
+                    memoEl.value = updatedMemo;
+                    memoEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    memoEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+            if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext?.()?.saveSettingsDebounced === 'function') {
+                SillyTavern.getContext().saveSettingsDebounced();
+            } else if (typeof globalThis.saveSettingsDebounced === 'function') {
+                globalThis.saveSettingsDebounced();
+            }
+        }
+
+        return {
+            success: true,
+            updatedMemo,
+            summary: isRespec
+                ? 'FAE character pools, tags, and knobs tuned and saved.'
+                : `FAE Milestone Complete! ${proposal.characterName}'s milestone applied.`,
+        };
     }
 
     if (proposal.isPbta) {

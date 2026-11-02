@@ -7,15 +7,51 @@
  * 2. Portrait Sync: Pushes generated/assigned Multihog portraits into the persona avatar.
  */
 
-import { extension_settings } from '../../../extensions.js';
-import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
-import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
-import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+let extension_settings = globalThis.extension_settings || {};
+let eventSource = globalThis.eventSource || { on: () => {}, makeFirst: () => {} };
+let event_types = globalThis.event_types || {};
+let saveSettingsDebounced = globalThis.saveSettingsDebounced || (() => {});
+let SlashCommandParser = globalThis.SlashCommandParser || null;
+let SlashCommand = globalThis.SlashCommand || null;
+
+try {
+    const ext = await import('../../../extensions.js');
+    if (ext?.extension_settings) extension_settings = ext.extension_settings;
+} catch (_) {}
+try {
+    const scr = await import('../../../../script.js');
+    if (scr?.eventSource) eventSource = scr.eventSource;
+    if (scr?.event_types) event_types = scr.event_types;
+    if (scr?.saveSettingsDebounced) saveSettingsDebounced = scr.saveSettingsDebounced;
+} catch (_) {}
+try {
+    const scp = await import('../../../slash-commands/SlashCommandParser.js');
+    if (scp?.SlashCommandParser) SlashCommandParser = scp.SlashCommandParser;
+} catch (_) {}
+try {
+    const sc = await import('../../../slash-commands/SlashCommand.js');
+    if (sc?.SlashCommand) SlashCommand = sc.SlashCommand;
+} catch (_) {}
+
 import {
     PBTA_GENRES,
     buildPbtACartridge,
     buildPbtAQuickStartInstructions,
 } from './pbta-ruleset.js';
+import {
+    FAE_GENRES,
+    FAE_CARTRIDGE_ID,
+    buildFaeCartridge,
+    buildFaeRngBlock,
+    triggerEventOrRest,
+    buildFaeQuickStartInstructions,
+} from './fae-ruleset.js';
+import {
+    parseFaeStateFromMemo,
+    reconcileFaeMemoAfterTurn,
+    formatFaeCharacterMemoBlock,
+    formatInitialFaeMemo,
+} from './fae-state-sync.js';
 import {
     openConciergeModal,
     refreshConciergeActiveContext,
@@ -47,17 +83,21 @@ import {
 import {
     isPbtAActive,
     isPbtaChat,
+    isFaeActive,
+    isFaeChat,
     formatRulesetBadge,
     persistPbtaChatState,
     isPersistingPbtaChatState,
     clearPersistingPbtaChatState,
     ensureActiveChatRulesetConsistency,
     isLiveSettingsPollutedWithPbtA,
+    isLiveSettingsPollutedWithFae,
     cleanseStockDndSettings,
     logRulesetEvent,
     collectRulesetDiagnostics,
     getCompanionActiveCartridge,
     setCompanionActiveCartridge,
+    getActiveRulesetId,
 } from './pbta-ruleset-persistence.js';
 import {
     scanAndInitUnsyncedNpcs,
@@ -167,6 +207,11 @@ const DEFAULT_SETTINGS = {
     cyoaMaxRetries: 1,
     enableCyoaMarkdownAutoRepair: true,
     cyoaMaxTokens: 0,
+    rulesetEngineMode: 'pbta',
+    lastFaeGenre: 'cosmic_horror',
+    faeFleeGrace: true,
+    faeAttritionShift: 0,
+    faeOverflowDefault: 'scar_and_ko',
 };
 
 function getSettings() {
@@ -206,7 +251,9 @@ async function refreshMultihogRuntime() {
         if (typeof bridge.autoApplySysprompt === 'function') await bridge.autoApplySysprompt(true);
         if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
     } catch (_) {
-        document.getElementById('rpg_tracker_btn_apply_sysprompt')?.click();
+        if (typeof document !== 'undefined') {
+            document.getElementById('rpg_tracker_btn_apply_sysprompt')?.click();
+        }
     }
     if (typeof globalThis._rpgSyncSettingsUi === 'function') {
         globalThis._rpgSyncSettingsUi();
@@ -224,8 +271,9 @@ function getActiveChatId() {
  * Get Multihog framework settings.
  */
 function getRpgSettings() {
-    const ctx = SillyTavern.getContext();
-    return ctx.extensionSettings?.rpg_tracker || null;
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    return ctx?.extensionSettings?.rpg_tracker
+        || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
 }
 
 /**
@@ -558,6 +606,8 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
     return await forceRenderTrackerView(s, effectiveChatId, initialMemo, { persist: true });
 }
 
+const _lastFaeMemoByChat = new Map();
+
 /**
  * Main synchronizer function.
  */
@@ -602,20 +652,45 @@ export async function runSync(reason = '') {
             if (rulesetChanged) didWork = true;
         }
 
-        // 1. Auto-hydrate PbtA game state memo if needed
-        const memoHydrated = await hydratePbtaMemoIfNeeded(chatId);
-        if (memoHydrated) didWork = true;
+        // 1. Auto-hydrate PbtA game state memo if needed (when not FAE)
+        if (!isFaeActive(chatId)) {
+            const memoHydrated = await hydratePbtaMemoIfNeeded(chatId);
+            if (memoHydrated) didWork = true;
+        }
 
-        // 2. Synchronize PbtA Harm with descending tandem HP in live memo
+        // 2. Synchronize active ruleset memo vitality / state reconciliation
         const rpgSettings = getRpgSettings();
         if (rpgSettings) {
-            const vitalityUpdated = syncLivePbtaMemoVitality(rpgSettings, chatId);
-            if (vitalityUpdated) {
-                didWork = true;
-                try {
-                    const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
-                    if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
-                } catch (_) {}
+            if (isFaeActive(chatId)) {
+                const rawMemo = rpgSettings.currentMemo || rpgSettings.chatStates?.[chatId]?.currentMemo || '';
+                if (rawMemo) {
+                    const compSettings = getSettings();
+                    const genreKey = compSettings.lastFaeGenre || 'cosmic_horror';
+                    const prevMemo = _lastFaeMemoByChat.get(chatId) || null;
+                    const reconciled = reconcileFaeMemoAfterTurn(prevMemo, rawMemo, genreKey);
+                    if (reconciled.changed) {
+                        rpgSettings.currentMemo = reconciled.memo;
+                        if (rpgSettings.chatStates?.[chatId]) {
+                            rpgSettings.chatStates[chatId].currentMemo = reconciled.memo;
+                        }
+                        didWork = true;
+                        saveSettingsDebounced();
+                        try {
+                            const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+                            if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+                        } catch (_) {}
+                    }
+                    _lastFaeMemoByChat.set(chatId, rpgSettings.currentMemo || rawMemo);
+                }
+            } else {
+                const vitalityUpdated = syncLivePbtaMemoVitality(rpgSettings, chatId);
+                if (vitalityUpdated) {
+                    didWork = true;
+                    try {
+                        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+                        if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
+                    } catch (_) {}
+                }
             }
         }
 
@@ -705,7 +780,7 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
 
     // 2. Install unlocked base overrides into customSyspromptLibrary
     if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
-    s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_'));
+    s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_') && !p.id.startsWith('fae_'));
     const pbtaSnippets = cartridge.payload.customSyspromptLibrary.map(item => ({
         ...item,
         enabled: true,
@@ -788,14 +863,126 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
 }
 
 /**
+ * Applies the Freeform Attrition Engine (FAE) Game Cartridge to MultiHog settings.
+ * @param {string} genreKey
+ * @param {object} [overrides={}]
+ * @returns {Promise<boolean>}
+ */
+export async function applyFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const s = ctx?.extensionSettings?.rpg_tracker
+        || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
+    if (!s) {
+        showToast('error', 'Multihog D&D Framework not detected.', 'MultiHog Companion');
+        return false;
+    }
+
+    const cartridge = buildFaeCartridge(genreKey, overrides);
+    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+
+    // 1. Ensure cartridge exists in MultiHog's cartridge database
+    if (!s.gameCartridges) s.gameCartridges = [];
+    const idx = s.gameCartridges.findIndex(c => c.id === cartridge.id);
+    if (idx >= 0) {
+        s.gameCartridges[idx] = cartridge;
+    } else {
+        s.gameCartridges.push(cartridge);
+    }
+
+    // 2. Install unlocked base overrides into customSyspromptLibrary
+    if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
+    s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_') && !p.id.startsWith('fae_'));
+    const faeSnippets = cartridge.payload.customSyspromptLibrary.map(item => ({
+        ...item,
+        enabled: true,
+        scope: 'chat',
+        _chatSetupMember: true,
+    }));
+    s.customSyspromptLibrary.push(...faeSnippets);
+
+    // 2b. Synchronize MultiHog's global snippet catalog
+    if (!s.syspromptSnippetDatabase) s.syspromptSnippetDatabase = [];
+    for (const sn of faeSnippets) {
+        const catIdx = s.syspromptSnippetDatabase.findIndex(p => p.id === sn.id);
+        if (catIdx >= 0) s.syspromptSnippetDatabase[catIdx] = { ...sn };
+        else s.syspromptSnippetDatabase.push({ ...sn });
+    }
+
+    // 3. Update sysprompt modules (deactivate base sections replaced by overrides or not used)
+    s.syspromptModules = s.syspromptModules || {};
+    Object.assign(s.syspromptModules, cartridge.payload.syspromptModules);
+
+    // 4. Update stock prompts (character, party, combat)
+    s.stockPrompts = s.stockPrompts || {};
+    Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
+
+    // 4b. Update CYOA config if defined in cartridge payload
+    if (cartridge.payload.cyoaConfig) {
+        s.cyoaConfig = s.cyoaConfig || {};
+        Object.assign(s.cyoaConfig, cartridge.payload.cyoaConfig);
+    }
+
+    // 5. Update RNG settings to pure queue mode
+    s.rngEnabled = true;
+    s.rngQueueD20 = true;
+    s.rngQueueD100 = false;
+    s.diceFunctionTool = false;
+    s.diceD100Mode = false;
+
+    // 6. Update block order
+    s.blockOrder = [...cartridge.payload.blockOrder];
+    if (s.modules) {
+        Object.assign(s.modules, cartridge.payload.modules);
+    }
+
+    // 7. Save settings
+    saveSettingsDebounced();
+
+    // 7b. Persist FAE setup snapshot so MultiHog's Chat Setup Link & F5 reloads preserve FAE
+    const activeChatId = getActiveChatId();
+    if (activeChatId) {
+        await persistPbtaChatState(activeChatId);
+    }
+
+    // 8. Re-apply sysprompt via MultiHog runtime bridge
+    await refreshMultihogRuntime();
+
+    // Persist active genre in Companion settings
+    const compSettings = getSettings();
+    compSettings.lastFaeGenre = genreKey;
+    saveSettingsDebounced();
+
+    const activeLabel = overrides.systemLabel || overrides.name || genre.label;
+    const activeDossierSnapshot = overrides.dossier || s.chatStates?.[activeChatId]?.faeCampaignDossier || s.chatStates?.[activeChatId]?.pbtaCampaignDossier || null;
+    if (activeChatId) {
+        await setCompanionActiveCartridge(activeChatId, {
+            cartridgeId: 'fae',
+            genre: genreKey,
+            systemLabel: activeLabel,
+            title: overrides.campaignTitle || overrides.name || null,
+            ...(activeDossierSnapshot ? { dossier: JSON.parse(JSON.stringify(activeDossierSnapshot)) } : {}),
+        });
+    }
+    logRulesetEvent('applyFaeCartridge', {
+        genreKey,
+        activeChatId,
+        hasOverrides: Object.keys(overrides || {}).length > 0,
+    });
+    showToast('success', `🕯️ FAE ruleset (${activeLabel}) applied to this chat!`, 'FAE Engine Active');
+    updateRulesetBadge();
+    return true;
+}
+
+/**
  * Restores MultiHog to factory D&D 5e settings.
  * Pulls actual factory defaults from MultiHog's defaults.js when available;
  * falls back to hardcoded values if the import fails (e.g. folder renamed).
  * @returns {Promise<boolean>}
  */
 export async function restoreStockDnd() {
-    const ctx = SillyTavern.getContext();
-    const s = ctx.extensionSettings?.rpg_tracker;
+    const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const s = ctx?.extensionSettings?.rpg_tracker
+        || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
     if (!s) return false;
 
     const activeChatId = getActiveChatId();
@@ -803,6 +990,7 @@ export async function restoreStockDnd() {
 
     if (activeChatId && s.chatStates?.[activeChatId]) {
         delete s.chatStates[activeChatId].pbtaCampaignDossier;
+        delete s.chatStates[activeChatId].faeCampaignDossier;
     }
 
     if (activeChatId) {
@@ -894,6 +1082,90 @@ export async function quickStartPbtA(genreKey = 'fantasy', charName = '', scenar
             }
         } else {
             showToast('warning', 'Quick Start function not available. PbtA ruleset is active — type your first message!', 'MultiHog Companion');
+        }
+    } catch (err) {
+        console.error('[MultiHog Companion] Quick Start failed:', err);
+        showToast('error', `Quick Start failed: ${err.message}`, 'MultiHog Companion');
+    }
+}
+
+/**
+ * Triggers Quick Start for a Freeform Attrition Engine (FAE) adventure.
+ * @param {string} genreKey
+ * @param {string} charName
+ * @param {string} scenarioDesc
+ * @param {object|null} [customKnobs=null]
+ * @returns {Promise<void>}
+ */
+export async function quickStartFae(genreKey = 'cosmic_horror', charName = '', scenarioDesc = '', customKnobs = null) {
+    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const cleanCharName = (charName || '').trim();
+
+    // ── 0. Ensure Clean Chat & Auto-Rename ──────────────────────────────────
+    try {
+        const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
+        const defaultTitle = cleanCharName
+            ? `${cleanCharName} - FAE ${genre.label}`
+            : `FAE ${genre.label} Adventure`;
+        await ensureCleanAdventureChat({
+            adventureTitle: defaultTitle,
+            fallbackLabel: `FAE ${genre.label} Adventure`,
+        });
+    } catch (chatErr) {
+        console.warn('[MultiHog Companion] Auto-chat preparation failed, proceeding:', chatErr);
+    }
+
+    const ok = await applyFaeCartridge(genreKey, customKnobs ? { knobs: customKnobs } : {});
+    if (!ok) return;
+
+    const instructions = buildFaeQuickStartInstructions(genreKey, cleanCharName, scenarioDesc, customKnobs);
+
+    try {
+        const qs = await import('../SillyTavern-MultihogDnDFramework/quickstart.js');
+        if (typeof qs.runQuickStart === 'function') {
+            showToast('info', `Starting ${genre.label} adventure...`, 'Quick Start');
+
+            // Temporarily suppress upstream's starter message so upstream does not dump
+            // the mechanical instruction block into chat as a user message, and set onboardingLevel
+            // to 'none' so upstream does not generate D&D levels or [XP] blocks.
+            let originalSendStarter = true;
+            let originalLevel = null;
+            let rpgSettings = null;
+            try {
+                const sm = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+                rpgSettings = sm?.getSettings?.();
+                if (rpgSettings) {
+                    originalSendStarter = rpgSettings.onboardingSendStarterMessage;
+                    rpgSettings.onboardingSendStarterMessage = false;
+                    originalLevel = rpgSettings.onboardingLevel;
+                    rpgSettings.onboardingLevel = 'none';
+                }
+            } catch (_) {}
+
+            try {
+                await qs.runQuickStart(genre.multihogGenre, null, cleanCharName, instructions);
+            } finally {
+                if (rpgSettings) {
+                    rpgSettings.onboardingSendStarterMessage = originalSendStarter;
+                    if (originalLevel !== null) {
+                        rpgSettings.onboardingLevel = originalLevel;
+                    }
+                }
+            }
+
+            // Send clean narrative opening message
+            const starterText = scenarioDesc
+                ? `Begin the adventure.\n\n${scenarioDesc}`
+                : 'Begin the adventure.';
+            const textarea = /** @type {HTMLTextAreaElement|null} */ (document.getElementById('send_textarea'));
+            const sendBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('send_but'));
+            if (textarea && sendBtn) {
+                textarea.value = starterText;
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                sendBtn.click();
+            }
+        } else {
+            showToast('warning', 'Quick Start function not available. FAE ruleset is active — type your first message!', 'MultiHog Companion');
         }
     } catch (err) {
         console.error('[MultiHog Companion] Quick Start failed:', err);
@@ -1335,11 +1607,45 @@ async function initUI() {
 
         await updateLorebookSyncUI();
 
-        // ── PbtA Concierge Session Zero ──
+        // ── PbtA & FAE Concierge Session Zero ──
         $('#mhc_open_concierge_btn').on('click', function (e) {
             e.preventDefault();
-            openConciergeModal();
+            const mode = $('#mhc_ruleset_mode_select').val() || (isFaeActive() ? 'fae' : 'pbta');
+            const genre = mode === 'fae' ? $('#mhc_fae_genre').val() : $('#mhc_pbta_genre').val();
+            openConciergeModal({ ruleset: mode, genreKey: genre });
         });
+
+        // ── Ruleset Mode Toggle (PbtA vs FAE) ──
+        const rulesetModeSelect = $('#mhc_ruleset_mode_select');
+        const pbtaControlsGroup = $('#mhc_pbta_controls_group');
+        const faeControlsGroup = $('#mhc_fae_controls_group');
+        const pbtaActionsGroup = $('#mhc_pbta_actions_group');
+        const faeActionsGroup = $('#mhc_fae_actions_group');
+
+        function updateRulesetModeUI(mode) {
+            if (mode === 'fae') {
+                pbtaControlsGroup.hide();
+                pbtaActionsGroup.hide();
+                faeControlsGroup.show();
+                faeActionsGroup.show();
+            } else {
+                faeControlsGroup.hide();
+                faeActionsGroup.hide();
+                pbtaControlsGroup.show();
+                pbtaActionsGroup.show();
+            }
+        }
+
+        const initialMode = current.rulesetEngineMode || (isFaeActive() ? 'fae' : 'pbta');
+        if (rulesetModeSelect.length) {
+            rulesetModeSelect.val(initialMode);
+            updateRulesetModeUI(initialMode);
+            rulesetModeSelect.on('change', function () {
+                const mode = $(this).val();
+                updateRulesetModeUI(mode);
+                updateSettings({ rulesetEngineMode: mode });
+            });
+        }
 
         // ── PbtA Ruleset Controls ──
         const genreSelect = $('#mhc_pbta_genre');
@@ -1365,11 +1671,108 @@ async function initUI() {
         });
         updateGenrePreview(genreSelect.val() || 'fantasy');
 
+        // ── FAE Ruleset Controls ──
+        const faeGenreSelect = $('#mhc_fae_genre');
+        const faePoolsPreview = $('#mhc_fae_pools_preview');
+        const faeKnobsPreview = $('#mhc_fae_knobs_preview');
+        const faeFleeGraceCb = $('#mhc_fae_flee_grace');
+        const faeShiftSelect = $('#mhc_fae_attrition_shift');
+        const faeOverflowSelect = $('#mhc_fae_overflow_default');
+
+        function updateFaeGenrePreview(key) {
+            const g = FAE_GENRES[key] || FAE_GENRES.cosmic_horror;
+            if (faePoolsPreview.length) {
+                const poolsStr = Object.values(g.pools).map(p => `${p.label} (${p.current}/${p.max})`).join(', ');
+                faePoolsPreview.text(`Resource Pools: ${poolsStr}`);
+            }
+            if (faeKnobsPreview.length) {
+                const shift = g.knobs.base_attrition_shift >= 0 ? `+${g.knobs.base_attrition_shift}` : g.knobs.base_attrition_shift;
+                faeKnobsPreview.text(`Knobs: Flee Grace (${g.knobs.flee_grace_toggle ? 'ON' : 'OFF'}) | Shift: ${shift} | Overflow: ${g.knobs.overflow_default}`);
+            }
+        }
+
+        const savedFaeGenre = current.lastFaeGenre || 'cosmic_horror';
+        if (FAE_GENRES[savedFaeGenre]) {
+            faeGenreSelect.val(savedFaeGenre);
+        }
+        updateFaeGenrePreview(faeGenreSelect.val() || 'cosmic_horror');
+
+        faeFleeGraceCb.prop('checked', current.faeFleeGrace !== false);
+        if (current.faeAttritionShift !== undefined) {
+            faeShiftSelect.val(String(current.faeAttritionShift));
+        }
+        if (current.faeOverflowDefault) {
+            faeOverflowSelect.val(current.faeOverflowDefault);
+        }
+
+        faeGenreSelect.on('change', function () {
+            const key = $(this).val();
+            updateFaeGenrePreview(key);
+            const g = FAE_GENRES[key];
+            if (g) {
+                faeFleeGraceCb.prop('checked', g.knobs.flee_grace_toggle);
+                faeShiftSelect.val(String(g.knobs.base_attrition_shift));
+                faeOverflowSelect.val(g.knobs.overflow_default);
+                updateSettings({
+                    lastFaeGenre: key,
+                    faeFleeGrace: g.knobs.flee_grace_toggle,
+                    faeAttritionShift: g.knobs.base_attrition_shift,
+                    faeOverflowDefault: g.knobs.overflow_default,
+                });
+            } else {
+                updateSettings({ lastFaeGenre: key });
+            }
+        });
+
+        faeFleeGraceCb.on('change', function () {
+            updateSettings({ faeFleeGrace: $(this).is(':checked') });
+        });
+        faeShiftSelect.on('change', function () {
+            updateSettings({ faeAttritionShift: parseInt($(this).val(), 10) || 0 });
+        });
+        faeOverflowSelect.on('change', function () {
+            updateSettings({ faeOverflowDefault: $(this).val() });
+        });
+
+        function getFaeCustomKnobs() {
+            return {
+                flee_grace_toggle: faeFleeGraceCb.is(':checked'),
+                base_attrition_shift: parseInt(faeShiftSelect.val(), 10) || 0,
+                overflow_default: faeOverflowSelect.val() || 'scar_and_ko',
+            };
+        }
+
+        $('#mhc_fae_load_cartridge').on('click', async function () {
+            const btn = $(this);
+            btn.prop('disabled', true);
+            try {
+                await applyFaeCartridge(faeGenreSelect.val(), { knobs: getFaeCustomKnobs() });
+            } finally {
+                btn.prop('disabled', false);
+            }
+        });
+
+        $('#mhc_fae_quickstart').on('click', async function () {
+            const btn = $(this);
+            const charName = ($('#mhc_pbta_char_name').val() || '').trim();
+            const scenarioDesc = ($('#mhc_pbta_scenario_desc').val() || '').trim();
+            btn.prop('disabled', true);
+            try {
+                await quickStartFae(faeGenreSelect.val(), charName, scenarioDesc, getFaeCustomKnobs());
+            } finally {
+                btn.prop('disabled', false);
+            }
+        });
+
         $('#mhc_pbta_load_cartridge').on('click', async function () {
             const btn = $(this);
             btn.prop('disabled', true);
             try {
-                await applyPbtACartridge(genreSelect.val());
+                if (rulesetModeSelect.val() === 'fae') {
+                    await applyFaeCartridge(faeGenreSelect.val(), { knobs: getFaeCustomKnobs() });
+                } else {
+                    await applyPbtACartridge(genreSelect.val());
+                }
             } finally {
                 btn.prop('disabled', false);
             }
@@ -1378,9 +1781,16 @@ async function initUI() {
         $('#mhc_pbta_roll_name').on('click', async function (e) {
             e.preventDefault();
             e.stopPropagation();
-            const genreKey = genreSelect.val();
-            const genreObj = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
-            const name = await getRandomCharacterName(genreObj.multihogGenre || 'fantasy');
+            const isFae = rulesetModeSelect.val() === 'fae';
+            let multihogGenre = 'fantasy';
+            if (isFae) {
+                const g = FAE_GENRES[faeGenreSelect.val()] || FAE_GENRES.cosmic_horror;
+                multihogGenre = g.multihogGenre || 'horror';
+            } else {
+                const g = PBTA_GENRES[genreSelect.val()] || PBTA_GENRES.fantasy;
+                multihogGenre = g.multihogGenre || 'fantasy';
+            }
+            const name = await getRandomCharacterName(multihogGenre);
             $('#mhc_pbta_char_name').val(name);
         });
 
@@ -1390,7 +1800,11 @@ async function initUI() {
             const scenarioDesc = ($('#mhc_pbta_scenario_desc').val() || '').trim();
             btn.prop('disabled', true);
             try {
-                await quickStartPbtA(genreSelect.val(), charName, scenarioDesc);
+                if (rulesetModeSelect.val() === 'fae') {
+                    await quickStartFae(faeGenreSelect.val(), charName, scenarioDesc, getFaeCustomKnobs());
+                } else {
+                    await quickStartPbtA(genreSelect.val(), charName, scenarioDesc);
+                }
             } finally {
                 btn.prop('disabled', false);
             }
@@ -1632,16 +2046,19 @@ export function initWandMenu() {
             const s = getSettings();
             const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
             const chatId = ctx?.getCurrentChatId?.() || ctx?.chatId || s.currentChatId || 'default';
-            const pbtaActive = isPbtaChat(chatId, rpgSettings, s) || isPbtAActive(chatId, rpgSettings, s);
+            const faeActive = isFaeChat(chatId, rpgSettings, s) || isFaeActive(chatId, rpgSettings, s);
+            const pbtaActive = !faeActive && (isPbtaChat(chatId, rpgSettings, s) || isPbtAActive(chatId, rpgSettings, s));
             const pacingXp = s.pbtaCampaignDossier?.[chatId]?.config?.pacingXp
                 || s.companionDossier?.[chatId]?.config?.pacingXp;
-            const status = evaluateLevelUpEligibility(curMemo, pbtaActive ? 'pbta' : null, { pacingXp });
+            const status = evaluateLevelUpEligibility(curMemo, faeActive ? 'fae' : (pbtaActive ? 'pbta' : null), { pacingXp });
             if (status.eligible) {
                 levelUpBtn.title = 'Milestone reached! Open Level-Up Desk to advance character';
                 levelUpBtn.setAttribute('data-is-level-up', 'true');
-                const labelText = status.ruleset === 'pbta'
-                    ? '⚡ Playbook Advance Available'
-                    : `⬆ Level Up Available (Lvl ${status.currentLevel} → ${status.nextLevel})`;
+                const labelText = status.ruleset === 'fae'
+                    ? '🏆 FAE Milestone Available'
+                    : (status.ruleset === 'pbta'
+                        ? '⚡ Playbook Advance Available'
+                        : `⬆ Level Up Available (Lvl ${status.currentLevel} → ${status.nextLevel})`);
                 levelUpBtn.innerHTML = `
                     <div class="fa-solid fa-circle-arrow-up extensionsMenuExtensionButton" style="color: #fbbf24;"></div>
                     <span>${labelText}</span>
@@ -1685,20 +2102,33 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     const { openLevelUpModal } = await import('./level-up-ui.js');
 
     const dossier = ensureChatDossier(chatId, s, { memo: currentMemo });
-    const isPbta = isPbtaChat(chatId, rpgSettings, s)
+    const isFae = isFaeChat(chatId, rpgSettings, s)
+        || isFaeActive(chatId, rpgSettings, s)
+        || dossier?.meta?.ruleset === 'fae';
+    const isPbta = !isFae && (isPbtaChat(chatId, rpgSettings, s)
         || isPbtAActive(chatId, rpgSettings, s)
-        || isDossierPbta(dossier);
+        || isDossierPbta(dossier));
 
+    const rulesetKey = isFae ? 'fae' : (isPbta ? 'pbta' : (dossier.meta?.systemKey || 'dnd5e'));
     const eligibility = evaluateLevelUpEligibility(
         currentMemo,
-        isPbta ? 'pbta' : (dossier.meta?.systemKey || 'dnd5e'),
+        rulesetKey,
         { pacingXp: dossier.config?.pacingXp },
     );
 
     let blueprintPromise = null;
 
-    // If PbtA, bypass 1–20 D&D progression blueprint generation
-    if (isPbta) {
+    // If FAE or PbtA, bypass 1–20 D&D progression blueprint generation
+    if (isFae) {
+        dossier.progressionBlueprint = null;
+        if (dossier.meta) {
+            dossier.meta.systemKey = 'fae';
+            dossier.meta.ruleset = 'fae';
+            if (!dossier.meta.systemLabel || dossier.meta.systemLabel.includes('5e')) {
+                dossier.meta.systemLabel = 'FAE Freeform Attrition Engine';
+            }
+        }
+    } else if (isPbta) {
         dossier.progressionBlueprint = null;
         if (dossier.meta) {
             const existingSysKey = (dossier.meta.systemKey || '').toLowerCase();
@@ -1716,7 +2146,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
             dossier.progressionBlueprint = null;
         }
     }
-    if (!isPbta && !hasProgressionBlueprint(dossier)) {
+    if (!isPbta && !isFae && !hasProgressionBlueprint(dossier)) {
         const canonical = getCanonicalDndProgression(dossier.protagonist?.class);
         if (canonical) {
             dossier.progressionBlueprint = canonical;
@@ -1743,7 +2173,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     // If character does not have sufficient XP to level up, enforce Respec mode
     const effectiveIsRespec = isRespec || !eligibility.eligible;
 
-    const targetLevel = isPbta
+    const targetLevel = (isPbta || isFae)
         ? null
         : (effectiveIsRespec
             ? (dossier.protagonist?.level || eligibility.currentLevel || 1)
@@ -1754,7 +2184,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     // Once the codex exists (or for canonical classes), it goes straight to Stage 2 (Level Up / Respec).
     const canonicalProg = getCanonicalDndProgression(dossier.protagonist?.class);
     const hasBlueprintAlready = hasProgressionBlueprint(dossier) || !!canonicalProg;
-    const initialStage = (!isPbta && !hasBlueprintAlready) ? 1 : 2;
+    const initialStage = (!isPbta && !isFae && !hasBlueprintAlready) ? 1 : 2;
 
     openLevelUpModal({
         chatId,
@@ -1766,7 +2196,7 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
         initialStage,
         rpgSettings,
         onComplete: () => {
-            decorateXpBarsForLevelUp(isPbta);
+            decorateXpBarsForLevelUp(isPbta || isFae);
             initWandMenu();
         },
     });
@@ -1774,19 +2204,23 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
 
 
 
-// ── PbtA Detection & State Recovery ──────────────────────────────────────────────
+// ── Ruleset Detection & State Recovery ──────────────────────────────────────────────
 export {
     isPbtAActive,
     isPbtaChat,
+    isFaeActive,
+    isFaeChat,
     formatRulesetBadge,
     persistPbtaChatState,
     ensureActiveChatRulesetConsistency,
     isLiveSettingsPollutedWithPbtA,
+    isLiveSettingsPollutedWithFae,
     cleanseStockDndSettings,
     logRulesetEvent,
     collectRulesetDiagnostics,
     getCompanionActiveCartridge,
     setCompanionActiveCartridge,
+    getActiveRulesetId,
 };
 
 // ── 2d6 RNG Queue Interceptor ───────────────────────────────────────────────────
@@ -1820,17 +2254,32 @@ function buildPbtA2d6Block(lineCount = 12) {
 
 /**
  * SillyTavern generate_interceptor — runs AFTER MultiHog's interceptor
- * (loading_order 30 > 20). When PbtA is active for the current chat,
- * replaces MultiHog's polyhedral RNG queue with a clean 2d6-only format.
+ * (loading_order 30 > 20). When PbtA or FAE is active for the current chat,
+ * replaces MultiHog's polyhedral RNG queue with a clean 2d6 or 4dF block.
  *
  * Registered on globalThis via the manifest's generate_interceptor field.
  */
 function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
-    if (!Array.isArray(chat) || !isPbtAActive()) return;
+    const faeActive = isFaeActive();
+    const pbtaActive = !faeActive && isPbtAActive();
+    if (!Array.isArray(chat) || (!pbtaActive && !faeActive)) return;
 
     // MultiHog prepends its RNG block into the last user message's content.
-    // Find it and replace with our clean 2d6 block.
-    const rngPattern = /\[RNG_QUEUE\s+v[\d.]+\][\s\S]*?\[\/RNG_QUEUE\]\s*/g;
+    // Find it and replace with our clean 2d6 or 4dF block.
+    const rngPattern = /\[RNG_QUEUE[\s\S]*?\[\/RNG_QUEUE\]\s*/g;
+
+    let replacementBlock = '';
+    if (faeActive) {
+        const memo = getRpgSettings()?.currentMemo || '';
+        const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
+        const faeState = parseFaeStateFromMemo(memo, genreKey);
+        replacementBlock = buildFaeRngBlock({ state: faeState, genreKey: faeState.genreKey || genreKey });
+        if (!replacementBlock.endsWith('\n\n')) {
+            replacementBlock = `${replacementBlock}\n\n`;
+        }
+    } else {
+        replacementBlock = buildPbtA2d6Block();
+    }
 
     for (let i = chat.length - 1; i >= Math.max(0, chat.length - 3); i--) {
         const msg = chat[i];
@@ -1838,15 +2287,15 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
 
         if (typeof msg.mes === 'string' && rngPattern.test(msg.mes)) {
             rngPattern.lastIndex = 0;
-            msg.mes = msg.mes.replace(rngPattern, buildPbtA2d6Block());
-            console.log('[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
+            msg.mes = msg.mes.replace(rngPattern, replacementBlock);
+            console.log(faeActive ? '[MultiHog Companion] Replaced polyhedral RNG queue with FAE 4dF block.' : '[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
             return;
         }
 
         if (typeof msg.content === 'string' && rngPattern.test(msg.content)) {
             rngPattern.lastIndex = 0;
-            msg.content = msg.content.replace(rngPattern, buildPbtA2d6Block());
-            console.log('[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
+            msg.content = msg.content.replace(rngPattern, replacementBlock);
+            console.log(faeActive ? '[MultiHog Companion] Replaced polyhedral RNG queue with FAE 4dF block.' : '[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
             return;
         }
 
@@ -1854,8 +2303,8 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
             for (const part of msg.content) {
                 if (part?.type === 'text' && typeof part.text === 'string' && rngPattern.test(part.text)) {
                     rngPattern.lastIndex = 0;
-                    part.text = part.text.replace(rngPattern, buildPbtA2d6Block());
-                    console.log('[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
+                    part.text = part.text.replace(rngPattern, replacementBlock);
+                    console.log(faeActive ? '[MultiHog Companion] Replaced polyhedral RNG queue with FAE 4dF block.' : '[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
                     return;
                 }
             }
@@ -1866,6 +2315,7 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
 // [CATALOG: ADR-MP-03] See MONKEYPATCHES.md — SillyTavern Pipeline Generation Interceptor (PbtA 2d6 RNG Injection)
 // Register the interceptor on globalThis so SillyTavern can call it.
 globalThis.mhcGenerationInterceptor = mhcGenerationInterceptor;
+export { mhcGenerationInterceptor };
 
 // ── Ruleset Status Badge ────────────────────────────────────────────────────────
 
@@ -1900,6 +2350,7 @@ function updateDndSubfooterFixUI() {
  * Update the status badge in the settings panel to show the active ruleset.
  */
 function updateRulesetBadge() {
+    if (typeof document === 'undefined') return;
     const badge = document.getElementById('mhc_ruleset_status');
     const summary = document.getElementById('mhc_pbta_summary_line');
     updateDndSubfooterFixUI();
@@ -1952,7 +2403,7 @@ async function runChatChangedCoordinator(targetChatId, token) {
         if (token !== _activeChatChangedToken) return;
 
         // 4. Synchronize UI badges & Lorebook status
-        if (!isPbtAActive(targetChatId) && getSettings().enableDndSubfooterFix !== false) {
+        if (!isPbtAActive(targetChatId) && !isFaeActive(targetChatId) && getSettings().enableDndSubfooterFix !== false) {
             const rpgSettings = getRpgSettings();
             if (rpgSettings && !isDndSubfooterAlignmentApplied(rpgSettings)) {
                 await applyDndSubfooterAlignment({ rpgSettings });
@@ -2093,17 +2544,18 @@ export async function coordinateTierSyncAfterTurn() {
 /**
  * Extension entry point.
  */
-jQuery(async () => {
-    // 1. Initialize UI
-    await initUI();
+if (typeof jQuery !== 'undefined') {
+    jQuery(async () => {
+        // 1. Initialize UI
+        await initUI();
 
-    // 2. Setup Smart Aspect-Ratio & Crop Bridge (/imagine interceptor)
-    setupImagineInterceptor();
+        // 2. Setup Smart Aspect-Ratio & Crop Bridge (/imagine interceptor)
+        setupImagineInterceptor();
 
-    // 2b. Setup Adventure Companion PbtA Documentation Bridge (Strategy 1)
-    setupCompanionDocInterceptor();
+        // 2b. Setup Adventure Companion PbtA Documentation Bridge (Strategy 1)
+        setupCompanionDocInterceptor();
 
-    // 3. Register Slash Commands
+        // 3. Register Slash Commands
     if (SlashCommandParser && SlashCommand) {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'mhc-sync',
@@ -2126,6 +2578,64 @@ jQuery(async () => {
                 return ok ? `PbtA ruleset (${genre}) loaded into this chat.` : 'Failed to load PbtA ruleset.';
             },
             helpString: '<div>Loads the PbtA (Powered by the Apocalypse) 2d6 ruleset cartridge into MultiHog. Usage: <code>/mhc-pbta [fantasy|scifi|anime|horror]</code></div>',
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-fae',
+            callback: async (args) => {
+                const genre = (args?.genre || args?._unnamed || 'cosmic_horror').toString().trim().toLowerCase();
+                if (!FAE_GENRES[genre]) {
+                    const available = Object.keys(FAE_GENRES).join(', ');
+                    return `Unknown FAE genre "${genre}". Available: ${available}`;
+                }
+                const ok = await applyFaeCartridge(genre);
+                return ok ? `FAE ruleset (${genre}) loaded into this chat.` : 'Failed to load FAE ruleset.';
+            },
+            helpString: '<div>Loads the Freeform Attrition Engine (FAE) 4dF ruleset cartridge into MultiHog. Usage: <code>/mhc-fae [cosmic_horror|osr_dungeon|survival_horror|post_apocalyptic|cyberpunk_noir|deep_space|weird_west]</code></div>',
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'mhc-fae-rest',
+            callback: async (args) => {
+                const eventType = (args?.type || args?._unnamed || 'camp_or_sleep').toString().trim().toLowerCase();
+                const validEvents = ['scene_breather', 'camp_or_sleep', 'haven_or_specialist', 'day_pass', 'scene_transition'];
+                if (!validEvents.includes(eventType)) {
+                    return `Unknown rest/event type "${eventType}". Available: ${validEvents.join(', ')}`;
+                }
+                const rpgSettings = getRpgSettings();
+                const currentMemo = rpgSettings?.currentMemo || '';
+                const chatId = getActiveChatId();
+                const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
+                const state = parseFaeStateFromMemo(currentMemo, genreKey);
+                const restRes = triggerEventOrRest(state, eventType);
+
+                const charBlockRegex = /\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i;
+                const newCharBlock = formatFaeCharacterMemoBlock(state);
+                let newMemo = currentMemo;
+                if (charBlockRegex.test(newMemo)) {
+                    newMemo = newMemo.replace(charBlockRegex, newCharBlock);
+                } else if (newMemo.trim()) {
+                    newMemo = newCharBlock + '\n\n' + newMemo;
+                } else {
+                    newMemo = formatInitialFaeMemo(state);
+                }
+
+                if (rpgSettings) {
+                    rpgSettings.currentMemo = newMemo;
+                    if (chatId && rpgSettings.chatStates?.[chatId]) {
+                        rpgSettings.chatStates[chatId].currentMemo = newMemo;
+                    }
+                    saveSettingsDebounced();
+                }
+
+                if (chatId) {
+                    await forceRenderTrackerView(rpgSettings, chatId, newMemo, { persist: true });
+                }
+
+                showToast('success', `FAE Rest (${eventType}) applied! ${restRes.summary}`, 'FAE Rest');
+                return `FAE Rest (${eventType}): ${restRes.summary || 'Rest completed with no pool changes.'}`;
+            },
+            helpString: '<div>Triggers an FAE rest or passive drain event and updates the character sheet. Usage: <code>/mhc-fae-rest [scene_breather|camp_or_sleep|haven_or_specialist|day_pass|scene_transition]</code></div>',
         }));
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -2237,7 +2747,7 @@ jQuery(async () => {
         const s = ctx?.extensionSettings?.rpg_tracker;
         const targetEl = this;
 
-        if (!isPbtAActive(activeChatId) && s && isLiveSettingsPollutedWithPbtA(s)) {
+        if (!isPbtAActive(activeChatId) && !isFaeActive(activeChatId) && s && (isLiveSettingsPollutedWithPbtA(s) || isLiveSettingsPollutedWithFae(s))) {
             // Halt upstream runQuickStart until cleansing completes
             if (e && typeof e.stopImmediatePropagation === 'function') {
                 e.stopImmediatePropagation();
@@ -2246,7 +2756,7 @@ jQuery(async () => {
             if (_isSanitizingQuickStart) return;
             _isSanitizingQuickStart = true;
             try {
-                console.log('[MultiHog Companion] Sanitizing stale PbtA stock prompts before character generation...');
+                console.log('[MultiHog Companion] Sanitizing stale PbtA/FAE stock prompts before character generation...');
                 await cleanseStockDndSettings(s, { chatId: activeChatId, syncSetup: true });
                 if (s?.stockPrompts) {
                     const inputVal = (typeof $ !== 'undefined'
@@ -2401,3 +2911,4 @@ jQuery(async () => {
 
     console.log('[MultiHog Companion] Extension loaded successfully.');
 });
+}

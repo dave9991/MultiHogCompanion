@@ -88,10 +88,12 @@ import {
     findNextAdventureVersionName,
 } from './adventure-chat.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
+import { FAE_GENRES } from './fae-ruleset.js';
 import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders } from './namerag-hooks.js';
 import {
     getCompanionActiveCartridge,
     getCandidateChatIds,
+    isFaeActive,
 } from './pbta-ruleset-persistence.js';
 let extension_settings = globalThis.extension_settings || {};
 try {
@@ -282,12 +284,15 @@ function showConciergeConfirm({
  * Completely resets in-memory Session Zero state, blueprint, and UI.
  * Cleans out any saved draft from localStorage.
  */
-export function resetConciergeState({ showGreeting = true } = {}) {
+export function resetConciergeState({ showGreeting = true, ruleset = null, genreKey = null } = {}) {
     try {
         localStorage.removeItem(STORAGE_DRAFT_KEY);
     } catch (_) {}
 
-    activeDossier = createEmptyDossier();
+    const effectiveRuleset = ruleset || (isFaeActive() ? 'fae' : 'pbta');
+    const effectiveGenre = genreKey || (effectiveRuleset === 'fae' ? 'cosmic_horror' : 'fantasy');
+
+    activeDossier = createEmptyDossier(effectiveRuleset, effectiveGenre);
     loadedCampaignOriginChatId = null;
     loadedCampaignOriginTitle = null;
     chatHistory = [];
@@ -319,11 +324,31 @@ export function resetConciergeState({ showGreeting = true } = {}) {
     updateBlueprintDeck();
 
     if (showGreeting) {
-        appendChatBubble(
-            'assistant',
-            "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?",
-        );
+        const greeting = effectiveRuleset === 'fae'
+            ? "Welcome to Session Zero! I'm your FAE Concierge. Tell me what kind of adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?"
+            : "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?";
+        appendChatBubble('assistant', greeting);
     }
+}
+
+/**
+ * Switches the active ruleset mode (e.g. between 'pbta' and 'fae').
+ *
+ * @param {string} newRuleset 'pbta' or 'fae'
+ * @param {string|null} [newGenreKey]
+ */
+export function switchRulesetMode(newRuleset = 'pbta', newGenreKey = null) {
+    const isFae = newRuleset === 'fae';
+    const defaultGenre = isFae ? (newGenreKey || 'cosmic_horror') : (newGenreKey || 'fantasy');
+    activeDossier = createEmptyDossier(newRuleset, defaultGenre);
+    changelog.push(`Switched ruleset mode to ${newRuleset.toUpperCase()} (${defaultGenre})`);
+    updateBlueprintDeck();
+    saveDraft();
+    const modeLabel = isFae ? 'Freeform Attrition Engine (4dF)' : 'Powered by the Apocalypse (2d6)';
+    appendChatBubble(
+        'assistant',
+        `Switched Session Zero mode to **${modeLabel}** (${activeDossier.meta?.systemLabel || defaultGenre}). What kind of adventure or setting would you like to build?`
+    );
 }
 
 /**
@@ -338,12 +363,15 @@ function updateBlueprintDeck() {
     const kick = activeDossier.theKick || {};
 
     // Header Badge & System Card
-    const sysLabel = meta.systemLabel || PBTA_GENRES.fantasy.label;
-    $('#mhc_header_system_badge').text(`🎲 ${sysLabel}`);
-    $('#mhc_deck_system_tag').text(meta.systemKey?.toUpperCase() || 'FANTASY');
-    const campTitle = (meta.title || '').trim() || 'Untitled PbtA Campaign';
+    const isFae = activeDossier.meta?.ruleset === 'fae';
+    const sysLabel = meta.systemLabel || (isFae ? (FAE_GENRES[meta.systemKey]?.label || 'Freeform Attrition Engine') : PBTA_GENRES.fantasy.label);
+    const badgeIcon = isFae ? '🛡️' : '🎲';
+    $('#mhc_header_system_badge').text(`${badgeIcon} ${sysLabel}`);
+    $('#mhc_deck_system_tag').text(meta.systemKey?.toUpperCase() || (isFae ? 'FAE' : 'FANTASY'));
+    const defaultCampTitle = isFae ? 'Untitled FAE Campaign' : 'Untitled PbtA Campaign';
+    const campTitle = (meta.title || '').trim() || defaultCampTitle;
     $('#mhc_deck_campaign_title').text(campTitle);
-    $('#mhc_deck_system_desc').text(meta.premise || `PbtA ${sysLabel} fiction-first narrative engine.`);
+    $('#mhc_deck_system_desc').text(meta.premise || (isFae ? `FAE ${sysLabel} 4dF attrition narrative engine.` : `PbtA ${sysLabel} fiction-first narrative engine.`));
     if (meta.tone) {
         $('#mhc_deck_system_tone_text').text(meta.tone);
         $('#mhc_deck_system_tone').show();
@@ -366,31 +394,40 @@ function updateBlueprintDeck() {
     $('#mhc_deck_dial_playstyle').text(playstyleLabel);
     $('#mhc_dial_playstyle_btn').text(playstyleDialLabel);
 
-    const harmMax = cfg.harmMax || 5;
-    let harmTag = '(Standard)';
-    if (harmMax === 3) harmTag = '(Gritty)';
-    else if (harmMax === 4) harmTag = '(Tense)';
-    else if (harmMax === 6) harmTag = '(Pulp)';
-    $('#mhc_dial_harm_btn').text(`❤️ Harm: ${harmMax} ${harmTag}`);
+    if (isFae) {
+        const knobs = cfg.knobs || activeDossier.knobs || {};
+        const shiftVal = knobs.base_attrition_shift ?? 0;
+        const shiftStr = shiftVal >= 0 ? `+${shiftVal}` : `${shiftVal}`;
+        const fleeStr = knobs.flee_grace_toggle ? 'ON' : 'OFF';
+        $('#mhc_dial_harm_btn').text(`⚖️ Shift: ${shiftStr}`);
+        $('#mhc_dial_downed_btn').text(`🏃 Flee Grace: ${fleeStr}`);
+    } else {
+        const harmMax = cfg.harmMax || 5;
+        let harmTag = '(Standard)';
+        if (harmMax === 3) harmTag = '(Gritty)';
+        else if (harmMax === 4) harmTag = '(Tense)';
+        else if (harmMax === 6) harmTag = '(Pulp)';
+        $('#mhc_dial_harm_btn').text(`❤️ Harm: ${harmMax} ${harmTag}`);
 
-    const maxHarmFate = cfg.maxHarmFate || { rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated' };
-    const fateRule = maxHarmFate.rule || 'Mortal Peril';
-    let fateShort = 'Mortal Peril';
-    let fateIcon = '💀';
-    if (/respawn|graveyard|ghost|mmo|shrine/i.test(fateRule)) {
-        fateShort = 'Respawn';
-        fateIcon = '🔄';
-    } else if (/burnout|exhaust|faint|pass out|fatigue/i.test(fateRule)) {
-        fateShort = 'Burnout / Faint';
-        fateIcon = '💤';
-    } else if (/unconscious|capture|knockout|arrest|subdue/i.test(fateRule)) {
-        fateShort = 'Knockout / Arrest';
-        fateIcon = '⛓️';
-    } else if (!/mortal\s*peril|last\s*breath|dying/i.test(fateRule)) {
-        fateShort = fateRule.length > 18 ? fateRule.slice(0, 16) + '...' : fateRule;
-        fateIcon = '⚡';
+        const maxHarmFate = cfg.maxHarmFate || { rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated' };
+        const fateRule = maxHarmFate.rule || 'Mortal Peril';
+        let fateShort = 'Mortal Peril';
+        let fateIcon = '💀';
+        if (/respawn|graveyard|ghost|mmo|shrine/i.test(fateRule)) {
+            fateShort = 'Respawn';
+            fateIcon = '🔄';
+        } else if (/burnout|exhaust|faint|pass out|fatigue/i.test(fateRule)) {
+            fateShort = 'Burnout / Faint';
+            fateIcon = '💤';
+        } else if (/unconscious|capture|knockout|arrest|subdue/i.test(fateRule)) {
+            fateShort = 'Knockout / Arrest';
+            fateIcon = '⛓️';
+        } else if (!/mortal\s*peril|last\s*breath|dying/i.test(fateRule)) {
+            fateShort = fateRule.length > 18 ? fateRule.slice(0, 16) + '...' : fateRule;
+            fateIcon = '⚡';
+        }
+        $('#mhc_dial_downed_btn').text(`${fateIcon} Downed: ${fateShort}`);
     }
-    $('#mhc_dial_downed_btn').text(`${fateIcon} Downed: ${fateShort}`);
 
     const partyMode = cfg.partyMode || 'squad';
     const partyLabel = partyMode.charAt(0).toUpperCase() + partyMode.slice(1);
@@ -448,38 +485,73 @@ function updateBlueprintDeck() {
     }
 
     // Protagonist Card
-    $('#mhc_deck_char_playbook').text(proto.playbook || 'In Development');
+    $('#mhc_deck_char_playbook').text(proto.archetype || proto.playbook || 'In Development');
     $('#mhc_deck_char_name').text(proto.name || 'Unnamed Adventurer');
 
-    const curHarm = parseInt(proto.harm?.current, 10) || 0;
-    const maxHarm = parseInt(proto.harm?.max ?? activeDossier.config?.harmMax, 10) || 5;
-    const curHp = Math.max(0, maxHarm - curHarm);
-    if (curHarm > 0 || (proto.conditions && proto.conditions.length) || proto.status) {
-        const condList = Array.isArray(proto.conditions) ? proto.conditions : (proto.conditions ? [proto.conditions] : []);
-        const condText = condList.length ? ` · ${condList.join(', ')}` : '';
-        const statusLabel = proto.status || (curHarm > 0 ? 'Wounded' : 'Healthy');
-        $('#mhc_deck_char_vitals').html(`
-            <span class="mhc-pill" style="border-color: rgba(239, 68, 68, 0.5); color: #f87171; background: rgba(239, 68, 68, 0.1);" title="Vitals & Injuries">
-                🩸 ${curHp}/${maxHarm} HP (Harm: ${curHarm}/${maxHarm}) · ${escapeHtml(statusLabel)}${escapeHtml(condText)}
-            </span>
-        `).show();
-    } else {
-        $('#mhc_deck_char_vitals').empty().hide();
-    }
+    if (isFae) {
+        const pools = proto.pools || activeDossier.pools || {};
+        const poolEntries = Object.entries(pools);
+        if (poolEntries.length) {
+            const html = poolEntries.map(([k, p]) => {
+                const col = p.barColor === 'red' ? '#f87171' : p.barColor === 'blue' ? '#60a5fa' : p.barColor === 'purple' ? '#c084fc' : p.barColor === 'amber' ? '#fbbf24' : '#4ade80';
+                return `<span class="mhc-pill" style="border-color: ${col}66; color: ${col}; background: ${col}18;" title="Zero Debuff: ${escapeHtml(p.zero_debuff || '')}">
+                    ${escapeHtml(p.label)}: ${p.current}/${p.max}
+                </span>`;
+            }).join(' ');
+            $('#mhc_deck_char_vitals').html(html).show();
+        } else {
+            $('#mhc_deck_char_vitals').empty().hide();
+        }
 
-    const statsEl = $('#mhc_deck_char_stats');
-    statsEl.empty();
-    const statsObj = proto.stats && Object.keys(proto.stats).length ? proto.stats : { Might: 0, Agility: 0, Wits: 0, Heart: 0, Arcana: 0 };
-    for (const [sName, sVal] of Object.entries(statsObj)) {
-        const sign = sVal >= 0 ? '+' : '';
-        statsEl.append(`<span class="mhc-stat-pill">${sName} ${sign}${sVal}</span>`);
-    }
+        const statsEl = $('#mhc_deck_char_stats');
+        statsEl.empty();
+        const posTags = Array.isArray(proto.positiveTags) ? proto.positiveTags : (proto.positive_tags || []);
+        if (posTags.length) {
+            for (const t of posTags) {
+                statsEl.append(`<span class="mhc-stat-pill" style="border-color: rgba(59, 130, 246, 0.5); color: #93c5fd;">🏷️ ${escapeHtml(t)}</span>`);
+            }
+        } else {
+            statsEl.append('<span class="mhc-empty-hint">No positive tags defined yet.</span>');
+        }
 
-    const movesEl = $('#mhc_deck_char_moves');
-    if (proto.startingMoves && proto.startingMoves.length) {
-        movesEl.html(proto.startingMoves.map(m => `<div>• <b>${m}</b></div>`).join(''));
+        const movesEl = $('#mhc_deck_char_moves');
+        const negTags = Array.isArray(proto.negativeTags) ? proto.negativeTags : (proto.negative_tags || []);
+        if (negTags.length) {
+            movesEl.html(negTags.map(t => `<div style="color: #f87171;">• <b>⚠️ Scar:</b> ${escapeHtml(t)}</div>`).join(''));
+        } else {
+            movesEl.text('• No scars or lasting debuffs.');
+        }
     } else {
-        movesEl.text('• Moves will be forged in the conversation.');
+        const curHarm = parseInt(proto.harm?.current, 10) || 0;
+        const maxHarm = parseInt(proto.harm?.max ?? activeDossier.config?.harmMax, 10) || 5;
+        const curHp = Math.max(0, maxHarm - curHarm);
+        if (curHarm > 0 || (proto.conditions && proto.conditions.length) || proto.status) {
+            const condList = Array.isArray(proto.conditions) ? proto.conditions : (proto.conditions ? [proto.conditions] : []);
+            const condText = condList.length ? ` · ${condList.join(', ')}` : '';
+            const statusLabel = proto.status || (curHarm > 0 ? 'Wounded' : 'Healthy');
+            $('#mhc_deck_char_vitals').html(`
+                <span class="mhc-pill" style="border-color: rgba(239, 68, 68, 0.5); color: #f87171; background: rgba(239, 68, 68, 0.1);" title="Vitals & Injuries">
+                    🩸 ${curHp}/${maxHarm} HP (Harm: ${curHarm}/${maxHarm}) · ${escapeHtml(statusLabel)}${escapeHtml(condText)}
+                </span>
+            `).show();
+        } else {
+            $('#mhc_deck_char_vitals').empty().hide();
+        }
+
+        const statsEl = $('#mhc_deck_char_stats');
+        statsEl.empty();
+        const statsObj = proto.stats && Object.keys(proto.stats).length ? proto.stats : { Might: 0, Agility: 0, Wits: 0, Heart: 0, Arcana: 0 };
+        for (const [sName, sVal] of Object.entries(statsObj)) {
+            const sign = sVal >= 0 ? '+' : '';
+            statsEl.append(`<span class="mhc-stat-pill">${sName} ${sign}${sVal}</span>`);
+        }
+
+        const movesEl = $('#mhc_deck_char_moves');
+        if (proto.startingMoves && proto.startingMoves.length) {
+            movesEl.html(proto.startingMoves.map(m => `<div>• <b>${m}</b></div>`).join(''));
+        } else {
+            movesEl.text('• Moves will be forged in the conversation.');
+        }
     }
 
     // Supporting Cast & Allies (NPCs) Card
@@ -556,41 +628,74 @@ function updateBlueprintDeck() {
     const mList = $('#mhc_deck_monsters_list');
     mList.empty();
     if (monsters.length) {
-        monsters.forEach(m => {
-            const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
-            const moves = m.moves?.length ? m.moves.join('; ') : '';
-            const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
-            const doomBadge = m.impendingDoom?.length
-                ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;" title="Active Countdown Front / Impending Doom">⏳ Clock: ${m.impendingDoom.length}</span>`
-                : '';
-            const doomLine = m.impendingDoom?.length
-                ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>⏳ Impending Doom:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${m.impendingDoom.map(d => `<li>${d}</li>`).join('')}</ul></div>`
-                : '';
+        if (isFae) {
+            monsters.forEach(m => {
+                const threat = m.threat_level ?? m.threatLevel ?? 1;
+                const layers = m.layers ?? m.hp ?? 1;
+                const poolsAtRisk = Array.isArray(m.pools_at_risk) ? m.pools_at_risk.join(', ') : (m.pools_at_risk || m.poolsAtRisk || 'Health');
+                const pressures = Array.isArray(m.pressures) ? m.pressures.join('; ') : (m.pressures || '');
+                const pressuresLine = pressures ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Pressures:</b> ${escapeHtml(pressures)}</div>` : '';
+                const barriers = Array.isArray(m.leverage_barriers) ? m.leverage_barriers.join(' / ') : (m.leverage_barriers || m.leverageBarriers || '');
+                const barrierLine = barriers ? `<div style="font-size: 0.8em; opacity: 0.85; color: #fbbf24;"><b>Leverage Barriers:</b> ${escapeHtml(barriers)}</div>` : '';
+                const finish = Array.isArray(m.full_finish_triggers) ? m.full_finish_triggers.join('; ') : (m.full_finish_triggers || m.fullFinishTriggers || '');
+                const finishLine = finish ? `<div style="font-size: 0.8em; opacity: 0.85; color: #4ade80;"><b>Full Finish Triggers:</b> ${escapeHtml(finish)}</div>` : '';
 
-            const mCur = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
-            const mMax = parseInt(m.harm?.max ?? m.harm, 10) || 4;
-            const mHp = Math.max(0, mMax - mCur);
-            const harmBadge = mCur > 0
-                ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">🩸 ${mHp}/${mMax} HP (Harm: ${mCur}/${mMax}) · Wounded</span>`
-                : `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${mMax} | Armor: ${m.armor}</span>`;
+                const threatBadge = `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">Threat: ${threat} | ${layers} Layer(s)</span>`;
+                const poolBadge = `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;">Pools: ${escapeHtml(poolsAtRisk)}</span>`;
 
-            mList.append(`
-                <div class="mhc-deck-item collapsible">
-                    <div class="mhc-deck-item-header">
-                        <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
-                            👹 ${m.name} ${harmBadge} ${doomBadge}
+                mList.append(`
+                    <div class="mhc-deck-item collapsible">
+                        <div class="mhc-deck-item-header">
+                            <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
+                                👹 ${escapeHtml(m.name)} ${threatBadge} ${poolBadge}
+                            </div>
+                            <span class="mhc-deck-item-toggle">▼</span>
                         </div>
-                        <span class="mhc-deck-item-toggle">▼</span>
+                        <div class="mhc-deck-item-detail">
+                            ${barrierLine}
+                            ${pressuresLine}
+                            ${finishLine}
+                        </div>
                     </div>
-                    <div class="mhc-deck-item-detail">
-                        <div style="font-size: 0.85em; opacity: 0.85;"><b>Attacks:</b> ${attacks}</div>
-                        <div style="font-size: 0.8em; opacity: 0.75;"><b>Weakness:</b> ${m.weakness || 'None specified'}</div>
-                        ${movesLine}
-                        ${doomLine}
+                `);
+            });
+        } else {
+            monsters.forEach(m => {
+                const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
+                const moves = m.moves?.length ? m.moves.join('; ') : '';
+                const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
+                const doomBadge = m.impendingDoom?.length
+                    ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;" title="Active Countdown Front / Impending Doom">⏳ Clock: ${m.impendingDoom.length}</span>`
+                    : '';
+                const doomLine = m.impendingDoom?.length
+                    ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>⏳ Impending Doom:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${m.impendingDoom.map(d => `<li>${d}</li>`).join('')}</ul></div>`
+                    : '';
+
+                const mCur = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
+                const mMax = parseInt(m.harm?.max ?? m.harm, 10) || 4;
+                const mHp = Math.max(0, mMax - mCur);
+                const harmBadge = mCur > 0
+                    ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">🩸 ${mHp}/${mMax} HP (Harm: ${mCur}/${mMax}) · Wounded</span>`
+                    : `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${mMax} | Armor: ${m.armor}</span>`;
+
+                mList.append(`
+                    <div class="mhc-deck-item collapsible">
+                        <div class="mhc-deck-item-header">
+                            <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
+                                👹 ${m.name} ${harmBadge} ${doomBadge}
+                            </div>
+                            <span class="mhc-deck-item-toggle">▼</span>
+                        </div>
+                        <div class="mhc-deck-item-detail">
+                            <div style="font-size: 0.85em; opacity: 0.85;"><b>Attacks:</b> ${attacks}</div>
+                            <div style="font-size: 0.8em; opacity: 0.75;"><b>Weakness:</b> ${m.weakness || 'None specified'}</div>
+                            ${movesLine}
+                            ${doomLine}
+                        </div>
                     </div>
-                </div>
-            `);
-        });
+                `);
+            });
+        }
     } else {
         mList.append('<div class="mhc-empty-hint">No monsters queued yet.</div>');
     }
@@ -2043,6 +2148,13 @@ function bindModalEvents() {
         }
     });
 
+    // Ruleset Switch interaction on system badge click
+    $('#mhc_header_system_badge').on('click', () => {
+        const isFae = activeDossier.meta?.ruleset === 'fae';
+        const nextRuleset = isFae ? 'pbta' : 'fae';
+        switchRulesetMode(nextRuleset);
+    });
+
     // Campaign Calibration Dial click interactions (manual cycling)
     const cyclePlaystyle = () => {
         activeDossier.config = activeDossier.config || {};
@@ -2057,6 +2169,21 @@ function bindModalEvents() {
     $('#mhc_dial_playstyle_btn').on('click', cyclePlaystyle);
 
     $('#mhc_dial_harm_btn').on('click', () => {
+        const isFae = activeDossier.meta?.ruleset === 'fae';
+        if (isFae) {
+            activeDossier.config = activeDossier.config || {};
+            activeDossier.config.knobs = activeDossier.config.knobs || activeDossier.knobs || {};
+            const curShift = activeDossier.config.knobs.base_attrition_shift ?? 0;
+            const cycle = { 0: 1, 1: 2, 2: -1, '-1': 0 };
+            const nextShift = cycle[curShift] ?? 0;
+            activeDossier.config.knobs.base_attrition_shift = nextShift;
+            if (activeDossier.knobs) activeDossier.knobs.base_attrition_shift = nextShift;
+            changelog.push(`Toggled Base Attrition Shift to ${nextShift >= 0 ? '+' : ''}${nextShift}`);
+            updateBlueprintDeck();
+            saveDraft();
+            return;
+        }
+
         activeDossier.config = activeDossier.config || {};
         const current = activeDossier.config.harmMax || 5;
         const cycle = { 5: 3, 3: 4, 4: 6, 6: 5 };
@@ -2076,6 +2203,19 @@ function bindModalEvents() {
     });
 
     $('#mhc_dial_downed_btn').on('click', () => {
+        const isFae = activeDossier.meta?.ruleset === 'fae';
+        if (isFae) {
+            activeDossier.config = activeDossier.config || {};
+            activeDossier.config.knobs = activeDossier.config.knobs || activeDossier.knobs || {};
+            const curFlee = activeDossier.config.knobs.flee_grace_toggle !== false;
+            activeDossier.config.knobs.flee_grace_toggle = !curFlee;
+            if (activeDossier.knobs) activeDossier.knobs.flee_grace_toggle = !curFlee;
+            changelog.push(`Toggled Flee Grace to ${!curFlee ? 'ON' : 'OFF'}`);
+            updateBlueprintDeck();
+            saveDraft();
+            return;
+        }
+
         activeDossier.config = activeDossier.config || {};
         const presets = [
             { key: 'mortal_peril', label: 'Mortal Peril', rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated', cyoaStyle: 'crisis' },
@@ -2563,7 +2703,7 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
 /**
  * Open the PbtA Concierge modal window.
  */
-export async function openConciergeModal() {
+export async function openConciergeModal({ ruleset = null, genreKey = null } = {}) {
     await ensureModalMounted();
     bindModalEvents();
     updateConnectionDropdowns();
@@ -2574,7 +2714,7 @@ export async function openConciergeModal() {
 
     if (draftResult?.corrupted) {
         // Corrupted or incomplete draft in storage: discard and reset cleanly
-        resetConciergeState({ showGreeting: true });
+        resetConciergeState({ showGreeting: true, ruleset, genreKey });
         toastr?.info('Previous uncompleted draft could not be fully loaded and was reset to a fresh Session Zero.', 'Session Zero');
     } else if (draftResult?.draft) {
         // Valid draft found: restore it if in-memory history isn't already active
@@ -2608,10 +2748,10 @@ export async function openConciergeModal() {
         // No draft exists in storage
         if (chatHistory.length > 0) {
             // Storage was cleared or campaign was previously built; reset in-memory state cleanly
-            resetConciergeState({ showGreeting: true });
+            resetConciergeState({ showGreeting: true, ruleset, genreKey });
         } else if (!$('#mhc_chat_messages').children().length) {
             // Pristine first open: show greeting
-            resetConciergeState({ showGreeting: true });
+            resetConciergeState({ showGreeting: true, ruleset, genreKey });
         }
     }
 

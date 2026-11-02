@@ -56,10 +56,10 @@
 Upstream MultiHog hardcodes an HTTP `fetch('.../multihogDnDdoc.md')` to load its core ruleset, moves, and prompts. Upstream provides **no plugin architecture, cartridge interface, or settings option** to supply custom tabletop systems (such as Powered by the Apocalypse, Blades in the Dark, or custom narrative rulesets).
 
 #### Companion Mitigation
-Companion intercepts `window.fetch`. When a request matches `multihogDnDdoc.md` and the active chat has an active PbtA cartridge, Companion synthesizes a dynamic markdown document compiling PbtA moves, Harm/Hold mechanics, and system guidance, and returns it inside a synthetic `Response` object.
+Companion intercepts `window.fetch`. When a request matches `multihogDnDdoc.md` and the active chat has an active PbtA or FAE cartridge, Companion synthesizes a dynamic markdown document compiling PbtA moves or FAE 4dF attrition mechanics, and returns it inside a synthetic `Response` object.
 
 #### Blast Radius If Removed
-PbtA campaigns will revert to standard D&D 5e mechanics: character sheets will demand HP/D&D stats, narrative moves will stop resolving, and dice rolls will expect d20 instead of 2d6.
+PbtA and FAE campaigns will revert to standard D&D 5e mechanics: character sheets will demand HP/D&D stats, narrative moves/attrition will stop resolving, and dice rolls will expect d20 instead of 2d6 or 4dF.
 
 #### Retirement Criteria
 Upstream MultiHog provides an official Cartridge / System Provider API (e.g., `registerRulesetProvider(fn)`).
@@ -98,15 +98,15 @@ Upstream MultiHog escapes its instruction literals or SillyTavern provides a `ra
 * **Associated Mechanisms:** [`ADR-MP-05 (stockPrompts Mutation)`](./MONKEYPATCHES.md#adr-mp-05-in-memory-upstream-settings-cleansing-stockprompts-mutation), [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled), [`DOM-01a / DOM-01b`](./LISTENERS.md#dom-01a)
 
 #### The Upstream Defect
-Upstream MultiHog stores all system prompts in a single shared object: `extensionSettings.rpg_tracker.stockPrompts`. When running a PbtA campaign, Companion writes PbtA system prompts into this object. When the user later switches to a standard D&D 5e chat or opens the QuickStart drawer, stale PbtA instructions remain in `stockPrompts` and contaminate D&D gameplay and character creation.
+Upstream MultiHog stores all system prompts in a single shared object: `extensionSettings.rpg_tracker.stockPrompts`. When running a PbtA or FAE campaign, Companion writes custom system prompts into this object. When the user later switches to a standard D&D 5e chat or opens the QuickStart drawer, stale PbtA or FAE instructions remain in `stockPrompts` and contaminate D&D gameplay and character creation.
 
 #### Companion Mitigation
 Companion executes deterministic preflight cleansing:
 1. `EVT-04` (`runChatChangedCoordinator`) sanitizes `stockPrompts` on chat switch.
-2. `DOM-01a` and `DOM-01b` intercept QuickStart and Character Creator buttons to purge stale PbtA prompts before character generation commences.
+2. `DOM-01a` and `DOM-01b` intercept QuickStart and Character Creator buttons to purge stale PbtA and FAE prompts before character generation commences.
 
 #### Blast Radius If Removed
-Standard D&D campaigns will intermittently receive PbtA move directives, causing narrator hallucinations, broken character creation, and stat mismatches.
+Standard D&D campaigns will intermittently receive PbtA or FAE directives, causing narrator hallucinations, broken character creation, and stat mismatches.
 
 #### Retirement Criteria
 Upstream MultiHog scopes its `stockPrompts` per chat partition rather than globally.

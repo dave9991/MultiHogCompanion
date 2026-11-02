@@ -15,6 +15,8 @@
  */
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
+import { FAE_GENRES, buildTailoredFaeDocumentation } from './fae-ruleset.js';
+import { isFaeActive, getCompanionActiveCartridge } from './pbta-ruleset-persistence.js';
 
 let _originalFetch = null;
 let _interceptorActive = false;
@@ -63,6 +65,82 @@ export function detectActiveGenre(customContext = {}) {
 
     // 4. Default fallback
     return 'fantasy';
+}
+
+/**
+ * Detects the active FAE genre from MultiHog settings, memo, or stored preferences.
+ *
+ * @param {object} [customContext] Optional context for testing or direct override
+ * @param {string} [customContext.lastFaeGenre]
+ * @param {string} [customContext.genre]
+ * @param {string} [customContext.lastGenre]
+ * @param {string} [customContext.currentMemo]
+ * @param {string} [customContext.chatId]
+ * @param {object} [customContext.rpgSettings]
+ * @returns {string} Canonical genre key in FAE_GENRES (e.g. 'cosmic_horror', 'osr_dungeon', etc.)
+ */
+export function detectActiveFaeGenre(customContext = {}) {
+    // 1. Direct explicit genre override
+    if (customContext.lastFaeGenre && FAE_GENRES[customContext.lastFaeGenre]) {
+        return customContext.lastFaeGenre;
+    }
+    if (customContext.genre && FAE_GENRES[customContext.genre]) {
+        return customContext.genre;
+    }
+    if (customContext.lastGenre && FAE_GENRES[customContext.lastGenre]) {
+        return customContext.lastGenre;
+    }
+
+    // 2. Companion active cartridge record
+    try {
+        const activeCart = getCompanionActiveCartridge(customContext.chatId || null, customContext.rpgSettings || null);
+        if (activeCart?.genre && FAE_GENRES[activeCart.genre]) {
+            return activeCart.genre;
+        }
+    } catch (_) { /* ignore */ }
+
+    // 3. MultiHog Companion extension settings
+    try {
+        const extSettings = typeof globalThis !== 'undefined'
+            ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.multihog_companion
+            : null;
+        if (extSettings?.lastFaeGenre && FAE_GENRES[extSettings.lastFaeGenre]) {
+            return extSettings.lastFaeGenre;
+        }
+    } catch (_) { /* ignore */ }
+
+    // 4. Inspect active state memo content for FAE genre pool signatures
+    const memo = customContext.currentMemo
+        || customContext.rpgSettings?.currentMemo
+        || (typeof globalThis !== 'undefined'
+            ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo
+            : '');
+
+    if (memo && typeof memo === 'string') {
+        const memoLower = memo.toLowerCase();
+        if (/\b(torch\s*(&|and)\s*supplies|torch_and_supplies)\b/i.test(memoLower)) return 'osr_dungeon';
+        if (/\b(ammo\s*(&|and)\s*battery|ammo_and_battery)\b/i.test(memoLower)) return 'survival_horror';
+        if (/\b(water\s*(&|and)\s*filters|water_and_filters)\b/i.test(memoLower)) return 'post_apocalyptic';
+        if (/\b(heat\s*(&|and)\s*trace|heat_and_trace)\b/i.test(memoLower)) return 'cyberpunk_noir';
+        if (/\b(oxygen\s*(&|and)\s*power|oxygen_and_power)\b/i.test(memoLower)) return 'deep_space';
+        if (/\b(trail\s*supplies|trail_supplies)\b/i.test(memoLower)) return 'weird_west';
+    }
+
+    // 5. Default fallback
+    return 'cosmic_horror';
+}
+
+/**
+ * Appends tailored FAE documentation to the upstream framework manual text.
+ *
+ * @param {string} originalManual Content of multihogDnDdoc.md
+ * @param {string} [genreKey] Active genre key
+ * @returns {string} Augmented documentation string
+ */
+export function appendFaeDocsToManual(originalManual, genreKey) {
+    const effectiveGenre = genreKey || detectActiveFaeGenre();
+    const faeSection = buildTailoredFaeDocumentation(effectiveGenre);
+    return `${originalManual || ''}\n\n---\n\n${faeSection}`;
 }
 
 /**
@@ -175,8 +253,14 @@ export function setupCompanionDocInterceptor() {
                 const response = await _originalFetch.call(this, input, init);
                 if (response && response.ok) {
                     const originalText = await response.text();
-                    const genreKey = detectActiveGenre();
-                    const augmentedText = appendPbtaDocsToManual(originalText, genreKey);
+                    let augmentedText;
+                    if (isFaeActive()) {
+                        const genreKey = detectActiveFaeGenre();
+                        augmentedText = appendFaeDocsToManual(originalText, genreKey);
+                    } else {
+                        const genreKey = detectActiveGenre();
+                        augmentedText = appendPbtaDocsToManual(originalText, genreKey);
+                    }
                     return new Response(augmentedText, {
                         status: response.status,
                         statusText: response.statusText,

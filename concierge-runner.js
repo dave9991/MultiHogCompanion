@@ -13,6 +13,8 @@
 
 import { serializeDossierToMarkdown } from './concierge-parser.js';
 import { formatInitialPbtaMemo } from './pbta-ruleset.js';
+import { formatInitialFaeMemo } from './fae-state-sync.js';
+import { buildFaeCartridge } from './fae-ruleset.js';
 import { getStagedCanonEntries, writeStagedCanon } from './concierge-canon.js';
 import {
     loadMainNpcSectionNames,
@@ -461,31 +463,67 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
 
         // ── 0b. Ensure Clean Chat & Auto-Rename ────────────────────────────────
         onProgress('🛡️ Preparing clean adventure session...', 5);
+        const isFae = dossier.meta?.ruleset === 'fae';
+        const fallbackLabel = isFae
+            ? `FAE ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`
+            : `PbtA ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`;
         const chatId = await ensureCleanAdventureChat({
             adventureTitle,
-            fallbackLabel: `PbtA ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`,
+            fallbackLabel,
             wipeOldTitle,
         });
-        // ── 1. Apply PbtA Ruleset Cartridge with Dynamic Overrides ─────────────
-        onProgress('🎲 Installing PbtA ruleset and 2d6 engine...', 15);
-        const statsList = Object.keys(dossier.protagonist?.stats || {});
-        const cartridgeOverrides = {
-            id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
-            campaignTitle: adventureTitle,
-            name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
-            systemLabel: dossier.meta?.systemLabel,
-            description: dossier.meta?.premise,
-            tone: dossier.meta?.tone,
-            factions: dossier.factions,
-            worldRules: dossier.worldRules,
-            stats: statsList.length >= 3 ? statsList : null,
-            startingMoves: dossier.protagonist?.startingMoves,
-            cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
-            config: dossier.config || {},
-        };
-        const cartridgeOk = await applyPbtACartridge(systemKey, cartridgeOverrides);
-        if (!cartridgeOk) {
-            throw new Error('Failed to install PbtA ruleset cartridge.');
+        // ── 1. Apply Ruleset Cartridge with Dynamic Overrides ───────────────────
+        if (isFae) {
+            onProgress('🎲 Installing FAE ruleset and 4dF attrition engine...', 15);
+            const cartridgeOverrides = {
+                id: chatId ? `fae_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+                campaignTitle: adventureTitle,
+                name: adventureTitle ? `FAE: ${adventureTitle}` : null,
+                systemLabel: dossier.meta?.systemLabel,
+                description: dossier.meta?.premise,
+                tone: dossier.meta?.tone,
+                factions: dossier.factions,
+                worldRules: dossier.worldRules,
+                positive_tags: dossier.protagonist?.positiveTags,
+                negative_tags: dossier.protagonist?.negativeTags,
+                pools: dossier.protagonist?.pools,
+                config: dossier.config || {},
+                knobs: dossier.config?.knobs || {},
+            };
+            if (typeof options.applyFaeCartridge === 'function') {
+                await options.applyFaeCartridge(systemKey, cartridgeOverrides);
+            } else {
+                const cartridge = buildFaeCartridge(systemKey, cartridgeOverrides);
+                const effectiveCtxEarly = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+                const rpg = effectiveCtxEarly?.extensionSettings?.rpg_tracker;
+                if (rpg && cartridge?.payload) {
+                    if (cartridge.payload.customSyspromptLibrary) rpg.customSyspromptLibrary = [...cartridge.payload.customSyspromptLibrary];
+                    if (cartridge.payload.syspromptModules) rpg.syspromptModules = { ...(rpg.syspromptModules || {}), ...cartridge.payload.syspromptModules };
+                    if (cartridge.payload.stockPrompts) rpg.stockPrompts = { ...(rpg.stockPrompts || {}), ...cartridge.payload.stockPrompts };
+                    if (cartridge.payload.cyoaConfig) rpg.cyoaConfig = { ...(rpg.cyoaConfig || {}), ...cartridge.payload.cyoaConfig };
+                }
+            }
+        } else {
+            onProgress('🎲 Installing PbtA ruleset and 2d6 engine...', 15);
+            const statsList = Object.keys(dossier.protagonist?.stats || {});
+            const cartridgeOverrides = {
+                id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+                campaignTitle: adventureTitle,
+                name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
+                systemLabel: dossier.meta?.systemLabel,
+                description: dossier.meta?.premise,
+                tone: dossier.meta?.tone,
+                factions: dossier.factions,
+                worldRules: dossier.worldRules,
+                stats: statsList.length >= 3 ? statsList : null,
+                startingMoves: dossier.protagonist?.startingMoves,
+                cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
+                config: dossier.config || {},
+            };
+            const cartridgeOk = await applyPbtACartridge(systemKey, cartridgeOverrides);
+            if (!cartridgeOk) {
+                throw new Error('Failed to install PbtA ruleset cartridge.');
+            }
         }
 
         // Apply native MultiHog CYOA toggle based on playstyle dial
@@ -655,7 +693,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             // Store dossier and initialize game state memo in MultiHog for runtime panel access
             const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
             const rpgSettings = effectiveCtx?.extensionSettings?.rpg_tracker;
-            const initialMemo = formatInitialPbtaMemo(dossier);
+            const initialMemo = isFae
+                ? formatInitialFaeMemo(dossier, { location: dossier.theKick?.startingLocation })
+                : formatInitialPbtaMemo(dossier);
 
             if (rpgSettings) {
                 rpgSettings.currentMemo = initialMemo;
@@ -816,9 +856,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
             if (typeof setCompanionActiveCartridge === 'function' && chatId) {
                 await setCompanionActiveCartridge(chatId, {
-                    cartridgeId: 'pbta',
+                    cartridgeId: isFae ? 'fae' : 'pbta',
                     genre: systemKey,
-                    systemLabel: dossier.meta?.systemLabel || 'PbtA',
+                    systemLabel: dossier.meta?.systemLabel || (isFae ? 'FAE' : 'PbtA'),
                     title: adventureTitle,
                     dossier: JSON.parse(JSON.stringify(dossier)),
                 });
@@ -837,9 +877,10 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
 
         // ── 6. Opening Fiction Scene (Turn 0) ───────────────────────────────────
         onProgress('🚀 Launching opening adventure turn...', 95);
+        const defaultOpeningTitle = isFae ? 'FAE Adventure' : 'PbtA Adventure';
         const openingText = dossier.theKick?.openingPrompt
             ? dossier.theKick.openingPrompt
-            : `[Initial Setup: ${dossier.meta?.title || 'PbtA Adventure'}]\n${dossier.meta?.premise || 'The adventure begins.'}\n\nBegin the adventure and frame the opening scene.`;
+            : `[Initial Setup: ${dossier.meta?.title || defaultOpeningTitle}]\n${dossier.meta?.premise || 'The adventure begins.'}\n\nBegin the adventure and frame the opening scene.`;
 
         await sendOutgoingChatMessage(openingText);
 
@@ -922,24 +963,56 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             }
         }
 
-        // 3. Update PbtA Cartridge with dynamic rules and Harm tiers
-        onProgress('🎲 Re-applying PbtA ruleset cartridge...', 60);
-        const statsList = Object.keys(dossier.protagonist?.stats || {});
-        const cartridgeOverrides = {
-            id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
-            campaignTitle: adventureTitle,
-            name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
-            systemLabel: dossier.meta?.systemLabel,
-            description: dossier.meta?.premise,
-            tone: dossier.meta?.tone,
-            factions: dossier.factions,
-            worldRules: dossier.worldRules,
-            stats: statsList.length >= 3 ? statsList : null,
-            startingMoves: dossier.protagonist?.startingMoves,
-            cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
-            config: dossier.config || {},
-        };
-        await applyPbtACartridge(systemKey, cartridgeOverrides);
+        // 3. Update Ruleset Cartridge with dynamic rules and Harm tiers
+        const isFae = dossier.meta?.ruleset === 'fae';
+        if (isFae) {
+            onProgress('🎲 Re-applying FAE ruleset cartridge...', 60);
+            const cartridgeOverrides = {
+                id: chatId ? `fae_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+                campaignTitle: adventureTitle,
+                name: adventureTitle ? `FAE: ${adventureTitle}` : null,
+                systemLabel: dossier.meta?.systemLabel,
+                description: dossier.meta?.premise,
+                tone: dossier.meta?.tone,
+                factions: dossier.factions,
+                worldRules: dossier.worldRules,
+                positive_tags: dossier.protagonist?.positiveTags,
+                negative_tags: dossier.protagonist?.negativeTags,
+                pools: dossier.protagonist?.pools,
+                config: dossier.config || {},
+                knobs: dossier.config?.knobs || {},
+            };
+            if (typeof options.applyFaeCartridge === 'function') {
+                await options.applyFaeCartridge(systemKey, cartridgeOverrides);
+            } else {
+                const cartridge = buildFaeCartridge(systemKey, cartridgeOverrides);
+                const rpg = ctx?.extensionSettings?.rpg_tracker;
+                if (rpg && cartridge?.payload) {
+                    if (cartridge.payload.customSyspromptLibrary) rpg.customSyspromptLibrary = [...cartridge.payload.customSyspromptLibrary];
+                    if (cartridge.payload.syspromptModules) rpg.syspromptModules = { ...(rpg.syspromptModules || {}), ...cartridge.payload.syspromptModules };
+                    if (cartridge.payload.stockPrompts) rpg.stockPrompts = { ...(rpg.stockPrompts || {}), ...cartridge.payload.stockPrompts };
+                    if (cartridge.payload.cyoaConfig) rpg.cyoaConfig = { ...(rpg.cyoaConfig || {}), ...cartridge.payload.cyoaConfig };
+                }
+            }
+        } else {
+            onProgress('🎲 Re-applying PbtA ruleset cartridge...', 60);
+            const statsList = Object.keys(dossier.protagonist?.stats || {});
+            const cartridgeOverrides = {
+                id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+                campaignTitle: adventureTitle,
+                name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
+                systemLabel: dossier.meta?.systemLabel,
+                description: dossier.meta?.premise,
+                tone: dossier.meta?.tone,
+                factions: dossier.factions,
+                worldRules: dossier.worldRules,
+                stats: statsList.length >= 3 ? statsList : null,
+                startingMoves: dossier.protagonist?.startingMoves,
+                cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
+                config: dossier.config || {},
+            };
+            await applyPbtACartridge(systemKey, cartridgeOverrides);
+        }
 
         // 4. Update live state memo and MultiHog memory
         onProgress('⚙️ Synchronizing live state memo & character vitals...', 80);
@@ -957,13 +1030,19 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             }
 
             if (memo && memo.trim()) {
-                // Non-destructively merge updated protagonist harm capacity and rules into active game
-                const { mergeDossierIntoLiveMemo } = await import('./pbta-vitality-sync.js');
-                rpgSettings.currentMemo = mergeDossierIntoLiveMemo(memo, dossier, charName);
-                rpgSettings.currentMemo = normalizePbtaMemo(rpgSettings.currentMemo);
+                if (isFae) {
+                    rpgSettings.currentMemo = formatInitialFaeMemo(dossier, { location: dossier.theKick?.startingLocation });
+                } else {
+                    // Non-destructively merge updated protagonist harm capacity and rules into active game
+                    const { mergeDossierIntoLiveMemo } = await import('./pbta-vitality-sync.js');
+                    rpgSettings.currentMemo = mergeDossierIntoLiveMemo(memo, dossier, charName);
+                    rpgSettings.currentMemo = normalizePbtaMemo(rpgSettings.currentMemo);
+                }
             } else {
                 // Only if the adventure was never started/memo was completely blank
-                rpgSettings.currentMemo = formatInitialPbtaMemo(dossier);
+                rpgSettings.currentMemo = isFae
+                    ? formatInitialFaeMemo(dossier, { location: dossier.theKick?.startingLocation })
+                    : formatInitialPbtaMemo(dossier);
             }
 
             // Register/update Custom HUD Tracker Module in MultiHog Settings if defined
@@ -1014,14 +1093,14 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             // Force tracker view hydration so Multihog HUD transitions immediately out of .rt-empty onboarding
             await forceRenderTrackerView(rpgSettings, chatId || 'active', rpgSettings.currentMemo);
 
-            // Persist MultiHog setup snapshot and chat partition so F5 reloads retain PbtA
+            // Persist MultiHog setup snapshot and chat partition so F5 reloads retain PbtA/FAE
             try {
                 const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
                 if (typeof setCompanionActiveCartridge === 'function' && chatId) {
                     await setCompanionActiveCartridge(chatId, {
-                        cartridgeId: 'pbta',
+                        cartridgeId: isFae ? 'fae' : 'pbta',
                         genre: systemKey,
-                        systemLabel: dossier.meta?.systemLabel || 'PbtA',
+                        systemLabel: dossier.meta?.systemLabel || (isFae ? 'FAE' : 'PbtA'),
                         title: dossier.meta?.title || null,
                         dossier: JSON.parse(JSON.stringify(dossier)),
                     });
@@ -1033,7 +1112,10 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
         }
 
         onProgress('✨ Active campaign successfully synchronized!', 100);
-        return { success: true, message: `Active campaign synchronized with Harm capacity ${dossier.config?.harmMax || 5}!` };
+        const syncMsg = isFae
+            ? 'Active FAE campaign successfully synchronized!'
+            : `Active campaign synchronized with Harm capacity ${dossier.config?.harmMax || 5}!`;
+        return { success: true, message: syncMsg };
     } catch (err) {
         console.error('[PbtA Concierge] Active campaign sync failed:', err);
         return { success: false, message: err.message || String(err) };
@@ -1080,3 +1162,6 @@ Output the [UPDATE_DOSSIER] ... [/UPDATE_DOSSIER] block now.`;
 
     return healAndNormalizeDossier(dossier, rawMarkdown);
 }
+
+// Canonical alias for launching a Concierge Session Zero campaign (PbtA or FAE)
+export const executeConciergeCampaignLaunch = launchPbtaCampaign;

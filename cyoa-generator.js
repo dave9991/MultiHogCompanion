@@ -13,6 +13,8 @@
  */
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
+import { FAE_GENRES } from './fae-ruleset.js';
+import { isFaeActive } from './pbta-ruleset-persistence.js';
 import { stripThinkingContent } from './concierge-connection.js';
 
 let _activeCyoaAbortController = null;
@@ -49,22 +51,42 @@ export function abortCyoaGeneration(reason = 'unspecified') {
 
 /**
  * Checks whether the protagonist is downed/incapacitated in the structured State Memo.
- * Handles both PbtA (Max Harm / 0 HP) and D&D (0 HP / Dying / Unconscious).
+ * Handles FAE (Breaking Point / 0 HP / Overflow), PbtA (Max Harm / 0 HP) and D&D (0 HP / Dying / Unconscious).
  *
  * @param {string} memoText
  * @param {boolean} [isPbta=false]
+ * @param {boolean} [isFae=false]
  * @returns {boolean}
  */
-export function isProtagonistDowned(memoText, isPbta = false) {
+export function isProtagonistDowned(memoText, isPbta = false, isFae = false) {
     if (!memoText || typeof memoText !== 'string') return false;
+
+    const effectiveIsFae = isFae || (!isPbta && (isFaeActive?.() || /FAE Knobs:|Positive Tags:|BREAKING POINT|OVERFLOW/i.test(memoText || '')));
 
     // Check [CHARACTER] section first if present (terminated by [/CHARACTER], next section [HEADER], or end of text)
     const charMatch = memoText.match(/\[CHARACTER\]([\s\S]*?)(?:\[\/CHARACTER\]|(?=\n[ \t]*\[(?:PARTY|ENEMIES|COMBAT|LOCATION|INVENTORY|WORLD)\])|$)/i);
     const scope = charMatch ? charMatch[1] : memoText;
 
     // Direct status keywords indicating down/dying
-    if (/Status\s*:.*?\b(Incapacitated|Dying|Defeated|Unconscious|Mortally Wounded)\b/i.test(scope)) {
+    if (/Status\s*:.*?\b(Incapacitated|Dying|Defeated|Unconscious|Mortally Wounded|Knocked Out)\b/i.test(scope)) {
         return true;
+    }
+
+    if (effectiveIsFae) {
+        // Direct status keywords indicating down/dying
+        if (/Status\s*:.*?\b(Incapacitated|Dying|Defeated|Unconscious|Mortally Wounded|Knocked Out|Breaking Point)\b/i.test(scope)) {
+            return true;
+        }
+        // Primary pool at 0 HP
+        if (/\b0\/\d+\s*HP\b/i.test(scope)) {
+            return true;
+        }
+        // Active breaking point or overflow event (exclude FAE Knobs config line)
+        const scopeWithoutKnobs = scope.replace(/FAE Knobs:[^\n]*/i, '');
+        if (/\b(?:BREAKING POINT|OVERFLOW TO|OVERFLOW_REDIRECT|OVERFLOW_SCAR)\b/i.test(scopeWithoutKnobs)) {
+            return true;
+        }
+        return false;
     }
 
     if (isPbta) {
@@ -99,11 +121,13 @@ export function isProtagonistDowned(memoText, isPbta = false) {
  * @param {string} opts.narrative Latest narrative beat from assistant
  * @param {string} opts.memo Fresh state memo after State Tracker audit
  * @param {boolean} opts.isPbta Whether PbtA ruleset is active
+ * @param {boolean} [opts.isFae=false] Whether FAE ruleset is active
  * @param {object} [opts.rpgSettings] MultiHog settings
  * @returns {{ systemPrompt: string, userPrompt: string }}
  */
-export function buildCyoaPrompt({ narrative, memo, isPbta, rpgSettings }) {
-    const isDowned = isProtagonistDowned(memo, isPbta);
+export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSettings }) {
+    const effectiveIsFae = isFae || (!isPbta && (isFaeActive?.() || /FAE Knobs:|Positive Tags:|Leverage Barriers/i.test(memo || '')));
+    const isDowned = isProtagonistDowned(memo, isPbta, effectiveIsFae);
     const cyoaConfig = rpgSettings?.cyoaConfig || {};
     const playstyle = cyoaConfig.playstyle || 'cyoa_5';
     const choiceCount = playstyle === 'cyoa_3' ? 3 : 5;
@@ -113,7 +137,53 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, rpgSettings }) {
     let systemPrompt = '';
     let guidelines = '';
 
-    if (isPbta) {
+    if (effectiveIsFae) {
+        const genreKey = rpgSettings?.faeGenre || rpgSettings?.pbtaGenre || 'cosmic_horror';
+        const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+
+        if (isDowned) {
+            guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS AT A BREAKING POINT / ZERO-STATE (0 HP / Incapacitated):
+- Strict negative constraint: Tags are DISABLED at 0 HP. DO NOT offer bold physical attacks, confident feats, or normal offensive actions.
+- The character has hit a breaking point or primary pool exhaustion.
+- You must generate exactly ${choiceCount} Crisis Survival / Pivot choices reflecting their dire situation:
+  1. FLEE GRACE ESCAPE / DESPERATE RETREAT: If Flee Grace is ON, slip past the danger or scramble into cover at heavy consequence — [Bypass/Retreat: At-Risk Pool]
+  2. PIVOT TO SECONDARY POOL: Abandon the direct contest and absorb the shock through another pool (e.g. burning Nerve/Sanity or Supplies) — [Pivot]
+  3. DESPERATE PLEA / ALLY SHIELD: Call upon an ally, mentor, or bystander to intervene or distract the threat.
+  ${choiceCount === 5 ? '4. BRACE FOR OVERFLOW / LAST STAND: Absorb the overflow damage and accept a lasting Scar/Debuff.\n  5. COLLAPSE / SUCCUMB: Fall back, play dead, or let darkness take you to avoid immediate lethality.' : ''}`;
+        } else {
+            guidelines = `Freeform Attrition Engine (FAE) Tactical & Narrative Choices:
+- Generate exactly ${choiceCount} actionable, suspenseful choices tailored to the current scene and fictional stakes.
+- FAE SCOPE & INTENT:
+  * Full Finish: Direct resolution against the encounter or objective (requires breaking leverage barriers first if present) — [Full: At-Risk Pool]
+  * Stepping-Stone: Partial progress to crack a leverage layer, seize positional advantage, or weaken the opposition — [Stepping-Stone: At-Risk Pool]
+  * Bypass / Tactical Pivot: Avoid the threat, create distance, flee, or change the angle of engagement — [Bypass/Retreat: At-Risk Pool]
+- TAG MATCHING: At most 1–2 choices may explicitly match a relevant Positive Tag from the protagonist sheet in brackets: e.g. "— [Stepping-Stone: Health | Tag: Fire Axe]" or "— [Full: Nerve | Tag: Street-Smart]".
+- THREAT & ATTRITION AT RISK: Actions should note which pool is at risk if attrition is suffered (e.g. Health, Nerve, Body, Sanity).
+- STRICT NEGATIVE RESTRAINTS:
+  * NEVER output D&D target DCs (e.g. "DC 14"), AC, saving throws, or d20 bonuses.
+  * NEVER output PbtA 2d6 move names (e.g. "Hack & Slash", "Act Under Fire"). FAE uses 4dF attrition rolls against Threat Levels (1–5) and pool strain.
+- REACTION / COMPLICATION CONTINUATION: If the preceding turn inflicted pool strain or a complication, provide options to react, reposition, or patch the wound.
+- Remaining choices should offer dialogue in quotes, cautious observation, or clever environmental tricks.`;
+        }
+
+        systemPrompt = `You are the specialized CYOA Choice Engine for a Freeform Attrition Engine (${genre.label}) tabletop RPG.
+Your sole job is to formulate ${choiceCount} suspenseful player choices based on the latest narrative event and character state.
+
+${guidelines}
+
+FORMAT CONTRACT:
+- Output ONLY a <choices> block containing <button> elements.
+${cyoaEmojis ? '- Prefix each choice option with an appropriate thematic emoji.' : ''}
+- Example format:
+<choices>
+<button>1. 🪓 Swing the fire axe into the creature's exposed sensory tentacles — [Stepping-Stone: Health | Tag: Fire Axe]</button>
+<button>2. 🔦 Flash the high-beam strobe into its milky eyes to blind it — [Stepping-Stone: Nerve]</button>
+<button>3. 🤫 Hold your breath behind the overturned gurney until the tentacles retract</button>
+<button>4. 🤝 Grab the wounded orderly and haul them into the security office</button>
+<button>5. 🏃 Sprint for the emergency stairwell and throw the iron deadbolt — [Bypass/Retreat: Health]</button>
+</choices>
+Do NOT include any narrative explanation, commentary, or extra text outside the <choices>...</choices> block.`;
+    } else if (isPbta) {
         const genreKey = rpgSettings?.pbtaGenre || 'fantasy';
         const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
 
@@ -628,7 +698,7 @@ export function extractTextFromApiResponse(response) {
  * @param {Function} [params.showToast] Toast notification helper
  * @returns {Promise<boolean>} Success status
  */
-export async function generateCyoaChoices({ messageId, narrative, isPbta, rpgSettings, showToast }) {
+export async function generateCyoaChoices({ messageId, narrative, isPbta, isFae, rpgSettings, showToast }) {
     if (_isGenerating) {
         abortCyoaGeneration('restart_generation');
     }
@@ -656,10 +726,12 @@ export async function generateCyoaChoices({ messageId, narrative, isPbta, rpgSet
         const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
 
         // 4. Build prompt
+        const effectiveIsFae = isFae !== undefined ? isFae : isFaeActive?.();
         const { systemPrompt, userPrompt } = buildCyoaPrompt({
             narrative,
             memo: freshMemo,
-            isPbta,
+            isPbta: effectiveIsFae ? false : isPbta,
+            isFae: effectiveIsFae,
             rpgSettings,
         });
 

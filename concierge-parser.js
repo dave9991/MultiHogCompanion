@@ -6,16 +6,123 @@
  */
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
+import { FAE_GENRES, sanitizeFaePositiveTags, isGodTag } from './fae-ruleset.js';
 import { stripThinkingContent } from './concierge-connection.js';
 
 /**
  * Creates a clean default Campaign Dossier object.
+ * @param {string} [ruleset='pbta']
+ * @param {string|null} [genreKey=null]
  * @returns {object}
  */
-export function createEmptyDossier() {
+export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
+    if (ruleset === 'fae') {
+        const systemKey = genreKey && FAE_GENRES[genreKey] ? genreKey : 'cosmic_horror';
+        const genreObj = FAE_GENRES[systemKey] || FAE_GENRES.cosmic_horror;
+        const clonedPools = {};
+        for (const [k, p] of Object.entries(genreObj.pools)) {
+            clonedPools[k] = {
+                key: p.key || k,
+                label: p.label,
+                barColor: p.barColor || 'green',
+                current: p.current,
+                max: p.max,
+                recovery: p.recovery,
+                passive_drain: p.passive_drain ? { ...p.passive_drain } : null,
+                strain_flavor: p.strain_flavor,
+                zero_debuff: p.zero_debuff,
+                on_overflow: p.on_overflow,
+            };
+        }
+
+        const dossier = {
+            meta: {
+                title: 'Untitled FAE Campaign',
+                ruleset: 'fae',
+                systemKey,
+                systemLabel: genreObj.label,
+                premise: '',
+                tone: '',
+                createdAt: Date.now(),
+            },
+            protagonist: {
+                name: '',
+                playbook: '',
+                species: '',
+                appearance: '',
+                equipment: '',
+                personality: '',
+                background: '',
+                habits: '',
+                stats: {},
+                startingMoves: [],
+                positiveTags: [],
+                negativeTags: [],
+                pools: clonedPools,
+                harm: { max: 5, current: 0, armor: 0 },
+                conditions: [],
+                status: '',
+                gear: [],
+                bio: '',
+                portraitSrc: null,
+            },
+            npcs: [],
+            monsters: [],
+            maps: [],
+            factions: [],
+            theKick: {
+                startingLocation: '',
+                crisis: '',
+                openingPrompt: '',
+            },
+            cyoaExamples: [],
+            worldRules: {
+                axioms: [],
+                customModule: null,
+            },
+            contemplation: {
+                coreTension: '',
+                worldConsequences: '',
+                webOfEntanglement: '',
+                kickPressure: '',
+            },
+            config: {
+                playstyle: 'cyoa_5',
+                cyoaEmojis: true,
+                harmMax: 5,
+                partyMode: 'squad',
+                artStyle: '',
+                pacingXp: 5,
+                simulationDepth: 'active_fronts',
+                relationships: true,
+                maxHarmFate: {
+                    rule: 'Mortal Peril (Last Breath / Dying)',
+                    statusToken: '(-) Incapacitated',
+                    cyoaStyle: 'crisis',
+                },
+                knobs: { ...genreObj.knobs },
+                pacingScenes: 4,
+            },
+        };
+
+        dossier.pools = dossier.protagonist.pools;
+        dossier.knobs = dossier.config.knobs;
+        dossier.character = {
+            name: '',
+            archetype: genreObj.archetypes[0],
+            positive_tags: dossier.protagonist.positiveTags,
+            negative_tags: dossier.protagonist.negativeTags,
+            scenes_completed: 0,
+            scenes_target: 4,
+        };
+
+        return dossier;
+    }
+
     return {
         meta: {
             title: 'Untitled PbtA Campaign',
+            ruleset: 'pbta',
             systemKey: 'fantasy',
             systemLabel: PBTA_GENRES.fantasy.label,
             premise: '',
@@ -94,9 +201,17 @@ export function isDossierEmptyOrUntouched(dossier) {
     const kick = dossier.theKick || {};
     const worldRules = dossier.worldRules || {};
 
-    const hasTitle = Boolean(meta.title && meta.title.trim() !== '' && meta.title.trim() !== 'Untitled PbtA Campaign');
+    const hasTitle = Boolean(
+        meta.title &&
+        meta.title.trim() !== '' &&
+        meta.title.trim() !== 'Untitled PbtA Campaign' &&
+        meta.title.trim() !== 'Untitled FAE Campaign'
+    );
     const hasPremise = Boolean(meta.premise && meta.premise.trim() !== '');
-    const hasProto = Boolean(proto.name && proto.name.trim() !== '');
+    const hasProto = Boolean(
+        (proto.name && proto.name.trim() !== '') ||
+        (Array.isArray(proto.positiveTags) && proto.positiveTags.length > 0)
+    );
     const hasNpcs = Array.isArray(npcs) && npcs.length > 0;
     const hasMonsters = Array.isArray(monsters) && monsters.length > 0;
     const hasMaps = Array.isArray(maps) && maps.length > 0;
@@ -204,10 +319,15 @@ export const SYSTEM_ALIASES = {
     wanderhome: 'slice_of_life',
     yazeba: 'slice_of_life',
     'small town': 'slice_of_life',
+    'osr dungeon': 'osr_dungeon',
+    osr: 'osr_dungeon',
+    'cyberpunk noir': 'cyberpunk_noir',
+    'deep space': 'deep_space',
+    'weird west': 'weird_west',
 };
 
 /**
- * Normalizes raw system engine keys into canonical PBTA_GENRES keys.
+ * Normalizes raw system engine keys into canonical PBTA_GENRES or FAE_GENRES keys.
  * @param {string} rawKey
  * @returns {string|null}
  */
@@ -215,6 +335,7 @@ export function normalizeSystemKey(rawKey) {
     if (!rawKey) return null;
     const clean = rawKey.trim().toLowerCase().replace(/[\s\-_]+/g, '_');
     if (PBTA_GENRES[clean]) return clean;
+    if (FAE_GENRES && FAE_GENRES[clean]) return clean;
     if (SYSTEM_ALIASES[clean]) return SYSTEM_ALIASES[clean];
     const plain = rawKey.trim().toLowerCase();
     if (SYSTEM_ALIASES[plain]) return SYSTEM_ALIASES[plain];
@@ -576,11 +697,12 @@ The Kick: Unset
 [/CURRENT_CAMPAIGN_DOSSIER]`;
     }
 
+    const isFae = meta.ruleset === 'fae';
     const lines = [
         '[CURRENT_CAMPAIGN_DOSSIER]',
         'Status: IN_PROGRESS',
-        `Title: ${meta.title || 'Untitled Campaign'}`,
-        `System: ${meta.systemLabel || 'Fantasy'} (${meta.systemKey || 'fantasy'})`,
+        `Title: ${meta.title || (isFae ? 'Untitled FAE Campaign' : 'Untitled Campaign')}`,
+        `System: ${meta.systemLabel || (isFae ? 'Cosmic Horror' : 'Fantasy')} (${meta.systemKey || (isFae ? 'cosmic_horror' : 'fantasy')})${isFae ? ' [FAE]' : ''}`,
         meta.premise ? `Premise: ${meta.premise}` : null,
     ];
 
@@ -588,30 +710,46 @@ The Kick: Unset
     // model can copy names/keys exactly and emit precise partial edits.
     const cfg = dossier.config || {};
     const fatePart = cfg.maxHarmFate?.rule ? `, max_harm_fate=${cfg.maxHarmFate.rule}` : '';
-    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}${fatePart}`);
+    const knobsPart = (isFae && cfg.knobs)
+        ? `, flee_grace=${cfg.knobs.flee_grace_toggle ? 'on' : 'off'}, base_attrition_shift=${cfg.knobs.base_attrition_shift ?? 0}, overflow_default=${cfg.knobs.overflow_default || 'scar_and_ko'}, pacing_scenes=${cfg.pacingScenes ?? 4}`
+        : '';
+    lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}${fatePart}${knobsPart}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
 
-    if (p.name || p.playbook) {
+    if (p.name || p.playbook || (isFae && (p.positiveTags?.length || (p.pools && Object.keys(p.pools).length)))) {
         lines.push('[PROTAGONIST]');
         lines.push(`name: ${p.name || 'Unnamed Adventurer'}`);
-        lines.push(`playbook: ${p.playbook || 'In Development'}`);
+        lines.push(`playbook: ${p.playbook || (isFae ? 'Investigator' : 'In Development')}`);
         if (p.species) lines.push(`species: ${p.species}`);
         if (p.appearance) lines.push(`appearance: ${p.appearance}`);
         if (p.equipment) lines.push(`equipment: ${p.equipment}`);
         if (p.personality) lines.push(`personality: ${p.personality}`);
         if (p.background) lines.push(`background: ${p.background}`);
         if (p.habits) lines.push(`habits: ${p.habits}`);
-        if (p.stats && Object.keys(p.stats).length) {
-            lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}`);
-        }
-        if (p.harm) {
-            const curH = parseInt(p.harm.current, 10) || 0;
-            const maxH = parseInt(p.harm.max, 10) || 5;
-            lines.push(curH > 0 ? `harm: ${curH}/${maxH}` : `harm: ${maxH}`);
-            lines.push(`armor: ${p.harm?.armor ?? 0}`);
+        if (isFae) {
+            if (p.positiveTags && p.positiveTags.length) {
+                lines.push(`positive_tags: ${p.positiveTags.join(', ')}`);
+            }
+            if (p.negativeTags && p.negativeTags.length) {
+                lines.push(`negative_tags: ${p.negativeTags.join(', ')}`);
+            }
+            if (p.pools && Object.keys(p.pools).length) {
+                const poolStrs = Object.values(p.pools).map(pl => `${pl.label}: ${pl.current}/${pl.max} (zero_debuff: ${pl.zero_debuff || 'None'}, recovery: ${pl.recovery || ''}, overflow: ${pl.on_overflow || ''})`);
+                lines.push(`pools: ${poolStrs.join(' | ')}`);
+            }
         } else {
-            lines.push('harm: 5');
-            lines.push('armor: 0');
+            if (p.stats && Object.keys(p.stats).length) {
+                lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}`);
+            }
+            if (p.harm) {
+                const curH = parseInt(p.harm.current, 10) || 0;
+                const maxH = parseInt(p.harm.max, 10) || 5;
+                lines.push(curH > 0 ? `harm: ${curH}/${maxH}` : `harm: ${maxH}`);
+                lines.push(`armor: ${p.harm?.armor ?? 0}`);
+            } else {
+                lines.push('harm: 5');
+                lines.push('armor: 0');
+            }
         }
         if (p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) {
             lines.push(`conditions: ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}`);
@@ -664,16 +802,25 @@ The Kick: Unset
         monsters.forEach(m => {
             lines.push('[MONSTER]');
             lines.push(`name: ${m.name}`);
-            const curHarm = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
-            const maxHarm = parseInt(m.harm?.max ?? m.harm, 10) || 4;
-            lines.push(curHarm > 0 ? `harm: ${curHarm}/${maxHarm}` : `harm: ${maxHarm}`);
-            lines.push(`armor: ${m.armor || 0}`);
-            if (m.status) lines.push(`status: ${m.status}`);
-            if (m.attacks && m.attacks.length) lines.push(`attacks: ${[].concat(m.attacks).join(', ')}`);
-            lines.push(`weakness: ${m.weakness || 'Unknown'}`);
-            if (m.impendingDoom && m.impendingDoom.length) {
-                lines.push('countdown:');
-                m.impendingDoom.forEach(d => lines.push(`- ${d}`));
+            const curHarm = parseInt(m.currentHarm ?? m.harm?.current ?? m.currentLayers, 10) || 0;
+            const maxHarm = parseInt(m.harm?.max ?? m.harm ?? m.layers, 10) || 4;
+            if (isFae) {
+                if (m.threatLevel !== undefined && m.threatLevel !== null) lines.push(`threat_level: ${m.threatLevel}`);
+                lines.push(`layers: ${curHarm > 0 ? `${curHarm}/${maxHarm}` : `${maxHarm}`}`);
+                if (m.poolsAtRisk) lines.push(`pools_at_risk: ${Array.isArray(m.poolsAtRisk) ? m.poolsAtRisk.join(', ') : m.poolsAtRisk}`);
+                if (m.pressures && m.pressures.length) lines.push(`pressures: ${Array.isArray(m.pressures) ? m.pressures.join(', ') : m.pressures}`);
+                if (m.leverageBarriers && m.leverageBarriers.length) lines.push(`leverage_barriers: ${Array.isArray(m.leverageBarriers) ? m.leverageBarriers.join(', ') : m.leverageBarriers}`);
+                if (m.fullFinishTriggers) lines.push(`full_finish_triggers: ${m.fullFinishTriggers}`);
+            } else {
+                lines.push(curHarm > 0 ? `harm: ${curHarm}/${maxHarm}` : `harm: ${maxHarm}`);
+                lines.push(`armor: ${m.armor || 0}`);
+                if (m.status) lines.push(`status: ${m.status}`);
+                if (m.attacks && m.attacks.length) lines.push(`attacks: ${[].concat(m.attacks).join(', ')}`);
+                lines.push(`weakness: ${m.weakness || 'Unknown'}`);
+                if (m.impendingDoom && m.impendingDoom.length) {
+                    lines.push('countdown:');
+                    m.impendingDoom.forEach(d => lines.push(`- ${d}`));
+                }
             }
             if (m.notes) lines.push(`notes: ${m.notes}`);
             lines.push('[/MONSTER]');
@@ -984,18 +1131,70 @@ export function applyDossierUpdates(text, dossier) {
     }
 
     // ── 1. Meta / System ────────────────────────────────────────────────────────
+    const rulesetMatch = topLevelRaw.match(/ruleset\s*:\s*([^\n\r]+)/i);
+    if (rulesetMatch) {
+        const rVal = rulesetMatch[1].trim().toLowerCase();
+        if (rVal === 'fae' || rVal === 'pbta') {
+            if (updated.meta.ruleset !== rVal) {
+                updated.meta.ruleset = rVal;
+                changes.push(`Ruleset set to ${rVal.toUpperCase()}`);
+            }
+        }
+    }
+
     const sysMatch = topLevelRaw.match(/system\s*:\s*([^\n\r]+)/i);
     if (sysMatch) {
-        const rawKey = sysMatch[1].trim();
-        const key = normalizeSystemKey(rawKey);
-        if (key && PBTA_GENRES[key]) {
+        let rawKey = sysMatch[1].trim();
+        if (/^fae[:/]/i.test(rawKey)) {
+            updated.meta.ruleset = 'fae';
+            rawKey = rawKey.replace(/^fae[:/]\s*/i, '').trim();
+        }
+        const isFae = updated.meta?.ruleset === 'fae' || Boolean(FAE_GENRES[rawKey.toLowerCase()]);
+        if (isFae && FAE_GENRES[rawKey.toLowerCase()]) {
+            const key = rawKey.toLowerCase();
+            updated.meta.ruleset = 'fae';
             if (updated.meta.systemKey !== key) {
                 updated.meta.systemKey = key;
-                updated.meta.systemLabel = PBTA_GENRES[key].label;
-                changes.push(`PbtA Engine set to ${updated.meta.systemLabel} (${key})`);
+                updated.meta.systemLabel = FAE_GENRES[key].label;
+                changes.push(`FAE Engine set to ${updated.meta.systemLabel} (${key})`);
+            }
+            if (!updated.protagonist.pools || Object.keys(updated.protagonist.pools).length === 0) {
+                const clonedPools = {};
+                for (const [k, p] of Object.entries(FAE_GENRES[key].pools)) {
+                    clonedPools[k] = { ...p, key: p.key || k, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
+                }
+                updated.protagonist.pools = clonedPools;
+            }
+            updated.config = updated.config || {};
+            if (!updated.config.knobs) {
+                updated.config.knobs = { ...FAE_GENRES[key].knobs };
             }
         } else {
-            errors.push(`Unknown system engine "${rawKey}". Available: ${Object.keys(PBTA_GENRES).join(', ')}`);
+            const key = normalizeSystemKey(rawKey);
+            if (key && PBTA_GENRES[key]) {
+                if (updated.meta.systemKey !== key) {
+                    updated.meta.systemKey = key;
+                    updated.meta.systemLabel = PBTA_GENRES[key].label;
+                    changes.push(`PbtA Engine set to ${updated.meta.systemLabel} (${key})`);
+                }
+            } else {
+                errors.push(`Unknown system engine "${rawKey}". Available: ${Object.keys(PBTA_GENRES).join(', ')}`);
+            }
+        }
+    } else if (updated.meta?.ruleset === 'fae' && (!updated.meta.systemKey || !FAE_GENRES[updated.meta.systemKey])) {
+        const key = 'cosmic_horror';
+        updated.meta.systemKey = key;
+        updated.meta.systemLabel = FAE_GENRES[key].label;
+        if (!updated.protagonist.pools || Object.keys(updated.protagonist.pools).length === 0) {
+            const clonedPools = {};
+            for (const [k, p] of Object.entries(FAE_GENRES[key].pools)) {
+                clonedPools[k] = { ...p, key: p.key || k, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
+            }
+            updated.protagonist.pools = clonedPools;
+        }
+        updated.config = updated.config || {};
+        if (!updated.config.knobs) {
+            updated.config.knobs = { ...FAE_GENRES[key].knobs };
         }
     }
 
@@ -1041,9 +1240,11 @@ export function applyDossierUpdates(text, dossier) {
             changes.push(`Protagonist name: "${kv.name}" (was "${updated.protagonist.name || 'Unnamed'}")`);
             updated.protagonist.name = kv.name;
         }
-        if (kv.playbook && updated.protagonist.playbook !== kv.playbook) {
-            changes.push(`Protagonist playbook: "${kv.playbook}" (was "${updated.protagonist.playbook || 'None'}")`);
-            updated.protagonist.playbook = kv.playbook;
+        const archVal = kv.archetype || kv.playbook;
+        if (archVal && (updated.protagonist.playbook !== archVal || updated.protagonist.archetype !== archVal)) {
+            changes.push(`Protagonist archetype/playbook: "${archVal}" (was "${updated.protagonist.archetype || updated.protagonist.playbook || 'None'}")`);
+            updated.protagonist.playbook = archVal;
+            updated.protagonist.archetype = archVal;
         }
         if (kv.bio && updated.protagonist.bio !== kv.bio) {
             updated.protagonist.bio = kv.bio;
@@ -1150,6 +1351,91 @@ export function applyDossierUpdates(text, dossier) {
             const derivedGear = splitEquipmentIntoGearList(equip);
             if (derivedGear.length) {
                 updated.protagonist.gear = derivedGear;
+            }
+        }
+
+        // FAE Positive Tags
+        const rawPosTags = parseBulletOrListItems(pBlock, 'positive_tags', { splitCommas: true });
+        const rawTags = rawPosTags.length ? rawPosTags : parseBulletOrListItems(pBlock, 'tags', { splitCommas: true });
+        let posTagsList = [];
+        if (rawTags.length) {
+            posTagsList = rawTags;
+        } else if (kv.positive_tags || kv.tags) {
+            const rawVal = kv.positive_tags || kv.tags;
+            posTagsList = splitTopLevelItems(rawVal, { splitCommas: true });
+        }
+        if (posTagsList.length > 0) {
+            const cleanPos = sanitizeFaePositiveTags(posTagsList, 4);
+            updated.protagonist.positiveTags = cleanPos;
+            if (!updated.protagonist.startingMoves || updated.protagonist.startingMoves.length === 0) {
+                updated.protagonist.startingMoves = [...cleanPos];
+            }
+            changes.push(`Protagonist positive tags updated (${cleanPos.length} tags registered)`);
+        }
+
+        // FAE Negative Tags / Scars
+        const rawNegTags = parseBulletOrListItems(pBlock, 'negative_tags', { splitCommas: true });
+        const rawScars = rawNegTags.length ? rawNegTags : parseBulletOrListItems(pBlock, 'scars', { splitCommas: true });
+        let negTagsList = [];
+        if (rawScars.length) {
+            negTagsList = rawScars;
+        } else if (kv.negative_tags || kv.scars) {
+            const rawVal = kv.negative_tags || kv.scars;
+            negTagsList = splitTopLevelItems(rawVal, { splitCommas: true });
+        }
+        if (negTagsList.length > 0) {
+            updated.protagonist.negativeTags = negTagsList;
+            if (!updated.protagonist.conditions || updated.protagonist.conditions.length === 0) {
+                updated.protagonist.conditions = [...negTagsList];
+            }
+            changes.push(`Protagonist negative tags / scars updated (${negTagsList.length} registered)`);
+        }
+
+        // FAE Pools
+        const rawPoolsLines = parseBulletOrListItems(pBlock, 'pools', { splitCommas: false });
+        let poolItems = [];
+        if (rawPoolsLines.length > 0) {
+            poolItems = rawPoolsLines;
+        } else if (kv.pools) {
+            poolItems = kv.pools.split('|').map(s => s.trim()).filter(Boolean);
+        }
+        if (poolItems.length > 0) {
+            updated.protagonist.pools = updated.protagonist.pools || {};
+            for (const item of poolItems) {
+                const poolMatch = item.match(/^([A-Za-z0-9_ &]+?)\s*:\s*(\d+)(?:\s*\/\s*(\d+))?(?:\s*\((.*?)\))?/i);
+                if (poolMatch) {
+                    const label = poolMatch[1].trim();
+                    const key = label.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                    const cur = parseInt(poolMatch[2], 10);
+                    const max = poolMatch[3] !== undefined ? parseInt(poolMatch[3], 10) : cur;
+                    const parenOptions = poolMatch[4] || '';
+
+                    const optObj = {};
+                    if (parenOptions) {
+                        for (const opt of parenOptions.split(',')) {
+                            const [k, v] = opt.split(':').map(s => s.trim());
+                            if (k && v) {
+                                optObj[k.toLowerCase()] = v;
+                            }
+                        }
+                    }
+
+                    const existing = updated.protagonist.pools[key] || {};
+                    const barColor = existing.barColor || (key === 'health' || key === 'body' ? 'green' : (key === 'sanity' || key === 'nerve' ? 'purple' : 'amber'));
+                    updated.protagonist.pools[key] = {
+                        key,
+                        label: existing.label || label,
+                        barColor,
+                        current: cur,
+                        max,
+                        recovery: optObj.recovery || existing.recovery || 'camp_or_sleep',
+                        passive_drain: optObj.passive_drain || existing.passive_drain || null,
+                        strain_flavor: optObj.strain_flavor || existing.strain_flavor || '',
+                        zero_debuff: optObj.zero_debuff || existing.zero_debuff || '',
+                        on_overflow: optObj.overflow || optObj.on_overflow || existing.on_overflow || 'lethal',
+                    };
+                    changes.push(`Protagonist pool ${label} set to ${cur}/${max}`);
+                }
             }
         }
     }
@@ -1339,10 +1625,44 @@ export function applyDossierUpdates(text, dossier) {
                 if (!isNaN(h)) mMaxHarm = h;
             }
         }
+        if (kv.layers || kv.hp) {
+            const rawLayers = kv.layers || kv.hp;
+            const slashMatch = String(rawLayers).match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (slashMatch) {
+                mCurHarm = parseInt(slashMatch[1], 10);
+                mMaxHarm = parseInt(slashMatch[2], 10);
+            } else {
+                const l = parseInt(rawLayers, 10);
+                if (!isNaN(l)) {
+                    mCurHarm = l;
+                    mMaxHarm = l;
+                }
+            }
+        }
         if (kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
             const cVal = parseInt(kv.current_harm ?? kv.harm_current ?? kv.wounds, 10);
             if (!isNaN(cVal)) mCurHarm = cVal;
         }
+
+        let threatLevelNum = null;
+        if (kv.threat_level !== undefined || kv.threat !== undefined) {
+            const rawT = parseInt(kv.threat_level ?? kv.threat, 10);
+            if (!isNaN(rawT) && rawT >= 1 && rawT <= 4) {
+                threatLevelNum = rawT;
+            }
+        }
+
+        const rawPressures = parseBulletOrListItems(mBlock, 'pressures', { splitCommas: true });
+        const rawBarriers = parseBulletOrListItems(mBlock, 'leverage_barriers', { splitCommas: true });
+        let finalBarriers = rawBarriers.length ? rawBarriers : parseBulletOrListItems(mBlock, 'barriers', { splitCommas: true });
+        if (finalBarriers.length === 1 && /\[.*?\][\s\S]*\[.*?\]/.test(finalBarriers[0])) {
+            const matches = finalBarriers[0].match(/\[(.*?)\]/g);
+            if (matches && matches.length > 1) {
+                finalBarriers = matches.map(m => m.replace(/^\[|\]$/g, '').trim());
+            }
+        }
+        const rawFinish = kv.full_finish_triggers || kv.full_finish_trigger || kv.finish_triggers || (parseBulletOrListItems(mBlock, 'full_finish_triggers', { splitCommas: false }).join('; '));
+        const poolsAtRisk = kv.pools_at_risk || kv.pools;
 
         const parsedAttacks = parseBulletOrListItems(mBlock, 'attacks', { splitCommas: true });
         const parsedMonConds = parseBulletOrListItems(mBlock, 'conditions', { splitCommas: true });
@@ -1358,15 +1678,29 @@ export function applyDossierUpdates(text, dossier) {
             notes: kv.notes || '',
             status: kv.status ? kv.status.trim() : (mCurHarm > 0 ? '(-) Wounded' : ''),
             conditions: parsedMonConds.length ? sanitizeConditionsList(parsedMonConds) : [],
+            threatLevel: threatLevelNum,
+            layers: mMaxHarm,
+            currentLayers: mCurHarm,
+            poolsAtRisk: poolsAtRisk || null,
+            pressures: rawPressures,
+            leverageBarriers: finalBarriers,
+            fullFinishTriggers: rawFinish || '',
         };
 
         const existingIdx = updated.monsters.findIndex(m => m.name.toLowerCase() === monsterObj.name.toLowerCase());
         if (existingIdx >= 0) {
             const patch = {};
-            if (kv.harm || kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
+            if (kv.harm || kv.layers || kv.hp || kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
                 patch.harm = monsterObj.harm;
                 patch.currentHarm = monsterObj.currentHarm;
+                patch.layers = monsterObj.layers;
+                patch.currentLayers = monsterObj.currentLayers;
             }
+            if (threatLevelNum !== null) patch.threatLevel = threatLevelNum;
+            if (poolsAtRisk) patch.poolsAtRisk = poolsAtRisk;
+            if (rawPressures.length) patch.pressures = rawPressures;
+            if (finalBarriers.length) patch.leverageBarriers = finalBarriers;
+            if (rawFinish) patch.fullFinishTriggers = rawFinish;
             if (kv.armor) patch.armor = monsterObj.armor;
             if (parsedAttacks.length) patch.attacks = monsterObj.attacks;
             if (kv.weakness) patch.weakness = monsterObj.weakness;
@@ -1376,12 +1710,20 @@ export function applyDossierUpdates(text, dossier) {
             if (parsedMonConds.length) patch.conditions = monsterObj.conditions;
             updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], patch);
             Object.assign(monsterObj, updated.monsters[existingIdx]);
-            const woundLabel = monsterObj.currentHarm > 0 ? `Harm: ${monsterObj.currentHarm}/${monsterObj.harm}` : `Harm: ${monsterObj.harm}`;
-            changes.push(`Updated Adversary "${monsterObj.name}" (${woundLabel}, Armor: ${monsterObj.armor})`);
+            if (threatLevelNum !== null || kv.layers || monsterObj.threatLevel) {
+                changes.push(`Updated FAE Encounter "${monsterObj.name}" (Threat: ${monsterObj.threatLevel || 2}, Layers: ${monsterObj.currentHarm}/${monsterObj.harm})`);
+            } else {
+                const woundLabel = monsterObj.currentHarm > 0 ? `Harm: ${monsterObj.currentHarm}/${monsterObj.harm}` : `Harm: ${monsterObj.harm}`;
+                changes.push(`Updated Adversary "${monsterObj.name}" (${woundLabel}, Armor: ${monsterObj.armor})`);
+            }
         } else {
             updated.monsters.push(monsterObj);
-            const woundLabel = monsterObj.currentHarm > 0 ? ` (Harm: ${monsterObj.currentHarm}/${monsterObj.harm}, Armor: ${monsterObj.armor})` : ` (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`;
-            changes.push(`Added Adversary "${monsterObj.name}"${woundLabel}`);
+            if (threatLevelNum !== null || kv.layers) {
+                changes.push(`Added FAE Encounter "${monsterObj.name}" (Threat: ${threatLevelNum || 2}, Layers: ${monsterObj.currentHarm}/${monsterObj.harm})`);
+            } else {
+                const woundLabel = monsterObj.currentHarm > 0 ? ` (Harm: ${monsterObj.currentHarm}/${monsterObj.harm}, Armor: ${monsterObj.armor})` : ` (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`;
+                changes.push(`Added Adversary "${monsterObj.name}"${woundLabel}`);
+            }
         }
     }
 
@@ -1819,6 +2161,73 @@ export function applyDossierUpdates(text, dossier) {
                 changes.push(`Max Harm fate dial set to "${ruleStr}" [${tokenStr}]`);
             }
         }
+
+        // FAE Knobs in CONFIG
+        updated.config.knobs = updated.config.knobs || {};
+        const fleeRaw = kv.flee_grace_toggle !== undefined ? kv.flee_grace_toggle : kv.flee_grace;
+        if (fleeRaw !== undefined) {
+            const val = /true|on/i.test(String(fleeRaw).trim());
+            if (updated.config.knobs.flee_grace_toggle !== val) {
+                updated.config.knobs.flee_grace_toggle = val;
+                changes.push(`Flee Grace dial set to ${val ? 'ON' : 'OFF'}`);
+            }
+        }
+        const shiftRaw = kv.base_attrition_shift !== undefined ? kv.base_attrition_shift : kv.attrition_shift;
+        if (shiftRaw !== undefined) {
+            const val = parseInt(shiftRaw, 10);
+            if (!isNaN(val) && updated.config.knobs.base_attrition_shift !== val) {
+                updated.config.knobs.base_attrition_shift = val;
+                changes.push(`Base Attrition Shift dial set to ${val >= 0 ? '+' : ''}${val}`);
+            }
+        }
+        const overflowRaw = kv.overflow_default !== undefined ? kv.overflow_default : kv.overflow;
+        if (overflowRaw !== undefined) {
+            const val = String(overflowRaw).trim().toLowerCase();
+            if (['lethal', 'scar_and_ko', 'scene_fail'].includes(val) && updated.config.knobs.overflow_default !== val) {
+                updated.config.knobs.overflow_default = val;
+                changes.push(`Overflow default dial set to ${val}`);
+            }
+        }
+    }
+
+    // Top-level or outside-CONFIG FAE Knobs
+    updated.config.knobs = updated.config.knobs || {};
+    const topFleeMatch = topLevelRaw.match(/flee_grace(?:_toggle)?\s*:\s*(true|false|on|off)/i);
+    if (topFleeMatch) {
+        const val = /true|on/i.test(String(topFleeMatch[1]).trim());
+        if (updated.config.knobs.flee_grace_toggle !== val) {
+            updated.config.knobs.flee_grace_toggle = val;
+            changes.push(`Flee Grace dial set to ${val ? 'ON' : 'OFF'}`);
+        }
+    }
+    const topShiftMatch = topLevelRaw.match(/base_attrition_shift\s*:\s*([+-]?\d+)/i);
+    if (topShiftMatch) {
+        const val = parseInt(topShiftMatch[1], 10);
+        if (!isNaN(val) && updated.config.knobs.base_attrition_shift !== val) {
+            updated.config.knobs.base_attrition_shift = val;
+            changes.push(`Base Attrition Shift dial set to ${val >= 0 ? '+' : ''}${val}`);
+        }
+    }
+    const topOverflowMatch = topLevelRaw.match(/overflow_default\s*:\s*([a-z_]+)/i);
+    if (topOverflowMatch) {
+        const val = String(topOverflowMatch[1]).trim().toLowerCase();
+        if (['lethal', 'scar_and_ko', 'scene_fail'].includes(val) && updated.config.knobs.overflow_default !== val) {
+            updated.config.knobs.overflow_default = val;
+            changes.push(`Overflow default dial set to ${val}`);
+        }
+    }
+
+    if (updated.meta?.ruleset === 'fae') {
+        updated.pools = updated.protagonist.pools;
+        updated.knobs = updated.config.knobs;
+        updated.character = {
+            name: updated.protagonist.name || 'Protagonist',
+            archetype: updated.protagonist.archetype || updated.protagonist.playbook || 'Investigator',
+            positive_tags: updated.protagonist.positiveTags || [],
+            negative_tags: updated.protagonist.negativeTags || [],
+            scenes_completed: 0,
+            scenes_target: updated.config.pacingScenes || 4,
+        };
     }
 
     return {
@@ -1897,6 +2306,20 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
 
     let monstersMd = monsters.length
         ? monsters.map(m => {
+            if (meta.ruleset === 'fae') {
+                const threatStr = m.threatLevel ? `Threat Level ${m.threatLevel}` : 'Standard Threat';
+                const layersStr = `${m.currentHarm ?? m.currentLayers ?? 0}/${m.harm ?? m.layers ?? 2} HP`;
+                const poolsStr = Array.isArray(m.poolsAtRisk) ? m.poolsAtRisk.join(', ') : (m.poolsAtRisk || 'Health');
+                const pressuresStr = Array.isArray(m.pressures) ? m.pressures.join(', ') : (m.pressures || 'None');
+                const barriersStr = Array.isArray(m.leverageBarriers) ? m.leverageBarriers.join('; ') : (m.leverageBarriers || 'None');
+                const finishStr = m.fullFinishTriggers ? `\n* **Full-Finish Triggers:** ${m.fullFinishTriggers}` : '';
+                const notesStr = m.notes ? `\n* **Notes:** ${m.notes}` : '';
+                return `### 👹 ${m.name}
+* **${threatStr}** | **Leverage Layers:** ${layersStr}
+* **Pools at Risk:** ${poolsStr}
+* **Pressures:** ${pressuresStr}
+* **Leverage Barriers:** ${barriersStr}${finishStr}${notesStr}`;
+            }
             let attacks = (m.attacks && m.attacks.length) ? m.attacks.join(', ') : 'Natural attacks';
             let doom = (m.impendingDoom && m.impendingDoom.length)
                 ? `\n  * **Countdown Clock:**\n    ${m.impendingDoom.map(d => `* ${d}`).join('\n    ')}`
@@ -1956,14 +2379,37 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
         ? `\n* **Tone:** ${meta.tone}`
         : '';
 
-    return `# 📜 CAMPAIGN DOSSIER: ${meta.title || 'Untitled PbtA Campaign'}
+    const isFae = meta.ruleset === 'fae';
+    const systemLine = isFae
+        ? `* **System Engine:** Freeform Attrition Engine (${meta.systemLabel || 'Cosmic Horror'}) (\`${meta.systemKey || 'cosmic_horror'}\`)`
+        : `* **System Engine:** ${meta.systemLabel || 'PbtA Fantasy'} (\`${meta.systemKey || 'fantasy'}\`)`;
+    const knobsLine = (isFae && dossier.config?.knobs)
+        ? `\n* **FAE Knobs:** Flee Grace: ${dossier.config.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${dossier.config.knobs.base_attrition_shift >= 0 ? '+' + dossier.config.knobs.base_attrition_shift : dossier.config.knobs.base_attrition_shift} | Overflow: ${dossier.config.knobs.overflow_default || 'scar_and_ko'}`
+        : '';
 
-* **System Engine:** ${meta.systemLabel || 'PbtA Fantasy'} (\`${meta.systemKey || 'fantasy'}\`)
-* **Premise:** ${meta.premise || 'Not specified'}${toneLine}
+    let protagonistSection = '';
+    if (isFae) {
+        const poolsMd = Object.values(p.pools || {}).map(pool =>
+            `* **${pool.label} (${pool.current}/${pool.max}):** Recovery via \`${pool.recovery}\` · Zero Debuff: "${pool.zero_debuff}" · Overflow: \`${pool.on_overflow}\``
+        ).join('\n') || '* No resource pools established.';
 
----
+        const posTagsMd = (p.positiveTags || []).map(t => `* ${t}`).join('\n') || '* No positive tags registered yet.';
+        const negTagsMd = (p.negativeTags || []).map(t => `* ${t}`).join('\n') || '* None.';
 
-## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
+        protagonistSection = `## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
+* **Archetype:** ${p.playbook || 'Investigator'}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}
+* **Background Bio:** ${p.bio || p.background || 'None'}
+
+### 🧪 Resource Pools:
+${poolsMd}
+
+### 🏷️ Positive Tags (Signature Gear & Traits):
+${posTagsMd}
+
+### 🩹 Scars & Debuffs:
+${negTagsMd}`;
+    } else {
+        protagonistSection = `## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
 * **Playbook:** ${p.playbook || 'Wanderer'}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}${p.habits ? `\n* **Habits:** ${p.habits}` : ''}
 * **Stats:** ${statString || 'Not assigned'}
 * **Harm Capacity:** ${(p.harm?.current > 0) ? `${p.harm.current}/${p.harm.max || 5} (Wounded)` : (p.harm?.max || 5)} | **Armor:** ${p.harm?.armor || 0}${(p.status || (p.harm?.current > 0 ? '(-) Wounded' : '')) ? `\n* **Status:** ${p.status || '(-) Wounded'}` : ''}${(p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) ? `\n* **Conditions:** ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}` : ''}
@@ -1973,7 +2419,17 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
 ${movesMd}
 
 ### 🎒 Starting Gear:
-${gearMd}
+${gearMd}`;
+    }
+
+    return `# 📜 CAMPAIGN DOSSIER: ${meta.title || (isFae ? 'Untitled FAE Campaign' : 'Untitled PbtA Campaign')}
+
+${systemLine}${knobsLine}
+* **Premise:** ${meta.premise || 'Not specified'}${toneLine}
+
+---
+
+${protagonistSection}
 
 ---
 
@@ -2004,7 +2460,7 @@ ${mapsMd}${worldRulesMd}${customModuleMd}
 * **Playstyle:** ${dossier.config.playstyle || 'cyoa_5'}
 * **Harm Capacity:** ${dossier.config.harmMax || 5}
 * **Party Mode:** ${dossier.config.partyMode || 'squad'}
-* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}${dossier.config.maxHarmFate ? `\n* **Max Harm Fate:** ${dossier.config.maxHarmFate.rule || dossier.config.maxHarmFate}${dossier.config.maxHarmFate.statusToken ? ` | **Status Token:** ${dossier.config.maxHarmFate.statusToken}` : ''}` : ''}` : ''}`;
+* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}${dossier.config.maxHarmFate ? `\n* **Max Harm Fate:** ${dossier.config.maxHarmFate.rule || dossier.config.maxHarmFate}${dossier.config.maxHarmFate.statusToken ? ` | **Status Token:** ${dossier.config.maxHarmFate.statusToken}` : ''}` : ''}${isFae && dossier.config.knobs ? `\n* **Flee Grace:** ${dossier.config.knobs.flee_grace_toggle ? 'ON' : 'OFF'}\n* **Base Attrition Shift:** ${dossier.config.knobs.base_attrition_shift >= 0 ? '+' + dossier.config.knobs.base_attrition_shift : dossier.config.knobs.base_attrition_shift}\n* **Overflow Default:** ${dossier.config.knobs.overflow_default || 'scar_and_ko'}` : ''}${isFae && dossier.config.pacingScenes ? `\n* **Pacing Scenes:** ${dossier.config.pacingScenes}` : ''}` : ''}`;
 }
 
 /**
@@ -2024,27 +2480,46 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
 
     // 1. Meta
     dossier.meta = dossier.meta || {};
-    if (!dossier.meta.title || typeof dossier.meta.title !== 'string') {
-        dossier.meta.title = empty.meta.title;
-    }
-    const rawKey = (dossier.meta.systemKey || '').toLowerCase();
-    if (rawKey && PBTA_GENRES[rawKey]) {
-        dossier.meta.systemKey = rawKey;
-        dossier.meta.systemLabel = PBTA_GENRES[rawKey].label;
+    const isFae = dossier.meta.ruleset === 'fae' || Boolean(FAE_GENRES[dossier.meta.systemKey]);
+    if (isFae) {
+        dossier.meta.ruleset = 'fae';
+        if (!dossier.meta.title || typeof dossier.meta.title !== 'string') {
+            dossier.meta.title = 'Untitled FAE Campaign';
+        }
+        const rawFaeKey = (dossier.meta.systemKey || '').toLowerCase();
+        if (rawFaeKey && FAE_GENRES[rawFaeKey]) {
+            dossier.meta.systemKey = rawFaeKey;
+            dossier.meta.systemLabel = FAE_GENRES[rawFaeKey].label;
+        } else {
+            dossier.meta.systemKey = 'cosmic_horror';
+            dossier.meta.systemLabel = FAE_GENRES.cosmic_horror.label;
+        }
     } else {
-        const labelLower = (dossier.meta.systemLabel || '').toLowerCase();
-        const found = Object.values(PBTA_GENRES).find(g =>
-            (rawKey && g.id.toLowerCase() === rawKey) ||
-            (labelLower && (g.label.toLowerCase().includes(labelLower) || labelLower.includes(g.id.toLowerCase()) || labelLower.includes(g.label.split(' ')[0].toLowerCase())))
-        );
-        dossier.meta.systemKey = found ? found.id : 'fantasy';
-        dossier.meta.systemLabel = found ? found.label : PBTA_GENRES.fantasy.label;
+        dossier.meta.ruleset = 'pbta';
+        if (!dossier.meta.title || typeof dossier.meta.title !== 'string') {
+            dossier.meta.title = empty.meta.title;
+        }
+        const rawKey = (dossier.meta.systemKey || '').toLowerCase();
+        if (rawKey && PBTA_GENRES[rawKey]) {
+            dossier.meta.systemKey = rawKey;
+            dossier.meta.systemLabel = PBTA_GENRES[rawKey].label;
+        } else {
+            const labelLower = (dossier.meta.systemLabel || '').toLowerCase();
+            const found = Object.values(PBTA_GENRES).find(g =>
+                (rawKey && g.id.toLowerCase() === rawKey) ||
+                (labelLower && (g.label.toLowerCase().includes(labelLower) || labelLower.includes(g.id.toLowerCase()) || labelLower.includes(g.label.split(' ')[0].toLowerCase())))
+            );
+            dossier.meta.systemKey = found ? found.id : 'fantasy';
+            dossier.meta.systemLabel = found ? found.label : PBTA_GENRES.fantasy.label;
+        }
     }
     dossier.meta.premise = dossier.meta.premise || '';
     dossier.meta.tone = dossier.meta.tone || '';
     dossier.meta.createdAt = dossier.meta.createdAt || Date.now();
 
-    const activeGenre = PBTA_GENRES[dossier.meta.systemKey] || PBTA_GENRES.fantasy;
+    const activeGenre = isFae
+        ? (FAE_GENRES[dossier.meta.systemKey] || FAE_GENRES.cosmic_horror)
+        : (PBTA_GENRES[dossier.meta.systemKey] || PBTA_GENRES.fantasy);
 
     // 2. Config & Dials
     dossier.config = dossier.config || {};
@@ -2147,21 +2622,58 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         dossier.protagonist.status = protoHarmObj.current > 0 ? '(-) Wounded' : '';
     }
 
-    if (!dossier.protagonist.stats || typeof dossier.protagonist.stats !== 'object' || Object.keys(dossier.protagonist.stats).length === 0) {
-        const stdMods = [+2, +1, +1, 0, -1];
-        const healedStats = {};
-        activeGenre.stats.forEach((s, idx) => {
-            healedStats[s] = stdMods[idx] ?? 0;
-        });
-        dossier.protagonist.stats = healedStats;
-    } else {
-        for (const [k, v] of Object.entries(dossier.protagonist.stats)) {
-            dossier.protagonist.stats[k] = parseInt(v, 10) || 0;
-        }
-    }
+    if (isFae) {
+        const faeGenreObj = activeGenre;
+        dossier.config.knobs = { ...faeGenreObj.knobs, ...(dossier.config.knobs || {}) };
+        dossier.config.pacingScenes = dossier.config.pacingScenes || 4;
 
-    if (!Array.isArray(dossier.protagonist.startingMoves) || dossier.protagonist.startingMoves.length === 0) {
-        dossier.protagonist.startingMoves = activeGenre.moves.slice(0, 2);
+        dossier.protagonist.positiveTags = Array.isArray(dossier.protagonist.positiveTags)
+            ? dossier.protagonist.positiveTags
+            : (Array.isArray(dossier.protagonist.tags) ? dossier.protagonist.tags : [...faeGenreObj.defaultPositiveTags]);
+        dossier.protagonist.negativeTags = Array.isArray(dossier.protagonist.negativeTags)
+            ? dossier.protagonist.negativeTags
+            : (Array.isArray(dossier.protagonist.scars) ? dossier.protagonist.scars : []);
+
+        dossier.protagonist.pools = dossier.protagonist.pools || {};
+        for (const [k, p] of Object.entries(faeGenreObj.pools)) {
+            if (!dossier.protagonist.pools[k]) {
+                dossier.protagonist.pools[k] = { ...p, key: p.key || k, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
+            }
+        }
+
+        if (!Array.isArray(dossier.protagonist.startingMoves) || dossier.protagonist.startingMoves.length === 0) {
+            dossier.protagonist.startingMoves = [...dossier.protagonist.positiveTags];
+        }
+        if (!Array.isArray(dossier.protagonist.conditions) || dossier.protagonist.conditions.length === 0) {
+            dossier.protagonist.conditions = [...dossier.protagonist.negativeTags];
+        }
+        dossier.pools = dossier.protagonist.pools;
+        dossier.knobs = dossier.config.knobs;
+        dossier.character = {
+            name: dossier.protagonist.name || 'Protagonist',
+            archetype: dossier.protagonist.playbook || faeGenreObj.archetypes[0],
+            positive_tags: dossier.protagonist.positiveTags,
+            negative_tags: dossier.protagonist.negativeTags,
+            scenes_completed: 0,
+            scenes_target: dossier.config.pacingScenes || 4,
+        };
+    } else {
+        if (!dossier.protagonist.stats || typeof dossier.protagonist.stats !== 'object' || Object.keys(dossier.protagonist.stats).length === 0) {
+            const stdMods = [+2, +1, +1, 0, -1];
+            const healedStats = {};
+            activeGenre.stats.forEach((s, idx) => {
+                healedStats[s] = stdMods[idx] ?? 0;
+            });
+            dossier.protagonist.stats = healedStats;
+        } else {
+            for (const [k, v] of Object.entries(dossier.protagonist.stats)) {
+                dossier.protagonist.stats[k] = parseInt(v, 10) || 0;
+            }
+        }
+
+        if (!Array.isArray(dossier.protagonist.startingMoves) || dossier.protagonist.startingMoves.length === 0) {
+            dossier.protagonist.startingMoves = activeGenre.moves.slice(0, 2);
+        }
     }
 
     if (dossier.protagonist.equipment && isPlaceholderGearList(dossier.protagonist.gear)) {

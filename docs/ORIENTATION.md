@@ -52,6 +52,7 @@ Developing this extension requires understanding the interaction across three di
 | **MultiHog Upstream State & Turn Loop** | [upstream-multihog.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/upstream-multihog.md) | `extensions/SillyTavern-MultihogDnDFramework/docs/chat-ownership.md`<br>`extensions/SillyTavern-MultihogDnDFramework/docs/multihogDnDdoc.md` |
 | **Monkey Patching & DOM Interception** | [MONKEYPATCHES.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/MONKEYPATCHES.md) | Architectural Decision Records (ADRs) and safe wrapping patterns |
 | **PbtA Ruleset & Vitality Mechanics** | [PBTA.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/PBTA.md) | `pbta-ruleset.js`, `pbta-vitality-sync.js`, `pbta-companion-bridge.js` |
+| **Freeform Attrition Engine (FAE)** | [FAE.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/FAE.md) | `fae-ruleset.js`, `fae-state-sync.js` |
 
 ---
 

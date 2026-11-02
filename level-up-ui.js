@@ -10,11 +10,13 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection, extractConciergeDirectives, splitTopLevelDirectives } from './level-up-runner.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection, applyFaeMilestoneSelection, resolveFaeGenreKey, extractConciergeDirectives, splitTopLevelDirectives } from './level-up-runner.js';
 import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, parseBlueprintFromResponse, normalizeBlueprint, normalizeLevelEntry, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
+import { FAE_GENRES, isGodTag, sanitizeFaePositiveTags } from './fae-ruleset.js';
+import { normalizeFaePill } from './fae-state-sync.js';
 
 let _activeModalElement = null;
 
@@ -74,7 +76,13 @@ export function openLevelUpModal({
     closeLevelUpModal();
 
     const sysKeyLower = (dossier?.meta?.systemKey || '').toLowerCase();
-    const isPbta = !!(
+    const isFae = Boolean(
+        dossier?.meta?.ruleset === 'fae'
+        || (dossier?.meta?.systemKey && FAE_GENRES[String(dossier.meta.systemKey).toLowerCase()])
+        || Boolean(dossier?.protagonist?.pools && Object.keys(dossier.protagonist.pools).length > 0)
+        || /FAE Knobs:|Positive Tags:/i.test(rpgSettings?.currentMemo || '')
+    );
+    const isPbta = !isFae && !!(
         sysKeyLower === 'pbta'
         || (sysKeyLower && PBTA_GENRES[sysKeyLower])
         || dossier?.protagonist?.isPbta
@@ -85,11 +93,11 @@ export function openLevelUpModal({
 
     // Normalize on load so previously stored/LLM blueprints never show HP/ASI/slot bookkeeping as features
     let activeBlueprint = normalizeBlueprint(blueprint || dossier?.progressionBlueprint || null);
-    const isLoadingBlueprint = !isPbta && !!blueprintPromise && !activeBlueprint;
+    const isLoadingBlueprint = !isPbta && !isFae && !!blueprintPromise && !activeBlueprint;
 
-    // Stage selection: PbtA always uses Stage 2 (Playbook Desk).
+    // Stage selection: PbtA and FAE always use Stage 2 (Playbook / Milestone Desk).
     // For D&D: if initialStage is passed, honor it. Otherwise, if blueprint exists, default to 2; if not, default to 1.
-    let currentStage = isPbta ? 2 : (initialStage ? initialStage : (activeBlueprint ? 2 : 1));
+    let currentStage = (isPbta || isFae) ? 2 : (initialStage ? initialStage : (activeBlueprint ? 2 : 1));
 
     const parsedCurrentSheet = parseCharacterBlockFromMemo(rpgSettings?.currentMemo || '');
     const initialSheetFeatures = Array.isArray(dossier?.protagonist?.features) && dossier.protagonist.features.length > 0
@@ -99,6 +107,7 @@ export function openLevelUpModal({
     const proposal = formulateLevelUpProposal(dossier, activeBlueprint, targetLevel, {
         isRespec,
         isPbta,
+        isFae,
         currentMemo: rpgSettings?.currentMemo,
     });
     proposal.newFeatures = [...(proposal.newFeatures || [])];
@@ -115,9 +124,11 @@ export function openLevelUpModal({
     // STAGE 2: ADVANCEMENT / RESPEC REVIEW MARKUP
     // ─────────────────────────────────────────────────────────────
 
-    const stage2Title = isPbta
-        ? (isRespec ? `🔄 Playbook Tuning Desk — ${proposal.characterName}` : `⚡ Playbook Advancement Desk — ${proposal.characterName}`)
-        : (isRespec ? `🔄 Respec & Tuning Desk — ${proposal.characterName}` : `⬆ Level Up Available — ${proposal.characterName} (Level ${proposal.currentLevel} ➔ ${proposal.targetLevel})`);
+    const stage2Title = isFae
+        ? (isRespec ? `🕯️ FAE Attrition & Knob Tuning Desk — ${proposal.characterName}` : `🏆 FAE Milestone Reward Desk — ${proposal.characterName}`)
+        : (isPbta
+            ? (isRespec ? `🔄 Playbook Tuning Desk — ${proposal.characterName}` : `⚡ Playbook Advancement Desk — ${proposal.characterName}`)
+            : (isRespec ? `🔄 Respec & Tuning Desk — ${proposal.characterName}` : `⬆ Level Up Available — ${proposal.characterName} (Level ${proposal.currentLevel} ➔ ${proposal.targetLevel})`));
 
     const pbtaStatNames = (Array.isArray(proposal.statNames) && proposal.statNames.length > 0)
         ? proposal.statNames
@@ -256,7 +267,14 @@ export function openLevelUpModal({
     }
 
     // Stage 2 Subbadges HTML
-    const stage2SubBadgesHtml = isPbta ? `
+    const primaryPoolKey = proposal.pools ? Object.keys(proposal.pools)[0] : null;
+    const primaryPool = primaryPoolKey ? proposal.pools[primaryPoolKey] : null;
+
+    const stage2SubBadgesHtml = isFae ? `
+        <span class="mhc-badge-class"><i class="fa-solid fa-skull"></i> Genre: ${escapeHtml(proposal.genreKey || 'cosmic_horror')}</span>
+        <span class="mhc-badge-hitdie" style="border-color: rgba(34, 197, 94, 0.4); color: #86efac;"><i class="fa-solid fa-heart-pulse"></i> ${escapeHtml(primaryPool?.label || 'Pool')}: ${primaryPool?.current ?? 0}/${primaryPool?.max ?? 8}</span>
+        <span class="mhc-badge-mode">${isRespec ? 'Attrition & Knob Tuning' : 'Milestone Reward'}</span>
+    ` : (isPbta ? `
         <span class="mhc-badge-class"><i class="fa-solid fa-book-sparkles"></i> Playbook: ${escapeHtml(proposal.playbookName || proposal.className)}</span>
         <span class="mhc-badge-hitdie" id="mhc-pbta-harm-badge" style="border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;"><i class="fa-solid fa-heart-crack"></i> Harm Capacity: ${proposal.harm?.max || 4}</span>
         <span class="mhc-badge-hitdie" id="mhc-pbta-armor-badge" style="border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;"><i class="fa-solid fa-shield"></i> Armor: ${proposal.harm?.armor ?? 1}</span>
@@ -265,7 +283,7 @@ export function openLevelUpModal({
         <span class="mhc-badge-class" id="mhc-stage2-class-badge"><i class="fa-solid fa-shield-halved"></i> ${escapeHtml(proposal.className)}</span>
         <span class="mhc-badge-hitdie" id="mhc-stage2-hitdie-badge"><i class="fa-solid fa-dice-d20"></i> Hit Die: ${escapeHtml(proposal.hitDie)}</span>
         <span class="mhc-badge-mode">${isRespec ? 'Tuning & Respec' : `Advancing to Level ${proposal.targetLevel}`}</span>
-    `;
+    `);
 
     const pbtaStatsBarHtml = isPbta ? `
         <div class="mhc-pbta-stats-bar" id="mhc-pbta-stats-row" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
@@ -362,7 +380,7 @@ export function openLevelUpModal({
         ? (isRespec ? 'Add or tweak custom Playbook Move...' : 'Add custom Playbook Move manually...')
         : (isRespec ? 'Add or tweak custom trait or ability...' : 'Add custom trait or ability manually...');
 
-    const harmonizationControlsHtml = (!isPbta && isRespec) ? `
+    const harmonizationControlsHtml = (!isPbta && !isFae && isRespec) ? `
     <div class="mhc-harmonize-bar" style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
         <button class="mhc-chip" id="mhc-sync-codex-traits-btn" title="Harmonize active traits strictly with the 1–20 Progression Codex up to your level">
             <i class="fa-solid fa-arrows-rotate"></i> Sync from Codex Table
@@ -373,7 +391,7 @@ export function openLevelUpModal({
     </div>
     ` : '';
 
-    const activeAbilitiesSectionHtml = !isPbta ? `
+    const activeAbilitiesSectionHtml = (!isPbta && !isFae) ? `
     <div class="mhc-card-section" style="margin-top: 10px;">
         <div class="mhc-section-title" style="justify-content: space-between;">
             <span><i class="fa-solid fa-bolt" style="color: #60a5fa;"></i> Active Powers & Rest Resources ([ABILITIES])</span>
@@ -389,13 +407,24 @@ export function openLevelUpModal({
     </div>
     ` : '';
 
-    const conciergeTitle = isPbta ? 'Playbook Guide Concierge' : 'Leveling Guide Concierge';
-    const conciergeDesc = isPbta
-        ? (isRespec ? 'Consult your guide to review your playbook moves, refine stats (-1 to +3), or tune gear and conditions.' : 'Consult your guide for playbook advances, new narrative moves, or rule clarifications.')
-        : (isRespec ? 'Consult your guide to review your build, audit active vs passive abilities, or rebalance perks without changing your level.' : 'Consult your guide for build recommendations, rule clarifications, or to request custom thematic perks.');
+    const conciergeTitle = isFae
+        ? 'FAE Attrition & Milestone Guide'
+        : (isPbta ? 'Playbook Guide Concierge' : 'Leveling Guide Concierge');
+    const conciergeDesc = isFae
+        ? (isRespec ? 'Consult your guide to tune attrition pools, adjust narrative knobs, or refine positive tags and scars.' : 'Consult your guide for milestone capabilities, healing scars, or increasing pool capacities.')
+        : (isPbta
+            ? (isRespec ? 'Consult your guide to review your playbook moves, refine stats (-1 to +3), or tune gear and conditions.' : 'Consult your guide for playbook advances, new narrative moves, or rule clarifications.')
+            : (isRespec ? 'Consult your guide to review your build, audit active vs passive abilities, or rebalance perks without changing your level.' : 'Consult your guide for build recommendations, rule clarifications, or to request custom thematic perks.'));
 
     let stage2QuickChipsHtml = '';
-    if (isPbta) {
+    if (isFae) {
+        stage2QuickChipsHtml = `
+        <button class="mhc-chip" data-prompt="Suggest a new genre-appropriate Positive Tag for my character (no God Tags)">⚡ Suggest Positive Tag</button>
+        <button class="mhc-chip" data-prompt="Help me heal or replace one of my active Scars or Debuffs">🩹 Heal a Scar</button>
+        <button class="mhc-chip" data-prompt="Recommend which pool capacity to increase based on recent scenes">🛡️ Hardened Reserve Advice</button>
+        <button class="mhc-chip" data-prompt="Review my FAE Knobs (Flee Grace, Shift, Overflow) for the upcoming scenario">⚙️ Review Knobs &amp; Pools</button>
+        `;
+    } else if (isPbta) {
         stage2QuickChipsHtml = `
         <button class="mhc-chip" data-prompt="Suggest a new Playbook Move fitting my archetype with a 10+, 7-9, and 6- trigger">🔄 Suggest new Move</button>
         <button class="mhc-chip" data-prompt="Help me rebalance my stats (${escapeHtml(pbtaStatNamesStr)}) within the -1 to +3 range">⚡ Rebalance stats</button>
@@ -417,20 +446,204 @@ export function openLevelUpModal({
         `;
     }
 
-    const stage2Placeholder = isPbta
-        ? (isRespec ? 'Ask your guide, or request custom moves (e.g. \'Suggest an infiltration move\')...' : 'Ask your guide, or request custom playbook moves...')
-        : (isRespec ? 'Ask your guide, or request custom boons to tune your build...' : 'Ask your guide, or request custom boons (e.g. \'I want a frost totem perk\')...');
+    const stage2Placeholder = isFae
+        ? (isRespec ? 'Ask your guide, or request adjustments to pools, knobs, or tags...' : 'Ask your guide, or request custom milestone capabilities...')
+        : (isPbta
+            ? (isRespec ? 'Ask your guide, or request custom moves (e.g. \'Suggest an infiltration move\')...' : 'Ask your guide, or request custom playbook moves...')
+            : (isRespec ? 'Ask your guide, or request custom boons to tune your build...' : 'Ask your guide, or request custom boons (e.g. \'I want a frost totem perk\')...'));
 
-    const confirmBtnText = isPbta
-        ? (isRespec ? '<i class="fa-solid fa-floppy-disk"></i> Save Playbook Changes' : '<i class="fa-solid fa-check"></i> Confirm Playbook Advancement')
-        : (isRespec ? '<i class="fa-solid fa-floppy-disk"></i> Save Build Changes' : `<i class="fa-solid fa-check"></i> Confirm & Advance to Level ${proposal.targetLevel}`);
+    const confirmBtnText = isFae
+        ? (isRespec ? '<i class="fa-solid fa-floppy-disk"></i> Save Attrition &amp; Knob Changes' : '<i class="fa-solid fa-check"></i> Confirm Milestone Advancement')
+        : (isPbta
+            ? (isRespec ? '<i class="fa-solid fa-floppy-disk"></i> Save Playbook Changes' : '<i class="fa-solid fa-check"></i> Confirm Playbook Advancement')
+            : (isRespec ? '<i class="fa-solid fa-floppy-disk"></i> Save Build Changes' : `<i class="fa-solid fa-check"></i> Confirm & Advance to Level ${proposal.targetLevel}`));
 
     // Return to Stage 1 Button (D&D only)
-    const stageSwitchBtnHtml = !isPbta ? `
+    const stageSwitchBtnHtml = (!isPbta && !isFae) ? `
         <button class="menu_button mhc-btn-stage-switch" id="mhc-switch-to-stage1-btn" title="View or customize the full 1–20 Class Progression Codex">
             <i class="fa-solid fa-book-sparkles"></i> 📜 Class Definition & Roadmap
         </button>
     ` : '';
+
+    // FAE Milestone Picker markup (when advancing an FAE character)
+    let faeMilestoneSection = '';
+    if (isFae && !isRespec && Array.isArray(proposal.milestoneOptions)) {
+        const healOpt = proposal.milestoneOptions.find(o => o.id === 'heal_scar');
+        const capOpt = proposal.milestoneOptions.find(o => o.id === 'new_capability');
+        const hardOpt = proposal.milestoneOptions.find(o => o.id === 'hardened_reserve');
+
+        const scarsList = proposal.negativeTags || [];
+        const scarOptionsHtml = scarsList.length > 0
+            ? scarsList.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')
+            : '<option value="" disabled>No active scars or debuffs</option>';
+
+        const reducedPools = healOpt?.reducedPools || [];
+        const reducedPoolsHtml = reducedPools.length > 0
+            ? `<div style="margin-top: 4px;">
+                <label style="font-size: 0.85em; color: #94a3b8; margin-right: 6px;">Or Restore Lost Max Capacity:</label>
+                <select id="mhc_fae_restore_pool_select" class="text_pole">
+                    <option value="">-- Choose pool to restore +1 max --</option>
+                    ${reducedPools.map(rp => `<option value="${escapeHtml(rp.key)}">${escapeHtml(rp.label)} (${rp.currentMax} ➔ ${rp.currentMax + 1})</option>`).join('')}
+                </select>
+            </div>`
+            : '';
+
+        const suggestedTags = capOpt?.suggestedTags || [];
+        const suggestedTagsHtml = suggestedTags.map(t =>
+            `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`
+        ).join('');
+        const initialTag = suggestedTags[0] || '';
+
+        const poolChoices = hardOpt?.pools || [];
+        const poolChoicesHtml = poolChoices.map(p =>
+            `<option value="${escapeHtml(p.key)}" ${p.disabled ? 'disabled' : ''}>${escapeHtml(p.label)} (${p.current}/${p.max} ➔ ${p.disabled ? 'Cap 12 Reached' : `${p.current + 1}/${p.nextMax}`})</option>`
+        ).join('');
+
+        faeMilestoneSection = `
+        <div class="mhc-card-section" id="mhc-fae-milestone-picker-card">
+            <div class="mhc-section-title" style="justify-content: space-between;">
+                <span><i class="fa-solid fa-trophy" style="color: #fbbf24;"></i> Choose Your Milestone Reward (Every 3–5 Scenes)</span>
+                <span style="font-size: 0.8em; color: #9ca3af;">Pacing: ${proposal.pacingScenes || 4} Scenes</span>
+            </div>
+            <div class="mhc-asi-radio-group" id="mhc-fae-milestone-options">
+                <!-- 1. Heal a Scar -->
+                <div class="mhc-fae-milestone-option" data-milestone-id="heal_scar" style="padding: 6px 0;">
+                    <label class="mhc-radio-label" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="radio" name="mhc_fae_milestone_pick" value="heal_scar" checked />
+                        <strong>Heal a Scar / Restore Capacity</strong>
+                    </label>
+                    <div class="mhc-fae-milestone-detail" data-milestone-detail="heal_scar" style="margin: 6px 0 4px 24px; display: flex; flex-direction: column; gap: 6px;">
+                        <div>
+                            <label style="font-size: 0.85em; color: #94a3b8; margin-right: 6px;">Select Scar/Debuff to heal:</label>
+                            <select id="mhc_fae_heal_scar_select" class="text_pole">
+                                ${scarOptionsHtml}
+                            </select>
+                        </div>
+                        ${reducedPoolsHtml}
+                    </div>
+                </div>
+
+                <!-- 2. New Capability -->
+                <div class="mhc-fae-milestone-option" data-milestone-id="new_capability" style="padding: 6px 0;">
+                    <label class="mhc-radio-label" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="radio" name="mhc_fae_milestone_pick" value="new_capability" />
+                        <strong>New Capability (Positive Tag or Signature Gear)</strong>
+                    </label>
+                    <div class="mhc-fae-milestone-detail" data-milestone-detail="new_capability" style="margin: 6px 0 4px 24px; display: none; flex-direction: column; gap: 6px;">
+                        <select id="mhc_fae_tag_select" class="text_pole">
+                            ${suggestedTagsHtml}
+                            <option value="custom">Custom Tag (write below)</option>
+                        </select>
+                        <input type="text" id="mhc_fae_custom_tag_input" class="text_pole" value="${escapeHtml(initialTag)}" placeholder="Tag Name (Specific scope and discipline...)" />
+                        <span style="font-size:0.8em; color:#f59e0b;"><i class="fa-solid fa-triangle-exclamation"></i> Broad God Tags (e.g. Lucky, Smart, Fast, Invincible) are strictly blacklisted.</span>
+                    </div>
+                </div>
+
+                <!-- 3. Hardened Reserve -->
+                <div class="mhc-fae-milestone-option" data-milestone-id="hardened_reserve" style="padding: 6px 0;">
+                    <label class="mhc-radio-label" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="radio" name="mhc_fae_milestone_pick" value="hardened_reserve" />
+                        <strong>Hardened Reserve (Increase Pool Max by +1, up to 12)</strong>
+                    </label>
+                    <div class="mhc-fae-milestone-detail" data-milestone-detail="hardened_reserve" style="margin: 6px 0 4px 24px; display: none; flex-direction: column; gap: 6px;">
+                        <select id="mhc_fae_hardened_pool_select" class="text_pole">
+                            ${poolChoicesHtml}
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // FAE Pools, Knobs & Tags Tuning Card markup
+    let faeTuningSection = '';
+    if (isFae) {
+        const pools = proposal.pools || {};
+        const poolRowsHtml = Object.entries(pools).map(([k, p]) => {
+            const barColorHex = p.barColor === 'purple' ? '#a855f7' : (p.barColor === 'amber' ? '#f59e0b' : (p.barColor === 'blue' ? '#3b82f6' : '#22c55e'));
+            return `
+            <div class="mhc-fae-pool-row" data-pool-key="${escapeHtml(k)}" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; padding: 6px 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px;">
+                <span style="font-weight: 600; min-width: 120px;">
+                    <span class="mhc-badge-hitdie" style="border-color: ${barColorHex}; color: ${barColorHex};">${escapeHtml(p.label || k)}</span>
+                </span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <label style="font-size: 0.85em; color: #94a3b8;">Cur:</label>
+                    <input type="number" class="text_pole mhc-fae-pool-cur" data-pool="${escapeHtml(k)}" min="0" max="${p.max}" value="${p.current}" style="width: 50px; text-align: center; padding: 2px;" />
+                    <span style="color: #64748b;">/</span>
+                    <label style="font-size: 0.85em; color: #94a3b8;">Max:</label>
+                    <input type="number" class="text_pole mhc-fae-pool-max" data-pool="${escapeHtml(k)}" min="1" max="12" value="${p.max}" style="width: 50px; text-align: center; padding: 2px;" />
+                </div>
+                <span style="font-size: 0.78em; color: #94a3b8; flex: 1; text-align: right;" title="Recovery: ${escapeHtml(p.recovery || 'rest')}">Zero: ${escapeHtml(p.zero_debuff || 'Down')}</span>
+            </div>`;
+        }).join('');
+
+        const shiftVal = proposal.knobs?.base_attrition_shift ?? 0;
+        const overflowVal = proposal.knobs?.overflow_default || 'scar_and_ko';
+
+        faeTuningSection = `
+        <!-- FAE Resource Pools Card -->
+        <div class="mhc-card-section" id="mhc-fae-pools-card">
+            <div class="mhc-section-title"><i class="fa-solid fa-droplet" style="color: #38bdf8;"></i> Attrition Resource Pools</div>
+            <div class="mhc-fae-pools-list" id="mhc-fae-pools-list">
+                ${poolRowsHtml}
+            </div>
+        </div>
+
+        <!-- FAE Knobs Card -->
+        <div class="mhc-card-section" id="mhc-fae-knobs-card">
+            <div class="mhc-section-title"><i class="fa-solid fa-sliders" style="color: #a78bfa;"></i> Narrative &amp; Attrition Knobs</div>
+            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.9em;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="mhc_fae_flee_grace_chk" ${proposal.knobs?.flee_grace_toggle ? 'checked' : ''} />
+                    <span><strong>Flee Grace:</strong> Grant +1 to Flee actions during retreat</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label style="color: #94a3b8;">Base Attrition Shift:</label>
+                    <select id="mhc_fae_shift_select" class="text_pole" style="width: auto;">
+                        <option value="-1" ${shiftVal === -1 ? 'selected' : ''}>-1 (Hardened / Heavy Attrition)</option>
+                        <option value="0" ${shiftVal === 0 ? 'selected' : ''}>0 (Standard)</option>
+                        <option value="1" ${shiftVal === 1 ? 'selected' : ''}>+1 (Heroic / Forgiving)</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label style="color: #94a3b8;">Overflow Default:</label>
+                    <select id="mhc_fae_overflow_select" class="text_pole" style="width: auto;">
+                        <option value="scar_and_ko" ${overflowVal === 'scar_and_ko' ? 'selected' : ''}>Scar &amp; KO (Incapacitation + Negative Tag)</option>
+                        <option value="lethal" ${overflowVal === 'lethal' ? 'selected' : ''}>Lethal (Fatal Injury / Terminal Doom)</option>
+                        <option value="gear_loss" ${overflowVal === 'gear_loss' ? 'selected' : ''}>Gear Loss (Signature Item Destroyed)</option>
+                        <option value="narrative_fail" ${overflowVal === 'narrative_fail' ? 'selected' : ''}>Narrative Consequence (Severe Permanent Shift)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- FAE Positive Tags Card -->
+        <div class="mhc-card-section" id="mhc-fae-pos-tags-card">
+            <div class="mhc-section-title"><i class="fa-solid fa-tag" style="color: #4ade80;"></i> Positive Tags &amp; Capabilities</div>
+            <ul class="mhc-perks-list" id="mhc-fae-pos-tags-list">
+                <!-- Populated by renderFaePosTags -->
+            </ul>
+            <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
+                <input type="text" id="mhc_fae_manual_pos_tag_input" class="text_pole" placeholder="Add Positive Tag (e.g. Service Revolver, Lockpicking)..." style="flex: 1;" />
+                <button class="menu_button" id="mhc_fae_manual_pos_tag_btn"><i class="fa-solid fa-plus"></i> Add Tag</button>
+            </div>
+            <div id="mhc_fae_god_tag_warning" style="display: none; color: #ef4444; font-size: 0.82em; margin-top: 4px;">
+                <i class="fa-solid fa-circle-exclamation"></i> <strong>God Tag Detected:</strong> Broad tags (e.g. Lucky, Smart, Strong, Fast, Invincible) are blacklisted in FAE.
+            </div>
+        </div>
+
+        <!-- FAE Scars & Debuffs Card -->
+        <div class="mhc-card-section" id="mhc-fae-neg-tags-card">
+            <div class="mhc-section-title"><i class="fa-solid fa-skull-crossbones" style="color: #f87171;"></i> Scars &amp; Debuffs (Negative Tags)</div>
+            <ul class="mhc-perks-list" id="mhc-fae-neg-tags-list">
+                <!-- Populated by renderFaeNegTags -->
+            </ul>
+            <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
+                <input type="text" id="mhc_fae_manual_neg_tag_input" class="text_pole" placeholder="Add Scar/Debuff (e.g. Fractured Ribs, Shaking Hands)..." style="flex: 1;" />
+                <button class="menu_button" id="mhc_fae_manual_neg_tag_btn"><i class="fa-solid fa-plus"></i> Add Scar</button>
+            </div>
+        </div>`;
+    }
 
     // ─────────────────────────────────────────────────────────────
     // STAGE 1: CLASS DEFINITION & 1–20 CODEX MARKUP
@@ -551,35 +764,40 @@ export function openLevelUpModal({
             <div class="mhc-modal-body mhc-advancement-split-body">
                 <!-- Left Column: Character Build & Features -->
                 <div class="mhc-advancement-cards-col">
-                    <!-- Vitality / Harm Section -->
-                    ${vitalitySectionHtml}
+                    ${isFae ? `
+                        ${!isRespec ? faeMilestoneSection : ''}
+                        ${faeTuningSection}
+                    ` : `
+                        <!-- Vitality / Harm Section -->
+                        ${vitalitySectionHtml}
 
-                    <!-- PbtA Advancement Picker (when advancing a playbook) -->
-                    ${pbtaAdvanceSection}
+                        <!-- PbtA Advancement Picker (when advancing a playbook) -->
+                        ${pbtaAdvanceSection}
 
-                    <!-- Class Features & Active Traits / Moves -->
-                    <div class="mhc-card-section">
-                        <div class="mhc-section-title" style="justify-content: space-between;">
-                            <span><i class="fa-solid ${featuresIcon}"></i> ${escapeHtml(featuresTitle)}</span>
+                        <!-- Class Features & Active Traits / Moves -->
+                        <div class="mhc-card-section">
+                            <div class="mhc-section-title" style="justify-content: space-between;">
+                                <span><i class="fa-solid ${featuresIcon}"></i> ${escapeHtml(featuresTitle)}</span>
+                            </div>
+                            ${harmonizationControlsHtml}
+                            <ul class="mhc-perks-list" id="mhc-perks-list-container">
+                                <!-- Populated dynamically by renderPerksList -->
+                            </ul>
+                            <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
+                                <input type="text" id="mhc_manual_perk_input" class="text_pole" placeholder="${featuresPlaceholder}" style="flex: 1;" />
+                                <button class="menu_button" id="mhc_manual_perk_add_btn"><i class="fa-solid fa-plus"></i> Add</button>
+                            </div>
                         </div>
-                        ${harmonizationControlsHtml}
-                        <ul class="mhc-perks-list" id="mhc-perks-list-container">
-                            <!-- Populated dynamically by renderPerksList -->
-                        </ul>
-                        <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
-                            <input type="text" id="mhc_manual_perk_input" class="text_pole" placeholder="${featuresPlaceholder}" style="flex: 1;" />
-                            <button class="menu_button" id="mhc_manual_perk_add_btn"><i class="fa-solid fa-plus"></i> Add</button>
-                        </div>
-                    </div>
 
-                    <!-- Active Tracked Abilities ([ABILITIES] Module) -->
-                    ${activeAbilitiesSectionHtml}
+                        <!-- Active Tracked Abilities ([ABILITIES] Module) -->
+                        ${activeAbilitiesSectionHtml}
 
-                    <!-- ASI / Feat Section -->
-                    ${asiSection}
+                        <!-- ASI / Feat Section -->
+                        ${asiSection}
 
-                    <!-- Party Sync Section -->
-                    ${partySection}
+                        <!-- Party Sync Section -->
+                        ${partySection}
+                    `}
                 </div>
 
                 <!-- Right Column: Interactive Concierge Desk -->
@@ -1167,6 +1385,71 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
         }
     });
 
+    // FAE Positive Tags Rendering
+    const faePosTagsContainer = modal.querySelector('#mhc-fae-pos-tags-list');
+    function renderFaePosTags() {
+        if (!faePosTagsContainer) return;
+        const tags = proposal.positiveTags || [];
+        if (tags.length === 0) {
+            faePosTagsContainer.innerHTML = '<li class="mhc-perk-item"><em>None</em></li>';
+            return;
+        }
+        faePosTagsContainer.innerHTML = tags.map((t, idx) => `
+            <li class="mhc-perk-item" data-pos-tag-index="${idx}">
+                <i class="fa-solid fa-tag" style="color: #4ade80;"></i>
+                <span class="mhc-perk-text" style="flex: 1;">${escapeHtml(t)}</span>
+                <button class="mhc-remove-fae-pos-tag-btn" data-index="${idx}" title="Remove tag" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:1.1em; line-height:1; padding:0 4px;">&times;</button>
+            </li>
+        `).join('');
+
+        faePosTagsContainer.querySelectorAll('.mhc-remove-fae-pos-tag-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.getAttribute('data-index'), 10);
+                if (!isNaN(idx) && idx >= 0 && idx < proposal.positiveTags.length) {
+                    proposal.positiveTags.splice(idx, 1);
+                    proposal.newFeatures = [...proposal.positiveTags];
+                    renderFaePosTags();
+                }
+            });
+        });
+    }
+
+    // FAE Negative Tags (Scars & Debuffs) Rendering
+    const faeNegTagsContainer = modal.querySelector('#mhc-fae-neg-tags-list');
+    function renderFaeNegTags() {
+        if (!faeNegTagsContainer) return;
+        const scars = proposal.negativeTags || [];
+        if (scars.length === 0) {
+            faeNegTagsContainer.innerHTML = '<li class="mhc-perk-item"><em>None</em></li>';
+            return;
+        }
+        faeNegTagsContainer.innerHTML = scars.map((s, idx) => `
+            <li class="mhc-perk-item" data-neg-tag-index="${idx}">
+                <i class="fa-solid fa-skull-crossbones" style="color: #f87171;"></i>
+                <span class="mhc-perk-text" style="flex: 1;">${escapeHtml(s)}</span>
+                <button class="mhc-remove-fae-neg-tag-btn" data-index="${idx}" title="Remove scar" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:1.1em; line-height:1; padding:0 4px;">&times;</button>
+            </li>
+        `).join('');
+
+        faeNegTagsContainer.querySelectorAll('.mhc-remove-fae-neg-tag-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.getAttribute('data-index'), 10);
+                if (!isNaN(idx) && idx >= 0 && idx < proposal.negativeTags.length) {
+                    proposal.negativeTags.splice(idx, 1);
+                    proposal.scars = [...proposal.negativeTags];
+                    renderFaeNegTags();
+                }
+            });
+        });
+    }
+
+    if (isFae) {
+        renderFaePosTags();
+        renderFaeNegTags();
+    }
+
     // Hook up blueprint promise if generating asynchronously
     if (isLoadingBlueprint && blueprintPromise) {
         blueprintPromise.then((rawResolvedBlueprint) => {
@@ -1303,7 +1586,11 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
     // Stage 2 Concierge Chat History
     const chatLogEl = modal.querySelector('#mhc-concierge-chat-log');
     let initialGreeting = '';
-    if (isPbta) {
+    if (isFae) {
+        initialGreeting = isRespec
+            ? `Greetings, ${proposal.characterName}! Welcome to your FAE Attrition & Knob Tuning Desk. Here we can tune your resource pools, adjust narrative knobs (Flee Grace, Attrition Shift, Overflow), and refine your positive capabilities or scars. How would you like to tune your character?`
+            : `Greetings, ${proposal.characterName}! You have reached an FAE Milestone after completing ${proposal.pacingScenes || 4} scenes. Choose your milestone reward on the left, or ask me for advice on capabilities, healing scars, or hardening pool reserves.`;
+    } else if (isPbta) {
         initialGreeting = isRespec
             ? `Greetings, ${proposal.characterName}! Welcome to your Playbook Tuning Desk. You are walking the path of ${proposal.playbookName || proposal.className}. Here we can review your Playbook Moves, rebalance stats (-1 to +3: ${pbtaStatNamesStr}), customize techniques, or adjust gear and conditions without D&D level constraints. How would you like to refine your playbook?`
             : `Greetings, ${proposal.characterName}! You have reached the milestone to advance your Playbook as ${proposal.playbookName || proposal.className}. Choose a Playbook Advance on the left, or ask me to craft custom Playbook Moves, advance your stats (${pbtaStatNamesStr}), or review your journey.`;
@@ -1350,7 +1637,24 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
         if (conciergeSendBtn) conciergeSendBtn.disabled = true;
         if (conciergeTyping) conciergeTyping.style.display = 'flex';
 
-        const systemPrompt = isPbta ? `You are the Playbook Guide and PbtA narrative systems architect for "${proposal.characterName}", playing the "${proposal.playbookName || proposal.className}" playbook.
+        const systemPrompt = isFae ? `You are the FAE Attrition Guide and Freeform Attrition Engine systems architect for "${proposal.characterName}", in the "${proposal.genreKey || 'cosmic_horror'}" genre.
+Active Pools: ${Object.entries(proposal.pools || {}).map(([k, p]) => `${p.label}: ${p.current}/${p.max}`).join(', ')}
+FAE Knobs: Flee Grace: ${proposal.knobs?.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${proposal.knobs?.base_attrition_shift >= 0 ? '+' : ''}${proposal.knobs?.base_attrition_shift} | Overflow: ${proposal.knobs?.overflow_default}
+Positive Tags: ${(proposal.positiveTags || []).join(', ') || 'None'}
+Scars & Debuffs: ${(proposal.negativeTags || []).join(', ') || 'None'}
+
+STRICT FAE ARCHITECTURAL RULES:
+1. PURE FAE RULES ONLY: No D&D levels (1-20), Hit Dice, spell slots, AC, or DC rolls. No PbtA 2d6 move rolls. FAE uses 4dF attrition and tag-driven resource pools.
+2. NO GOD TAGS: Universal blacklist: Lucky, Smart, Competent, Fast, Heroic, Strong, Good at everything, Invincible, Master, Omni. Positive tags must represent specific capabilities, background, or signature gear.
+3. DIRECTIVES FOR LIVE UPDATES:
+   - To add a Positive Tag: [ADD_TAG: Tag Name (specific narrative scope and capability)]
+   - To remove a Positive Tag: [REMOVE_TAG: Tag Name]
+   - To add a Scar/Debuff: [ADD_SCAR: (-) Scar Name (debilitating hindrance)]
+   - To remove/heal a Scar/Debuff: [REMOVE_SCAR: Scar Name]
+   - To update a Pool current or max: [SET_POOL: PoolKey | current/max] (e.g. [SET_POOL: sanity | 8/8])
+   - To update a Knob: [SET_KNOB: knob_name | value] (e.g. [SET_KNOB: flee_grace | ON], [SET_KNOB: shift | +0], [SET_KNOB: overflow | scar_and_ko])
+4. Keep your response atmospheric, sharp, and under 130 words.`
+        : (isPbta ? `You are the Playbook Guide and PbtA narrative systems architect for "${proposal.characterName}", playing the "${proposal.playbookName || proposal.className}" playbook.
 Character Stats: ${JSON.stringify(proposal.stats || dossier?.protagonist?.stats || {})}
 Harm Capacity: ${proposal.harm?.max || 4} | Current Harm: ${proposal.harm?.current || 0} | Armor: ${proposal.harm?.armor ?? 1}
 Active Playbook Moves: ${proposal.newFeatures.join('; ')}
@@ -1402,7 +1706,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
    - Example Active Power: Misfortune Gambit (Reroll a failed check from critical misfortune; 1/1 per long rest)
    - Example Passive Perk: Street Rat (+2 to Stealth in urban districts)
 5. Single-Track Progression: Streamlined D&D Lite model. No rigid subclass branching. The class remains "${proposal.className}".
-6. Concise & Inspiring: Keep your spoken reply evocative, clear, and under 130 words.`;
+6. Concise & Inspiring: Keep your spoken reply evocative, clear, and under 130 words.`);
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -1419,7 +1723,99 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             const { directives, cleanedText } = extractConciergeDirectives(reply);
 
             for (const dir of directives) {
-                if (dir.tag === 'ADD_FEATURE') {
+                if (dir.tag === 'ADD_TAG' && isFae) {
+                    const rawTag = dir.payload.trim();
+                    if (rawTag && !isGodTag(rawTag)) {
+                        const norm = normalizeFaePill(rawTag, 'Positive Tag');
+                        proposal.positiveTags = proposal.positiveTags || [];
+                        const key = extractFeatureKey(norm);
+                        const idx = proposal.positiveTags.findIndex(t => extractFeatureKey(t) === key);
+                        if (idx >= 0) {
+                            proposal.positiveTags[idx] = norm;
+                        } else {
+                            proposal.positiveTags.push(norm);
+                        }
+                        proposal.newFeatures = [...proposal.positiveTags];
+                        renderFaePosTags();
+                        if (typeof toastr !== 'undefined') toastr.info(norm, 'Added Positive Tag');
+                    } else if (isGodTag(rawTag)) {
+                        if (typeof toastr !== 'undefined') toastr.warning(`Rejected God Tag: "${rawTag}". FAE tags must be specific.`, 'Tag Blacklisted');
+                    }
+                } else if (dir.tag === 'REMOVE_TAG' && isFae) {
+                    const target = dir.payload.trim();
+                    proposal.positiveTags = (proposal.positiveTags || []).filter(t => !matchesFeatureRemovalTarget(t, target));
+                    proposal.newFeatures = [...proposal.positiveTags];
+                    renderFaePosTags();
+                } else if (dir.tag === 'ADD_SCAR' && isFae) {
+                    let rawScar = dir.payload.trim();
+                    if (rawScar.startsWith('(-)')) rawScar = rawScar.replace(/^\(-\)\s*/, '');
+                    const norm = normalizeFaePill(rawScar, 'Debuff');
+                    proposal.negativeTags = proposal.negativeTags || [];
+                    const key = extractFeatureKey(norm);
+                    const idx = proposal.negativeTags.findIndex(s => extractFeatureKey(s) === key);
+                    if (idx >= 0) {
+                        proposal.negativeTags[idx] = norm;
+                    } else {
+                        proposal.negativeTags.push(norm);
+                    }
+                    proposal.scars = [...proposal.negativeTags];
+                    renderFaeNegTags();
+                    if (typeof toastr !== 'undefined') toastr.info(norm, 'Added Scar / Debuff');
+                } else if (dir.tag === 'REMOVE_SCAR' && isFae) {
+                    const target = dir.payload.trim();
+                    proposal.negativeTags = (proposal.negativeTags || []).filter(s => !matchesFeatureRemovalTarget(s, target));
+                    proposal.scars = [...proposal.negativeTags];
+                    renderFaeNegTags();
+                } else if (dir.tag === 'SET_POOL' && isFae && proposal.pools) {
+                    const pipeIdx = dir.payload.indexOf('|');
+                    if (pipeIdx > 0) {
+                        const pTarget = dir.payload.slice(0, pipeIdx).trim().toLowerCase();
+                        const pVal = dir.payload.slice(pipeIdx + 1).trim();
+                        const poolEntry = Object.entries(proposal.pools).find(([k, p]) =>
+                            k.toLowerCase() === pTarget || (p.label && p.label.toLowerCase() === pTarget)
+                        );
+                        if (poolEntry) {
+                            const [pKey, pool] = poolEntry;
+                            const slashMatch = pVal.match(/^(\d+)(?:\s*\/\s*(\d+))?$/);
+                            if (slashMatch) {
+                                const cur = parseInt(slashMatch[1], 10);
+                                if (slashMatch[2]) {
+                                    pool.max = Math.min(12, Math.max(1, parseInt(slashMatch[2], 10)));
+                                    pool.current = Math.min(pool.max, Math.max(0, cur));
+                                } else {
+                                    pool.current = Math.min(pool.max, Math.max(0, cur));
+                                }
+                                const curInput = modal.querySelector(`.mhc-fae-pool-cur[data-pool="${pKey}"]`);
+                                if (curInput) {
+                                    curInput.value = String(pool.current);
+                                    curInput.max = String(pool.max);
+                                }
+                                const maxInput = modal.querySelector(`.mhc-fae-pool-max[data-pool="${pKey}"]`);
+                                if (maxInput) maxInput.value = String(pool.max);
+                            }
+                        }
+                    }
+                } else if (dir.tag === 'SET_KNOB' && isFae) {
+                    const pipeIdx = dir.payload.indexOf('|');
+                    if (pipeIdx > 0) {
+                        const knobName = dir.payload.slice(0, pipeIdx).trim().toLowerCase();
+                        const knobVal = dir.payload.slice(pipeIdx + 1).trim();
+                        proposal.knobs = proposal.knobs || {};
+                        if (knobName.includes('flee')) {
+                            proposal.knobs.flee_grace_toggle = /^(on|true|yes|1)$/i.test(knobVal);
+                            const chk = modal.querySelector('#mhc_fae_flee_grace_chk');
+                            if (chk) chk.checked = proposal.knobs.flee_grace_toggle;
+                        } else if (knobName.includes('shift')) {
+                            proposal.knobs.base_attrition_shift = Math.max(-1, Math.min(1, parseInt(knobVal, 10) || 0));
+                            const sel = modal.querySelector('#mhc_fae_shift_select');
+                            if (sel) sel.value = String(proposal.knobs.base_attrition_shift);
+                        } else if (knobName.includes('overflow')) {
+                            proposal.knobs.overflow_default = knobVal;
+                            const sel = modal.querySelector('#mhc_fae_overflow_select');
+                            if (sel) sel.value = knobVal;
+                        }
+                    }
+                } else if (dir.tag === 'ADD_FEATURE') {
                     const rawFeat = dir.payload.trim();
                     const feat = isPbta ? formatMoveAsPill(rawFeat) : formatTraitAsPill(rawFeat);
                     if (feat) {
@@ -1513,7 +1909,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 }
             }
 
-            if (!isPbta) {
+            if (!isPbta && !isFae) {
                 applyBlueprintDirectivesFromReply(reply);
             }
 
@@ -1768,9 +2164,178 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
         });
     }
 
+    // FAE Controls & Handlers
+    if (isFae) {
+        const posTagInput = modal.querySelector('#mhc_fae_manual_pos_tag_input');
+        const posTagAddBtn = modal.querySelector('#mhc_fae_manual_pos_tag_btn');
+        const godTagWarning = modal.querySelector('#mhc_fae_god_tag_warning');
+
+        posTagInput?.addEventListener('input', () => {
+            const val = posTagInput.value.trim();
+            if (val && isGodTag(val)) {
+                if (godTagWarning) godTagWarning.style.display = 'block';
+            } else {
+                if (godTagWarning) godTagWarning.style.display = 'none';
+            }
+        });
+
+        const handleAddPosTag = () => {
+            const val = posTagInput?.value?.trim();
+            if (!val) return;
+            if (isGodTag(val)) {
+                if (godTagWarning) godTagWarning.style.display = 'block';
+                if (typeof toastr !== 'undefined') toastr.warning(`Rejected God Tag: "${val}". FAE tags must be specific.`, 'Tag Blacklisted');
+                return;
+            }
+            if (godTagWarning) godTagWarning.style.display = 'none';
+            const norm = normalizeFaePill(val, 'Capability');
+            proposal.positiveTags = proposal.positiveTags || [];
+            const key = extractFeatureKey(norm);
+            const idx = proposal.positiveTags.findIndex(t => extractFeatureKey(t) === key);
+            if (idx >= 0) {
+                proposal.positiveTags[idx] = norm;
+            } else {
+                proposal.positiveTags.push(norm);
+            }
+            proposal.newFeatures = [...proposal.positiveTags];
+            posTagInput.value = '';
+            renderFaePosTags();
+        };
+
+        posTagAddBtn?.addEventListener('click', handleAddPosTag);
+        posTagInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddPosTag();
+            }
+        });
+
+        const negTagInput = modal.querySelector('#mhc_fae_manual_neg_tag_input');
+        const negTagAddBtn = modal.querySelector('#mhc_fae_manual_neg_tag_btn');
+
+        const handleAddNegTag = () => {
+            let val = negTagInput?.value?.trim();
+            if (!val) return;
+            if (val.startsWith('(-)')) val = val.replace(/^\(-\)\s*/, '');
+            const norm = normalizeFaePill(val, 'Debuff');
+            proposal.negativeTags = proposal.negativeTags || [];
+            const key = extractFeatureKey(norm);
+            const idx = proposal.negativeTags.findIndex(s => extractFeatureKey(s) === key);
+            if (idx >= 0) {
+                proposal.negativeTags[idx] = norm;
+            } else {
+                proposal.negativeTags.push(norm);
+            }
+            proposal.scars = [...proposal.negativeTags];
+            negTagInput.value = '';
+            renderFaeNegTags();
+        };
+
+        negTagAddBtn?.addEventListener('click', handleAddNegTag);
+        negTagInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddNegTag();
+            }
+        });
+
+        // Pool inputs
+        modal.querySelectorAll('.mhc-fae-pool-cur').forEach(input => {
+            input.addEventListener('change', () => {
+                const pKey = input.getAttribute('data-pool');
+                if (proposal.pools?.[pKey]) {
+                    const val = parseInt(input.value, 10);
+                    proposal.pools[pKey].current = Math.min(proposal.pools[pKey].max, Math.max(0, isNaN(val) ? 0 : val));
+                    input.value = String(proposal.pools[pKey].current);
+                }
+            });
+        });
+
+        modal.querySelectorAll('.mhc-fae-pool-max').forEach(input => {
+            input.addEventListener('change', () => {
+                const pKey = input.getAttribute('data-pool');
+                if (proposal.pools?.[pKey]) {
+                    const val = parseInt(input.value, 10);
+                    proposal.pools[pKey].max = Math.min(12, Math.max(1, isNaN(val) ? 1 : val));
+                    proposal.pools[pKey].current = Math.min(proposal.pools[pKey].max, proposal.pools[pKey].current);
+                    input.value = String(proposal.pools[pKey].max);
+                    const curInput = modal.querySelector(`.mhc-fae-pool-cur[data-pool="${pKey}"]`);
+                    if (curInput) {
+                        curInput.max = String(proposal.pools[pKey].max);
+                        curInput.value = String(proposal.pools[pKey].current);
+                    }
+                }
+            });
+        });
+
+        modal.querySelector('#mhc_fae_flee_grace_chk')?.addEventListener('change', (e) => {
+            proposal.knobs = proposal.knobs || {};
+            proposal.knobs.flee_grace_toggle = e.target.checked;
+        });
+
+        modal.querySelector('#mhc_fae_shift_select')?.addEventListener('change', (e) => {
+            proposal.knobs = proposal.knobs || {};
+            proposal.knobs.base_attrition_shift = parseInt(e.target.value, 10) || 0;
+        });
+
+        modal.querySelector('#mhc_fae_overflow_select')?.addEventListener('change', (e) => {
+            proposal.knobs = proposal.knobs || {};
+            proposal.knobs.overflow_default = e.target.value;
+        });
+
+        // Milestone radio selection
+        modal.querySelectorAll('input[name="mhc_fae_milestone_pick"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const val = radio.value;
+                modal.querySelectorAll('.mhc-fae-milestone-detail').forEach(el => {
+                    const det = el.getAttribute('data-milestone-detail');
+                    el.style.display = (det === val) ? 'flex' : 'none';
+                });
+            });
+        });
+
+        const tagSelect = modal.querySelector('#mhc_fae_tag_select');
+        const customTagInput = modal.querySelector('#mhc_fae_custom_tag_input');
+        tagSelect?.addEventListener('change', () => {
+            if (!customTagInput) return;
+            if (tagSelect.value !== 'custom') {
+                customTagInput.value = tagSelect.value;
+            } else {
+                customTagInput.value = '';
+                customTagInput.focus();
+            }
+        });
+    }
+
     // Confirm & Apply Advancement
     const confirmBtn = modal.querySelector('#mhc-confirm-apply-btn');
     confirmBtn?.addEventListener('click', () => {
+        if (isFae && !isRespec) {
+            const selectedMilestoneType = modal.querySelector('input[name="mhc_fae_milestone_pick"]:checked')?.value;
+            if (selectedMilestoneType === 'heal_scar') {
+                const scarVal = modal.querySelector('#mhc_fae_heal_scar_select')?.value || '';
+                const restorePoolVal = modal.querySelector('#mhc_fae_restore_pool_select')?.value || '';
+                if (scarVal) {
+                    proposal.faeMilestone = { type: 'heal_scar', scar: scarVal };
+                } else if (restorePoolVal) {
+                    proposal.faeMilestone = { type: 'heal_scar', restorePool: restorePoolVal };
+                } else {
+                    proposal.faeMilestone = { type: 'heal_scar' };
+                }
+            } else if (selectedMilestoneType === 'new_capability') {
+                const customInputVal = modal.querySelector('#mhc_fae_custom_tag_input')?.value?.trim();
+                const selectVal = modal.querySelector('#mhc_fae_tag_select')?.value;
+                const chosenTag = customInputVal || (selectVal !== 'custom' ? selectVal : '') || '';
+                proposal.faeMilestone = { type: 'new_capability', tag: chosenTag };
+            } else if (selectedMilestoneType === 'hardened_reserve') {
+                const targetPool = modal.querySelector('#mhc_fae_hardened_pool_select')?.value;
+                proposal.faeMilestone = { type: 'hardened_reserve', pool: targetPool };
+            }
+            if (proposal.faeMilestone) {
+                applyFaeMilestoneSelection(proposal, proposal.faeMilestone);
+            }
+        }
+
         if (isPbta && !isRespec) {
             const selectedAdvType = modal.querySelector('input[name="mhc_pbta_advance_pick"]:checked')?.value;
             if (selectedAdvType === 'stat_boost') {
@@ -1831,7 +2396,13 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
 
         if (commitResult.success) {
             if (dossier?.protagonist) {
-                if (isPbta) {
+                if (isFae) {
+                    dossier.protagonist.pools = JSON.parse(JSON.stringify(proposal.pools));
+                    dossier.protagonist.positiveTags = [...(proposal.positiveTags || [])];
+                    dossier.protagonist.negativeTags = [...(proposal.negativeTags || [])];
+                    dossier.config = dossier.config || {};
+                    dossier.config.knobs = { ...(proposal.knobs || {}) };
+                } else if (isPbta) {
                     dossier.protagonist.moves = [...(proposal.newFeatures || [])];
                     if (proposal.harm) dossier.protagonist.harm = { ...proposal.harm };
                     if (proposal.stats) dossier.protagonist.stats = { ...proposal.stats };
@@ -1866,9 +2437,11 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             persistCompanionDossier(chatId, dossier);
 
             if (typeof toastr !== 'undefined') {
-                const successMsg = isPbta
-                    ? (isRespec ? 'Playbook moves and harm clocks updated!' : `Playbook advanced for ${proposal.characterName}!`)
-                    : (isRespec ? `Build changes saved for ${proposal.characterName} (Level ${proposal.currentLevel})!` : `Advanced to Level ${proposal.targetLevel}!`);
+                const successMsg = isFae
+                    ? (isRespec ? `FAE pools, tags, and knobs tuned and saved for ${proposal.characterName}!` : `Milestone reward applied for ${proposal.characterName}!`)
+                    : (isPbta
+                        ? (isRespec ? 'Playbook moves and harm clocks updated!' : `Playbook advanced for ${proposal.characterName}!`)
+                        : (isRespec ? `Build changes saved for ${proposal.characterName} (Level ${proposal.currentLevel})!` : `Advanced to Level ${proposal.targetLevel}!`));
                 toastr.success(successMsg, 'Level-Up Engine');
             }
 

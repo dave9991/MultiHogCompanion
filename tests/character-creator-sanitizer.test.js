@@ -1,6 +1,8 @@
 import assert from 'node:assert';
 import {
     isValidCharacterName,
+    stripMarkdownNameArtifacts,
+    sanitizeCharacterHeaderInMemo,
     extractNameFromBio,
     sanitizeCharacterStockPrompt,
     rectifyMemoCharacterName,
@@ -9,6 +11,10 @@ import {
     sanitizeRawGenerationArgs,
     installMacroSyntaxSanitizer,
 } from '../character-creator-sanitizer.js';
+import {
+    extractNameFromMemo,
+    getMultihogPlayerName,
+} from '../persona-matching.js';
 
 console.log('--- Running Character Creator Sanitizer Test Suite ---');
 
@@ -29,7 +35,22 @@ assert.strictEqual(isValidCharacterName('a'), false, 'Rejects single character')
 assert.strictEqual(isValidCharacterName('Edmund Wilson'), true, 'Accepts Edmund Wilson');
 assert.strictEqual(isValidCharacterName('John "The axe" Smith'), true, 'Accepts John "The axe" Smith');
 assert.strictEqual(isValidCharacterName('Valerius Thorne'), true, 'Accepts Valerius Thorne');
+assert.strictEqual(isValidCharacterName('**Lou'), false, 'Rejects **Lou with raw markdown');
+assert.strictEqual(isValidCharacterName('`Lou`'), false, 'Rejects `Lou` with raw markdown backticks');
+assert.strictEqual(isValidCharacterName('Lou'), true, 'Accepts clean Lou');
 console.log('✓ isValidCharacterName properly identifies valid vs macro/placeholder names');
+
+// 1b. stripMarkdownNameArtifacts tests
+console.log('Testing stripMarkdownNameArtifacts...');
+assert.strictEqual(stripMarkdownNameArtifacts('**Lou**'), 'Lou', 'Strips bold asterisks');
+assert.strictEqual(stripMarkdownNameArtifacts('**Lou (The Sellsword)**'), 'Lou', 'Strips bold and parenthetical archetype');
+assert.strictEqual(stripMarkdownNameArtifacts('Lou (The Sellsword)** (The Sellsword)'), 'Lou', 'Strips double parenthetical archetype and bold');
+assert.strictEqual(stripMarkdownNameArtifacts('`Lou`'), 'Lou', 'Strips backticks');
+assert.strictEqual(stripMarkdownNameArtifacts('<b>Lou</b>'), 'Lou', 'Strips HTML tags');
+assert.strictEqual(stripMarkdownNameArtifacts('- **Lou (The Sellsword)**'), 'Lou', 'Strips leading bullet and markdown');
+assert.strictEqual(stripMarkdownNameArtifacts(null), '', 'Handles null');
+assert.strictEqual(stripMarkdownNameArtifacts(undefined), '', 'Handles undefined');
+console.log('✓ stripMarkdownNameArtifacts cleanses markdown and parentheticals');
 
 // 2. extractNameFromBio tests
 console.log('Testing extractNameFromBio...');
@@ -76,6 +97,42 @@ User (Warrior): 10/10 HP
 const rectifiedUser = rectifyMemoCharacterName(genericMemo, 'Conan');
 assert.ok(rectifiedUser.includes('[CHARACTER]\nConan (Warrior): 10/10 HP'), 'Rectifies User to Conan');
 console.log('✓ rectifyMemoCharacterName repairs corrupted memos');
+
+// 4b. sanitizeCharacterHeaderInMemo & markdown header tests
+console.log('Testing sanitizeCharacterHeaderInMemo...');
+const boldMemo = `[CHARACTER]
+**Lou (The Sellsword)**: 10/10 HP | Pool: Health (10/10)
+[/CHARACTER]`;
+const sanitizedBold = sanitizeCharacterHeaderInMemo(boldMemo);
+assert.ok(sanitizedBold.includes('Lou (The Sellsword): 10/10 HP'), 'Strips bold artifacts from header line');
+
+const dupMemo = `[CHARACTER]
+Lou (The Sellsword)** (The Sellsword): 10/10 HP
+[/CHARACTER]`;
+const sanitizedDup = sanitizeCharacterHeaderInMemo(dupMemo);
+assert.ok(sanitizedDup.includes('Lou (The Sellsword): 10/10 HP'), 'Deduplicates duplicated parentheticals');
+
+const macroMemo = `[CHARACTER]
+{{user}} (The Sellsword): 10/10 HP
+[/CHARACTER]`;
+const sanitizedFallback = sanitizeCharacterHeaderInMemo(macroMemo, '**Lou');
+assert.ok(sanitizedFallback.includes('Lou (The Sellsword): 10/10 HP'), 'Replaces macro and cleans fallback name');
+console.log('✓ sanitizeCharacterHeaderInMemo cleanly sanitizes header lines');
+
+// 4c. extractNameFromMemo and getMultihogPlayerName with markdown artifacts
+console.log('Testing extractNameFromMemo and getMultihogPlayerName...');
+assert.strictEqual(extractNameFromMemo(boldMemo), 'Lou', 'extractNameFromMemo handles bold memo');
+assert.strictEqual(extractNameFromMemo(dupMemo), 'Lou', 'extractNameFromMemo handles duplicate archetype memo');
+
+const mockSettings = {
+    chatStates: {
+        chat123: {
+            playerCharacter: { name: '**Lou' },
+        },
+    },
+};
+assert.strictEqual(getMultihogPlayerName('chat123', mockSettings), 'Lou', 'getMultihogPlayerName strips markdown from playerCharacter');
+console.log('✓ extractNameFromMemo and getMultihogPlayerName handle markdown artifacts cleanly');
 
 // 5. determineEffectiveCharacterName tests
 console.log('Testing determineEffectiveCharacterName...');

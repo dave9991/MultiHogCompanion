@@ -6,15 +6,18 @@
             <div class="mhc-header-title">
                 <span class="mhc-header-icon">🎩</span>
                 <div>
-                    <h3 style="margin: 0; font-size: 1.15em; font-weight: 700;">PbtA Concierge</h3>
+                    <h3 id="mhc_concierge_modal_title" style="margin: 0; font-size: 1.25em;">PbtA Concierge</h3>
                     <small style="opacity: 0.75; font-size: 0.78em;">Conversational Session Zero &amp; Campaign Architect</small>
                 </div>
             </div>
             
             <div class="mhc-header-controls">
-                <!-- System Badge -->
-                <div id="mhc_header_system_badge" class="mhc-system-badge" title="Detected PbtA Narrative System">
-                    🎲 Fantasy (Dungeon World)
+                <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px;" title="Switch Session Zero Ruleset Engine between PbtA (2d6) and FAE (4dF)">
+                    <button type="button" class="mhc-ruleset-btn active" data-ruleset="pbta" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🎲 PbtA (2d6)</button>
+                    <button type="button" class="mhc-ruleset-btn" data-ruleset="fae" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🕯️ FAE (4dF)</button>
+                </div>
+                <div id="mhc_header_system_badge" class="mhc-system-badge" title="Active Genre / System (Concierge can use any preset or create a custom setting)">
+                    ✨ Any Genre / Custom
                 </div>
 
                 <!-- Connection Selector Dropdown -->
@@ -99,7 +102,7 @@
                     <!-- System Card -->
                     <div class="mhc-card mhc-card-system">
                         <div class="mhc-card-header">
-                            <span class="mhc-card-title">🎲 PbtA Engine</span>
+                            <span id="mhc_deck_engine_title" class="mhc-card-title">🎲 PbtA Engine</span>
                             <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
                         </div>
                         <div class="mhc-deck-title-row" style="margin: 6px 0 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;">

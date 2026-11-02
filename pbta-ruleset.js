@@ -1241,14 +1241,19 @@ export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName =
     const moveNames = genre.moves.map(m => m.split('—')[0].replace(/\s*\(\+Attribute\)/, '').trim()).join(', ');
     const archetypesSnippet = genre.archetypes.slice(0, 4).join(', ');
 
+    const mentionsParty = typeof customNotes === 'string' && /\b(friends?|companions?|party|crew|squad|allies|partners|team|band|fellowship|retinue|brothers|sisters|comrades|mercenaries)\b/i.test(customNotes);
+
     return [
         `RULES: PbtA ruleset (${genre.label}).`,
         charName ? `NAME: ${charName}.` : null,
-        `ATTRIBUTES: Modifier array (+2, +1, +1, 0, -1) across: ${genre.stats.join(', ')}. Exactly ONE stat is -1.`,
-        `PLAYBOOK: Choose ONE PbtA Playbook (e.g. ${archetypesSnippet}). Output as "Name (Playbook)". FORBIDDEN: No D&D subclasses (no Arcane Archer, Battle Master, Assassin).`,
+        `ATTRIBUTES: Modifiers (+2, +1, +1, 0, -1) across: ${genre.stats.join(', ')}. Exactly ONE stat is -1.`,
+        `PLAYBOOK: Choose ONE PbtA Playbook (e.g. ${archetypesSnippet}). Output as "Name (Playbook)". No D&D classes.`,
         `MOVES (pick 2): ${moveNames}.`,
-        `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or damage dice. Use Harm (0/5), Armor (0), weapon tags, and XP: 0/5 in [CHARACTER].`,
-        `FORMAT MANDATE: Output [CHARACTER] with 5/5 HP | Harm: 0/5 | Armor: 0, Stats with modifiers, ((PILLS)) Moves: Move 1 (detail), ((PILLS)) Gear: Item (tags), Wealth, ((PILLS)) Conditions: None, Hold/Forward: None, XP: 0/5, Status: Healthy.`,
+        `NO D&D: No character levels, [XP] blocks, spell slots, AC/DC, or damage dice. Use Harm (0/5), Armor (0), weapon tags, XP: 0/5 in [CHARACTER].`,
+        `FORMAT MANDATE: Output [CHARACTER] with 5/5 HP | Harm: 0/5 | Armor: 0, Stats with modifiers, ((PILLS)) Moves: Move 1 (detail), ((PILLS)) Gear: Item (tags), Wealth, ((PILLS)) Conditions: None, Hold/Forward: None, XP: 0/5, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`,
+        mentionsParty
+            ? `PARTY OVERRIDE (EXPLICITLY INSTRUCTED): You ARE explicitly instructed to output a [PARTY] block! Because the scenario mentions companions/friends, generate a [PARTY]...[/PARTY] block with 1–2 fitting starting companions using PbtA Playbooks, Harm: 0/5, Stats, ((PILLS)) Moves, ((PILLS)) Gear, ((PILLS)) Bonds, ((PILLS)) Conditions: None, Status: Healthy.`
+            : null,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }

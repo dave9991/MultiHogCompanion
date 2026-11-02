@@ -41,6 +41,7 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
                 ruleset: 'fae',
                 systemKey,
                 systemLabel: genreObj.label,
+                genreEstablished: Boolean(genreKey && FAE_GENRES[genreKey]),
                 premise: '',
                 tone: '',
                 createdAt: Date.now(),
@@ -119,12 +120,15 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
         return dossier;
     }
 
+    const pbtaKey = genreKey && PBTA_GENRES[genreKey] ? genreKey : 'fantasy';
+    const pbtaGenre = PBTA_GENRES[pbtaKey] || PBTA_GENRES.fantasy;
     return {
         meta: {
             title: 'Untitled PbtA Campaign',
             ruleset: 'pbta',
-            systemKey: 'fantasy',
-            systemLabel: PBTA_GENRES.fantasy.label,
+            systemKey: pbtaKey,
+            systemLabel: pbtaGenre.label,
+            genreEstablished: Boolean(genreKey && PBTA_GENRES[genreKey]),
             premise: '',
             tone: '',
             createdAt: Date.now(),
@@ -1142,6 +1146,8 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
+    const sysLabelMatch = topLevelRaw.match(/system_label\s*:\s*([^\n\r]+)/i);
+
     const sysMatch = topLevelRaw.match(/system\s*:\s*([^\n\r]+)/i);
     if (sysMatch) {
         let rawKey = sysMatch[1].trim();
@@ -1150,28 +1156,39 @@ export function applyDossierUpdates(text, dossier) {
             rawKey = rawKey.replace(/^fae[:/]\s*/i, '').trim();
         }
         const isFae = updated.meta?.ruleset === 'fae' || Boolean(FAE_GENRES[rawKey.toLowerCase()]);
-        if (isFae && FAE_GENRES[rawKey.toLowerCase()]) {
-            const key = rawKey.toLowerCase();
+        if (isFae) {
             updated.meta.ruleset = 'fae';
-            if (updated.meta.systemKey !== key) {
+            updated.meta.genreEstablished = true;
+            const normFaeKey = rawKey.toLowerCase();
+            if (FAE_GENRES[normFaeKey]) {
+                const key = normFaeKey;
+                const nextLabel = sysLabelMatch ? sysLabelMatch[1].trim() : FAE_GENRES[key].label;
+                if (updated.meta.systemKey !== key || updated.meta.systemLabel !== nextLabel) {
+                    changes.push(`FAE Engine set to ${nextLabel} (${key})`);
+                }
                 updated.meta.systemKey = key;
-                updated.meta.systemLabel = FAE_GENRES[key].label;
-                changes.push(`FAE Engine set to ${updated.meta.systemLabel} (${key})`);
-            }
-            if (!updated.protagonist.pools || Object.keys(updated.protagonist.pools).length === 0) {
+                updated.meta.systemLabel = nextLabel;
+
                 const clonedPools = {};
                 for (const [k, p] of Object.entries(FAE_GENRES[key].pools)) {
                     clonedPools[k] = { ...p, key: p.key || k, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
                 }
                 updated.protagonist.pools = clonedPools;
-            }
-            updated.config = updated.config || {};
-            if (!updated.config.knobs) {
+                updated.config = updated.config || {};
                 updated.config.knobs = { ...FAE_GENRES[key].knobs };
+            } else {
+                const customKey = rawKey.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'custom';
+                const customLabel = sysLabelMatch ? sysLabelMatch[1].trim() : (customKey === 'custom' ? 'Custom FAE Setting' : rawKey.trim());
+                if (updated.meta.systemKey !== customKey || updated.meta.systemLabel !== customLabel) {
+                    changes.push(`FAE Engine set to ${customLabel} (${customKey})`);
+                }
+                updated.meta.systemKey = customKey;
+                updated.meta.systemLabel = customLabel;
             }
         } else {
             const key = normalizeSystemKey(rawKey);
             if (key && PBTA_GENRES[key]) {
+                updated.meta.genreEstablished = true;
                 if (updated.meta.systemKey !== key) {
                     updated.meta.systemKey = key;
                     updated.meta.systemLabel = PBTA_GENRES[key].label;
@@ -1181,7 +1198,7 @@ export function applyDossierUpdates(text, dossier) {
                 errors.push(`Unknown system engine "${rawKey}". Available: ${Object.keys(PBTA_GENRES).join(', ')}`);
             }
         }
-    } else if (updated.meta?.ruleset === 'fae' && (!updated.meta.systemKey || !FAE_GENRES[updated.meta.systemKey])) {
+    } else if (updated.meta?.ruleset === 'fae' && !updated.meta.systemKey) {
         const key = 'cosmic_horror';
         updated.meta.systemKey = key;
         updated.meta.systemLabel = FAE_GENRES[key].label;
@@ -1195,6 +1212,15 @@ export function applyDossierUpdates(text, dossier) {
         updated.config = updated.config || {};
         if (!updated.config.knobs) {
             updated.config.knobs = { ...FAE_GENRES[key].knobs };
+        }
+    }
+
+    if (sysLabelMatch && !sysMatch) {
+        const nextLabel = sysLabelMatch[1].trim();
+        if (updated.meta.systemLabel !== nextLabel) {
+            updated.meta.systemLabel = nextLabel;
+            updated.meta.genreEstablished = true;
+            changes.push(`System label set to "${nextLabel}"`);
         }
     }
 
@@ -1400,9 +1426,11 @@ export function applyDossierUpdates(text, dossier) {
             poolItems = kv.pools.split('|').map(s => s.trim()).filter(Boolean);
         }
         if (poolItems.length > 0) {
-            updated.protagonist.pools = updated.protagonist.pools || {};
+            const parsedPools = {};
+            const colorCycle = ['green', 'purple', 'amber', 'cyan', 'red'];
+            let poolIdx = 0;
             for (const item of poolItems) {
-                const poolMatch = item.match(/^([A-Za-z0-9_ &]+?)\s*:\s*(\d+)(?:\s*\/\s*(\d+))?(?:\s*\((.*?)\))?/i);
+                const poolMatch = item.match(/^([A-Za-z0-9_ &/-]+?)\s*:\s*(\d+)(?:\s*\/\s*(\d+))?(?:\s*\((.*?)\))?/i);
                 if (poolMatch) {
                     const label = poolMatch[1].trim();
                     const key = label.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -1413,29 +1441,64 @@ export function applyDossierUpdates(text, dossier) {
                     const optObj = {};
                     if (parenOptions) {
                         for (const opt of parenOptions.split(',')) {
-                            const [k, v] = opt.split(':').map(s => s.trim());
-                            if (k && v) {
-                                optObj[k.toLowerCase()] = v;
+                            const colonIdx = opt.indexOf(':');
+                            if (colonIdx !== -1) {
+                                const k = opt.slice(0, colonIdx).trim().toLowerCase();
+                                const v = opt.slice(colonIdx + 1).trim();
+                                if (k && v) {
+                                    optObj[k] = v;
+                                }
                             }
                         }
                     }
 
-                    const existing = updated.protagonist.pools[key] || {};
-                    const barColor = existing.barColor || (key === 'health' || key === 'body' ? 'green' : (key === 'sanity' || key === 'nerve' ? 'purple' : 'amber'));
-                    updated.protagonist.pools[key] = {
+                    const rawDrain = optObj.passive_drain || optObj.drain;
+                    let parsedDrain = null;
+                    if (rawDrain) {
+                        if (typeof rawDrain === 'object') {
+                            parsedDrain = { ...rawDrain };
+                        } else {
+                            const drainStr = String(rawDrain).trim();
+                            if (drainStr.includes(':')) {
+                                const parts = drainStr.split(':');
+                                const trigger = parts[0].trim();
+                                const amount = parseInt(parts[1], 10) || 1;
+                                const flavor = parts.slice(2).join(':').trim();
+                                parsedDrain = { trigger, amount, flavor, reason: flavor };
+                            } else {
+                                parsedDrain = { trigger: drainStr, amount: 1, flavor: '', reason: '' };
+                            }
+                        }
+                    }
+
+                    const existing = updated.protagonist.pools?.[key] || {};
+                    const barColor = optObj.color || existing.barColor || (key === 'health' || key === 'body' ? 'green' : (key === 'sanity' || key === 'nerve' ? 'purple' : colorCycle[poolIdx % colorCycle.length]));
+                    parsedPools[key] = {
                         key,
                         label: existing.label || label,
                         barColor,
                         current: cur,
                         max,
                         recovery: optObj.recovery || existing.recovery || 'camp_or_sleep',
-                        passive_drain: optObj.passive_drain || existing.passive_drain || null,
-                        strain_flavor: optObj.strain_flavor || existing.strain_flavor || '',
-                        zero_debuff: optObj.zero_debuff || existing.zero_debuff || '',
-                        on_overflow: optObj.overflow || optObj.on_overflow || existing.on_overflow || 'lethal',
+                        passive_drain: parsedDrain || (existing.passive_drain ? { ...existing.passive_drain } : null),
+                        strain_flavor: optObj.strain_flavor || optObj.strain || existing.strain_flavor || '',
+                        zero_debuff: optObj.zero_debuff || existing.zero_debuff || 'Clamped & Exhausted',
+                        on_overflow: optObj.overflow || optObj.on_overflow || existing.on_overflow || 'scar_and_ko',
                     };
+                    poolIdx++;
                     changes.push(`Protagonist pool ${label} set to ${cur}/${max}`);
                 }
+            }
+
+            if (Object.keys(parsedPools).length > 0) {
+                const existingPools = updated.protagonist.pools;
+                const hasExistingCommonKeys = existingPools && Object.keys(parsedPools).some(k => Boolean(existingPools[k]));
+                if (Object.keys(parsedPools).length >= 2 || !existingPools || !hasExistingCommonKeys) {
+                    updated.protagonist.pools = parsedPools;
+                } else {
+                    updated.protagonist.pools = { ...(existingPools || {}), ...parsedPools };
+                }
+                updated.pools = updated.protagonist.pools;
             }
         }
     }
@@ -2217,16 +2280,21 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
+    if (changes.length > 0) {
+        updated.meta = updated.meta || {};
+        updated.meta.genreEstablished = true;
+    }
+
     if (updated.meta?.ruleset === 'fae') {
         updated.pools = updated.protagonist.pools;
-        updated.knobs = updated.config.knobs;
+        updated.knobs = updated.config?.knobs;
         updated.character = {
             name: updated.protagonist.name || 'Protagonist',
             archetype: updated.protagonist.archetype || updated.protagonist.playbook || 'Investigator',
             positive_tags: updated.protagonist.positiveTags || [],
             negative_tags: updated.protagonist.negativeTags || [],
             scenes_completed: 0,
-            scenes_target: updated.config.pacingScenes || 4,
+            scenes_target: updated.config?.pacingScenes || 4,
         };
     }
 
@@ -2489,7 +2557,10 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         const rawFaeKey = (dossier.meta.systemKey || '').toLowerCase();
         if (rawFaeKey && FAE_GENRES[rawFaeKey]) {
             dossier.meta.systemKey = rawFaeKey;
-            dossier.meta.systemLabel = FAE_GENRES[rawFaeKey].label;
+            dossier.meta.systemLabel = dossier.meta.systemLabel && rawFaeKey === 'custom' ? dossier.meta.systemLabel : FAE_GENRES[rawFaeKey].label;
+        } else if (rawFaeKey) {
+            dossier.meta.systemKey = rawFaeKey;
+            dossier.meta.systemLabel = dossier.meta.systemLabel || (rawFaeKey === 'custom' ? 'Custom FAE Setting' : rawFaeKey);
         } else {
             dossier.meta.systemKey = 'cosmic_horror';
             dossier.meta.systemLabel = FAE_GENRES.cosmic_horror.label;
@@ -2516,6 +2587,14 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.meta.premise = dossier.meta.premise || '';
     dossier.meta.tone = dossier.meta.tone || '';
     dossier.meta.createdAt = dossier.meta.createdAt || Date.now();
+    if (dossier.meta.genreEstablished !== undefined) {
+        dossier.meta.genreEstablished = Boolean(dossier.meta.genreEstablished);
+    } else {
+        dossier.meta.genreEstablished = Boolean(
+            dossier.meta.systemKey &&
+            (FAE_GENRES[dossier.meta.systemKey] || PBTA_GENRES[dossier.meta.systemKey] || dossier.meta.systemKey === 'custom')
+        );
+    }
 
     const activeGenre = isFae
         ? (FAE_GENRES[dossier.meta.systemKey] || FAE_GENRES.cosmic_horror)
@@ -2635,9 +2714,11 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
             : (Array.isArray(dossier.protagonist.scars) ? dossier.protagonist.scars : []);
 
         dossier.protagonist.pools = dossier.protagonist.pools || {};
-        for (const [k, p] of Object.entries(faeGenreObj.pools)) {
-            if (!dossier.protagonist.pools[k]) {
-                dossier.protagonist.pools[k] = { ...p, key: p.key || k, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
+        if (Object.keys(dossier.protagonist.pools).length === 0) {
+            for (const [k, p] of Object.entries(faeGenreObj.pools)) {
+                if (!dossier.protagonist.pools[k]) {
+                    dossier.protagonist.pools[k] = { ...p, key: p.key || k, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
+                }
             }
         }
 

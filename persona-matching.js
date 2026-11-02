@@ -10,6 +10,9 @@
  * - Leading bullet points and markdown in [CHARACTER] memos
  */
 
+import { stripMarkdownNameArtifacts, isValidCharacterName } from './character-creator-sanitizer.js';
+export { isValidCharacterName };
+
 /**
  * Generates normalized lookup keys/variants for a character or persona name.
  * Handles quoted nicknames (e.g. John "The axe" Smith), smart quotes, HTML entities,
@@ -113,30 +116,6 @@ export async function findMatchingPersona(charName, providedPersonas = null) {
 }
 
 /**
- * Checks whether a candidate string is a valid, real character name
- * (not a template macro or generic system placeholder).
- * @param {string} name
- * @returns {boolean}
- */
-export function isValidCharacterName(name) {
-    if (!name || typeof name !== 'string') return false;
-    const trimmed = name.trim();
-    if (!trimmed || trimmed.length < 2 || trimmed.length > 80) return false;
-
-    // Reject template macros anywhere in the name: {{user}}, {{char}}, {user}, {char}, etc.
-    if (/\{+(?:user|char|name|player)\}+/i.test(trimmed)) return false;
-    if (/^\{+.*?\}$/.test(trimmed)) return false;
-
-    // Strip bracket/brace artifacts and examine core word
-    const cleaned = trimmed.replace(/[{}]/g, '').trim();
-    if (/^(character|unknown|user|name|player|my character|unnamed|pc)$/i.test(cleaned)) {
-        return false;
-    }
-
-    return true;
-}
-
-/**
  * Helper to extract character name from a memo string.
  * @param {string} memo
  * @returns {string | null}
@@ -146,29 +125,41 @@ export function extractNameFromMemo(memo) {
     const charBlock = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
     if (charBlock) {
         let firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
-        // Decode common HTML entities and strip leading bullets or MultiHog ((ICON)) / ((BAR...)) markers
+        // Decode common HTML entities, strip leading bullets or MultiHog ((ICON)) / ((BAR...)) markers, and strip markdown
         firstLine = firstLine
             .replace(/&quot;/g, '"')
             .replace(/&#34;/g, '"')
             .replace(/&apos;/g, "'")
             .replace(/&#39;/g, "'")
-            .replace(/^[-*•–—]\s*/, '')
+            .replace(/^[-*•–—#>\s]+/, '')
             .replace(/^(?:\(\([A-Za-z0-9_]+\)\)\s*)+/, '')
             .replace(/\s*\(\([A-Za-z0-9_]+\)\)[\s\S]*$/, '')
+            .replace(/[*_`~]/g, '')
             .trim();
+
+        // Deduplicate consecutive identical parentheticals (e.g. Lou (The Sellsword)** (The Sellsword))
+        while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(firstLine)) {
+            firstLine = firstLine.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
+        }
+
         const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
         if (m) {
-            const candidate = m[1].trim();
+            const candidate = stripMarkdownNameArtifacts(m[1]);
             if (isValidCharacterName(candidate)) return candidate;
             return null;
         }
-        if (firstLine && isValidCharacterName(firstLine) && firstLine.length <= 50) {
-            return firstLine;
+        const cleanedLine = stripMarkdownNameArtifacts(firstLine);
+        if (cleanedLine && isValidCharacterName(cleanedLine) && cleanedLine.length <= 50) {
+            return cleanedLine;
         }
     }
     const nameField = memo.match(/(?:^|\n)\s*(?:Name|Character Name)\s*[:\|]\s*([^\n\|\[<]{2,60})/im);
     if (nameField) {
-        const candidate = nameField[1].replace(/<[^>]+>/g, '').trim();
+        let fieldVal = nameField[1].replace(/<[^>]+>/g, '').replace(/[*_`~]/g, '').trim();
+        while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(fieldVal)) {
+            fieldVal = fieldVal.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
+        }
+        const candidate = stripMarkdownNameArtifacts(fieldVal);
         if (isValidCharacterName(candidate)) return candidate;
     }
     return null;
@@ -227,14 +218,16 @@ export function getMultihogPlayerName(chatId, providedRpgSettings = null) {
 
     // 1. Chat partition playerCharacter, pbtaCampaignDossier, or companionDossier
     for (const cid of candidateIds) {
-        const pcName = s.chatStates?.[cid]?.playerCharacter?.name;
+        const rawPcName = s.chatStates?.[cid]?.playerCharacter?.name;
+        const pcName = stripMarkdownNameArtifacts(rawPcName);
         if (pcName && isValidCharacterName(pcName)) {
-            return pcName.trim();
+            return pcName;
         }
-        const protoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name
+        const rawProtoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name
             || s.chatStates?.[cid]?.companionDossier?.protagonist?.name;
+        const protoName = stripMarkdownNameArtifacts(rawProtoName);
         if (protoName && isValidCharacterName(protoName)) {
-            return protoName.trim();
+            return protoName;
         }
     }
 
@@ -259,7 +252,7 @@ export function getMultihogPlayerName(chatId, providedRpgSettings = null) {
 
     // 4. Top-level playerCharacter (if live and belongs to this chat)
     if ((isOwnerMatch || isOwnerUnset) && s.playerCharacter?.name) {
-        const topName = s.playerCharacter.name.trim();
+        const topName = stripMarkdownNameArtifacts(s.playerCharacter.name);
         if (isValidCharacterName(topName)) return topName;
     }
 
@@ -288,9 +281,9 @@ export function getMultihogPlayerPortrait(chatId, charName, providedRpgSettings 
     const candidateNames = [];
     const addCandidateName = (raw) => {
         if (!raw || typeof raw !== 'string') return;
-        const trimmed = raw.trim();
-        if (trimmed && isValidCharacterName(trimmed) && !candidateNames.includes(trimmed)) {
-            candidateNames.push(trimmed);
+        const cleaned = stripMarkdownNameArtifacts(raw);
+        if (cleaned && isValidCharacterName(cleaned) && !candidateNames.includes(cleaned)) {
+            candidateNames.push(cleaned);
         }
     };
 

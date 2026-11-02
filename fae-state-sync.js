@@ -19,6 +19,7 @@ import {
     createInitialFaeState,
     sanitizeFaePositiveTags,
 } from './fae-ruleset.js';
+import { stripMarkdownNameArtifacts } from './character-creator-sanitizer.js';
 
 /**
  * Normalizes pool display labels to canonical object keys (e.g. "Torch & Supplies" -> "torch_and_supplies").
@@ -202,7 +203,13 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
     const charLines = charText.split('\n');
 
     // 1. Line 1: Name (Archetype): cur/max HP | Pool: Label (cur/max) | Scenes: X/Y | XP: X/Y
-    const line1 = charLines.find(l => /HP/i.test(l)) || '';
+    let line1 = charLines.find(l => /HP/i.test(l)) || '';
+    if (line1) {
+        line1 = line1.replace(/[*_`~]/g, '');
+        while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(line1)) {
+            line1 = line1.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
+        }
+    }
     const clauses = line1.split('|').map(s => s.trim());
 
     let name = baseState.character.name;
@@ -216,7 +223,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
     if (clauses.length > 0) {
         const headMatch = clauses[0].match(/^\s*[-*+•–—]?\s*(.+?)(?:\s*\(([^)]+)\))?:\s*([+-]?\d+)\/(\d+)\s*HP/i);
         if (headMatch) {
-            name = headMatch[1].trim();
+            name = stripMarkdownNameArtifacts(headMatch[1]) || headMatch[1].trim();
             archetype = headMatch[2] ? headMatch[2].trim() : archetype;
             primaryCur = parseInt(headMatch[3], 10);
             primaryMax = parseInt(headMatch[4], 10);
@@ -578,10 +585,33 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
  */
 export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', options = {}) {
     let state;
+    const isObj = typeof faeStateOrGenreKey === 'object' && faeStateOrGenreKey !== null;
+
     if (typeof faeStateOrGenreKey === 'string') {
         state = createInitialFaeState(faeStateOrGenreKey, options);
-    } else if (faeStateOrGenreKey && typeof faeStateOrGenreKey === 'object') {
-        state = faeStateOrGenreKey;
+    } else if (isObj) {
+        if (faeStateOrGenreKey.pools && faeStateOrGenreKey.character) {
+            state = faeStateOrGenreKey;
+        } else {
+            const genreKey = faeStateOrGenreKey.genreKey || faeStateOrGenreKey.config?.genre || faeStateOrGenreKey.config?.faeGenre || faeStateOrGenreKey.genre || options.genreKey || 'cosmic_horror';
+            const p = faeStateOrGenreKey.protagonist || faeStateOrGenreKey.character || {};
+            const charOverrides = {
+                name: p.name || 'Protagonist',
+                archetype: p.archetype || p.playbook,
+                positive_tags: p.positiveTags || p.positive_tags || p.tags,
+                negative_tags: p.negativeTags || p.negative_tags || p.scars,
+                temp_advantage: p.temp_advantage,
+                scenes_completed: p.scenes_completed,
+                scenes_target: p.scenes_target,
+            };
+            const overrides = {
+                ...faeStateOrGenreKey,
+                character: { ...charOverrides, ...(faeStateOrGenreKey.character || {}) },
+                pools: faeStateOrGenreKey.pools || p.pools || options.pools,
+                knobs: faeStateOrGenreKey.knobs || faeStateOrGenreKey.config?.knobs || options.knobs,
+            };
+            state = createInitialFaeState(genreKey, overrides);
+        }
     } else {
         state = createInitialFaeState('cosmic_horror', options);
     }
@@ -593,17 +623,118 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
     blocks.push(`[TIME]\n${timeStr}\n[/TIME]`);
 
     // [LOCATION]
-    const locStr = options.location || 'The Starting Threshold';
+    const locStr = options.location || (isObj ? (faeStateOrGenreKey.theKick?.startingLocation || faeStateOrGenreKey.maps?.[0]?.site) : null) || 'Starting Location';
     blocks.push(`[LOCATION]\n${locStr}\n[/LOCATION]`);
 
     // [CHARACTER]
     blocks.push(formatFaeCharacterMemoBlock(state));
 
-    // [COMBAT] (optional)
+    // [PARTY] if companion NPCs exist and partyMode !== 'solo'
+    if (isObj && faeStateOrGenreKey.config?.partyMode !== 'solo' && Array.isArray(faeStateOrGenreKey.npcs)) {
+        const companions = faeStateOrGenreKey.npcs.filter(n =>
+            n && n.name && /companion|party|sidekick|follower|partner|ally|friend|crew|squad/i.test(n.role || 'companion')
+        );
+        if (companions.length > 0) {
+            const partyLines = ['[PARTY]'];
+            const primaryPool = Object.values(state.pools || {})[0] || { label: 'Health', max: 8 };
+            const primaryLabel = primaryPool.label || 'Health';
+            const primaryMax = primaryPool.max || 8;
+
+            for (let i = 0; i < companions.length; i++) {
+                const comp = companions[i];
+                const cName = (comp.name || 'Companion').trim();
+                let cArchetype = comp.archetype || comp.playbook || '';
+                if (!cArchetype) {
+                    const rawRole = (comp.role || 'Companion').replace(/\s*\([^)]*\)/g, '').trim();
+                    cArchetype = rawRole || 'Companion';
+                }
+                cArchetype = cArchetype.replace(/[()]/g, '').trim() || 'Companion';
+
+                const cAppearance = (comp.appearance || comp.description || (comp.demeanor ? `${comp.demeanor} demeanor` : '')).trim();
+
+                const rawTags = comp.positiveTags || comp.tags || comp.moves || ['Resourceful (adept survivor)'];
+                const tagsList = Array.isArray(rawTags)
+                    ? rawTags
+                    : typeof rawTags === 'string'
+                        ? splitTopLevelPillItems(rawTags)
+                        : [String(rawTags)];
+                const cTagsStr = tagsList.map(t => normalizeFaePill(t, 'Positive Tag')).filter(Boolean).join(', ') || 'Resourceful (adept survivor)';
+
+                const rawBoons = comp.boons || comp.gear || ['Field Kit (1 Use)'];
+                const boonsList = Array.isArray(rawBoons)
+                    ? rawBoons
+                    : typeof rawBoons === 'string'
+                        ? splitTopLevelPillItems(rawBoons)
+                        : [String(rawBoons)];
+                const cBoonsStr = boonsList.map(b => normalizeFaePill(b, 'Boon')).filter(Boolean).join(', ') || 'Field Kit (1 Use)';
+
+                if (i > 0) partyLines.push('');
+                partyLines.push(
+                    `- ${cName} (${cArchetype}): ${primaryMax}/${primaryMax} HP | Pool: ${primaryLabel} (${primaryMax}/${primaryMax})`,
+                    ...(cAppearance ? [`Appearance: ${cAppearance}`] : []),
+                    `((PILLS)) Positive Tags: ${cTagsStr}`,
+                    `((PILLS)) Boons: ${cBoonsStr}`,
+                    `((PILLS)) Scars & Debuffs: None`,
+                    `Status: Healthy`
+                );
+            }
+            partyLines.push('[/PARTY]');
+            blocks.push(partyLines.join('\n'));
+        }
+    }
+
+    // [DUNGEON] if maps exist
+    if (isObj && faeStateOrGenreKey.maps?.[0]?.site) {
+        blocks.push(`[DUNGEON]\nActive Site: ${faeStateOrGenreKey.maps[0].site}\nThreat: ${faeStateOrGenreKey.maps[0].threat || 'MODERATE'}\n[/DUNGEON]`);
+    }
+
+    // [FACTIONS] if factions exist
+    if (isObj && Array.isArray(faeStateOrGenreKey.factions) && faeStateOrGenreKey.factions.length > 0) {
+        const fLines = ['[FACTIONS]'];
+        for (const f of faeStateOrGenreKey.factions) {
+            const rawStanding = (f.standing || 'Neutral').trim();
+            let standingFormatted = rawStanding;
+            const lower = rawStanding.toLowerCase();
+            if (!rawStanding.startsWith('(+)') && !rawStanding.startsWith('(-)') && !rawStanding.startsWith('(+) ') && !rawStanding.startsWith('(-) ')) {
+                if (lower.includes('ally') || lower.includes('allied') || lower.includes('friend') || lower.includes('sympathetic') || lower.includes('honored')) {
+                    standingFormatted = `(+) ${rawStanding}`;
+                } else if (lower.includes('hostile') || lower.includes('rival') || lower.includes('enemy') || lower.includes('hated') || lower.includes('unfriendly')) {
+                    standingFormatted = `(-) ${rawStanding}`;
+                }
+            }
+
+            const pills = [`${standingFormatted} (Standing)`];
+            if (f.agenda) {
+                pills.push(`Agenda (${f.agenda.replace(/[()]/g, '').trim()})`);
+            }
+            if (f.notes) {
+                pills.push(`Notes (${f.notes.replace(/[()]/g, '').trim()})`);
+            }
+
+            fLines.push(`((PILLS)) ${f.name}: ${pills.join(', ')}`);
+        }
+        fLines.push('[/FACTIONS]');
+        blocks.push(fLines.join('\n'));
+    }
+
+    // Custom HUD Module if present
+    const customMod = isObj && faeStateOrGenreKey.worldRules?.customModule;
+    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+        const rawTag = (customMod.tag || customMod.fieldKey || customMod.label || 'CUSTOM')
+            .replace(/[^a-zA-Z0-9_]/g, '_')
+            .toUpperCase();
+        const label = customMod.label || customMod.tag || customMod.fieldKey || 'Custom Tracker';
+        const sampleContent = (customMod.sampleContent || customMod.sample || `${label}: Initialized`).trim();
+        blocks.push(`[${rawTag}]\n${sampleContent}\n[/${rawTag}]`);
+    }
+
+    // [COMBAT]
     if (options.encounter || options.activeEncounter) {
         const enc = options.encounter || options.activeEncounter;
         const encText = (typeof enc === 'string') ? enc : formatFaeEncounterBlock(enc);
         blocks.push(`[COMBAT]\n${encText}\n[/COMBAT]`);
+    } else {
+        blocks.push(`[COMBAT]\nActive: false\n[/COMBAT]`);
     }
 
     return blocks.join('\n\n');

@@ -141,6 +141,28 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSet
         const genreKey = rpgSettings?.faeGenre || rpgSettings?.pbtaGenre || 'cosmic_horror';
         const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
 
+        // Extract active pool names from memo or genre fallback
+        let activePoolNames = [];
+        if (typeof memo === 'string') {
+            const charBlockMatch = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
+            const charText = charBlockMatch ? charBlockMatch[1] : memo;
+            // Primary pool from line: Pool: Health (8/8)
+            const primaryPoolMatch = charText.match(/Pool:\s*([A-Za-z0-9&/ -]+?)(?:\s*\(\d+|\s*\||\n|$)/i);
+            if (primaryPoolMatch) {
+                activePoolNames.push(primaryPoolMatch[1].trim());
+            }
+            // Secondary pools from ((BAR:...)) Label: ...
+            const barMatches = [...charText.matchAll(/\(\(BAR:[^)]+\)\)\s*([A-Za-z0-9&/ -]+?):/gi)];
+            for (const m of barMatches) {
+                if (m[1]) activePoolNames.push(m[1].trim());
+            }
+        }
+        if (activePoolNames.length === 0 && genre?.pools) {
+            activePoolNames = Object.values(genre.pools).map(p => p.label);
+        }
+        const poolNamesStr = activePoolNames.length > 0 ? activePoolNames.join(', ') : 'Health, Sanity/Resolve';
+        const primaryPoolLabel = activePoolNames[0] || 'Health';
+
         if (isDowned) {
             guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS AT A BREAKING POINT / ZERO-STATE (0 HP / Incapacitated):
 - Strict negative constraint: Tags are DISABLED at 0 HP. DO NOT offer bold physical attacks, confident feats, or normal offensive actions.
@@ -157,6 +179,7 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSet
   * Full Finish: Direct resolution against the encounter or objective (requires breaking leverage barriers first if present) — [Full: At-Risk Pool]
   * Stepping-Stone: Partial progress to crack a leverage layer, seize positional advantage, or weaken the opposition — [Stepping-Stone: At-Risk Pool]
   * Bypass / Tactical Pivot: Avoid the threat, create distance, flee, or change the angle of engagement — [Bypass/Retreat: At-Risk Pool]
+- CRITICAL BRACKET RULE: The target immediately after the colon in [Stepping-Stone: <Pool>] or [Full: <Pool>] MUST be an active Resource Pool name (e.g. ${poolNamesStr}) — NEVER put a Positive Tag name in place of the Pool name! If a Positive Tag applies, write [Stepping-Stone: <Pool> | Tag: <TagName>] (e.g., [Stepping-Stone: Health | Tag: Trap-Wise], NEVER [Stepping-Stone: Trap-Wise]).
 - TAG MATCHING: At most 1–2 choices may explicitly match a relevant Positive Tag from the protagonist sheet in brackets: e.g. "— [Stepping-Stone: Health | Tag: Fire Axe]" or "— [Full: Nerve | Tag: Street-Smart]".
 - THREAT & ATTRITION AT RISK: Actions should note which pool is at risk if attrition is suffered (e.g. Health, Nerve, Body, Sanity).
 - STRICT NEGATIVE RESTRAINTS:
@@ -170,6 +193,8 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSet
 Your sole job is to formulate ${choiceCount} suspenseful player choices based on the latest narrative event and character state.
 
 ${guidelines}
+
+- CRITICAL BRACKET RULE: The target immediately after the colon in [Stepping-Stone: <Pool>] or [Full: <Pool>] MUST be an active Resource Pool name (e.g. ${poolNamesStr}) — NEVER put a Positive Tag name in place of the Pool name! If a Positive Tag applies, write [Stepping-Stone: <Pool> | Tag: <TagName>] (e.g., [Stepping-Stone: Health | Tag: Trap-Wise], NEVER [Stepping-Stone: Trap-Wise]).
 
 FORMAT CONTRACT:
 - Output ONLY a <choices> block containing <button> elements.

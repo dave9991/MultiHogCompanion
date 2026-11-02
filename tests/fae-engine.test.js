@@ -412,6 +412,49 @@ describe('Freeform Attrition Engine (FAE) — State Sync & Post-Turn Reconciliat
         assert.strictEqual(parsed.character.temp_advantage, 'Flank Opening');
     });
 
+    test('parseFaeStateFromMemo and reconcileFaeMemoAfterTurn cleanly heal markdown-polluted headers', () => {
+        const boldMemo = `[TIME]
+Day 1, 08:00 AM
+[/TIME]
+
+[CHARACTER]
+**Lou (The Sellsword)**: 10/10 HP | Pool: Health (10/10) | Scenes: 0/3 | XP: 0/3
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
+((PILLS)) Positive Tags: Tough (Armor)
+((PILLS)) Scars & Debuffs: None
+Status: Normal
+[/CHARACTER]`;
+
+        const parsedBold = parseFaeStateFromMemo(boldMemo, 'fantasy');
+        assert.strictEqual(parsedBold.character.name, 'Lou');
+        assert.strictEqual(parsedBold.character.archetype, 'The Sellsword');
+
+        const prevState = createInitialFaeState('fantasy');
+        const reconciledBold = reconcileFaeMemoAfterTurn(prevState, boldMemo, 'fantasy');
+        assert.ok(reconciledBold.memo.includes('Lou (The Sellsword): 10/10 HP'));
+        assert.ok(!reconciledBold.memo.includes('**Lou'));
+
+        const dupMemo = `[TIME]
+Day 1, 08:00 AM
+[/TIME]
+
+[CHARACTER]
+Lou (The Sellsword)** (The Sellsword): 10/10 HP | Pool: Health (10/10) | Scenes: 0/3 | XP: 0/3
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
+((PILLS)) Positive Tags: Tough (Armor)
+((PILLS)) Scars & Debuffs: None
+Status: Normal
+[/CHARACTER]`;
+
+        const parsedDup = parseFaeStateFromMemo(dupMemo, 'fantasy');
+        assert.strictEqual(parsedDup.character.name, 'Lou');
+        assert.strictEqual(parsedDup.character.archetype, 'The Sellsword');
+
+        const reconciledDup = reconcileFaeMemoAfterTurn(prevState, dupMemo, 'fantasy');
+        assert.ok(reconciledDup.memo.includes('Lou (The Sellsword): 10/10 HP'));
+        assert.ok(!reconciledDup.memo.includes('(The Sellsword) (The Sellsword)'));
+    });
+
     test('reconcileFaeMemoAfterTurn enforces Stage 1 Breaking Point Clamp and adds zero_debuff', () => {
         const prevState = createInitialFaeState('cosmic_horror');
         prevState.pools.sanity.current = 3;

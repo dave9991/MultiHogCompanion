@@ -20,6 +20,33 @@
  */
 
 /**
+ * Strips HTML tags, markdown emphasis (*, _, `, ~), leading bullets/symbols,
+ * and trailing parenthetical archetypes (e.g. "Lou (The Sellsword)") from a raw name.
+ * @param {string} rawName
+ * @returns {string}
+ */
+export function stripMarkdownNameArtifacts(rawName) {
+    if (!rawName || typeof rawName !== 'string') return '';
+    let cleaned = rawName
+        .replace(/<[^>]+>/g, '')
+        .replace(/^[-*•–—#>\s]+/, '')
+        .replace(/[*_`~]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    // Strip trailing parenthetical archetype if present (e.g. "Lou (The Sellsword)" -> "Lou")
+    while (/\s*\([^)]*\)$/.test(cleaned)) {
+        const stripped = cleaned.replace(/\s*\([^)]*\)$/, '').trim();
+        if (stripped) {
+            cleaned = stripped;
+        } else {
+            break;
+        }
+    }
+    return cleaned;
+}
+
+/**
  * Checks whether a candidate string is a valid, real character name
  * (not a template macro or generic system placeholder).
  * @param {string} name
@@ -29,6 +56,9 @@ export function isValidCharacterName(name) {
     if (!name || typeof name !== 'string') return false;
     const trimmed = name.trim();
     if (!trimmed || trimmed.length < 2 || trimmed.length > 80) return false;
+
+    // Reject names containing raw markdown artifacts (* or `)
+    if (/[*`]/.test(trimmed)) return false;
 
     // Reject template macros anywhere in the name: {{user}}, {{char}}, {user}, {char}, etc.
     if (/\{+(?:user|char|name|player)\}+/i.test(trimmed)) return false;
@@ -54,15 +84,21 @@ export function extractNameFromBio(bio) {
     if (!bio || typeof bio !== 'string') return null;
 
     // Pattern 1: "Species:\n<Name> is a [race/class]" or "Species: <Name> is a [race/class]"
-    const speciesMatch = bio.match(/(?:Species|Background|About|Name)\s*:\s*\n*\s*([A-Z][a-zA-Z'\-]{1,25}(?:\s+[A-Z][a-zA-Z'\-]{1,25}){1,3})\s+(?:is|was|has|lives|scrapes|works)\b/i);
-    if (speciesMatch && isValidCharacterName(speciesMatch[1])) {
-        return speciesMatch[1].trim();
+    const speciesMatch = bio.match(/(?:Species|Background|About|Name)\s*:\s*\n*\s*([*`_~A-Z][a-zA-Z'\-*`_~]{1,25}(?:\s+[*`_~A-Z][a-zA-Z'\-*`_~]{1,25}){0,3})\s+(?:is|was|has|lives|scrapes|works)\b/i);
+    if (speciesMatch) {
+        const candidate = stripMarkdownNameArtifacts(speciesMatch[1]);
+        if (isValidCharacterName(candidate)) {
+            return candidate;
+        }
     }
 
     // Pattern 2: "<Name> is a [adjective/race/class]"
-    const isAMatch = bio.match(/\b([A-Z][a-zA-Z'\-]{1,25}(?:\s+[A-Z][a-zA-Z'\-]{1,25}){1,3})\s+is\s+a\b/i);
-    if (isAMatch && isValidCharacterName(isAMatch[1])) {
-        return isAMatch[1].trim();
+    const isAMatch = bio.match(/\b([*`_~A-Z][a-zA-Z'\-*`_~]{1,25}(?:\s+[*`_~A-Z][a-zA-Z'\-*`_~]{1,25}){0,3})\s+is\s+a\b/i);
+    if (isAMatch) {
+        const candidate = stripMarkdownNameArtifacts(isAMatch[1]);
+        if (isValidCharacterName(candidate)) {
+            return candidate;
+        }
     }
 
     return null;
@@ -79,11 +115,17 @@ export function extractNameFromBio(bio) {
 export function sanitizeCharacterStockPrompt(stockPrompts, targetName = '') {
     if (!stockPrompts || typeof stockPrompts !== 'object') return false;
     let modified = false;
-    const replacement = (isValidCharacterName(targetName) ? targetName.trim() : 'Character Name');
+    const cleanTarget = stripMarkdownNameArtifacts(targetName);
+    const replacement = (isValidCharacterName(cleanTarget) ? cleanTarget : 'Character Name');
 
     if (stockPrompts.character && typeof stockPrompts.character === 'string') {
         if (/\{\{user\}\}/i.test(stockPrompts.character)) {
             stockPrompts.character = stockPrompts.character.replace(/\{\{user\}\}/gi, replacement);
+            modified = true;
+        }
+        const antiBoldRule = ' NEVER wrap the character name or first line in markdown bold (**).';
+        if (!stockPrompts.character.includes(antiBoldRule.trim())) {
+            stockPrompts.character = stockPrompts.character.trim() + antiBoldRule;
             modified = true;
         }
     }
@@ -92,19 +134,80 @@ export function sanitizeCharacterStockPrompt(stockPrompts, targetName = '') {
 }
 
 /**
+ * Cleans the first non-empty line inside [CHARACTER]...[/CHARACTER] of markdown artifacts
+ * and duplicate parenthetical archetypes, and replaces placeholders with fallbackName if provided.
+ * @param {string} memo
+ * @param {string} [fallbackName='']
+ * @returns {string}
+ */
+export function sanitizeCharacterHeaderInMemo(memo, fallbackName = '') {
+    if (!memo || typeof memo !== 'string') return memo;
+
+    let updatedMemo = memo;
+
+    // If fallbackName is provided and valid, run placeholder replacement logic
+    const cleanFallback = stripMarkdownNameArtifacts(fallbackName);
+    if (isValidCharacterName(cleanFallback)) {
+        updatedMemo = updatedMemo.replace(
+            /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player)(\s*[\(:])/gi,
+            `$1${cleanFallback}$2`
+        );
+    }
+
+    updatedMemo = updatedMemo.replace(/(\[CHARACTER\])([\s\S]*?)(\[\/CHARACTER\])/i, (fullMatch, openTag, body, closeTag) => {
+        const lines = body.split('\n');
+        let headerIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].trim().length > 0) {
+                headerIdx = i;
+                break;
+            }
+        }
+        if (headerIdx === -1) return fullMatch;
+
+        let line = lines[headerIdx];
+
+        // 1. Strip markdown bold/italic/code (*, _, `, ~) from header prefix before first : (or whole line if no :)
+        const colonIdx = line.indexOf(':');
+        if (colonIdx !== -1) {
+            const prefix = line.slice(0, colonIdx);
+            const rest = line.slice(colonIdx);
+            const cleanPrefix = prefix.replace(/[*_`~]/g, '');
+            line = cleanPrefix + rest;
+        } else {
+            line = line.replace(/[*_`~]/g, '');
+        }
+
+        // 2. Fix duplicate parenthetical archetypes caused by **Lou substitution
+        // e.g. Lou (The Sellsword)** (The Sellsword): 10/10 HP or Lou (The Sellsword) (The Sellsword): 10/10 HP -> Lou (The Sellsword): 10/10 HP
+        while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(line)) {
+            line = line.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
+        }
+
+        lines[headerIdx] = line;
+        return openTag + lines.join('\n') + closeTag;
+    });
+
+    return updatedMemo;
+}
+
+/**
  * Rectifies the character name in a state memo string if it currently contains
- * {{user}}, {user}, or generic User.
+ * {{user}}, {user}, or generic User, and ensures the character header is clean.
  * @param {string} memo
  * @param {string} realName
  * @returns {string}
  */
 export function rectifyMemoCharacterName(memo, realName) {
-    if (!memo || typeof memo !== 'string' || !isValidCharacterName(realName)) return memo;
+    if (!memo || typeof memo !== 'string') return memo;
+    const cleanName = stripMarkdownNameArtifacts(realName);
+    if (!isValidCharacterName(cleanName)) return sanitizeCharacterHeaderInMemo(memo);
 
-    return memo.replace(
-        /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|User)(\s*[\(:])/gi,
-        `$1${realName.trim()}$2`
+    const replaced = memo.replace(
+        /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player)(\s*[\(:])/gi,
+        `$1${cleanName}$2`
     );
+    return sanitizeCharacterHeaderInMemo(replaced, cleanName);
 }
 
 /**
@@ -116,20 +219,29 @@ export function determineEffectiveCharacterName(context = {}) {
     const { draft, playerCharacter, memo } = context;
 
     // 1. Explicit draft name from Character Creator
-    if (draft?.name && isValidCharacterName(draft.name)) {
-        return draft.name.trim();
+    if (draft?.name) {
+        const cleaned = stripMarkdownNameArtifacts(draft.name);
+        if (isValidCharacterName(cleaned)) {
+            return cleaned;
+        }
     }
 
     // 2. Existing valid playerCharacter name
-    if (playerCharacter?.name && isValidCharacterName(playerCharacter.name)) {
-        return playerCharacter.name.trim();
+    if (playerCharacter?.name) {
+        const cleaned = stripMarkdownNameArtifacts(playerCharacter.name);
+        if (isValidCharacterName(cleaned)) {
+            return cleaned;
+        }
     }
 
     // 3. Name mentioned in playerCharacter bio
     if (playerCharacter?.bio) {
         const bioName = extractNameFromBio(playerCharacter.bio);
-        if (bioName && isValidCharacterName(bioName)) {
-            return bioName;
+        if (bioName) {
+            const cleaned = stripMarkdownNameArtifacts(bioName);
+            if (isValidCharacterName(cleaned)) {
+                return cleaned;
+            }
         }
     }
 
@@ -137,10 +249,28 @@ export function determineEffectiveCharacterName(context = {}) {
     if (memo) {
         const charBlock = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
         if (charBlock) {
-            const firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
+            let firstLine = charBlock[1].replace(/<[^>]+>/g, '').trim().split('\n')[0].trim();
+            firstLine = firstLine
+                .replace(/&quot;/g, '"')
+                .replace(/&#34;/g, '"')
+                .replace(/&apos;/g, "'")
+                .replace(/&#39;/g, "'")
+                .replace(/^[-*•–—#>\s]+/, '')
+                .replace(/[*_`~]/g, '')
+                .trim();
+            while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(firstLine)) {
+                firstLine = firstLine.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
+            }
             const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
-            if (m && isValidCharacterName(m[1])) {
-                return m[1].trim();
+            if (m) {
+                const cleaned = stripMarkdownNameArtifacts(m[1]);
+                if (isValidCharacterName(cleaned)) {
+                    return cleaned;
+                }
+            }
+            const cleanedLine = stripMarkdownNameArtifacts(firstLine);
+            if (cleanedLine && isValidCharacterName(cleanedLine) && cleanedLine.length <= 50) {
+                return cleanedLine;
             }
         }
     }

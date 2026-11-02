@@ -11,8 +11,14 @@
  * 6. Concierge Runner launch alias and FAE integration
  */
 
-import test from 'node:test';
+import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import {
     createEmptyDossier,
@@ -42,7 +48,14 @@ import {
     launchPbtaCampaign,
 } from '../concierge-runner.js';
 
-import { FAE_GENRES } from '../fae-ruleset.js';
+import {
+    FAE_GENRES,
+    buildFaeQuickStartInstructions,
+    buildFaeFooterContent,
+    buildFaeCyoaPrompt,
+} from '../fae-ruleset.js';
+import { buildPbtAQuickStartInstructions } from '../pbta-ruleset.js';
+import { formatInitialFaeMemo } from '../fae-state-sync.js';
 
 test('FAE Session Zero Concierge: Dossier Initialization & Untouched Detection', () => {
     const dossier = createEmptyDossier('fae', 'osr_dungeon');
@@ -354,4 +367,268 @@ test('CYOA Choice Engine: Markup Extraction Resilience', () => {
 test('Concierge Runner: Campaign Launch Alias and Interface', () => {
     assert.equal(typeof executeConciergeCampaignLaunch, 'function');
     assert.equal(executeConciergeCampaignLaunch, launchPbtaCampaign);
+});
+
+describe('FAE Custom Genre & Custom Resource Pools', () => {
+    test('1. createEmptyDossier("fae") has genreEstablished === false, while createEmptyDossier("fae", "deep_space") has genreEstablished === true and systemKey === "deep_space"', () => {
+        const unestablished = createEmptyDossier('fae');
+        assert.equal(unestablished.meta.genreEstablished, false);
+
+        const established = createEmptyDossier('fae', 'deep_space');
+        assert.equal(established.meta.genreEstablished, true);
+        assert.equal(established.meta.systemKey, 'deep_space');
+
+        const unestablishedPbta = createEmptyDossier('pbta');
+        assert.equal(unestablishedPbta.meta.genreEstablished, false);
+
+        const establishedPbta = createEmptyDossier('pbta', 'scifi');
+        assert.equal(establishedPbta.meta.genreEstablished, true);
+        assert.equal(establishedPbta.meta.systemKey, 'scifi');
+    });
+
+    test('2. applyDossierUpdates with custom FAE genre and custom pools replaces default pools and survives healAndNormalizeDossier', () => {
+        const initial = createEmptyDossier('fae');
+        assert.equal(initial.meta.genreEstablished, false);
+
+        const updateText = `
+[UPDATE_DOSSIER]
+ruleset: fae
+system: custom
+system_label: Wuxia Jianghu
+[PROTAGONIST]
+name: Li Wei
+pools: Chi: 10/10 (zero_debuff: Qi Deviation, recovery: camp_or_sleep, overflow: scar_and_ko, drain: on_day_pass:1:Inner demon erosion) | Honor: 6/6 (zero_debuff: Disgraced Outcast, recovery: haven_or_specialist, overflow: scene_fail)
+[/PROTAGONIST]
+[/UPDATE_DOSSIER]`;
+
+        const res = applyDossierUpdates(updateText, initial);
+        assert.equal(res.success, true);
+        assert.equal(res.updatedDossier.meta.systemKey, 'custom');
+        assert.equal(res.updatedDossier.meta.systemLabel, 'Wuxia Jianghu');
+        assert.equal(res.updatedDossier.meta.genreEstablished, true);
+
+        // Replaces the default health/sanity pools so Object.keys is ['chi', 'honor']
+        assert.deepEqual(Object.keys(res.updatedDossier.protagonist.pools), ['chi', 'honor']);
+        assert.equal(res.updatedDossier.protagonist.pools.chi.current, 10);
+        assert.equal(res.updatedDossier.protagonist.pools.chi.max, 10);
+        assert.equal(res.updatedDossier.protagonist.pools.chi.zero_debuff, 'Qi Deviation');
+        assert.equal(res.updatedDossier.protagonist.pools.chi.passive_drain?.trigger, 'on_day_pass');
+        assert.equal(res.updatedDossier.protagonist.pools.chi.passive_drain?.amount, 1);
+        assert.equal(res.updatedDossier.protagonist.pools.chi.passive_drain?.flavor, 'Inner demon erosion');
+        assert.equal(res.updatedDossier.protagonist.pools.honor.zero_debuff, 'Disgraced Outcast');
+        assert.equal(res.updatedDossier.protagonist.pools.honor.on_overflow, 'scene_fail');
+
+        // Preserves custom pools through healAndNormalizeDossier without re-adding health or sanity
+        const healed = healAndNormalizeDossier(res.updatedDossier);
+        assert.deepEqual(Object.keys(healed.protagonist.pools), ['chi', 'honor']);
+        assert.equal(healed.meta.systemKey, 'custom');
+        assert.equal(healed.meta.systemLabel, 'Wuxia Jianghu');
+        assert.equal(healed.meta.genreEstablished, true);
+    });
+
+    test('3. applyDossierUpdates switching from untouched cosmic_horror to built-in system: osr_dungeon updates protagonist.pools', () => {
+        const initial = createEmptyDossier('fae');
+        assert.deepEqual(Object.keys(initial.protagonist.pools), ['health', 'sanity']);
+
+        const updateText = `
+[UPDATE_DOSSIER]
+system: osr_dungeon
+[/UPDATE_DOSSIER]`;
+
+        const res = applyDossierUpdates(updateText, initial);
+        assert.equal(res.success, true);
+        assert.equal(res.updatedDossier.meta.systemKey, 'osr_dungeon');
+        assert.deepEqual(Object.keys(res.updatedDossier.protagonist.pools), Object.keys(FAE_GENRES.osr_dungeon.pools));
+        assert.ok(res.updatedDossier.protagonist.pools.torch_and_supplies);
+        assert.ok(res.updatedDossier.protagonist.pools.resolve);
+        assert.ok(res.updatedDossier.protagonist.pools.health);
+        assert.equal(res.updatedDossier.protagonist.pools.sanity, undefined);
+    });
+});
+
+test('FAE Session Zero Concierge: Modal HTML header switcher & dynamic elements', () => {
+    const modalHtmlPath = path.resolve(__dirname, '../concierge-modal.html');
+    const modalHtml = fs.readFileSync(modalHtmlPath, 'utf8');
+
+    assert.ok(modalHtml.includes('id="mhc_concierge_modal_title"'), 'modal must contain #mhc_concierge_modal_title');
+    assert.ok(modalHtml.includes('id="mhc_header_ruleset_toggle"'), 'modal must contain #mhc_header_ruleset_toggle');
+    assert.ok(modalHtml.includes('data-ruleset="pbta"'), 'ruleset switcher must contain data-ruleset="pbta"');
+    assert.ok(modalHtml.includes('data-ruleset="fae"'), 'ruleset switcher must contain data-ruleset="fae"');
+    assert.ok(modalHtml.includes('id="mhc_deck_engine_title"'), 'system card must contain #mhc_deck_engine_title');
+});
+
+describe('Stage 2: Quick Start Party Override, Footer All-Pools, CYOA Pool Disambiguation & FAE Memo Initialization', () => {
+    test('1. buildFaeQuickStartInstructions includes PARTY OVERRIDE and negative bold header mandate when customNotes mentions friends/party', () => {
+        const withParty = buildFaeQuickStartInstructions('osr_dungeon', 'Lou', 'Lou and his friends enter the sewers underneath the city');
+        assert.ok(withParty.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must include party override when customNotes mentions friends');
+        assert.ok(withParty.includes('NEVER wrap the character name or header line in markdown bold (**)'), 'Must include bold header prohibition');
+        assert.ok(withParty.includes('NAME: Lou.'), 'Must mention Lou in name line');
+        assert.ok(withParty.includes('Torch & Supplies'), 'Must list OSR pools in Quick Start instructions');
+
+        const solo = buildFaeQuickStartInstructions('osr_dungeon', 'Lou', 'Lou wanders into the crypt alone');
+        assert.ok(!solo.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must NOT include party override when solo');
+        assert.ok(solo.includes('NEVER wrap the character name or header line in markdown bold (**)'));
+    });
+
+    test('2. buildPbtAQuickStartInstructions includes PARTY OVERRIDE and negative bold header mandate when customNotes mentions companions/party', () => {
+        const withParty = buildPbtAQuickStartInstructions('fantasy', 'Aelion', 'Aelion and his party explore the forgotten ruins');
+        assert.ok(withParty.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must include party override when customNotes mentions party');
+        assert.ok(withParty.includes('NEVER wrap the character name or header line in markdown bold (**)'), 'Must include bold header prohibition');
+        assert.ok(withParty.includes('NAME: Aelion.'), 'Must mention Aelion in name line');
+
+        const solo = buildPbtAQuickStartInstructions('fantasy', 'Aelion', 'Aelion infiltrates the castle alone');
+        assert.ok(!solo.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must NOT include party override when solo');
+        assert.ok(solo.includes('NEVER wrap the character name or header line in markdown bold (**)'));
+    });
+
+    test('3. buildFaeFooterContent formats all active pools for multi-pool genres and enforces STRICT FOOTER RULE', () => {
+        const osrFooter = buildFaeFooterContent('osr_dungeon');
+        assert.ok(osrFooter.includes('*(Health: [current]/[max]) | (Resolve: [current]/[max]) | (Torch & Supplies: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Coarse, Sub-location])*'), 'Must format all 3 OSR pools in footer template');
+        assert.ok(osrFooter.includes('STRICT FOOTER RULE: NEVER output "Level X", "(Status: ... HP)", or "(XP: ...)" in the footer'), 'Must include negative constraint against D&D levels');
+        assert.ok(osrFooter.includes('display ONLY the active Resource Pools (Health, Resolve, Torch & Supplies)'));
+
+        // Custom pools override
+        const customFooter = buildFaeFooterContent('custom', {
+            pools: {
+                chi: { label: 'Chi' },
+                honor: { label: 'Honor' },
+            },
+        });
+        assert.ok(customFooter.includes('*(Chi: [current]/[max]) | (Honor: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Coarse, Sub-location])*'));
+        assert.ok(customFooter.includes('display ONLY the active Resource Pools (Chi, Honor)'));
+    });
+
+    test('4. buildFaeCyoaPrompt includes CRITICAL BRACKET RULE and specifies active Resource Pools', () => {
+        const cyoaOsr = buildFaeCyoaPrompt('osr_dungeon');
+        assert.ok(cyoaOsr.includes('CRITICAL BRACKET RULE:'), 'Must include CRITICAL BRACKET RULE');
+        assert.ok(cyoaOsr.includes('Health, Resolve, Torch & Supplies'), 'Must enumerate all 3 OSR pools in bracket rule');
+        assert.ok(cyoaOsr.includes('— [Stepping-Stone: Health | Tag: Trap-Wise]'), 'Must provide proper pipe tag example');
+    });
+
+    test('5. buildCyoaPrompt dynamically extracts active pool names from memo and includes CRITICAL BRACKET RULE', () => {
+        const osrMemo = `[LOCATION]
+Sewers
+[/LOCATION]
+
+[CHARACTER]
+Lou (The Sellsword): 10/10 HP | Pool: Health (10/10) | Scenes: 0/4 | XP: 0/4
+((BAR:purple)) Resolve: 8/8 (Zero Debuff: Panicked | Recovery: Rest)
+((BAR:orange)) Torch & Supplies: 6/6 (Zero Debuff: Plunged in Darkness | Recovery: Resupply)
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
+((PILLS)) Positive Tags: Shield-Bearer (defense), Sewer-Wise (navigation)
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]`;
+
+        const { systemPrompt } = buildCyoaPrompt({
+            narrative: 'A giant rat lunges from the dark slime water!',
+            memo: osrMemo,
+            isPbta: false,
+            isFae: true,
+            rpgSettings: { faeGenre: 'osr_dungeon' },
+        });
+
+        assert.ok(systemPrompt.includes('CRITICAL BRACKET RULE:'), 'Prompt must include CRITICAL BRACKET RULE');
+        assert.ok(systemPrompt.includes('Health, Resolve, Torch & Supplies'), 'Prompt must resolve active pool names from memo');
+        assert.ok(systemPrompt.includes('NEVER put a Positive Tag name in place of the Pool name!'));
+        assert.ok(systemPrompt.includes('[Stepping-Stone: Health | Tag: Trap-Wise]'));
+    });
+
+    test('6. formatInitialFaeMemo with companion NPCs, maps, and factions renders [PARTY], [DUNGEON], and [FACTIONS]', () => {
+        const dossier = {
+            genreKey: 'osr_dungeon',
+            config: { partyMode: 'party' },
+            theKick: { startingLocation: 'The Sunken Catacombs' },
+            protagonist: {
+                name: 'Lou',
+                archetype: 'The Sellsword',
+                positiveTags: ['Iron Grip (grappling)', 'Shield Wall (defense)'],
+                negativeTags: [],
+            },
+            npcs: [
+                {
+                    name: 'Bran',
+                    role: 'companion',
+                    archetype: 'Torchbearer',
+                    appearance: 'Lanky youth clutching a sputtering oil lantern',
+                    positiveTags: ['Keen Eyed (spotting traps)'],
+                    boons: ['Oil Flasks (3 Uses)'],
+                },
+                {
+                    name: 'Gargoyle Guard',
+                    role: 'enemy',
+                },
+            ],
+            maps: [
+                { site: 'The Sunken Catacombs', threat: 'HIGH' },
+            ],
+            factions: [
+                {
+                    name: 'The Guild of Delvers',
+                    standing: 'Friendly',
+                    agenda: 'Retrieve the lost sigil',
+                },
+            ],
+            worldRules: {
+                customModule: {
+                    tag: 'TORCH_CLOCK',
+                    label: 'Torch Clock',
+                    sampleContent: 'Rounds remaining: 6',
+                },
+            },
+        };
+
+        const memo = formatInitialFaeMemo(dossier);
+
+        // Verify Location
+        assert.ok(memo.includes('[LOCATION]\nThe Sunken Catacombs\n[/LOCATION]'), 'Must format location from dossier');
+
+        // Verify Character
+        assert.ok(memo.includes('[CHARACTER]'), 'Must include [CHARACTER]');
+        assert.ok(memo.includes('Lou (The Sellsword): 10/10 HP | Pool: Health (10/10)'), 'Must format protagonist with OSR pool stats');
+        assert.ok(memo.includes('((BAR:blue)) Resolve: 6/6'), 'Must include secondary Resolve bar');
+        assert.ok(memo.includes('((BAR:amber)) Torch & Supplies: 6/6'), 'Must include secondary Torch & Supplies bar');
+
+        // Verify Party
+        assert.ok(memo.includes('[PARTY]'), 'Must include [PARTY] block for companions');
+        assert.ok(memo.includes('- Bran (Torchbearer): 10/10 HP | Pool: Health (10/10)'), 'Must format companion with primary pool and HP');
+        assert.ok(memo.includes('Appearance: Lanky youth clutching a sputtering oil lantern'), 'Must include companion appearance');
+        assert.ok(memo.includes('((PILLS)) Positive Tags: Keen Eyed (spotting traps)'), 'Must format companion positive tags');
+        assert.ok(memo.includes('((PILLS)) Boons: Oil Flasks (3 Uses)'), 'Must format companion boons');
+        assert.ok(memo.includes('((PILLS)) Scars & Debuffs: None'), 'Must format initial clean debuffs');
+        assert.ok(memo.includes('Status: Healthy'), 'Must format companion status');
+        assert.ok(!memo.includes('Gargoyle Guard'), 'Must exclude non-companion NPCs from [PARTY]');
+
+        // Verify Dungeon
+        assert.ok(memo.includes('[DUNGEON]\nActive Site: The Sunken Catacombs\nThreat: HIGH\n[/DUNGEON]'), 'Must include [DUNGEON] block');
+
+        // Verify Factions
+        assert.ok(memo.includes('[FACTIONS]'), 'Must include [FACTIONS] block');
+        assert.ok(memo.includes('((PILLS)) The Guild of Delvers: (+) Friendly (Standing), Agenda (Retrieve the lost sigil)'), 'Must format faction with standing pill');
+
+        // Verify Custom Module
+        assert.ok(memo.includes('[TORCH_CLOCK]\nRounds remaining: 6\n[/TORCH_CLOCK]'), 'Must include custom module block');
+
+        // Verify Combat inactive
+        assert.ok(memo.includes('[COMBAT]\nActive: false\n[/COMBAT]'), 'Must initialize combat inactive');
+    });
+
+    test('7. formatInitialFaeMemo in solo mode omits [PARTY] block', () => {
+        const soloDossier = {
+            genreKey: 'osr_dungeon',
+            config: { partyMode: 'solo' },
+            protagonist: {
+                name: 'Lou',
+                archetype: 'The Sellsword',
+            },
+            npcs: [
+                { name: 'Bran', role: 'companion' },
+            ],
+        };
+
+        const memo = formatInitialFaeMemo(soloDossier);
+        assert.ok(!memo.includes('[PARTY]'), 'Must NOT include [PARTY] when partyMode is solo');
+        assert.ok(!memo.includes('Bran'));
+        assert.ok(memo.includes('[COMBAT]\nActive: false\n[/COMBAT]'));
+    });
 });

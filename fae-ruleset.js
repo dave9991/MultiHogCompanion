@@ -1258,9 +1258,13 @@ FAE reminder: 4dF Attrition Engine. Single-pass forward momentum. Threat describ
  */
 export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) {
     const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
-    const poolKeys = Object.keys(genre.pools);
-    const p1 = genre.pools[poolKeys[0]]?.label || 'Health';
-    const p2 = genre.pools[poolKeys[1]]?.label || 'Resolve';
+    const activePools = (options?.pools && Object.keys(options.pools).length > 0)
+        ? options.pools
+        : (options?.config?.pools && Object.keys(options.config.pools).length > 0)
+            ? options.config.pools
+            : genre.pools;
+    const poolSegments = Object.values(activePools).map(p => `(${p.label}: [current]/[max])`).join(' | ');
+    const poolLabels = Object.values(activePools).map(p => p.label).join(', ');
 
     let timeFmt = '[HH:MM AM/PM], Day [X]';
     if (options.use24hTime) {
@@ -1272,10 +1276,11 @@ export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) 
 
     return `<end_of_output_footer>
 ALWAYS end every narrative output with:
-*(${p1}: [current]/[max]) | (${p2}: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Coarse, Sub-location])*
+*${poolSegments} | (Scenes: [current]/[target]) | (Location: [Coarse, Sub-location])*
 *${timeFmt}*
 (followed only by any active subfooters explicitly defined elsewhere in your instructions)
 Footer shows ONLY {{user}}'s pool status, scenes completed, location, and time.
+STRICT FOOTER RULE: NEVER output "Level X", "(Status: ... HP)", or "(XP: ...)" in the footer. FAE has no character levels; display ONLY the active Resource Pools (${poolLabels}), (Scenes: [current]/[target]), (Location: ...), and the time line.
 </end_of_output_footer>`;
 }
 
@@ -1354,6 +1359,14 @@ export function buildFaeCyoaPrompt(genreKey = 'cosmic_horror', overrides = {}) {
     const playstyle = config.playstyle || 'cyoa_5';
     if (playstyle === 'freeform') return '';
 
+    const activePools = (overrides?.pools && Object.keys(overrides.pools).length > 0)
+        ? overrides.pools
+        : (config?.pools && Object.keys(config.pools).length > 0)
+            ? config.pools
+            : genre.pools;
+    const poolLabels = Object.values(activePools).map(p => p.label).join(', ');
+    const primaryPoolLabel = Object.values(activePools)[0]?.label || 'Health';
+
     const choiceCount = playstyle === 'cyoa_3' ? 3 : 5;
     const exampleList = genre.cyoaExamples.slice(0, choiceCount);
     const exampleButtons = exampleList.map(e => `<button>${e}</button>`).join('\n');
@@ -1369,6 +1382,7 @@ export function buildFaeCyoaPrompt(genreKey = 'cosmic_horror', overrides = {}) {
   • Tactical Caution / Defensive Bracing: Zero-roll repositioning or setting up leverage.
   • Social / Dialogue: Spoken words or negotiation in quotes.
   • Retreat / Fallback: Narrow escape or disengagement — [Narrow Escape].
+- CRITICAL BRACKET RULE: The word immediately after the colon in [Stepping-Stone: <Pool>] or [Full: <Pool>] MUST be one of the active Resource Pools (${poolLabels}) — NEVER put a Positive Tag, Boon, or skill name in the <Pool> slot! If a Positive Tag or Boon applies, append it after a pipe: e.g. — [Stepping-Stone: ${primaryPoolLabel} | Tag: Trap-Wise].
 - ZERO-STATE ADAPTATION: If {{user}} is at 0 in their primary pool, choices MUST reflect desperation, crisis defense, or frantic flight.
 
 EXAMPLES:
@@ -1707,6 +1721,8 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
     const tagsSnippet = genre.defaultPositiveTags.join(', ');
     const knobs = Object.assign({}, genre.knobs, customKnobs || {});
 
+    const mentionsParty = typeof customNotes === 'string' && /\b(friends?|companions?|party|crew|squad|allies|partners|team|band|fellowship|retinue|brothers|sisters|comrades|mercenaries)\b/i.test(customNotes);
+
     return [
         `RULES: Freeform Attrition Engine (FAE) — ${genre.label}.`,
         charName ? `NAME: ${charName}.` : null,
@@ -1715,7 +1731,10 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
         `POSITIVE TAGS: Pick 4 distinct descriptive tags (skills, gear, background, or traits with detail in parentheses): ${tagsSnippet}.`,
         `KNOBS: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${knobs.base_attrition_shift >= 0 ? '+' + knobs.base_attrition_shift : knobs.base_attrition_shift} | Overflow: ${knobs.overflow_default}.`,
         `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or polyhedral damage dice. Use 4dF Attrition, Positive Tags, and Scars/Debuffs in [CHARACTER].`,
-        `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary ((BAR:...)) pools, FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy.`,
+        `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary ((BAR:...)) pools, FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`,
+        mentionsParty
+            ? `PARTY OVERRIDE (EXPLICITLY INSTRUCTED): You ARE explicitly instructed to output a [PARTY] block! Because the scenario mentions companions/friends, generate a [PARTY]...[/PARTY] block with 1–2 fitting starting companions using FAE companion format: "- Name (Archetype): 8/8 HP | Pool: ${Object.values(genre.pools)[0]?.label || 'Health'} (8/8)", "Appearance: ...", "((PILLS)) Positive Tags: Tag 1 (desc), Tag 2 (desc)", "((PILLS)) Boons: Boon 1 (1 Use)", "((PILLS)) Scars & Debuffs: None", "Status: Healthy". NEVER use D&D classes or levels in [PARTY].`
+            : null,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }

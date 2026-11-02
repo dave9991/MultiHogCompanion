@@ -159,6 +159,8 @@ import {
     isValidCharacterName,
     sanitizeCharacterStockPrompt,
     installMacroSyntaxSanitizer,
+    stripMarkdownNameArtifacts,
+    sanitizeCharacterHeaderInMemo,
 } from './character-creator-sanitizer.js';
 import {
     isDndSubfooterAlignmentApplied,
@@ -1008,6 +1010,111 @@ export async function restoreStockDnd() {
 }
 
 /**
+ * Rectifies corrupted character headers, player character state, and SillyTavern persona names
+ * following an upstream quick start generation pass.
+ * @param {string} [fallbackCharName='']
+ * @param {object|null} [providedSettings=null]
+ * @returns {Promise<string>} Clean character name
+ */
+export async function rectifyPostQuickStartState(fallbackCharName = '', providedSettings = null) {
+    let rpgSettings = providedSettings;
+    if (!rpgSettings) {
+        if (typeof globalThis._rpgSettings !== 'undefined') {
+            rpgSettings = globalThis._rpgSettings;
+        } else {
+            try {
+                const sm = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+                rpgSettings = sm?.getSettings?.();
+            } catch (_) {}
+        }
+    }
+    if (!rpgSettings) {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        rpgSettings = ctx?.extensionSettings?.rpg_tracker;
+    }
+
+    const cleanFallback = stripMarkdownNameArtifacts(fallbackCharName);
+
+    if (rpgSettings?.currentMemo) {
+        const sanitized = sanitizeCharacterHeaderInMemo(rpgSettings.currentMemo, cleanFallback);
+        if (sanitized !== rpgSettings.currentMemo) {
+            rpgSettings.currentMemo = sanitized;
+        }
+    }
+
+    const cleanName = (rpgSettings?.currentMemo ? extractNameFromMemo(rpgSettings.currentMemo) : null) || cleanFallback;
+
+    if (cleanName) {
+        if (rpgSettings?.playerCharacter && rpgSettings.playerCharacter.name !== cleanName) {
+            rpgSettings.playerCharacter.name = cleanName;
+        }
+
+        const candidateIds = getCandidateChatIds();
+        if (rpgSettings?.chatStates && candidateIds.length > 0) {
+            for (const cid of candidateIds) {
+                const cs = rpgSettings.chatStates[cid];
+                if (cs) {
+                    if (cs.playerCharacter && cs.playerCharacter.name !== cleanName) {
+                        cs.playerCharacter.name = cleanName;
+                    }
+                    if (cs.currentMemo) {
+                        const sanitizedCs = sanitizeCharacterHeaderInMemo(cs.currentMemo, cleanName);
+                        if (sanitizedCs !== cs.currentMemo) {
+                            cs.currentMemo = sanitizedCs;
+                        }
+                    }
+                }
+            }
+        }
+
+        // SillyTavern context and power_user sync
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        let powerUser = ctx?.powerUser || ctx?.power_user || (typeof window !== 'undefined' ? window.power_user : null);
+        if (!powerUser) {
+            try {
+                const pu = await import('../../../power-user.js');
+                powerUser = pu.power_user;
+            } catch (_) {}
+        }
+
+        if (powerUser?.personas && typeof powerUser.personas === 'object') {
+            for (const [avatarKey, personaVal] of Object.entries(powerUser.personas)) {
+                if (typeof personaVal === 'string' && (personaVal.startsWith('*') || personaVal.endsWith('*') || /[*`]/.test(personaVal))) {
+                    if (stripMarkdownNameArtifacts(personaVal) === cleanName) {
+                        powerUser.personas[avatarKey] = cleanName;
+                        if (powerUser.persona_descriptions && powerUser.persona_descriptions[personaVal]) {
+                            powerUser.persona_descriptions[cleanName] = powerUser.persona_descriptions[personaVal];
+                        }
+                    }
+                }
+            }
+        }
+
+        if (ctx && typeof ctx.name1 === 'string') {
+            if (stripMarkdownNameArtifacts(ctx.name1) === cleanName && ctx.name1 !== cleanName) {
+                ctx.name1 = cleanName;
+            }
+        }
+
+        if (powerUser && typeof powerUser.default_persona === 'string') {
+            if (stripMarkdownNameArtifacts(powerUser.default_persona) === cleanName && powerUser.default_persona !== cleanName) {
+                powerUser.default_persona = cleanName;
+            }
+        }
+
+        if (typeof document !== 'undefined') {
+            const yourNameInput = /** @type {HTMLInputElement|null} */ (document.getElementById('your_name'));
+            if (yourNameInput && stripMarkdownNameArtifacts(yourNameInput.value) === cleanName && yourNameInput.value !== cleanName) {
+                yourNameInput.value = cleanName;
+                yourNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }
+    }
+
+    return cleanName;
+}
+
+/**
  * Triggers Quick Start for a PbtA adventure.
  * @param {string} genreKey
  * @param {string} charName
@@ -1068,6 +1175,8 @@ export async function quickStartPbtA(genreKey = 'fantasy', charName = '', scenar
                     }
                 }
             }
+
+            await rectifyPostQuickStartState(cleanCharName || charName, rpgSettings);
 
             // Send clean narrative opening message
             const starterText = scenarioDesc
@@ -1152,6 +1261,8 @@ export async function quickStartFae(genreKey = 'cosmic_horror', charName = '', s
                     }
                 }
             }
+
+            await rectifyPostQuickStartState(cleanCharName || charName, rpgSettings);
 
             // Send clean narrative opening message
             const starterText = scenarioDesc

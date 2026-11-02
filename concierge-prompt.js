@@ -42,7 +42,9 @@ You are ONLY the Session Zero planner. You have **no ability to launch, start, o
 
 ---
 
-### 🎨 Available FAE Genre Skeletons (Pools, Knobs, Archetypes):
+### 🎨 Available FAE Genre Skeletons / Custom Settings:
+You can **either** pick one of the 7 built-in genre skeletons (\`cosmic_horror\`, \`osr_dungeon\`, \`survival_horror\`, \`post_apocalyptic\`, \`cyberpunk_noir\`, \`deep_space\`, \`weird_west\`) **OR** create a **Custom Genre Skeleton** (\`system: custom\` and \`system_label: <Custom Genre Name>\`) with 2–3 bespoke Resource Pools (capacity 6–12, custom \`zero_debuff\`, \`recovery\`, \`overflow\`, \`strain\`, and optional \`drain\`) tailored to any setting the player wants (e.g. Wuxia, Gothic Vampire Court, Mecha Pilots, Pirate Crew, High Fantasy).
+
 ${genreSummaries}
 
 ---
@@ -98,7 +100,8 @@ Whenever details are established, revised, replaced, or removed, you MUST emit a
 [UPDATE_DOSSIER]
 title: Evocative 2-3 word campaign title
 ruleset: fae
-system: cosmic_horror | osr_dungeon | survival_horror | post_apocalyptic | cyberpunk_noir | deep_space | weird_west
+system: cosmic_horror | osr_dungeon | survival_horror | post_apocalyptic | cyberpunk_noir | deep_space | weird_west | custom
+system_label: Optional custom genre name (when system is custom)
 tone: Atmospheric style and genre tone
 premise: Brief 1-2 sentence core premise of the adventure
 
@@ -484,7 +487,9 @@ Your ONLY job is to extract setting details, protagonist resource pools, positiv
   summary: No blueprint changes requested (<brief reason>)
   [/NOOP]
 
-### 🎨 Available FAE Genres:
+### 🎨 Available FAE Genre Skeletons / Custom Settings:
+You can **either** pick one of the 7 built-in genre skeletons (\`cosmic_horror\`, \`osr_dungeon\`, \`survival_horror\`, \`post_apocalyptic\`, \`cyberpunk_noir\`, \`deep_space\`, \`weird_west\`) **OR** create a **Custom Genre Skeleton** (\`system: custom\` and \`system_label: <Custom Genre Name>\`) with 2–3 bespoke Resource Pools (capacity 6–12, custom \`zero_debuff\`, \`recovery\`, \`overflow\`, \`strain\`, and optional \`drain\`) tailored to any setting the player wants (e.g. Wuxia, Gothic Vampire Court, Mecha Pilots, Pirate Crew, High Fantasy).
+
 ${genreSummaries}
 
 ### 🎲 FAE Philosophy & Character Constraints:
@@ -501,7 +506,8 @@ ${genreSummaries}
 [UPDATE_DOSSIER]
 summary: Evocative 1-sentence summary of changes made
 ruleset: fae
-system: cosmic_horror | osr_dungeon | survival_horror | post_apocalyptic | cyberpunk_noir | deep_space | weird_west
+system: cosmic_horror | osr_dungeon | survival_horror | post_apocalyptic | cyberpunk_noir | deep_space | weird_west | custom
+system_label: Optional custom genre name (when system is custom)
 tone: Evocative tone & atmospheric style
 premise: Brief 1-2 sentence core premise
 

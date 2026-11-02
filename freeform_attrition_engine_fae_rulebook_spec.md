@@ -14,7 +14,7 @@ Traditional tabletop RPGs rely on binary pass/fail rolls that either stall solo 
 
 ---
 
-## 2. Guidelines: Pools, Tags, and Genre Knobs
+## 2. Guidelines: Pools, Tags, Companions, and Genre Knobs
 
 ### 2.1 Picking Resource Pools (The Rule of 2 to 3)
 
@@ -45,11 +45,22 @@ Characters begin with **3 to 4 Positive Tags** and **0 to 1 Negative Tag (Scar)*
 * **Hard Stacking Cap:** The code enforces a strict maximum of **2 Positive Tags** per action ($-1$ Attrition each).
 * **Negative Tags / Scars:** Active debuffs or permanent scars apply $+1$ Attrition each when relevant to the action.
 
-### 2.4 Genre Knobs (System-Level Configuration)
+### 2.4 Companions, Hirelings, and Adventuring Parties (Zero-Bookkeeping Model)
+
+FAE is protagonist-centered, but genres like OSR dungeon crawls or squad sci-fi frequently involve companions, retainers, or party members. Rather than tracking separate pools or turns for companions, **companions are folded directly into Leverage and Tags**:
+
+1. **Protagonist-Anchored Pools:** The game still tracks only the protagonist's 2–3 core resource pools (representing the collective stamina, morale, and supplies of the group led by the protagonist).
+2. **Companions as Fictional Leverage (Primary Role):** The Narrator evaluates **Proportional Leverage** (Section 4) using the party's *combined* fictional presence.
+   * *Scope & Scale:* A lone fighter facing an entrenched goblin ambush may only have `stepping_stone` leverage, whereas a fighter backed by an archer and a mage may have the fictional positioning to achieve `full` resolution or neutralize a listed `Pressure` ($-1$ Threat) when coordinating their action.
+   * *Unlocking Angles (Avoiding `pivot`):* If an obstacle requires specialized capability the protagonist lacks (e.g., deciphering an arcane ward or banishing a wraith), directing a relevant companion to handle or assist with the task grants valid Leverage so the action is not forced into a `pivot`.
+3. **Companions as Positive Tags (Subject to the 2-Tag Cap):** Notable companions or hirelings can be recorded as Positive Tags (e.g., `Companion: Sister Valeria (Cleric)` or `Retainer: Torchbearer`). When they actively assist in the declared action, the LLM may select them as 1 of the **max 2 Positive Tags** ($-1$ Attrition). Because the 2-tag ceiling never changes, adding companions never breaks the attrition math.
+4. **Companions as Narrative Buffer (At Breaking Point / Overflow):** When a pool clamps at `0`, triggers `scar_and_ko`, or resolves a `GRACE_RETREAT_WITH_SCAR`, the consequence can manifest narratively on a companion—such as a retainer panicking and fleeing, or a companion taking an injury (`Companion Wounded: Valeria`) that disables their tag until `haven_or_specialist` recovery.
+
+### 2.5 Genre Knobs (System-Level Configuration)
 
 | Knob Name | Values | Mechanical Effect |
 | :--- | :--- | :--- |
-| **`flee_grace_toggle`** | `true` / `false` | If `true`, declaring a full retreat while a pool is at `0` **cannot trigger lethal overflow**; any rolled attrition converts into a permanent Scar or lost gear tag. If `false`, fleeing through hazards at `0` can trigger death/overflow. |
+| **`flee_grace_toggle`** | `true` / `false` | If `true`, declaring a full retreat while a pool is at `0` **cannot trigger lethal overflow**; any rolled attrition converts into a permanent Scar or lost gear/companion tag. If `false`, fleeing through hazards at `0` can trigger death/overflow. |
 | **`base_attrition_shift`** | `-1`, `0`, `+1` | `-1` = Pulp / Action (breezy). `0` = Standard Gritty. `+1` = Brutal Survival / Horror. |
 | **`overflow_default`** | `lethal` / `scar_and_ko` / `scene_fail` | Defines the default consequence when a primary pool takes attrition while already at `0`. |
 
@@ -93,7 +104,7 @@ In addition to losing points when directly challenged by an action roll, any poo
 Every **3 to 5 completed scenes** (or at the conclusion of a major chapter/delve), the player chooses one milestone reward:
 
 1. **Heal a Scar:** Permanently remove 1 Negative Tag (Scar) or restore $+1$ lost Max Pool capacity.
-2. **New Capability:** Acquire 1 new Positive Tag (or signature gear tag) earned through the fiction.
+2. **New Capability:** Acquire 1 new Positive Tag (personal trait, signature gear, or loyal companion tag) earned through the fiction.
 3. **Hardened Reserve:** Increase any Pool's Max capacity by $+1$ (up to a hard ceiling of 12).
 
 ---
@@ -109,7 +120,7 @@ To prevent players from one-shotting major encounters (*"I kill all the goblins"
 [Pre-Check: Is Encounter Threat == 0 (Trivial / Beneath Competence)?]
        ├─► YES ──► Threat 0: Do NOT call resolve_action(). Narrate effortless brush-aside.
        │
-       └─► NO (Threat 1–4) ──► [Compare Intent Scope & Leverage vs. Encounter Layers (X/Y HP)]
+       └─► NO (Threat 1–4) ──► [Compare Intent Scope & Leverage (Tags + Gear + Party) vs. Layers (X/Y HP)]
                                   │
                                   ├─► Narrow/Bypass Intent OR 1/Y Layer Left ──► "full" (Resolves in 1 Turn)
                                   ├─► Total Intent vs. 2+/Y Layers Left ───────► "stepping_stone" (-1 Layer + Setup)
@@ -118,10 +129,10 @@ To prevent players from one-shotting major encounters (*"I kill all the goblins"
 
 ### 4.1 Ambition Governs Leverage (Intent Scoping)
 
-The Narrator evaluates the **scope of the player's declared Intent** against the Encounter's current **Leverage Layers (`X/Y HP`)**:
+The Narrator evaluates the **scope of the player's declared Intent** and their **total Leverage** (personal tags, tools, terrain, and active companions) against the Encounter's current **Leverage Layers (`X/Y HP`)**:
 
 1. **Narrow / Bypass Intent (Escape, Delay, Slip Past, Grab Clue):** Can achieve **`full` resolution** in 1 turn even if an Encounter has multiple layers remaining (e.g., diving through an archway to escape a goblin ambush leaves the encounter behind in a single roll).
-2. **Total Intent (Eliminate / Rout / Completely Solve Encounter):** Only achieves **`full` resolution** when the Encounter has **`1` layer remaining (`1/Y HP`)** or when the player triggers a massive environmental silver bullet. If the Encounter has **`2+` layers remaining (`2/2 HP` or `3/3 HP`)**, a Total Intent automatically resolves as **`stepping_stone`**: the player's action succeeds at stripping `1` layer off the encounter (`2/2 -> 1/2 HP`) and crossing off one of its defenses.
+2. **Total Intent (Eliminate / Rout / Completely Solve Encounter):** Only achieves **`full` resolution** when the Encounter has **`1` layer remaining (`1/Y HP`)** or when the player leverages a decisive environmental/party silver bullet (such as coordinating companions to neutralize an obstacle's remaining defenses at once). If the Encounter has **`2+` layers remaining (`2/2 HP` or `3/3 HP`)**, a Total Intent defaults to **`stepping_stone`**: the player's action succeeds at stripping `1` layer off the encounter (`2/2 -> 1/2 HP`) and crossing off one of its defenses.
 
 ### 4.2 Native FAE Encounter Blocks (Cartridge Format)
 
@@ -155,7 +166,7 @@ Status: Unsearched
 
 **Guardrail on Threat Modifiers:** The Encounter Block's `Threat` is the locked baseline. The Narrator may only adjust it by $\pm 1$ under two conditions:
 * **`+1 Threat`:** The player charges directly into an active `Pressure` with zero preparation, OR attempts a `pivot` action with the wrong tools.
-* **`-1 Threat` (Min 1):** The player uses a clever environmental interaction that directly neutralizes one of the listed `Pressures`.
+* **`-1 Threat` (Min 1):** The player uses a clever environmental interaction or coordinated companion maneuver that directly neutralizes one of the listed `Pressures`.
 
 ---
 
@@ -163,7 +174,7 @@ Status: Unsearched
 
 ### 5.1 Primary Action Tool: `resolve_action()`
 
-When the encounter is **Threat 1–4**, the LLM evaluates the player's action and calls `resolve_action()` with:
+When the encounter is **Threat 1–4**, the LLM evaluates the player's action (without pre-judging the dice roll or attrition amount) and calls `resolve_action()` with:
 
 * **`pool_name` (`string`):** The specific pool placed at risk (`"health"`, `"sanity"`, `"resolve"`, `"torch_and_supplies"`).
 * **`threat_level` (`integer` 1 to 4):** The Encounter's base Threat ($\pm 1$ if modified by a Pressure interaction). *(Note: Threat 0 is resolved in narration without calling this tool).*
@@ -171,7 +182,7 @@ When the encounter is **Threat 1–4**, the LLM evaluates the player's action an
   * `"full"`: Completes the player's Intent and reduces Encounter Layers to `0/Y HP` (or bypasses the encounter).
   * `"stepping_stone"`: Strips `1` Layer from the Encounter (`X/Y -> X-1/Y HP`), crosses off a `Leverage Barrier`, and grants a temporary `[Advantage]` tag ($-1$ Attrition on the next turn).
   * `"pivot"`: Action connects at $+1$ Threat, proves why current leverage cannot finish the target, and reveals the required angle.
-* **`matched_positive_tags` (`array` of strings, max 2):** Up to 2 character tags (plus any active temporary `[Advantage]` tag from a prior stepping-stone turn).
+* **`matched_positive_tags` (`array` of strings, max 2):** Up to 2 character/companion/gear tags (plus any active temporary `[Advantage]` tag from a prior stepping-stone turn).
 * **`matched_negative_tags` (`array` of strings):** Any active Scars or situational debuffs hindering the action.
 * **`is_retreating` (`boolean`):** `true` if the player's primary intent is fleeing/exiting the danger zone.
 
@@ -240,7 +251,7 @@ When the player rests, transitions to a new major delve area, or spends a day in
   },
   "character": {
     "name": "Kaelen the Delver",
-    "positive_tags": ["Veteran Mercenary", "Heavy Shield", "Trap-Wise", "Iron Stomach"],
+    "positive_tags": ["Veteran Mercenary", "Heavy Shield", "Trap-Wise", "Companion: Brother Marcus (Cleric)"],
     "negative_tags": [],
     "temp_advantage": null
   },
@@ -491,7 +502,7 @@ def resolve_action(
             "pool_remaining": 0,
             "directive": (
                 "Player retreated at 0 pool with Flee Grace active. Escape succeeds! "
-                "Do NOT trigger lethal overflow; instead, destroy a gear tag or inflict a permanent Scar."
+                "Do NOT trigger lethal overflow; instead, destroy a gear tag, sideline a companion, or inflict a permanent Scar."
             )
         }
 
@@ -511,9 +522,9 @@ def resolve_action(
 ### Turn 1: Escaping the Murder of Crows Outside (`1/1 HP` Encounter, `0` Attrition)
 
 * **User:** `"I swing my shovel around myself in tight arcs while backing steadily toward the car, refusing to panic."`
-* **LLM (Internal Evaluation & Tool Call):**
-  * *Intent:* Reach the car safely (Narrow/Bypass Intent vs. `1/1 HP` Flock = **`full`**).
-  * *Pool & Threat:* `sanity` (eerie, unnatural behavior), `threat_level: 2`. Matches `"Calm"` and `"Ex-Military"`.
+* **LLM (Pre-Roll Evaluation & Tool Call):**
+  * *Intent & Scope:* Reach the car safely (Narrow/Bypass Intent vs. `1/1 HP` Flock = **`full`**).
+  * *Pool, Threat & Tags:* `sanity` (eerie, unnatural behavior), `threat_level: 2`. Matches `"Calm"` and `"Ex-Military"`.
   ```python
   resolve_action(
     pool_name="sanity",
@@ -535,9 +546,9 @@ def resolve_action(
 ### Turn 2: Searching the Whispering Study (`2/2 -> 1/2 HP`, Hitting the Zero Clamp)
 
 * **User:** `"Once inside the manor study, I lock the oak door and comb through the leather-bound journals on the desk to learn how to stop the summoning ritual."`
-* **LLM (Internal Evaluation & Tool Call):**
-  * *Intent:* Completely uncover how to stop the ritual (Total Intent against a `2/2 HP` Encounter = **`stepping_stone`**). He will crack Layer 1 (`[1. Ciphered Ritual Ledger]`), reducing the study to `1/2 HP`, while hitting the Breaking Point on Sanity.
-  * *Pool & Threat:* `sanity`, `threat_level: 3` (from the Encounter Block). Only `"Calm"` applies (`1` tag).
+* **LLM (Pre-Roll Evaluation & Tool Call):**
+  * *Intent & Scope:* Completely uncover how to stop the ritual (Total Intent against a `2/2 HP` Encounter = **`stepping_stone`**). This action will crack Layer 1 (`[1. Ciphered Ritual Ledger]`), reducing the study to `1/2 HP` and setting up the locked safe.
+  * *Pool, Threat & Tags:* `sanity` (blasphemous diagrams), `threat_level: 3` (from the Encounter Block). Only `"Calm"` applies (`1` tag).
   ```python
   resolve_action(
     pool_name="sanity",
@@ -560,9 +571,9 @@ def resolve_action(
 ### Turn 3: Abandoning the Safe & Fleeing at Zero (`is_retreating: true` with `flee_grace_toggle: true`)
 
 * **User:** `"Hearing wet scratching inside the study walls and knowing my mind can't take opening that safe right now, I stuff the ledger into my trenchcoat, hurl a chair through the bay window, and sprint across the lawn to my car."`
-* **LLM (Internal Evaluation & Tool Call):**
-  * *Intent:* Escape the manor alive with the ledger (Narrow/Bypass Intent = **`full`** resolution of escape, `is_retreating: true`).
-  * *Pool & Threat:* `sanity`, `threat_level: 2` (reduced by $-1$ for bypassing the safe and bolting).
+* **LLM (Pre-Roll Evaluation & Tool Call):**
+  * *Intent & Scope:* Escape the manor alive with the ledger (Narrow/Bypass Intent = **`full`** resolution of escape, `is_retreating: true`).
+  * *Pool, Threat & Tags:* `sanity`, `threat_level: 2` (reduced by $-1$ for bypassing the safe and bolting). Passes `"Calm"` and active debuff `"Manic Dissociation"`.
   ```python
   resolve_action(
     pool_name="sanity",
@@ -578,7 +589,7 @@ def resolve_action(
   * `roll_4df()` $\rightarrow$ `-1`.
   * `raw_cost` $= 2\text{ (threat)} - 1\text{ (dice)} - 0\text{ (pos)} + 1\text{ (neg\_tag)} = 2$.
   * Pool is at `0` and took `2` attrition, **but** `is_retreating` and `flee_grace_toggle` are both `True`.
-  * **Returns:** `{"outcome": "GRACE_RETREAT_WITH_SCAR", "dice": -1, "attrition": 2, "pool_remaining": 0, "directive": "Player retreated at 0 pool with Flee Grace active. Escape succeeds! Do NOT trigger lethal overflow; instead, destroy a gear tag or inflict a permanent Scar."}`
+  * **Returns:** `{"outcome": "GRACE_RETREAT_WITH_SCAR", "dice": -1, "attrition": 2, "pool_remaining": 0, "directive": "Player retreated at 0 pool with Flee Grace active. Escape succeeds! Do NOT trigger lethal overflow; instead, destroy a gear tag, sideline a companion, or inflict a permanent Scar."}`
 * **LLM Narration:**
   > As the wallpaper bulges inward with the sound of a hundred scrabbling claws, you heave a mahogany chair through the leaded bay window and dive out into the rain. You hit the wet turf rolling, the ciphered ledger clutched tight against your ribs, and scramble into the Ford—dropping your **Service Revolver** into the mud as your shaking hands jam the key into the ignition. You fishtail down the gravel drive and make it back to the streetlights of Arkham alive with the mill's location, though the dark outside your headlights now feels alive and hungry.
   > `[Escape Successful via Flee Grace! | Sanity: 0/8 | Lost Gear Tag: "Service Revolver" | Gained Scar: "Nyctophobia (Fear of the Dark)"]`

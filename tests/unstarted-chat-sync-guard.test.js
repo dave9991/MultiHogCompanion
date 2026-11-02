@@ -9,9 +9,10 @@
  */
 
 import assert from 'assert';
-import { isChatClean, isAdventureActive } from '../adventure-chat.js';
+import { isChatClean, isAdventureActive, ensureCleanAdventureChat } from '../adventure-chat.js';
 import { scanAndInitUnsyncedNpcs, checkAndSyncTierCrossovers, getRelationshipSyncLedger } from '../relationship-narrative-sync.js';
 import { isPbtAActive, ensureActiveChatRulesetConsistency } from '../pbta-ruleset-persistence.js';
+import { purgeCampaignLorebooks } from '../campaign-lore-sync.js';
 
 console.log('--- Running Unstarted Chat & QoL Sync Guard Test Suite ---');
 
@@ -206,5 +207,207 @@ assert.strictEqual(
 );
 
 console.log('✓ PbtA ruleset isolation on unstarted chat verified cleanly');
+
+// ── 5. Test Orphaned Campaign Lorebook & NPC Purge on Fresh Quick Start ─────
+console.log('Testing Orphaned Campaign Lorebook & NPC Purge on Fresh Quick Start...');
+
+const adventureTitle = 'Lou - FAE Gritty OSR Dungeon Crawl (Dark Fantasy Delve)';
+const expectedStrictPrefix = 'Lou_FAE_Gritty_OSR_Dungeon_Crawl_Dark_Fantasy_Delve';
+const targetNpcBook = `${expectedStrictPrefix}_NPCs`;
+const targetLocBook = `${expectedStrictPrefix}_Locations`;
+const unrelatedBook = 'Unrelated_Campaign_NPCs';
+
+// Track deleted books and slash commands
+const deletedBooksList = [];
+const slashCommandsExecuted = [];
+
+const mockFetch = async (url, options) => {
+    if (url.includes('/api/worldinfo/delete')) {
+        const body = JSON.parse(options?.body || '{}');
+        deletedBooksList.push(body.name);
+        return { ok: true, json: async () => ({}) };
+    }
+    return { ok: true, json: async () => ({}) };
+};
+globalThis.fetch = mockFetch;
+
+const mockWIList = [
+    targetNpcBook,
+    targetLocBook,
+    unrelatedBook,
+];
+
+const mockWorldInfoCache = new Map([
+    [targetNpcBook, { entries: { '1': { comment: 'Rats Vane' } } }],
+    [unrelatedBook, { entries: { '1': { comment: 'Archmage' } } }],
+]);
+
+const mockSelectedWI = [
+    targetNpcBook,
+    unrelatedBook,
+];
+
+const mockPurgeCtx = {
+    getWorldInfoNames: async () => mockWIList,
+    executeSlashCommandsWithOptions: async (cmd) => {
+        slashCommandsExecuted.push(cmd);
+    },
+    worldInfoCache: mockWorldInfoCache,
+    selected_world_info: mockSelectedWI,
+    updateWorldInfoList: async () => {},
+};
+
+// Set up live rpgSettings with stale keys referencing the deleted chat / lorebook
+globalThis._rpgSettings = {
+    activeRouterKeys: [
+        `${targetNpcBook}::7`,
+        `${expectedStrictPrefix}_NPCs::Rats Vane`,
+        'OtherBook::1',
+    ],
+    activeWorldKeys: [
+        `${targetNpcBook}::Rats Vane`,
+    ],
+    pinnedRouterKeys: [
+        `${targetNpcBook}::7`,
+    ],
+    keywordActivatedKeys: [
+        `${targetNpcBook}::Rats Vane`,
+    ],
+    campaignBooks: [
+        targetNpcBook,
+        targetLocBook,
+        'OtherBook',
+    ],
+    routerHistory: [
+        { chatId: adventureTitle, campaignPrefix: expectedStrictPrefix },
+        { chatId: 'Unrelated Chat', campaignPrefix: 'Unrelated' },
+    ],
+    routerCampaignPrefix: expectedStrictPrefix,
+    routerLog: [{ text: 'Stale turn log for Rats Vane' }],
+    npcRelationshipValues: {
+        [`${targetNpcBook}::Rats Vane`]: { friendship: 30, affection: 0 },
+    },
+    chatStates: {
+        [adventureTitle]: { currentMemo: 'stale' },
+    },
+};
+
+const purgedCount = await purgeCampaignLorebooks(adventureTitle, mockPurgeCtx);
+
+// 1. Verify target matching & deletion
+assert.strictEqual(purgedCount, 2, 'Must match and purge both candidate lorebooks for strict prefix');
+assert.ok(deletedBooksList.includes(targetNpcBook), 'Must delete Lou_FAE_Gritty_OSR_Dungeon_Crawl_Dark_Fantasy_Delve_NPCs');
+assert.ok(deletedBooksList.includes(targetLocBook), 'Must delete Lou_FAE_Gritty_OSR_Dungeon_Crawl_Dark_Fantasy_Delve_Locations');
+assert.ok(!deletedBooksList.includes(unrelatedBook), 'Must NOT delete unrelated book');
+
+// 2. Verify slash command deactivation
+assert.ok(
+    slashCommandsExecuted.some(cmd => cmd.includes(targetNpcBook) && cmd.includes('state=off')),
+    'Must de-activate purged lorebook via /world state=off'
+);
+
+// 3. Verify selected_world_info and worldInfoCache eviction
+assert.strictEqual(mockSelectedWI.includes(targetNpcBook), false, 'Must remove target book from selected_world_info');
+assert.strictEqual(mockSelectedWI.includes(unrelatedBook), true, 'Must keep unrelated book in selected_world_info');
+assert.strictEqual(mockWorldInfoCache.has(targetNpcBook), false, 'Must delete target book from worldInfoCache');
+assert.strictEqual(mockWorldInfoCache.has(unrelatedBook), true, 'Must keep unrelated book in worldInfoCache');
+
+// 4. Verify settings eviction
+const s = globalThis._rpgSettings;
+assert.deepStrictEqual(s.activeRouterKeys, ['OtherBook::1'], 'Must evict all keys matching strictPrefix or deleted books');
+assert.deepStrictEqual(s.activeWorldKeys, [], 'Must evict activeWorldKeys');
+assert.deepStrictEqual(s.pinnedRouterKeys, [], 'Must evict pinnedRouterKeys');
+assert.deepStrictEqual(s.keywordActivatedKeys, [], 'Must evict keywordActivatedKeys');
+assert.deepStrictEqual(s.campaignBooks, ['OtherBook'], 'Must filter campaignBooks');
+assert.strictEqual(s.routerHistory.length, 1, 'Must remove routerHistory entries matching clean or strict prefix');
+assert.strictEqual(s.routerHistory[0].chatId, 'Unrelated Chat');
+assert.deepStrictEqual(s.routerLog, [], 'Must clear routerLog when active prefix matches purged prefix');
+
+console.log('✓ Orphaned Campaign Lorebook & NPC Purge verified cleanly');
+
+// ── 6. Test ensureCleanAdventureChat Orphaned State & Lorebook Purge ─────────
+console.log('Testing ensureCleanAdventureChat orphaned state & lorebook purge...');
+
+globalThis._rpgSettings = {
+    activeRouterKeys: [`${targetNpcBook}::7`],
+    activeWorldKeys: [`${targetNpcBook}::Rats Vane`],
+    keywordActivatedKeys: [`${targetNpcBook}::Rats Vane`],
+    routerLog: [{ text: 'stale' }],
+    npcRelationshipValues: { [`${targetNpcBook}::Rats Vane`]: { friendship: 50 } },
+    chatStates: { [adventureTitle]: { memo: 'stale' } },
+};
+
+let renamedTo = null;
+const cleanAdventureCtx = {
+    chat: [],
+    characterId: 0,
+    characters: [{ avatar: 'avatar.png' }],
+    chatId: 'Game Master - 2026-11-02@12h00m',
+    getCurrentChatId: () => 'Game Master - 2026-11-02@12h00m',
+    executeSlashCommandsWithOptions: async (cmd) => {
+        if (cmd.startsWith('/renamechat')) {
+            renamedTo = cmd.match(/"([^"]+)"/)?.[1];
+        }
+    },
+    getWorldInfoNames: async () => [targetNpcBook],
+    updateWorldInfoList: async () => {},
+    extensionSettings: {
+        rpg_tracker: globalThis._rpgSettings,
+        multihog_companion: {},
+    },
+};
+globalThis.SillyTavern = { getContext: () => cleanAdventureCtx };
+
+// Global fetch mock to simulate /api/characters/chats returning NO existing chat with adventureTitle
+globalThis.fetch = async (url, options) => {
+    if (url.includes('/api/characters/chats')) {
+        return { ok: true, json: async () => ([{ file_id: 'Old Other Adventure' }]) };
+    }
+    if (url.includes('/api/worldinfo/delete')) {
+        return { ok: true, json: async () => ({}) };
+    }
+    return { ok: true, json: async () => ({}) };
+};
+
+const activeChatIdResult = await ensureCleanAdventureChat({ adventureTitle });
+assert.strictEqual(renamedTo, adventureTitle, 'Must rename chat to adventureTitle');
+assert.deepStrictEqual(globalThis._rpgSettings.activeRouterKeys, [], 'Must reset activeRouterKeys to empty');
+assert.deepStrictEqual(globalThis._rpgSettings.npcRelationshipValues, {}, 'Must reset npcRelationshipValues to empty');
+assert.strictEqual(globalThis._rpgSettings.chatStates[adventureTitle], undefined, 'Must purge chatStates[adventureTitle]');
+
+// Scenario B: User already has a saved chat with this exact name and did not ask to wipe it.
+// ensureCleanAdventureChat must advance to v2 so existing chat is preserved.
+let versionRenamedTo = null;
+const existingSavedChatCtx = {
+    chat: [],
+    characterId: 0,
+    characters: [{ avatar: 'avatar.png' }],
+    chatId: 'Game Master - 2026-11-02@14h00m',
+    getCurrentChatId: () => 'Game Master - 2026-11-02@14h00m',
+    executeSlashCommandsWithOptions: async (cmd) => {
+        if (cmd.startsWith('/renamechat')) {
+            versionRenamedTo = cmd.match(/"([^"]+)"/)?.[1];
+        }
+    },
+    getWorldInfoNames: async () => [],
+    updateWorldInfoList: async () => {},
+    extensionSettings: {
+        rpg_tracker: globalThis._rpgSettings,
+        multihog_companion: {},
+    },
+};
+globalThis.SillyTavern = { getContext: () => existingSavedChatCtx };
+
+globalThis.fetch = async (url, options) => {
+    if (url.includes('/api/characters/chats')) {
+        return { ok: true, json: async () => ([{ file_id: adventureTitle }]) };
+    }
+    return { ok: true, json: async () => ({}) };
+};
+
+await ensureCleanAdventureChat({ adventureTitle });
+assert.strictEqual(versionRenamedTo, `${adventureTitle} v2`, 'Must version chat to v2 when prior chat exists');
+
+console.log('✓ ensureCleanAdventureChat fresh quick start purge and versioning verified cleanly');
 
 console.log('--- ALL UNSTARTED CHAT & QOL SYNC GUARD TESTS PASSED CLEANLY! ---');

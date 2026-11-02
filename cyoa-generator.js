@@ -151,8 +151,8 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSet
             if (primaryPoolMatch) {
                 activePoolNames.push(primaryPoolMatch[1].trim());
             }
-            // Secondary pools from ((BAR:...)) Label: ...
-            const barMatches = [...charText.matchAll(/\(\(BAR:[^)]+\)\)\s*([A-Za-z0-9&/ -]+?):/gi)];
+            // Secondary pools from ((BAR<COLOR>)) or legacy ((BAR: color)) Label: ...
+            const barMatches = [...charText.matchAll(/\(\(BAR(?::\s*[a-zA-Z]+|[a-zA-Z]+|\s*-\s*[^)]+)?\)\)\s*([A-Za-z0-9&/ -]+?):/gi)];
             for (const m of barMatches) {
                 if (m[1]) activePoolNames.push(m[1].trim());
             }

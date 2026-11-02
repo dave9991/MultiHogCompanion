@@ -27,6 +27,38 @@ export const FAE_GOD_TAGS_BLACKLIST = [
 ];
 
 /**
+ * Maps a pool bar color name to a valid CSS suffix token supported by MultiHog's ((BAR<COLOR>)) syntax.
+ * MultiHog renderer matches ((BARBLUE)), ((BARGOLD)), ((BARPURPLE)), ((BARRED)), ((BARGREEN)).
+ * Note: 'amber' is invalid CSS and unsupported by MultiHog's regex; it maps to '((BARGOLD))'.
+ *
+ * @param {string} [barColor='purple']
+ * @returns {string} e.g. '((BARPURPLE))', '((BARGOLD))'
+ */
+export function toMultihogBarMarker(barColor = 'purple') {
+    const c = String(barColor || '').trim().toLowerCase();
+    switch (c) {
+        case 'amber':
+        case 'yellow':
+        case 'gold':
+        case 'orange':
+            return '((BARGOLD))';
+        case 'blue':
+        case 'cyan':
+            return '((BARBLUE))';
+        case 'purple':
+        case 'violet':
+            return '((BARPURPLE))';
+        case 'red':
+        case 'crimson':
+            return '((BARRED))';
+        case 'green':
+            return '((BARGREEN))';
+        default:
+            return '((BARPURPLE))';
+    }
+}
+
+/**
  * 7 Canonical FAE Genre Skeletons with resource pools, knobs, and archetypes.
  */
 export const FAE_GENRES = {
@@ -135,7 +167,7 @@ Status: Unsearched`,
             torch_and_supplies: {
                 key: 'torch_and_supplies',
                 label: 'Torch & Supplies',
-                barColor: 'amber',
+                barColor: 'gold',
                 current: 6,
                 max: 6,
                 recovery: 'haven_or_specialist',
@@ -213,7 +245,7 @@ Status: Entrenched`,
             ammo_and_battery: {
                 key: 'ammo_and_battery',
                 label: 'Ammo & Battery',
-                barColor: 'amber',
+                barColor: 'gold',
                 current: 6,
                 max: 6,
                 recovery: 'haven_or_specialist',
@@ -291,7 +323,7 @@ Status: Stalking`,
             water_and_filters: {
                 key: 'water_and_filters',
                 label: 'Water & Filters',
-                barColor: 'amber',
+                barColor: 'gold',
                 current: 6,
                 max: 6,
                 recovery: 'haven_or_specialist',
@@ -369,7 +401,7 @@ Status: Alerted`,
             heat_and_trace: {
                 key: 'heat_and_trace',
                 label: 'Heat & Trace',
-                barColor: 'amber',
+                barColor: 'gold',
                 current: 6,
                 max: 6,
                 recovery: 'haven_or_specialist',
@@ -447,7 +479,7 @@ Status: Lockdown`,
             oxygen_and_power: {
                 key: 'oxygen_and_power',
                 label: 'Oxygen & Power',
-                barColor: 'amber',
+                barColor: 'gold',
                 current: 6,
                 max: 6,
                 recovery: 'haven_or_specialist',
@@ -525,7 +557,7 @@ Status: Decompressing`,
             trail_supplies: {
                 key: 'trail_supplies',
                 label: 'Trail Supplies',
-                barColor: 'amber',
+                barColor: 'gold',
                 current: 6,
                 max: 6,
                 recovery: 'haven_or_specialist',
@@ -1405,7 +1437,7 @@ export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {})
     const secondaryList = poolKeys.slice(1).map(k => genre.pools[k]);
 
     const secondaryBars = secondaryList.map(p => {
-        return `((BAR:${p.barColor || 'purple'})) ${p.label}: ${p.current}/${p.max} (Zero Debuff: ${p.zero_debuff} | Recovery: ${p.recovery})`;
+        return `${toMultihogBarMarker(p.barColor)} ${p.label}: ${p.current}/${p.max}`;
     }).join('\n');
 
     const sampleTags = genre.defaultPositiveTags.join(', ');
@@ -1694,7 +1726,7 @@ ${active.defaultPositiveTags.map(t => `  • ${t}`).join('\n')}
    - When a pool reaches 0, treat it as a dramatic crisis. Recommend using Flee Grace or targeting an alternative pool.
 3. **State Tracker Synchronization:**
    - Primary Pool syncs in tandem with Line 1 HP (\`cur/max HP\`).
-   - Secondary pools are tracked via \`((BAR:color))\` progress bars.
+   - Secondary pools are tracked via \`((BAR<COLOR>))\` progress bars (e.g. \`((BARBLUE))\`, \`((BARGOLD))\`, \`((BARPURPLE))\`).
    - Milestone advancement occurs every 3–5 completed scenes (\`Scenes: X/Y\` and \`XP: X/Y\`).
 
 ---
@@ -1721,8 +1753,6 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
     const tagsSnippet = genre.defaultPositiveTags.join(', ');
     const knobs = Object.assign({}, genre.knobs, customKnobs || {});
 
-    const mentionsParty = typeof customNotes === 'string' && /\b(friends?|companions?|party|crew|squad|allies|partners|team|band|fellowship|retinue|brothers|sisters|comrades|mercenaries)\b/i.test(customNotes);
-
     return [
         `RULES: Freeform Attrition Engine (FAE) — ${genre.label}.`,
         charName ? `NAME: ${charName}.` : null,
@@ -1731,10 +1761,7 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
         `POSITIVE TAGS: Pick 4 distinct descriptive tags (skills, gear, background, or traits with detail in parentheses): ${tagsSnippet}.`,
         `KNOBS: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${knobs.base_attrition_shift >= 0 ? '+' + knobs.base_attrition_shift : knobs.base_attrition_shift} | Overflow: ${knobs.overflow_default}.`,
         `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or polyhedral damage dice. Use 4dF Attrition, Positive Tags, and Scars/Debuffs in [CHARACTER].`,
-        `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary ((BAR:...)) pools, FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`,
-        mentionsParty
-            ? `PARTY OVERRIDE (EXPLICITLY INSTRUCTED): You ARE explicitly instructed to output a [PARTY] block! Because the scenario mentions companions/friends, generate a [PARTY]...[/PARTY] block with 1–2 fitting starting companions using FAE companion format: "- Name (Archetype): 8/8 HP | Pool: ${Object.values(genre.pools)[0]?.label || 'Health'} (8/8)", "Appearance: ...", "((PILLS)) Positive Tags: Tag 1 (desc), Tag 2 (desc)", "((PILLS)) Boons: Boon 1 (1 Use)", "((PILLS)) Scars & Debuffs: None", "Status: Healthy". NEVER use D&D classes or levels in [PARTY].`
-            : null,
+        `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6" (NEVER use a colon inside ((BAR...)), e.g. write ((BARBLUE)) or ((BARGOLD)), and do NOT append Zero Debuff/Recovery text on the bar line), FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }

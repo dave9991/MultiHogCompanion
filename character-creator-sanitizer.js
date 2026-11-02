@@ -19,6 +19,8 @@
  *    before upstream persona creation runs.
  */
 
+import { toMultihogBarMarker } from './fae-ruleset.js';
+
 /**
  * Strips HTML tags, markdown emphasis (*, _, `, ~), leading bullets/symbols,
  * and trailing parenthetical archetypes (e.g. "Lou (The Sellsword)") from a raw name.
@@ -185,6 +187,22 @@ export function sanitizeCharacterHeaderInMemo(memo, fallbackName = '') {
         }
 
         lines[headerIdx] = line;
+
+        // 3. Normalize secondary pool lines containing ((BAR...)) markers:
+        // - Normalize malformed ((BAR:...)) or ((BAR - ...)) markers into valid MultiHog ((BAR<COLOR>)) tokens
+        // - Strip trailing (Zero Debuff: ...) parentheticals that crush HUD progress bar width
+        for (let i = 0; i < lines.length; i++) {
+            let l = lines[i];
+            if (/\(\(BAR/i.test(l)) {
+                l = l.replace(/\(\(BAR(?::\s*([a-zA-Z]+)|([a-zA-Z]+)|\s*-\s*([a-zA-Z]+))\)\)/gi, (_m, c1, c2, c3) => {
+                    const color = (c1 || c2 || c3 || '').trim().toLowerCase();
+                    return toMultihogBarMarker(color);
+                });
+                l = l.replace(/\s*\(Zero Debuff:.*\)\s*$/i, '');
+                lines[i] = l;
+            }
+        }
+
         return openTag + lines.join('\n') + closeTag;
     });
 

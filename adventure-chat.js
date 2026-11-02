@@ -352,6 +352,11 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
         await deleteAdventureChat(null, wipeOldTitle, { emitEvent: false });
         await sleep(250);
 
+        try {
+            const { purgeCampaignLorebooks } = await import('./campaign-lore-sync.js');
+            await purgeCampaignLorebooks(wipeOldTitle, ctx);
+        } catch (_) {}
+
         // Crucial: doNewChat switched away from wipeOldTitle, which caused MultiHog's
         // onChatChanged to save the departing chat's state into chatStates[wipeOldTitle].
         // We must purge wipeOldTitle using removeDeletedChatData and saveSettings so that
@@ -410,58 +415,149 @@ export async function ensureCleanAdventureChat({ adventureTitle = '', fallbackLa
     }
 
     // ── 2. Intelligent adventure renaming ──────────────────────────────────────
+    let safeTitle = '';
     const candidateTitle = (adventureTitle || fallbackLabel || '').trim();
     if (candidateTitle) {
         // Sanitize illegal filename characters and collapse consecutive whitespace
         const cleanTitle = candidateTitle.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
         // Limit to reasonable display length
-        const safeTitle = cleanTitle.length > 60 ? cleanTitle.slice(0, 60).trim() : cleanTitle;
+        safeTitle = cleanTitle.length > 60 ? cleanTitle.slice(0, 60).trim() : cleanTitle;
 
-        if (safeTitle && currentChatId && (isDefaultChatName(currentChatId) || currentChatId !== safeTitle)) {
-            console.log(`[MultiHog Companion] Renaming adventure chat "${currentChatId}" -> "${safeTitle}"`);
+        if (safeTitle) {
+            let existingChatNames = [];
             try {
-                if (typeof window !== 'undefined') {
-                    window._mhcPendingFreshRestart = {
-                        oldId: currentChatId,
-                        newId: safeTitle,
-                    };
-                }
+                existingChatNames = await getExistingAdventureNames();
+            } catch (_) {}
 
-                // Arm MultiHog's pendingUnseenChatReset proof marker so MultiHog's onChatRenamedMigrate
-                // recognizes the rename as an intentional transition from the timestamp shell to safeTitle.
+            const hasExistingSavedChat = Array.isArray(existingChatNames) &&
+                existingChatNames.includes(safeTitle) &&
+                safeTitle !== currentChatId &&
+                !wipeOldTitle;
+
+            if (hasExistingSavedChat) {
+                // The user has an existing saved chat with that exact name and didn't delete it.
+                // Advance to next version name so we don't clobber their existing chat.
+                safeTitle = findNextAdventureVersionName(safeTitle, existingChatNames);
+            }
+
+            // Either safeTitle was NOT in existingChatNames (or equals currentChatId on a clean unstarted chat),
+            // OR safeTitle was bumped to a new version name.
+            // In both cases, this is a fresh adventure launch! Any lorebooks or chatStates on disk
+            // matching safeTitle are orphaned leftovers from a previously deleted chat.
+            // Automatically purge them before renaming/aligning:
+            try {
+                const { purgeCampaignLorebooks } = await import('./campaign-lore-sync.js');
+                await purgeCampaignLorebooks(safeTitle, ctx);
+            } catch (pErr) {
+                console.warn('[MultiHog Companion] Non-fatal error during orphaned lorebook purge:', pErr);
+            }
+
+            const purgeTargetVariants = [
+                safeTitle,
+                safeTitle.replace(/\s+/g, '_'),
+                safeTitle.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+            ].filter(Boolean);
+
+            try {
+                const { removeDeletedChatData } = await import(
+                    '../SillyTavern-MultihogDnDFramework/src/features/chat/deleted-chat-data.js'
+                );
+                const { saveSettings } = await import(
+                    '../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js'
+                );
+                let stateMgr = null;
                 try {
-                    const { runtimeState } = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-state.js');
-                    if (runtimeState) {
-                        runtimeState.pendingUnseenChatReset = {
-                            oldId: currentChatId,
-                            newId: safeTitle,
-                            preexistingLocalMapKeys: [],
-                        };
-                    }
+                    stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
                 } catch (_) {}
 
-                if (typeof scriptModule?.renameChat === 'function') {
-                    await scriptModule.renameChat(currentChatId, safeTitle);
-                } else if (typeof ctx?.executeSlashCommandsWithOptions === 'function') {
-                    await ctx.executeSlashCommandsWithOptions(`/renamechat "${safeTitle}"`);
+                const settingsTargets = [];
+                try {
+                    const st = typeof stateMgr?.getSettings === 'function' ? stateMgr.getSettings() : null;
+                    if (st) settingsTargets.push(st);
+                } catch (_) {}
+                if (typeof globalThis !== 'undefined' && globalThis._rpgSettings && !settingsTargets.includes(globalThis._rpgSettings)) {
+                    settingsTargets.push(globalThis._rpgSettings);
                 }
-                await sleep(350);
-                currentChatId = getCurrentId ? getCurrentId() : (ctx?.chatId || null);
-            } catch (renameErr) {
-                console.warn('[MultiHog Companion] Non-fatal error while renaming adventure chat:', renameErr);
-            } finally {
-                setTimeout(() => {
-                    if (typeof window !== 'undefined' && window._mhcPendingFreshRestart) {
-                        window._mhcPendingFreshRestart = null;
+
+                for (const s of settingsTargets) {
+                    for (const v of purgeTargetVariants) {
+                        if (typeof removeDeletedChatData === 'function') {
+                            try { removeDeletedChatData(s, v); } catch (_) {}
+                        }
+                        if (s?.chatStates) {
+                            delete s.chatStates[v];
+                        }
                     }
-                }, 3000);
+                    s.activeRouterKeys = [];
+                    s.activeWorldKeys = [];
+                    s.keywordActivatedKeys = [];
+                    s.routerLog = [];
+                    s.npcRelationshipValues = {};
+                }
+
+                if (typeof saveSettings === 'function') {
+                    await saveSettings(true).catch(() => {});
+                }
+            } catch (_) {}
+
+            try {
+                const { removeLocalChatMapEntry, COMPANION_BY_CHAT_KEY, MEMO_RECOVERY_KEY } = await import(
+                    '../SillyTavern-MultihogDnDFramework/src/features/chat/local-chat-map.js'
+                );
+                if (typeof removeLocalChatMapEntry === 'function') {
+                    for (const v of purgeTargetVariants) {
+                        removeLocalChatMapEntry(COMPANION_BY_CHAT_KEY, v);
+                        removeLocalChatMapEntry(MEMO_RECOVERY_KEY, v);
+                    }
+                }
+            } catch (_) {}
+
+            if (currentChatId && (isDefaultChatName(currentChatId) || currentChatId !== safeTitle)) {
+                console.log(`[MultiHog Companion] Renaming adventure chat "${currentChatId}" -> "${safeTitle}"`);
+                try {
+                    if (typeof window !== 'undefined') {
+                        window._mhcPendingFreshRestart = {
+                            oldId: currentChatId,
+                            newId: safeTitle,
+                        };
+                    }
+
+                    // Arm MultiHog's pendingUnseenChatReset proof marker so MultiHog's onChatRenamedMigrate
+                    // recognizes the rename as an intentional transition from the timestamp shell to safeTitle.
+                    try {
+                        const { runtimeState } = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-state.js');
+                        if (runtimeState) {
+                            runtimeState.pendingUnseenChatReset = {
+                                oldId: currentChatId,
+                                newId: safeTitle,
+                                preexistingLocalMapKeys: [],
+                            };
+                        }
+                    } catch (_) {}
+
+                    if (typeof scriptModule?.renameChat === 'function') {
+                        await scriptModule.renameChat(currentChatId, safeTitle);
+                    } else if (typeof ctx?.executeSlashCommandsWithOptions === 'function') {
+                        await ctx.executeSlashCommandsWithOptions(`/renamechat "${safeTitle}"`);
+                    }
+                    await sleep(350);
+                    currentChatId = getCurrentId ? getCurrentId() : (ctx?.chatId || null);
+                } catch (renameErr) {
+                    console.warn('[MultiHog Companion] Non-fatal error while renaming adventure chat:', renameErr);
+                } finally {
+                    setTimeout(() => {
+                        if (typeof window !== 'undefined' && window._mhcPendingFreshRestart) {
+                            window._mhcPendingFreshRestart = null;
+                        }
+                    }, 3000);
+                }
             }
         }
     }
 
     // ── 3. Align Campaign Prefix to Adventure Title ───────────────────────────
     const effectiveChatId = currentChatId || (getCurrentId ? getCurrentId() : null) || ctx?.chatId || 'active';
-    const effectiveTitle = candidateTitle || effectiveChatId;
+    const effectiveTitle = safeTitle || candidateTitle || effectiveChatId;
     if (effectiveTitle && effectiveChatId) {
         try {
             const { alignCampaignPrefixForChat } = await import('./campaign-lore-sync.js');

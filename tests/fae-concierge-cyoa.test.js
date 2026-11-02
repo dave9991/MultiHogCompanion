@@ -458,26 +458,27 @@ test('FAE Session Zero Concierge: Modal HTML header switcher & dynamic elements'
 });
 
 describe('Stage 2: Quick Start Party Override, Footer All-Pools, CYOA Pool Disambiguation & FAE Memo Initialization', () => {
-    test('1. buildFaeQuickStartInstructions includes PARTY OVERRIDE and negative bold header mandate when customNotes mentions friends/party', () => {
+    test('1. buildFaeQuickStartInstructions does NOT output PARTY OVERRIDE and enforces negative bold header mandate', () => {
         const withParty = buildFaeQuickStartInstructions('osr_dungeon', 'Lou', 'Lou and his friends enter the sewers underneath the city');
-        assert.ok(withParty.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must include party override when customNotes mentions friends');
+        assert.ok(!withParty.includes('PARTY OVERRIDE'), 'Must NOT include party override when customNotes mentions friends (instant action focuses on protagonist)');
         assert.ok(withParty.includes('NEVER wrap the character name or header line in markdown bold (**)'), 'Must include bold header prohibition');
         assert.ok(withParty.includes('NAME: Lou.'), 'Must mention Lou in name line');
         assert.ok(withParty.includes('Torch & Supplies'), 'Must list OSR pools in Quick Start instructions');
+        assert.ok(withParty.includes('secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6"'));
 
         const solo = buildFaeQuickStartInstructions('osr_dungeon', 'Lou', 'Lou wanders into the crypt alone');
-        assert.ok(!solo.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must NOT include party override when solo');
+        assert.ok(!solo.includes('PARTY OVERRIDE'), 'Must NOT include party override when solo');
         assert.ok(solo.includes('NEVER wrap the character name or header line in markdown bold (**)'));
     });
 
-    test('2. buildPbtAQuickStartInstructions includes PARTY OVERRIDE and negative bold header mandate when customNotes mentions companions/party', () => {
+    test('2. buildPbtAQuickStartInstructions does NOT output PARTY OVERRIDE and enforces negative bold header mandate', () => {
         const withParty = buildPbtAQuickStartInstructions('fantasy', 'Aelion', 'Aelion and his party explore the forgotten ruins');
-        assert.ok(withParty.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must include party override when customNotes mentions party');
+        assert.ok(!withParty.includes('PARTY OVERRIDE'), 'Must NOT include party override when customNotes mentions party (instant action focuses on protagonist)');
         assert.ok(withParty.includes('NEVER wrap the character name or header line in markdown bold (**)'), 'Must include bold header prohibition');
         assert.ok(withParty.includes('NAME: Aelion.'), 'Must mention Aelion in name line');
 
         const solo = buildPbtAQuickStartInstructions('fantasy', 'Aelion', 'Aelion infiltrates the castle alone');
-        assert.ok(!solo.includes('PARTY OVERRIDE (EXPLICITLY INSTRUCTED)'), 'Must NOT include party override when solo');
+        assert.ok(!solo.includes('PARTY OVERRIDE'), 'Must NOT include party override when solo');
         assert.ok(solo.includes('NEVER wrap the character name or header line in markdown bold (**)'));
     });
 
@@ -586,8 +587,8 @@ Status: Healthy
         // Verify Character
         assert.ok(memo.includes('[CHARACTER]'), 'Must include [CHARACTER]');
         assert.ok(memo.includes('Lou (The Sellsword): 10/10 HP | Pool: Health (10/10)'), 'Must format protagonist with OSR pool stats');
-        assert.ok(memo.includes('((BAR:blue)) Resolve: 6/6'), 'Must include secondary Resolve bar');
-        assert.ok(memo.includes('((BAR:amber)) Torch & Supplies: 6/6'), 'Must include secondary Torch & Supplies bar');
+        assert.ok(memo.includes('((BARBLUE)) Resolve: 6/6'), 'Must include secondary Resolve bar');
+        assert.ok(memo.includes('((BARGOLD)) Torch & Supplies: 6/6'), 'Must include secondary Torch & Supplies bar');
 
         // Verify Party
         assert.ok(memo.includes('[PARTY]'), 'Must include [PARTY] block for companions');

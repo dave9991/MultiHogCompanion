@@ -117,7 +117,18 @@ const macroMemo = `[CHARACTER]
 [/CHARACTER]`;
 const sanitizedFallback = sanitizeCharacterHeaderInMemo(macroMemo, '**Lou');
 assert.ok(sanitizedFallback.includes('Lou (The Sellsword): 10/10 HP'), 'Replaces macro and cleans fallback name');
-console.log('✓ sanitizeCharacterHeaderInMemo cleanly sanitizes header lines');
+
+const faeMemoWithBars = `[CHARACTER]
+Lou (The Sellsword): 10/10 HP | Pool: Health (10/10)
+((BAR: blue)) Resolve: 6/6 (Zero Debuff: Rattled & Hesitant | Recovery: scene_breather)
+((BAR: amber)) Torch & Supplies: 6/6 (Zero Debuff: Pitch Black & Starving | Recovery: haven_or_specialist)
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
+[/CHARACTER]`;
+const sanitizedFaeBars = sanitizeCharacterHeaderInMemo(faeMemoWithBars);
+assert.ok(sanitizedFaeBars.includes('((BARBLUE)) Resolve: 6/6'), 'Converts ((BAR: blue)) to ((BARBLUE)) and strips Zero Debuff');
+assert.ok(sanitizedFaeBars.includes('((BARGOLD)) Torch & Supplies: 6/6'), 'Converts ((BAR: amber)) to ((BARGOLD)) and strips Zero Debuff');
+assert.ok(!sanitizedFaeBars.includes('Zero Debuff'), 'Strips trailing zero debuff clause on bar lines');
+console.log('✓ sanitizeCharacterHeaderInMemo cleanly sanitizes header lines and secondary bar pools');
 
 // 4c. extractNameFromMemo and getMultihogPlayerName with markdown artifacts
 console.log('Testing extractNameFromMemo and getMultihogPlayerName...');

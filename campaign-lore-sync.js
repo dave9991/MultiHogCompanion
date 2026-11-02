@@ -196,10 +196,19 @@ export async function alignCampaignPrefixForChat(chatId, adventureTitle) {
     if (!chatId || !adventureTitle) return '';
     try {
         const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
-        const cleanPrefix = stateMgr.sanitizeCampaignPrefixString(adventureTitle);
+        const cleanPrefix = typeof stateMgr.sanitizeCampaignPrefixString === 'function'
+            ? stateMgr.sanitizeCampaignPrefixString(adventureTitle)
+            : adventureTitle.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
         if (!cleanPrefix) return '';
 
-        const s = stateMgr.getSettings();
+        let s = null;
+        try {
+            s = typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null;
+        } catch (_) {}
+        if (!s && typeof globalThis !== 'undefined' && globalThis._rpgSettings) {
+            s = globalThis._rpgSettings;
+        }
+        if (!s) return '';
         if (!s.chatStates) s.chatStates = {};
         if (!s.chatStates[chatId]) s.chatStates[chatId] = {};
 
@@ -307,12 +316,37 @@ export async function verifyClonedLorebooks(bookRenameMap, ctx) {
 export async function deleteOldLorebooks(bookNames, ctx) {
     if (!Array.isArray(bookNames) || bookNames.length === 0) return 0;
     let deletedCount = 0;
+    const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+
+    let wiMod = null;
+    try {
+        wiMod = await import('../../../world-info.js');
+    } catch (_) {}
 
     for (const name of bookNames) {
+        if (typeof effectiveCtx?.executeSlashCommandsWithOptions === 'function') {
+            await effectiveCtx.executeSlashCommandsWithOptions(`/world state=off silent=true "${name}"`).catch(() => {});
+        }
+
+        const selList = (Array.isArray(wiMod?.selected_world_info) && wiMod.selected_world_info) ||
+                        (Array.isArray(effectiveCtx?.selected_world_info) && effectiveCtx.selected_world_info) ||
+                        (Array.isArray(globalThis?.selected_world_info) && globalThis.selected_world_info);
+        if (selList) {
+            let idx;
+            while ((idx = selList.indexOf(name)) !== -1) {
+                selList.splice(idx, 1);
+            }
+        }
+
+        const cache = wiMod?.worldInfoCache || effectiveCtx?.worldInfoCache || globalThis?.worldInfoCache;
+        try {
+            cache?.delete?.(name);
+        } catch (_) {}
+
         try {
             const res = await fetch('/api/worldinfo/delete', {
                 method: 'POST',
-                headers: await getSafeHeaders(ctx),
+                headers: await getSafeHeaders(effectiveCtx),
                 body: JSON.stringify({ name }),
             });
             if (res.ok) {
@@ -324,8 +358,8 @@ export async function deleteOldLorebooks(bookNames, ctx) {
         }
     }
 
-    if (deletedCount > 0 && typeof ctx?.updateWorldInfoList === 'function') {
-        try { await ctx.updateWorldInfoList(); } catch (_) { /* non-fatal */ }
+    if (deletedCount > 0 && typeof effectiveCtx?.updateWorldInfoList === 'function') {
+        try { await effectiveCtx.updateWorldInfoList(); } catch (_) { /* non-fatal */ }
     }
 
     return deletedCount;
@@ -345,6 +379,9 @@ export async function purgeCampaignLorebooks(prefix, ctx = null) {
     const cleanPrefix = prefix.trim();
     if (!cleanPrefix) return 0;
 
+    const whitespacePrefix = cleanPrefix.replace(/\s+/g, '_');
+    const strictPrefix = cleanPrefix.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
     let bookBelongsToPrefix = null;
     try {
         const utils = await import('../SillyTavern-MultihogDnDFramework/src/features/chat/clone-campaign-stack-utils.js');
@@ -355,37 +392,120 @@ export async function purgeCampaignLorebooks(prefix, ctx = null) {
     const allNames = await listAllWorldNames(effectiveCtx);
     const targetSet = new Set();
 
-    // Standard 6 campaign lorebook names with both spaces and underscores
-    const sanitizedPrefix = cleanPrefix.replace(/\s+/g, '_');
-    const standardBooks = [
-        `${sanitizedPrefix}_NPCs`,
-        `${sanitizedPrefix}_Factions`,
-        `${sanitizedPrefix}_Locations`,
-        `${sanitizedPrefix}_Quests`,
-        `${sanitizedPrefix}_Rules`,
-        `${sanitizedPrefix}_Skeleton`,
-        `${cleanPrefix}_NPCs`,
-        `${cleanPrefix}_Factions`,
-        `${cleanPrefix}_Locations`,
-        `${cleanPrefix}_Quests`,
-        `${cleanPrefix}_Rules`,
-        `${cleanPrefix}_Skeleton`,
-    ];
+    const prefixes = Array.from(new Set([cleanPrefix, whitespacePrefix, strictPrefix].filter(Boolean)));
+    const standardSuffixes = ['_NPCs', '_Factions', '_Locations', '_Quests', '_Rules', '_Skeleton'];
 
-    standardBooks.forEach(b => {
-        if (allNames.includes(b)) targetSet.add(b);
-    });
+    // Standard candidate names across all prefix variations and standard suffixes + Campaign_ variants
+    const candidateSet = new Set();
+    for (const p of prefixes) {
+        for (const suff of standardSuffixes) {
+            candidateSet.add((p + suff).toLowerCase());
+            candidateSet.add((`Campaign_${p}${suff}`).toLowerCase());
+        }
+        candidateSet.add((`Campaign_${p}`).toLowerCase());
+    }
 
-    // Also include any dynamic books belonging to this prefix
-    if (typeof bookBelongsToPrefix === 'function') {
-        allNames.forEach(name => {
-            if (bookBelongsToPrefix(name, cleanPrefix) || bookBelongsToPrefix(name, sanitizedPrefix)) {
+    const checkBelongs = (bookName, pref) => {
+        if (!pref) return false;
+        if (typeof bookBelongsToPrefix === 'function') {
+            try {
+                if (bookBelongsToPrefix(bookName, pref)) return true;
+            } catch (_) {}
+        }
+        const lowerBook = String(bookName || '').toLowerCase();
+        const lowerPref = String(pref || '').toLowerCase();
+        if (lowerBook === lowerPref) return true;
+        const rest = lowerBook.startsWith(lowerPref + '_') ? lowerBook.slice(lowerPref.length + 1) : null;
+        return rest !== null && !rest.includes('_');
+    };
+
+    for (const name of allNames) {
+        const lower = String(name || '').toLowerCase();
+        if (candidateSet.has(lower)) {
+            targetSet.add(name);
+            continue;
+        }
+        for (const p of prefixes) {
+            if (checkBelongs(name, p)) {
                 targetSet.add(name);
+                break;
             }
-        });
+        }
     }
 
     const booksToDelete = Array.from(targetSet);
+
+    // Clean any stale references to strictPrefix / booksToDelete from MultiHog's live settings
+    try {
+        const settingsTargets = [];
+        let stateMgr = null;
+        try {
+            stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+            const stSettings = typeof stateMgr?.getSettings === 'function' ? stateMgr.getSettings() : null;
+            if (stSettings) settingsTargets.push(stSettings);
+        } catch (_) {}
+        if (typeof globalThis !== 'undefined' && globalThis._rpgSettings && !settingsTargets.includes(globalThis._rpgSettings)) {
+            settingsTargets.push(globalThis._rpgSettings);
+        }
+
+        for (const s of settingsTargets) {
+            const booksToDeleteLower = new Set(booksToDelete.map(b => String(b).toLowerCase()));
+            const isStaleKey = (key) => {
+                if (typeof key !== 'string') return false;
+                const lowerKey = key.toLowerCase();
+                if (strictPrefix && lowerKey.startsWith(strictPrefix.toLowerCase() + '_')) return true;
+                if (cleanPrefix && lowerKey.startsWith(cleanPrefix.toLowerCase() + '_')) return true;
+                if (whitespacePrefix && lowerKey.startsWith(whitespacePrefix.toLowerCase() + '_')) return true;
+                for (const bName of booksToDelete) {
+                    if (lowerKey.startsWith(String(bName).toLowerCase() + '::')) return true;
+                }
+                return false;
+            };
+
+            const filterKeys = (arr) => {
+                if (!Array.isArray(arr)) return arr;
+                return arr.filter(k => !isStaleKey(k));
+            };
+
+            if (Array.isArray(s.activeRouterKeys)) s.activeRouterKeys = filterKeys(s.activeRouterKeys);
+            if (Array.isArray(s.activeWorldKeys)) s.activeWorldKeys = filterKeys(s.activeWorldKeys);
+            if (Array.isArray(s.pinnedRouterKeys)) s.pinnedRouterKeys = filterKeys(s.pinnedRouterKeys);
+            if (Array.isArray(s.keywordActivatedKeys)) s.keywordActivatedKeys = filterKeys(s.keywordActivatedKeys);
+
+            if (Array.isArray(s.campaignBooks)) {
+                s.campaignBooks = s.campaignBooks.filter(b => typeof b === 'string' && !booksToDeleteLower.has(b.toLowerCase()));
+            }
+
+            if (Array.isArray(s.routerHistory)) {
+                const cleanLower = cleanPrefix.toLowerCase();
+                const strictLower = strictPrefix.toLowerCase();
+                s.routerHistory = s.routerHistory.filter(entry => {
+                    if (!entry) return true;
+                    const cid = typeof entry.chatId === 'string' ? entry.chatId.toLowerCase() : '';
+                    const cpref = typeof entry.campaignPrefix === 'string' ? entry.campaignPrefix.toLowerCase() : '';
+                    if (cid && (cid === cleanLower || cid === strictLower)) return false;
+                    if (cpref && (cpref === cleanLower || cpref === strictLower)) return false;
+                    return true;
+                });
+            }
+
+            const currentActivePrefix = typeof s.routerCampaignPrefix === 'string' ? s.routerCampaignPrefix.toLowerCase() : '';
+            if (currentActivePrefix && (
+                currentActivePrefix === cleanPrefix.toLowerCase() ||
+                currentActivePrefix === strictPrefix.toLowerCase() ||
+                currentActivePrefix === whitespacePrefix.toLowerCase()
+            )) {
+                s.routerLog = [];
+            }
+        }
+
+        if (typeof stateMgr?.saveSettings === 'function') {
+            await stateMgr.saveSettings(true).catch(() => {});
+        }
+    } catch (setErr) {
+        console.warn('[MultiHog Companion] Non-fatal error cleaning settings during lorebook purge:', setErr);
+    }
+
     if (booksToDelete.length === 0) return 0;
 
     console.log(`[MultiHog Companion] Purging ${booksToDelete.length} campaign lorebook(s) for fresh restart:`, booksToDelete);

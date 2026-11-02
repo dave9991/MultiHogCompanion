@@ -18,6 +18,7 @@ import {
     FAE_GENRES,
     createInitialFaeState,
     sanitizeFaePositiveTags,
+    toMultihogBarMarker,
 } from './fae-ruleset.js';
 import { stripMarkdownNameArtifacts } from './character-creator-sanitizer.js';
 
@@ -131,9 +132,9 @@ export function formatFaeCharacterMemoBlock(faeState) {
     // Secondary Pools (Pools 2 and 3)
     for (const key of secondaryKeys) {
         const p = pools[key];
-        const barColor = p.barColor || 'purple';
+        const barMarker = toMultihogBarMarker(p.barColor);
         lines.push(
-            `((BAR:${barColor})) ${p.label}: ${p.current}/${p.max} (Zero Debuff: ${p.zero_debuff} | Recovery: ${p.recovery})`
+            `${barMarker} ${p.label}: ${p.current}/${p.max}`
         );
     }
 
@@ -294,18 +295,18 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         if (/HP/i.test(line) && line.includes(name)) continue;
 
         // Check for ((BAR...)) or bare pool line: Label: cur/max (...)
-        const barMatch = line.match(/(?:\(\(BAR(?::\s*(\w+)|RED|GREEN|BLUE|PURPLE|AMBER|\s*-\s*[^)]+)?\)\)\s*)?([A-Za-z0-9\s&]+?):\s*([+-]?\d+)\/(\d+)(?:\s*HP)?(?:\s*\(([^)]*)\))?/i);
+        const barMatch = line.match(/(?:\(\(BAR(?::\s*([a-zA-Z]+)|([a-zA-Z]+)|\s*-\s*([^)]+))?\)\)\s*)?([A-Za-z0-9\s&]+?):\s*([+-]?\d+)\/(\d+)(?:\s*HP)?(?:\s*\(([^)]*)\))?/i);
         if (barMatch) {
-            const rawLabel = barMatch[2].trim();
+            const rawLabel = barMatch[4].trim();
             if (/^(?:Pool|Scenes|XP|FAE Knobs|Status|Positive Tags|Scars|Conditions|Stats)/i.test(rawLabel)) {
                 continue;
             }
             const pKey = poolLabelToKey(rawLabel);
             if (pKey === activePrimaryKey) continue; // Already primary
 
-            const curVal = parseInt(barMatch[3], 10);
-            const maxVal = parseInt(barMatch[4], 10);
-            const details = barMatch[5] || '';
+            const curVal = parseInt(barMatch[5], 10);
+            const maxVal = parseInt(barMatch[6], 10);
+            const details = barMatch[7] || '';
             const defaultPool = fallbackGenre.pools[pKey] || {};
 
             let zeroDebuff = defaultPool.zero_debuff || `${rawLabel} Trauma`;
@@ -316,10 +317,15 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
             const recMatch = details.match(/Recovery:\s*([^|)]+)/i);
             if (recMatch) recovery = recMatch[1].trim();
 
+            const rawColor = (barMatch[1] || barMatch[2] || barMatch[3] || '').trim().toLowerCase();
+            const resolvedColor = (rawColor === 'amber' || rawColor === 'gold')
+                ? 'gold'
+                : (rawColor || defaultPool.barColor || 'purple');
+
             parsedPools[pKey] = {
                 key: pKey,
                 label: defaultPool.label || rawLabel,
-                barColor: barMatch[1]?.toLowerCase() || defaultPool.barColor || 'purple',
+                barColor: resolvedColor,
                 current: isNaN(curVal) ? (defaultPool.current || maxVal) : curVal,
                 max: isNaN(maxVal) ? (defaultPool.max || 6) : maxVal,
                 recovery,

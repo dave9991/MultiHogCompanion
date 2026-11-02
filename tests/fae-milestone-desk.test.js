@@ -300,7 +300,7 @@ test('FAE Milestone Desk: applyFaeMilestoneSelection & applyLevelUpCommit for al
         isRespec: false,
     });
     assert.strictEqual(res3b.success, true);
-    assert.ok(res3b.updatedMemo.includes('((BAR:purple)) Sanity: 9/9'), 'Secondary pool Sanity must increase to 9/9');
+    assert.ok(res3b.updatedMemo.includes('((BARPURPLE)) Sanity: 9/9'), 'Secondary pool Sanity must increase to 9/9');
     assert.ok(res3b.updatedMemo.includes('Scenes: 0/4 | XP: 0/4'), 'Scenes must reset to 0/4');
 
     // 3c. Cap enforcement at 12

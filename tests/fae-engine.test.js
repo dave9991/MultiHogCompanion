@@ -16,6 +16,7 @@ import {
     buildFaeRngBlock,
     buildFaeCartridge,
     buildTailoredFaeDocumentation,
+    toMultihogBarMarker,
 } from '../fae-ruleset.js';
 import {
     formatFaeCharacterMemoBlock,
@@ -382,7 +383,8 @@ describe('Freeform Attrition Engine (FAE) — State Sync & Post-Turn Reconciliat
 
         assert.ok(memoBlock.includes('[CHARACTER]'));
         assert.ok(memoBlock.includes('8/8 HP | Pool: Health (8/8) | Scenes: 0/4 | XP: 0/4'));
-        assert.ok(memoBlock.includes('((BAR:purple)) Sanity: 8/8'));
+        assert.ok(memoBlock.includes('((BARPURPLE)) Sanity: 8/8'));
+        assert.ok(!memoBlock.includes('Zero Debuff'), 'Secondary bar line must not include Zero Debuff');
         assert.ok(memoBlock.includes('FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko | [Advantage: Safe Combo]'));
         assert.ok(memoBlock.includes('((PILLS)) Positive Tags:'));
         assert.ok(memoBlock.includes('((PILLS)) Scars & Debuffs: (+) Advantage: Safe Combo (-1 Attrition on next action)'));
@@ -410,6 +412,51 @@ describe('Freeform Attrition Engine (FAE) — State Sync & Post-Turn Reconciliat
         assert.strictEqual(parsed.character.scenes_target, 4);
         assert.ok(parsed.character.negative_tags.some(t => t.includes('Twisted Ankle')));
         assert.strictEqual(parsed.character.temp_advantage, 'Flank Opening');
+    });
+
+    test('toMultihogBarMarker maps colors correctly to MultiHog tokens', () => {
+        assert.strictEqual(toMultihogBarMarker('amber'), '((BARGOLD))');
+        assert.strictEqual(toMultihogBarMarker('yellow'), '((BARGOLD))');
+        assert.strictEqual(toMultihogBarMarker('gold'), '((BARGOLD))');
+        assert.strictEqual(toMultihogBarMarker('orange'), '((BARGOLD))');
+        assert.strictEqual(toMultihogBarMarker('blue'), '((BARBLUE))');
+        assert.strictEqual(toMultihogBarMarker('cyan'), '((BARBLUE))');
+        assert.strictEqual(toMultihogBarMarker('purple'), '((BARPURPLE))');
+        assert.strictEqual(toMultihogBarMarker('violet'), '((BARPURPLE))');
+        assert.strictEqual(toMultihogBarMarker('red'), '((BARRED))');
+        assert.strictEqual(toMultihogBarMarker('crimson'), '((BARRED))');
+        assert.strictEqual(toMultihogBarMarker('green'), '((BARGREEN))');
+        assert.strictEqual(toMultihogBarMarker('unknown'), '((BARPURPLE))');
+    });
+
+    test('parseFaeStateFromMemo parses new ((BARGOLD)) and legacy ((BAR: amber)) markers', () => {
+        const newMemo = `[CHARACTER]
+Arthur (Survivor): 10/10 HP | Pool: Health (10/10) | Scenes: 0/4 | XP: 0/4
+((BARBLUE)) Resolve: 5/6
+((BARGOLD)) Torch & Supplies: 4/6
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
+[/CHARACTER]`;
+        const parsedNew = parseFaeStateFromMemo(newMemo, 'osr_dungeon');
+        assert.strictEqual(parsedNew.pools.resolve.current, 5);
+        assert.strictEqual(parsedNew.pools.resolve.barColor, 'blue');
+        assert.strictEqual(parsedNew.pools.torch_and_supplies.current, 4);
+        assert.strictEqual(parsedNew.pools.torch_and_supplies.barColor, 'gold');
+
+        const legacyMemo = `[CHARACTER]
+Arthur (Survivor): 10/10 HP | Pool: Health (10/10) | Scenes: 0/4 | XP: 0/4
+((BAR: blue)) Resolve: 6/6 (Zero Debuff: Rattled & Hesitant | Recovery: scene_breather)
+((BAR: amber)) Torch & Supplies: 3/6 (Zero Debuff: Pitch Black & Starving | Recovery: haven_or_specialist)
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
+[/CHARACTER]`;
+        const parsedLegacy = parseFaeStateFromMemo(legacyMemo, 'osr_dungeon');
+        assert.strictEqual(parsedLegacy.pools.resolve.current, 6);
+        assert.strictEqual(parsedLegacy.pools.resolve.barColor, 'blue');
+        assert.strictEqual(parsedLegacy.pools.resolve.zero_debuff, 'Rattled & Hesitant');
+        assert.strictEqual(parsedLegacy.pools.resolve.recovery, 'scene_breather');
+        assert.strictEqual(parsedLegacy.pools.torch_and_supplies.current, 3);
+        assert.strictEqual(parsedLegacy.pools.torch_and_supplies.barColor, 'gold');
+        assert.strictEqual(parsedLegacy.pools.torch_and_supplies.zero_debuff, 'Pitch Black & Starving');
+        assert.strictEqual(parsedLegacy.pools.torch_and_supplies.recovery, 'haven_or_specialist');
     });
 
     test('parseFaeStateFromMemo and reconcileFaeMemoAfterTurn cleanly heal markdown-polluted headers', () => {

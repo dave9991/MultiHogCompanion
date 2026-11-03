@@ -35,15 +35,29 @@ To prevent the LLM from narrating broken bones or crippling wounds on routine po
   * *Mental Pools:* Narrate creeping dread, cold sweat, sensory static, or rattled composure.
 * **Hitting Zero ($\text{Pool} == 0$ = The Breaking Point Wound):** Clamping at `0` is the exact narrative moment the character's guard breaks and they suffer a tangible injury or psychological fracture (their `zero_debuff`).
 
-### 2.3 Character Tags (Freeform Descriptors)
+### 2.3 Character Tags & The Trait Qualification Protocol
 
 Characters begin with **3 to 4 Positive Tags** and **0 to 1 Negative Tag (Scar)**.
 
-* **Scope:** A good tag should apply to roughly 25–30% of situations in the genre (e.g., `Ex-Military`, `Calm`, `Quiet`, `Occult Scholar`, `Shield-Bearer`, `Trap-Wise`).
-* **No "God Tags":** Universal adjectives that apply to almost any roll (`Lucky`, `Smart`, `Competent`, `Fast`, `Heroic`) are forbidden.
+* **Ideal Scope:** A balanced tag naturally applies to roughly 25–30% of genre situations (e.g., `Ex-Military`, `Calm`, `Quiet`, `Occult Scholar`, `Shield-Bearer`, `Trap-Wise`).
 * **Gear as Tags:** Signature equipment (`Service Revolver`, `Heavy Shield`, `Crowbar`, `Grappling Hook`) acts as a Positive Tag and can be temporarily lost, depleted, or broken as a narrative consequence.
 * **Hard Stacking Cap:** The code enforces a strict maximum of **2 Positive Character/Companion Tags** per action ($-1$ Attrition each). An earned `[Advantage]` tag from a prior `stepping_stone` turn stacks on top of this cap for an extra $-1$.
 * **Negative Tags / Scars:** Active debuffs or permanent scars apply $+1$ Attrition each when relevant to the action.
+
+#### 2.3.1 The Trait Qualification Protocol (Handling Broad or God-Tier Tags)
+
+To keep character creation fluid (especially when importing cards or concepts from other RPGs), the Narrator resolves overly broad tags via **Cooperative Qualification rather than hard rejection**:
+
+1. **Tier A — Auto-Qualify Broad Traits (`Trait [context]`):**
+   When a player proposes an overly broad adjective (`Strong`, `Smart`, `Fast`, `Lucky`, `Tough`), the Narrator does not reject it. Instead, it preserves the player's archetype by attaching a bracketed situational qualifier that narrows its applicability to ~25–30%:
+   * *"Strong"* $\rightarrow$ `Strong [for lifting, hauling, or breaching doors]`
+   * *"Smart"* $\rightarrow$ `Smart [for ancient ciphers and forensic clues]`
+   * *"Fast"* $\rightarrow$ `Fast [for dodging traps and ambushes]`
+   * *"Lucky"* $\rightarrow$ `Lucky [for narrowly surviving cave-ins and falls]`
+   * *"Tough"* $\rightarrow$ `Tough [against harsh poisons and extreme weather]`
+2. **Tier B — Remove Only True Omnipotence (With Clear Replacement):**
+   If a proposed tag claims absolute immunity or breaks the attrition engine entirely (`Invincible`, `Never Misses`, `Immortal`, `Omniscient`), the Narrator politely omits it and proposes a grounded alternative fitting FAE's math:
+   * *Example:* "I replaced *Invincible* because FAE relies on situational tags to keep 4dF tension alive—would you prefer `Heavy Plate [against blades and arrows]` or `Iron Will [against pain and panic]`?"
 
 ### 2.4 Companions, Hirelings, and Adventuring Parties (Zero-Bookkeeping Model)
 
@@ -209,7 +223,12 @@ When the player rests, transitions to a new major delve area, or spends a day in
   },
   "character": {
     "name": "Arthur Pendelton",
-    "positive_tags": ["Ex-Military", "Calm", "Quiet", "Service Revolver"],
+    "positive_tags": [
+      "Ex-Military",
+      "Calm [under gunfire and shock]",
+      "Quiet",
+      "Service Revolver"
+    ],
     "negative_tags": [],
     "temp_advantage": null
   },
@@ -253,7 +272,12 @@ When the player rests, transitions to a new major delve area, or spends a day in
   },
   "character": {
     "name": "Kaelen the Delver",
-    "positive_tags": ["Veteran Mercenary", "Heavy Shield", "Trap-Wise", "Companion: Brother Marcus (Cleric)"],
+    "positive_tags": [
+      "Veteran Mercenary",
+      "Heavy Shield",
+      "Trap-Wise",
+      "Companion: Brother Marcus (Cleric)"
+    ],
     "negative_tags": [],
     "temp_advantage": null
   },
@@ -528,7 +552,7 @@ def resolve_action(
 
 ## 8. Example 3-Turn Exchange (User, LLM, Cartridge & Code)
 
-**Starting State:** Skeleton A — Cthulhu Investigation (`Sanity: 3/8`, `Health: 8/8`, Tags: `["Ex-Military", "Calm", "Quiet", "Service Revolver"]`).
+**Starting State:** Skeleton A — Cthulhu Investigation (`Sanity: 3/8`, `Health: 8/8`, Tags: `["Ex-Military", "Calm [under gunfire and shock]", "Quiet", "Service Revolver"]`).
 **Active Encounter Block:** `The Whispering Study: 2/2 HP | Threat: 3 (Elite) | Pools: Sanity, Time`
 
 ### Turn 1: Escaping the Murder of Crows Outside (`1/1 HP` Encounter, `0` Attrition)
@@ -536,13 +560,13 @@ def resolve_action(
 * **User:** `"I swing my shovel around myself in tight arcs while backing steadily toward the car, refusing to panic."`
 * **LLM (Pre-Roll Evaluation & Tool Call):**
   * *Intent & Scope:* Reach the car safely (Narrow/Bypass Intent vs. `1/1 HP` Flock = **`full`**).
-  * *Pool, Threat & Tags:* `sanity` (eerie, unnatural behavior), `threat_level: 2`. Matches `"Calm"` and `"Ex-Military"`.
+  * *Pool, Threat & Tags:* `sanity` (eerie, unnatural behavior), `threat_level: 2`. Matches `"Calm [under gunfire and shock]"` and `"Ex-Military"`.
   ```python
   resolve_action(
     pool_name="sanity",
     threat_level=2,
     progress_scale="full",
-    matched_positive_tags=["Calm", "Ex-Military"],
+    matched_positive_tags=["Calm [under gunfire and shock]", "Ex-Military"],
     matched_negative_tags=[],
     is_retreating=True
   )
@@ -550,7 +574,7 @@ def resolve_action(
 * **Code Execution:**
   * `roll_4df()` $\rightarrow$ `0`.
   * `raw_cost` $= 2\text{ (threat)} + 0\text{ (dice)} - 2\text{ (pos\_tags)} = 0$.
-  * **Returns:** `{"outcome": "UNFAZED_PROGRESS", "dice": 0, "attrition": 0, "pool_remaining": 3, "directive": "FULL RESOLUTION: Grant the player's complete Intent and reduce Encounter HP/Layers to 0. Cost: 0 sanity. Highlight protection from ['Calm', 'Ex-Military']."}`
+  * **Returns:** `{"outcome": "UNFAZED_PROGRESS", "dice": 0, "attrition": 0, "pool_remaining": 3, "directive": "FULL RESOLUTION: Grant the player's complete Intent and reduce Encounter HP/Layers to 0. Cost: 0 sanity. Highlight protection from ['Calm [under gunfire and shock]', 'Ex-Military']."}`
 * **LLM Narration:**
   > Old trench discipline takes over before fear can even register. Keeping your breathing slow and deliberate, you sweep the iron spade in practiced, overlapping arcs. Two crows clip the flat of the blade with dull thuds and tumble into the weeds; the rest wheel back into the fog, their eerie, synchronized silence failing to rattle your nerves. You reach the Ford, wrench the door open, and slide behind the wheel untouched.
   > `[Encounter Resolved: 0/1 HP | Sanity: 3/8 | Health: 8/8 — 0 Attrition (Protected by: Calm, Ex-Military)]`
@@ -560,13 +584,13 @@ def resolve_action(
 * **User:** `"Once inside the manor study, I lock the oak door and comb through the leather-bound journals on the desk to learn how to stop the summoning ritual."`
 * **LLM (Pre-Roll Evaluation & Tool Call):**
   * *Intent & Scope:* Completely uncover how to stop the ritual (Total Intent against a `2/2 HP` Encounter = **`stepping_stone`**). This action will crack Layer 1 (`[1. Ciphered Ritual Ledger]`), reducing the study to `1/2 HP` and setting up the locked safe.
-  * *Pool, Threat & Tags:* `sanity` (blasphemous diagrams), `threat_level: 3` (from the Encounter Block). Only `"Calm"` applies (`1` tag).
+  * *Pool, Threat & Tags:* `sanity` (blasphemous diagrams), `threat_level: 3` (from the Encounter Block). Only `"Calm [under gunfire and shock]"` applies (`1` tag).
   ```python
   resolve_action(
     pool_name="sanity",
     threat_level=3,
     progress_scale="stepping_stone",
-    matched_positive_tags=["Calm"],
+    matched_positive_tags=["Calm [under gunfire and shock]"],
     matched_negative_tags=[],
     is_retreating=False
   )
@@ -585,19 +609,19 @@ def resolve_action(
 * **User:** `"Hearing wet scratching inside the study walls and knowing my mind can't take opening that safe right now, I stuff the ledger into my trenchcoat, hurl a chair through the bay window, and sprint across the lawn to my car."`
 * **LLM (Pre-Roll Evaluation & Tool Call):**
   * *Intent & Scope:* Escape the manor alive with the ledger (Narrow/Bypass Intent = **`full`** resolution of escape, `is_retreating: true`).
-  * *Pool, Threat & Tags:* `sanity`, `threat_level: 2` (reduced by $-1$ for bypassing the safe and bolting). Passes `"Calm"` and active debuff `"Manic Dissociation"`.
+  * *Pool, Threat & Tags:* `sanity`, `threat_level: 2` (reduced by $-1$ for bypassing the safe and bolting). Passes `"Calm [under gunfire and shock]"` and active debuff `"Manic Dissociation"`.
   ```python
   resolve_action(
     pool_name="sanity",
     threat_level=2,
     progress_scale="full",
-    matched_positive_tags=["Calm"],
+    matched_positive_tags=["Calm [under gunfire and shock]"],
     matched_negative_tags=["Manic Dissociation"],
     is_retreating=True
   )
   ```
 * **Code Execution:**
-  * `was_at_zero` is `True` $\rightarrow$ `"Calm"` is stripped (`effective_pos_tags = []`).
+  * `was_at_zero` is `True` $\rightarrow$ `"Calm [under gunfire and shock]"` is stripped (`effective_pos_tags = []`).
   * `roll_4df()` $\rightarrow$ `-1`.
   * `raw_cost` $= 2\text{ (threat)} - 1\text{ (dice)} - 0\text{ (pos)} + 1\text{ (neg\_tag)} = 2$.
   * Pool is at `0` and took `2` attrition, **but** `is_retreating` and `flee_grace_toggle` are both `True`.

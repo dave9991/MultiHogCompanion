@@ -538,13 +538,23 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
     // 3. Synchronize Scenes Completed <-> XP and detect Encounter Resolution
     const prevEnc = prevState?.activeEncounter;
     const nextEnc = nextState.activeEncounter;
+    const prevScenes = prevState?.character?.scenes_completed ?? 0;
 
     if (prevEnc && prevEnc.currentHp > 0) {
         const isResolvedNow = !nextEnc || nextEnc.currentHp === 0;
-        if (isResolvedNow && nextState.character.scenes_completed <= (prevState.character?.scenes_completed ?? 0)) {
-            nextState.character.scenes_completed = (prevState.character?.scenes_completed ?? 0) + 1;
+        if (isResolvedNow && nextState.character.scenes_completed <= prevScenes) {
+            nextState.character.scenes_completed = prevScenes + 1;
             events.push(`SCENE_INCREMENTED: Encounter resolved; scenes completed is now ${nextState.character.scenes_completed}`);
         }
+        if (isResolvedNow) {
+            if (!nextState.knobs) nextState.knobs = {};
+            nextState.knobs.breather_available = true;
+        }
+    }
+
+    if (nextState.character.scenes_completed > prevScenes) {
+        if (!nextState.knobs) nextState.knobs = {};
+        nextState.knobs.breather_available = true;
     }
 
     // 4. Generate Reconciled [CHARACTER] Block

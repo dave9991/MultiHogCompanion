@@ -60,8 +60,11 @@ ${genreSummaries}
    - **Pool == 0 (Breaking Point Clamp):** The pool clamps at 0 and inflicts its tangible trauma debuff (\`zero_debuff\`). Positive Tags cannot be applied to reduce attrition for actions relying on a clamped pool.
    - **Loss at 0 (Terminal Overflow):** Taking loss when clamped executes the pool's terminal overflow rule (\`redirect:<pool>\`, \`scar_and_ko\`, \`scene_fail\`, or \`lethal\`).
 4. **Recovery Tiers & Passive Drains:**
-   - **Recovery Tiers:** \`scene_breather\` (short breather), \`camp_or_sleep\` (making camp/rest), \`haven_or_specialist\` (civilized sanctuary, medical clinic, or specialist).
-   - **Passive Drains:** Predictable attrition triggers like \`on_camp_rest\`, \`on_day_pass\`, or \`on_scene_transition\`.
+   - **Strict Tier Assignment:**
+     - \`scene_breather\` (+2 points, max once per scene via \`breather_available\`; only restores \`scene_breather\` pools and cannot clear a \`0\` debuff).
+     - \`camp_or_sleep\` (+Half Max; restores \`camp_or_sleep\` and \`scene_breather\` pools and clears their \`zero_debuff\`, while triggering any \`camp_or_sleep\` passive drains).
+     - \`haven_or_specialist\` (Full Restore; restores all pools and clears all \`zero_debuff\` conditions without triggering wilderness upkeep).
+   - **Passive Drains:** Canonical \`event_type\` triggers: \`camp_or_sleep\`, \`day_pass\`, or \`scene_transition\` (instead of \`on_camp_rest\`, \`on_day_pass\`, \`on_scene_transition\`).
 5. **Character Tags & God Tag Blacklist:**
    - Characters have **3–4 Positive Tags** (including signature gear tags, traits, or background training) and **0–1 starting Scar/debuff**.
    - **STRICT FORBIDDEN GOD TAGS:** Never allow overly broad God Tags that could apply to almost any action: **${bannedGodTagsList}**. Tags must be specific traits, tools, or training.

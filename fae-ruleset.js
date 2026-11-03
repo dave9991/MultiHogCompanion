@@ -71,6 +71,7 @@ export const FAE_GENRES = {
             flee_grace_toggle: true,
             base_attrition_shift: 0,
             overflow_default: 'scar_and_ko',
+            breather_available: true,
         },
         pools: {
             health: {
@@ -138,6 +139,7 @@ Status: Unsearched`,
             flee_grace_toggle: false,
             base_attrition_shift: 0,
             overflow_default: 'lethal',
+            breather_available: true,
         },
         pools: {
             health: {
@@ -216,6 +218,7 @@ Status: Entrenched`,
             flee_grace_toggle: true,
             base_attrition_shift: 1,
             overflow_default: 'lethal',
+            breather_available: true,
         },
         pools: {
             health: {
@@ -294,6 +297,7 @@ Status: Stalking`,
             flee_grace_toggle: true,
             base_attrition_shift: 0,
             overflow_default: 'scar_and_ko',
+            breather_available: true,
         },
         pools: {
             body: {
@@ -372,6 +376,7 @@ Status: Alerted`,
             flee_grace_toggle: true,
             base_attrition_shift: 0,
             overflow_default: 'scene_fail',
+            breather_available: true,
         },
         pools: {
             body: {
@@ -450,6 +455,7 @@ Status: Lockdown`,
             flee_grace_toggle: false,
             base_attrition_shift: 1,
             overflow_default: 'lethal',
+            breather_available: true,
         },
         pools: {
             body: {
@@ -528,6 +534,7 @@ Status: Decompressing`,
             flee_grace_toggle: true,
             base_attrition_shift: -1,
             overflow_default: 'scar_and_ko',
+            breather_available: true,
         },
         pools: {
             grit: {
@@ -730,6 +737,7 @@ export function createInitialFaeState(genreKey = 'cosmic_horror', overrides = {}
             flee_grace_toggle: overrides.knobs?.flee_grace_toggle ?? genre.knobs.flee_grace_toggle,
             base_attrition_shift: overrides.knobs?.base_attrition_shift ?? genre.knobs.base_attrition_shift,
             overflow_default: overrides.knobs?.overflow_default ?? genre.knobs.overflow_default,
+            breather_available: overrides.knobs?.breather_available ?? genre.knobs.breather_available ?? true,
         },
         character: {
             name: charOverrides.name || 'Protagonist',
@@ -784,6 +792,7 @@ export function applyPoolLoss(state, poolName, amount, sourceNote = '', visited 
         if (!state.character.negative_tags.includes(pool.zero_debuff)) {
             state.character.negative_tags.push(pool.zero_debuff);
         }
+        const overflowRule = pool.on_overflow || state.knobs?.overflow_default || 'lethal';
         return {
             outcome: 'BREAKING_POINT_CLAMP',
             pool: poolName,
@@ -794,7 +803,7 @@ export function applyPoolLoss(state, poolName, amount, sourceNote = '', visited 
             directive: (
                 `${sourceNote ? sourceNote + ' ' : ''}TRAUMA / BREAKING POINT: ${poolName} drops to 0 and clamps! ` +
                 `Narrate an actual wound or breakdown ('${pool.zero_debuff}'). ` +
-                `Positive tags are now disabled for ${poolName} and any further loss triggers '${pool.on_overflow}'.`
+                `Positive tags are now disabled for ${poolName} and any further loss triggers '${overflowRule}'.`
             ),
         };
     }
@@ -925,6 +934,21 @@ export function handleOverflow(state, poolName, attrition, sourceNote = '', visi
  * @returns {{ event: string, summary: string, logs: string[] }}
  */
 export function triggerEventOrRest(state, eventType) {
+    if (!state.knobs) state.knobs = {};
+    if (['scene_transition', 'camp_or_sleep', 'haven_or_specialist'].includes(eventType)) {
+        state.knobs.breather_available = true;
+    }
+    if (eventType === 'scene_breather') {
+        if (state.knobs.breather_available === false) {
+            return {
+                event: eventType,
+                summary: 'Breather already used this scene.',
+                logs: ['Breather already used this scene.'],
+            };
+        }
+        state.knobs.breather_available = false;
+    }
+
     const logs = [];
 
     // 1. Process Passive Drains First (e.g. eating rations at camp, or losing Sanity each day)
@@ -1070,8 +1094,8 @@ export function resolveAction(state, {
             pool_remaining: 0,
             remaining: 0,
             directive: (
-                "Player retreated at 0 pool with Flee Grace active. Escape succeeds! " +
-                "Do NOT trigger lethal overflow; instead, destroy a gear tag, sideline a companion, or inflict a permanent Scar."
+                "Player retreated at 0 pool with Flee Grace active and took overflow attrition. Escape succeeds! " +
+                "Do NOT trigger lethal overflow; instead, Narrator selects a fitting gear tag to lose, companion to sideline, or permanent Scar."
             ),
         };
     }
@@ -1215,11 +1239,11 @@ SillyTavern injects a pre-calculated turn resolution table directly in the [RNG_
 Consult the matrix directly to find the exact Attrition and Outcome tier with zero arithmetic!
 
 OUTCOME TIERS:
-- Attrition 0 → UNFAZED_PROGRESS: Complete forward progress with 0 pool loss! Highlight character mastery and tag protection.
+- Attrition 0 → UNFAZED_PROGRESS: Complete forward progress with 0 pool loss! Highlight character mastery and tag protection. (If retreating at 0 pool rolls 0 attrition, escape succeeds cleanly via UNFAZED_PROGRESS).
 - Pool > 0 & Attrition > 0 → POOL_STRAIN: Deduct Attrition from pool. Narrate as near-misses, fatigue, winded breath, or dread. NO disabling wounds!
 - Pool drops to <= 0 → BREAKING_POINT_CLAMP: Clamp pool at exactly 0. Narrate the character's breaking point trauma. Add pool's zero_debuff to Scars & Debuffs.
 - Pool at 0 & Attrition > 0 → OVERFLOW:
-  • If Flee Grace is active and player is retreating: GRACE_RETREAT_WITH_SCAR (escape succeeds; destroy a gear tag, sideline a companion, or inflict a permanent Scar).
+  • If retreating at 0 rolls >= 1 attrition with Flee Grace active: GRACE_RETREAT_WITH_SCAR replaces overflow (escape succeeds; Narrator selects a fitting gear tag to lose, companion to sideline, or permanent Scar).
   • Otherwise execute pool's on_overflow rule (redirect, scar_and_ko, scene_fail, or lethal).
 
 ROLL FORMAT (Strict SillyTavern Colorization):
@@ -1359,7 +1383,7 @@ Rather than tracking separate pools or turns for companions, companions are fold
 export function buildFaeConstraintsContent(_isFreeform = false) {
     return `<constraints>
 <resolution_constraints>
-Single-pass resolution is mandatory. Never pause mid-turn to ask players for mechanical rolls or choices. Intent determines outcome scale; 4dF attrition measures the cost.
+Single-pass resolution is mandatory. Never pause mid-turn to ask players for mechanical rolls or choices. Intent determines outcome scale; 4dF attrition measures the cost. Never pre-judge the dice roll or predict whether a pool will hit 0 prior to evaluating the action.
 </resolution_constraints>
 <tag_and_zero_constraints>
 Hard stacking cap: At most 2 Positive Tags may be applied to an action (plus 1 active [Advantage] tag).

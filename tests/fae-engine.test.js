@@ -178,7 +178,7 @@ describe('Freeform Attrition Engine (FAE) — Section 8 Deterministic Spec Walkt
         assert.strictEqual(state.pools.sanity.current, 0);
         assert.ok(result.directive.includes('Flee Grace active'));
         assert.ok(result.directive.includes('Do NOT trigger lethal overflow'));
-        assert.ok(result.directive.includes('sideline a companion'));
+        assert.ok(result.directive.includes('companion to sideline'));
     });
 });
 
@@ -277,6 +277,27 @@ describe('Freeform Attrition Engine (FAE) — Pool Loss & Overflow Rules', () =>
         const res = applyPoolLoss(state, 'health', 2, 'Loop test');
         assert.ok(res.outcome.startsWith('OVERFLOW_'), 'Must safely terminate recursion');
     });
+
+    test('applyPoolLoss uses state.knobs.overflow_default when pool.on_overflow is omitted', () => {
+        const state = createInitialFaeState('cosmic_horror');
+        delete state.pools.health.on_overflow;
+        state.knobs.overflow_default = 'scar_and_ko';
+        state.pools.health.current = 4;
+
+        const res = applyPoolLoss(state, 'health', 6, 'Heavy strike');
+        assert.strictEqual(res.outcome, 'BREAKING_POINT_CLAMP');
+        assert.strictEqual(state.pools.health.current, 0);
+        assert.ok(res.directive.includes("triggers 'scar_and_ko'"), `Expected directive to include scar_and_ko, got: ${res.directive}`);
+
+        // Also test fallback to 'lethal' if both omitted
+        const state2 = createInitialFaeState('cosmic_horror');
+        delete state2.pools.health.on_overflow;
+        delete state2.knobs.overflow_default;
+        state2.pools.health.current = 4;
+
+        const res2 = applyPoolLoss(state2, 'health', 6, 'Heavy strike');
+        assert.ok(res2.directive.includes("triggers 'lethal'"), `Expected directive to include lethal fallback, got: ${res2.directive}`);
+    });
 });
 
 describe('Freeform Attrition Engine (FAE) — Recovery Tiers & Passive Upkeep', () => {
@@ -291,9 +312,47 @@ describe('Freeform Attrition Engine (FAE) — Recovery Tiers & Passive Upkeep', 
         // At 0, breather cannot clear debuff or heal
         state.pools.resolve.current = 0;
         state.character.negative_tags = ['Rattled & Hesitant'];
+        state.knobs.breather_available = true; // reset breather for zero-state isolation
         triggerEventOrRest(state, 'scene_breather');
         assert.strictEqual(state.pools.resolve.current, 0, 'Does not heal when at 0');
         assert.ok(state.character.negative_tags.includes('Rattled & Hesitant'), 'Does not clear debuff');
+    });
+
+    test('triggerEventOrRest enforces breather_available per scene and resets on scene_transition / camp / haven', () => {
+        const state = createInitialFaeState('osr_dungeon');
+        state.pools.resolve.current = 2;
+        state.pools.resolve.max = 6;
+        assert.strictEqual(state.knobs.breather_available, true);
+
+        // Calling scene_breather heals a scene_breather pool once and sets breather_available = false
+        const res1 = triggerEventOrRest(state, 'scene_breather');
+        assert.strictEqual(state.pools.resolve.current, 4);
+        assert.strictEqual(state.knobs.breather_available, false);
+        assert.ok(res1.summary.includes('Recovered +2 resolve'));
+
+        // Calling scene_breather a second time in the same scene returns 'Breather already used this scene.' without healing
+        const res2 = triggerEventOrRest(state, 'scene_breather');
+        assert.strictEqual(state.pools.resolve.current, 4, 'Resolve unaffected by second breather');
+        assert.strictEqual(res2.summary, 'Breather already used this scene.');
+        assert.strictEqual(state.knobs.breather_available, false);
+
+        // Calling scene_transition resets breather_available to true so subsequent breather works again
+        triggerEventOrRest(state, 'scene_transition');
+        assert.strictEqual(state.knobs.breather_available, true);
+
+        const res3 = triggerEventOrRest(state, 'scene_breather');
+        assert.strictEqual(state.pools.resolve.current, 6);
+        assert.strictEqual(state.knobs.breather_available, false);
+        assert.ok(res3.summary.includes('Recovered +2 resolve'));
+
+        // camp_or_sleep also resets breather_available to true
+        triggerEventOrRest(state, 'camp_or_sleep');
+        assert.strictEqual(state.knobs.breather_available, true);
+
+        // haven_or_specialist also resets breather_available to true
+        state.knobs.breather_available = false;
+        triggerEventOrRest(state, 'haven_or_specialist');
+        assert.strictEqual(state.knobs.breather_available, true);
     });
 
     test('camp_or_sleep processes passive drain first, heals half max, and clears zero_debuff', () => {
@@ -612,6 +671,31 @@ Status: Healthy
         assert.strictEqual(reconciled.changed, true);
         assert.strictEqual(reconciled.state.character.scenes_completed, 1);
         assert.ok(reconciled.memo.includes('Scenes: 1/4 | XP: 1/4'));
+    });
+
+    test('reconcileFaeMemoAfterTurn ensures breather_available = true when scenes_completed increases or encounter resolves', () => {
+        const prevState = createInitialFaeState('osr_dungeon');
+        prevState.knobs.breather_available = false;
+        prevState.character.scenes_completed = 1;
+
+        // Case A: scenes_completed increases in next memo
+        const nextMemo = formatInitialFaeMemo(prevState).replace('Scenes: 1/4', 'Scenes: 2/4');
+        const reconciled = reconcileFaeMemoAfterTurn(prevState, nextMemo, 'osr_dungeon');
+        assert.strictEqual(reconciled.state.knobs.breather_available, true);
+
+        // Case B: encounter resolves
+        const prevStateWithEnc = createInitialFaeState('osr_dungeon');
+        prevStateWithEnc.knobs.breather_available = false;
+        prevStateWithEnc.character.scenes_completed = 1;
+        prevStateWithEnc.activeEncounter = {
+            name: 'Goblin Patrol',
+            currentHp: 1,
+            maxHp: 2,
+            threat: 2,
+        };
+        const nextMemoNoEnc = formatInitialFaeMemo(prevStateWithEnc);
+        const reconciledEnc = reconcileFaeMemoAfterTurn(prevStateWithEnc, nextMemoNoEnc, 'osr_dungeon');
+        assert.strictEqual(reconciledEnc.state.knobs.breather_available, true);
     });
 
     test('buildFaePartyContent describes ZERO-BOOKKEEPING MODEL and folded mechanics', () => {

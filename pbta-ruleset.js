@@ -502,6 +502,7 @@ ALWAYS end every narrative output with:
 *(Harm: [current]/${harmMax}) | (XP: [current]/${pacingXp}) | (Hold: [current]) | (Location: [Coarse, Sub-location])*
 *${timeFmt}*
 (followed only by any active subfooters explicitly defined elsewhere in your instructions)
+(Always insert a blank line between the status footer and any active subfooters)
 Footer shows ONLY {{user}}'s Harm/XP/Hold/location/time (substitute values into the tokens; do NOT output literal square brackets around time or day, e.g. *08:00 AM, Day 1*) — never party or NPC status, and do not append story narration after the time line.
 </end_of_output_footer>`;
 }
@@ -782,6 +783,7 @@ You must generate exactly 5 choices following narrative context:
 - Output sequence: (1) Scene narrative -> (2) Status footer -> (3) <choices> block.
 - All narrative prose, dialogue, and suspense/cliffhanger beats belong exclusively in (1).
 - The <choices> block in (3) is the final subfooter and must immediately follow the status footer in (2) with NO text, thoughts, or parentheticals placed between or after them.
+- CRITICAL FORMATTING: There MUST be a blank line (\n\n) between the status footer in (2) and the <choices> block in (3) so Markdown parsers do not merge the footer into the choices container.
 - Enclose all choices inside a single <choices> XML block.
 - Wrap every single choice in a <button> tag.${emojiLine}
 - NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), Armor Class ("vs AC 15"), or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ Full Success | 7–9 Mixed Success | 6- Miss).

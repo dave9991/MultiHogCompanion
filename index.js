@@ -112,6 +112,7 @@ import {
     handleWandCyoaFixOrReroll,
     tryRepairMarkdownChoices,
     applyRepairedMessage,
+    repairMixedFooterAndChoicesInChat,
 } from './cyoa-safety-net.js';
 import {
     markLocationRerollActive,
@@ -2523,6 +2524,9 @@ async function runChatChangedCoordinator(targetChatId, token) {
         updateRulesetBadge();
         updateLorebookSyncUI();
 
+        // 4b. Normalize CYOA footer separation for loaded messages (WRK-08)
+        repairMixedFooterAndChoicesInChat();
+
         // 5. Persistence check & background syncs
         if (await checkHistoryPersistenceBlocked()) {
             updateRelationshipSyncUI();
@@ -2594,6 +2598,7 @@ async function runInitialLoadCoordinator() {
         updateRulesetBadge();
         updateLorebookSyncUI();
         updateRelationshipSyncUI();
+        repairMixedFooterAndChoicesInChat();
         await runSync('INITIAL_LOAD');
     } catch (err) {
         console.error('[MultiHog Companion] Error during initial load coordinator:', err);
@@ -2991,6 +2996,7 @@ if (typeof jQuery !== 'undefined') {
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId, type) => {
         if (type === 'first_message') return;
         if (!isAdventureActive()) return;
+        repairMixedFooterAndChoicesInChat();
         scheduleSync('CHARACTER_MESSAGE_RENDERED', 400);
         void coordinateTierSyncAfterTurn();
     });

@@ -22,6 +22,9 @@ import {
     regenerateCyoaChoicesForMessage,
     handleWandCyoaFixOrReroll,
     isNarratorGenerating,
+    ensureBlankLineBeforeChoices,
+    splitMixedFooterAndChoicesInDOM,
+    repairMixedFooterAndChoicesInChat,
 } from '../cyoa-safety-net.js';
 
 console.log('--- Running CYOA Safety Net Test Suite ---');
@@ -390,4 +393,188 @@ toasts.length = 0;
 
 delete globalThis.SillyTavern;
 console.log('✓ handleWandCyoaFixOrReroll safety guards and auto-repair verified');
+
+// ── 8. Status Footer & Choices Separation (WRK-08) ──────────────────────────
+console.log('8. Testing ensureBlankLineBeforeChoices, splitMixedFooterAndChoicesInDOM, and repairMixedFooterAndChoicesInChat...');
+
+const louPayloadSingleNewline = `*(Health: 10/10) | (Resolve: 6/6) | (Torch & Supplies: 6/6) | (Scenes: 0/4) | (Location: The Silt & Root Sewers, The Iron Grate of St. Mark's Courtyard)*
+*[08:00 AM], Day 1*
+<choices>
+<button>1. 🔦 Step cautiously ahead — [Resolve | +Trap-Wise]</button>
+<button>2. 🙏 Ask Marcus to cast a warding prayer — [Resolve | +Brother Marcus]</button>
+</choices>`;
+
+// A. Single newline expansion
+const fixedLou = ensureBlankLineBeforeChoices(louPayloadSingleNewline);
+assert.notStrictEqual(fixedLou, louPayloadSingleNewline, 'Must modify single-newline payload');
+assert.ok(fixedLou.includes('*[08:00 AM], Day 1*\n\n<choices>'), 'Must insert blank line before <choices>');
+assert.ok(fixedLou.includes('<button>1. 🔦 Step cautiously ahead — [Resolve | +Trap-Wise]</button>'), 'Preserves button 1');
+assert.ok(fixedLou.includes('<button>2. 🙏 Ask Marcus to cast a warding prayer — [Resolve | +Brother Marcus]</button>'), 'Preserves button 2');
+
+// B. Idempotence: payload with blank line already must be unmodified
+const fixedLouAgain = ensureBlankLineBeforeChoices(fixedLou);
+assert.strictEqual(fixedLouAgain, fixedLou, 'Must be idempotent and not add extra newlines');
+
+// C. Non-string inputs survive unharmed
+assert.strictEqual(ensureBlankLineBeforeChoices(null), null);
+assert.strictEqual(ensureBlankLineBeforeChoices(undefined), undefined);
+assert.strictEqual(ensureBlankLineBeforeChoices(123), 123);
+
+// D. Chat message repair with repairMixedFooterAndChoicesInChat
+let updateMessageBlockCalled = false;
+let updatedMsgId = -1;
+let finalizeRenderCalled = false;
+
+globalThis._rpgFinalizeCyoaNarratorRender = () => {
+    finalizeRenderCalled = true;
+};
+
+const chatWithMixedFooter = [
+    { is_user: false, is_system: false, mes: 'Welcome to the dungeon.' },
+    {
+        is_user: false,
+        is_system: false,
+        mes: louPayloadSingleNewline,
+        swipes: [louPayloadSingleNewline],
+        swipe_id: 0,
+    },
+];
+
+const mockContext = {
+    chat: chatWithMixedFooter,
+    updateMessageBlock: (id, msg) => {
+        updateMessageBlockCalled = true;
+        updatedMsgId = id;
+    },
+    saveChatDebounced: () => {},
+};
+
+const didRepairChat = repairMixedFooterAndChoicesInChat(mockContext);
+assert.strictEqual(didRepairChat, true, 'repairMixedFooterAndChoicesInChat must return true on repair');
+assert.strictEqual(updateMessageBlockCalled, true, 'updateMessageBlock must be invoked');
+assert.strictEqual(updatedMsgId, 1, 'updateMessageBlock must target message 1');
+assert.ok(chatWithMixedFooter[1].mes.includes('*[08:00 AM], Day 1*\n\n<choices>'), 'msg.mes must be repaired with blank line');
+assert.ok(chatWithMixedFooter[1].swipes[0].includes('*[08:00 AM], Day 1*\n\n<choices>'), 'active swipe must be repaired with blank line');
+assert.strictEqual(finalizeRenderCalled, true, '_rpgFinalizeCyoaNarratorRender must be invoked');
+
+delete globalThis._rpgFinalizeCyoaNarratorRender;
+
+// E. splitMixedFooterAndChoicesInDOM verifies DOM separation
+const emNode = { nodeType: 1, tagName: 'EM', textContent: '*(Health: 10/10)*' };
+const brNode = { nodeType: 1, tagName: 'BR' };
+const btn1 = { nodeType: 1, tagName: 'BUTTON', textContent: '1. Choice' };
+const btn2 = { nodeType: 1, tagName: 'BUTTON', textContent: '2. Choice' };
+
+let insertedBeforeNode = null;
+let insertedChildNode = null;
+
+const parentDiv = {
+    insertBefore: (newNode, refNode) => {
+        insertedChildNode = newNode;
+        insertedBeforeNode = refNode;
+    },
+};
+
+const childList = [emNode, brNode, btn1, btn2];
+const pElement = {
+    nodeType: 1,
+    tagName: 'P',
+    childNodes: childList,
+    firstChild: childList[0],
+    lastChild: childList[childList.length - 1],
+    parentNode: parentDiv,
+    ownerDocument: null,
+    querySelector: (sel) => (sel === 'button' ? btn1 : null),
+    removeChild: (node) => {
+        const idx = childList.indexOf(node);
+        if (idx !== -1) childList.splice(idx, 1);
+        pElement.firstChild = childList[0] || null;
+        pElement.lastChild = childList[childList.length - 1] || null;
+    },
+};
+
+const mockDoc = {
+    createElement: (tag) => {
+        const newElChildren = [];
+        return {
+            nodeType: 1,
+            tagName: tag.toUpperCase(),
+            childNodes: newElChildren,
+            appendChild: (node) => {
+                newElChildren.push(node);
+                const idx = childList.indexOf(node);
+                if (idx !== -1) childList.splice(idx, 1);
+                pElement.firstChild = childList[0] || null;
+                pElement.lastChild = childList[childList.length - 1] || null;
+            },
+            removeChild: (node) => {
+                const idx = newElChildren.indexOf(node);
+                if (idx !== -1) newElChildren.splice(idx, 1);
+            },
+            get firstChild() { return newElChildren[0] || null; },
+            get lastChild() { return newElChildren[newElChildren.length - 1] || null; },
+        };
+    },
+    querySelectorAll: () => [pElement],
+};
+pElement.ownerDocument = mockDoc;
+
+const splitResult = splitMixedFooterAndChoicesInDOM(mockDoc);
+assert.strictEqual(splitResult, true, 'splitMixedFooterAndChoicesInDOM must return true when splitting mixed p');
+assert.ok(insertedChildNode, 'A new <p> must have been created and inserted');
+assert.strictEqual(insertedBeforeNode, pElement, 'The new <p> must be inserted right before the original <p>');
+assert.ok(insertedChildNode.childNodes.includes(emNode), 'The new <p> must contain the leading <em> footer node');
+assert.ok(!childList.includes(emNode), 'The original <p> must no longer contain the <em> footer node');
+assert.ok(childList.includes(btn1), 'The original <p> must retain the buttons');
+assert.ok(childList.includes(btn2), 'The original <p> must retain the buttons');
+
+// F. coordinateCyoaForMessage Happy Path auto-repairs single newline
+let finalizeCalledOnHappyPath = false;
+globalThis._rpgFinalizeCyoaNarratorRender = () => {
+    finalizeCalledOnHappyPath = true;
+};
+
+const happyPathChat = [
+    { is_user: false, is_system: false, mes: 'Start' },
+    {
+        is_user: false,
+        is_system: false,
+        mes: louPayloadSingleNewline,
+        swipes: [louPayloadSingleNewline],
+        swipe_id: 0,
+    },
+];
+
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chat: happyPathChat,
+        updateMessageBlock: () => {},
+        saveChatDebounced: () => {},
+        extensionSettings: {
+            rpg_tracker: {
+                enabled: true,
+                playstyle: 'cyoa_3',
+                syspromptModules: { CYOA_mode: true },
+                currentMemo: '[CHARACTER]\nHero: 10/10 HP\n[/CHARACTER]',
+            },
+            MultiHogCompanion: {
+                enableDecoupledCyoa: true,
+            },
+        },
+    }),
+};
+
+const happyResult = await coordinateCyoaForMessage({
+    triggerSource: 'CHARACTER_MESSAGE_RENDERED',
+    isPbtaActive: () => true,
+});
+
+assert.strictEqual(happyResult, false, 'Happy path returns false (no extra generation needed)');
+assert.ok(happyPathChat[1].mes.includes('*[08:00 AM], Day 1*\n\n<choices>'), 'Happy path must auto-repair single newline to blank line');
+assert.strictEqual(finalizeCalledOnHappyPath, true, 'Happy path must invoke _rpgFinalizeCyoaNarratorRender');
+
+delete globalThis.SillyTavern;
+delete globalThis._rpgFinalizeCyoaNarratorRender;
+
+console.log('✓ Status footer & choices separation (WRK-08) verified');
 console.log('--- ALL CYOA SAFETY NET TESTS PASSED CLEANLY! ---');

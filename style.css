@@ -1536,3 +1536,23 @@
     opacity: 1;
     color: #f8fafc !important;
 }
+
+/* ── CYOA Mixed Footer & Choice Container Safety Net (WRK-08) ───────────────
+   When SillyTavern Markdown parses an assistant turn where only a single newline
+   separates the italicized status/location footer from <choices>, both the <em>
+   footer and <button> elements are placed into the same <p>. Upstream MultiHog's
+   .mes_text p:has(> button:nth-of-type(2)) rule applies font-size: 0 !important;
+   line-height: 0 !important; to hide whitespace, which crushes the <em> footer.
+   This rule restores readable typography and block formatting on all non-button
+   content inside that paragraph. */
+.mes_text p:has(> button:nth-of-type(2)) > em,
+.mes_text p:has(> button:nth-of-type(2)) > i,
+.mes_text p:has(> button:nth-of-type(2)) > strong,
+.mes_text p:has(> button:nth-of-type(2)) > b,
+.mes_text p:has(> button:nth-of-type(2)) > span:not(.rt-cyoa-mech):not(.rt-cyoa-dc):not(.rt-cyoa-mod):not(.rt-cyoa-tag) {
+    font-size: 0.92rem !important;
+    line-height: 1.45 !important;
+    display: block !important;
+    margin-bottom: 2px !important;
+}
+

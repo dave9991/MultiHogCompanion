@@ -248,6 +248,153 @@ export function hasCyoaChoices(text) {
 }
 
 /**
+ * Ensures there is at least one blank line (\n\n) between any preceding narrative/footer
+ * and the opening <choices> block.
+ *
+ * If text has a non-newline character followed by a single newline before <choices>,
+ * replaces it with a blank line ($1\n\n$2).
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function ensureBlankLineBeforeChoices(text) {
+    if (typeof text !== 'string') return text;
+    return text.replace(/([^\r\n])\r?\n([ \t]*<choices\b)/gi, '$1\n\n$2');
+}
+
+/**
+ * Splits any paragraph inside .mes_text where non-button elements (e.g. <em>, <strong>, <i>, <b>)
+ * precede <button> elements in the same <p> into two separate <p> elements:
+ * one for the leading footer nodes, followed by the paragraph for the buttons.
+ *
+ * @param {ParentNode} [root=document]
+ * @returns {boolean} True if any paragraph was split
+ */
+export function splitMixedFooterAndChoicesInDOM(root) {
+    const docRoot = root || (typeof document !== 'undefined' ? document : null);
+    if (!docRoot || typeof docRoot.querySelectorAll !== 'function') return false;
+
+    let didSplit = false;
+    const paragraphs = docRoot.querySelectorAll('.mes_text p, p');
+
+    for (const p of paragraphs) {
+        const firstBtn = p.querySelector('button');
+        if (!firstBtn) continue;
+
+        const leadingNodes = [];
+        let hasMeaningfulContent = false;
+
+        for (const child of Array.from(p.childNodes)) {
+            if (child === firstBtn || child.contains?.(firstBtn)) {
+                break;
+            }
+            leadingNodes.push(child);
+            if (child.nodeType === 1) { // ELEMENT_NODE
+                const tag = child.tagName.toLowerCase();
+                if (['em', 'i', 'strong', 'b', 'span', 'p'].includes(tag)) {
+                    hasMeaningfulContent = true;
+                }
+            } else if (child.nodeType === 3) { // TEXT_NODE
+                if (child.textContent && child.textContent.trim().length > 0) {
+                    hasMeaningfulContent = true;
+                }
+            }
+        }
+
+        if (hasMeaningfulContent && leadingNodes.length > 0) {
+            const ownerDoc = p.ownerDocument || (typeof document !== 'undefined' ? document : null);
+            if (!ownerDoc) continue;
+            const newP = ownerDoc.createElement('p');
+
+            for (const node of leadingNodes) {
+                newP.appendChild(node);
+            }
+
+            // Remove trailing <br> from newP
+            while (newP.lastChild && newP.lastChild.nodeType === 1 && newP.lastChild.tagName.toLowerCase() === 'br') {
+                newP.removeChild(newP.lastChild);
+            }
+
+            // Remove leading <br> before first button in original p
+            while (p.firstChild && p.firstChild.nodeType === 1 && p.firstChild.tagName.toLowerCase() === 'br') {
+                p.removeChild(p.firstChild);
+            }
+
+            p.parentNode?.insertBefore(newP, p);
+            didSplit = true;
+        }
+    }
+
+    return didSplit;
+}
+
+/**
+ * Inspects assistant messages in ctx.chat:
+ * If ensureBlankLineBeforeChoices(msg.mes) !== msg.mes, updates msg.mes and active
+ * msg.swipes[msg.swipe_id], and updates the message block via ctx.updateMessageBlock if available.
+ * Also performs DOM split on any mixed .mes_text paragraphs, and invokes
+ * globalThis._rpgFinalizeCyoaNarratorRender?.().
+ *
+ * @param {object} [ctx]
+ * @returns {boolean} True if any repair or DOM split occurred
+ */
+export function repairMixedFooterAndChoicesInChat(ctx) {
+    const context = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null);
+    const chat = context?.chat;
+    let didRepair = false;
+
+    if (Array.isArray(chat) && chat.length > 0) {
+        for (let i = 0; i < chat.length; i++) {
+            const msg = chat[i];
+            if (!msg || msg.is_user || msg.is_system) continue;
+
+            if (typeof msg.mes === 'string') {
+                const repaired = ensureBlankLineBeforeChoices(msg.mes);
+                if (repaired !== msg.mes) {
+                    msg.mes = repaired;
+                    if (Array.isArray(msg.swipes) && msg.swipe_id !== undefined) {
+                        msg.swipes[msg.swipe_id] = repaired;
+                    }
+                    didRepair = true;
+                    if (typeof context?.updateMessageBlock === 'function') {
+                        try {
+                            context.updateMessageBlock(i, msg);
+                        } catch (_) {}
+                    }
+                }
+            }
+        }
+    }
+
+    let domSplit = false;
+    if (typeof document !== 'undefined') {
+        try {
+            domSplit = splitMixedFooterAndChoicesInDOM(document);
+        } catch (_) {}
+    }
+
+    if (didRepair || domSplit) {
+        if (typeof context?.saveChatDebounced === 'function') {
+            context.saveChatDebounced();
+        } else if (typeof context?.saveChat === 'function') {
+            context.saveChat();
+        } else if (typeof globalThis.saveChatConditional === 'function') {
+            globalThis.saveChatConditional();
+        } else if (typeof globalThis.saveChatDebounced === 'function') {
+            globalThis.saveChatDebounced();
+        }
+
+        if (typeof globalThis._rpgFinalizeCyoaNarratorRender === 'function') {
+            try {
+                globalThis._rpgFinalizeCyoaNarratorRender();
+            } catch (_) {}
+        }
+    }
+
+    return didRepair || domSplit;
+}
+
+/**
  * Checks if the message text contains numbered choices in plain text or markdown
  * (e.g. "1. ⚔️ Attack", "* 2. 🏃 Flee") and converts them into <choices><button>...</button></choices>.
  *
@@ -379,6 +526,12 @@ export async function applyRepairedMessage(messageId, repairedText) {
             globalThis.saveChatDebounced();
         }
 
+        if (typeof document !== 'undefined') {
+            try {
+                splitMixedFooterAndChoicesInDOM(document);
+            } catch (_) {}
+        }
+
         if (typeof globalThis._rpgFinalizeCyoaNarratorRender === 'function') {
             globalThis._rpgFinalizeCyoaNarratorRender();
         }
@@ -471,6 +624,10 @@ export async function coordinateCyoaForMessage({
 
     // 1. Happy Path: Check if valid <choices><button>...</button></choices> already exist
     if (!force && hasCyoaChoices(msg.mes)) {
+        const repaired = ensureBlankLineBeforeChoices(msg.mes);
+        if (repaired !== msg.mes) {
+            await applyRepairedMessage(idx, repaired);
+        }
         const isDowned = isProtagonistDowned(freshMemo, pbtaActive);
         if (!isDowned) {
             return false;

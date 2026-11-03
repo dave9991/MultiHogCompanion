@@ -493,6 +493,7 @@ describe('Stage 2: Quick Start Party Override, Footer All-Pools, CYOA Pool Disam
         const osrFooter = buildFaeFooterContent('osr_dungeon');
         assert.ok(osrFooter.includes('*(Health: [current]/[max]) | (Resolve: [current]/[max]) | (Torch & Supplies: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Site Name, Current Area])*'), 'Must format all 3 OSR pools in footer template');
         assert.ok(osrFooter.includes('ALWAYS end every narrative message (including turns after a tool call, right above <choices>) with these exact two italicized lines:'), 'Must include positive instruction');
+        assert.ok(osrFooter.includes('there MUST be a blank line between the status footer and <choices>'), 'Must enforce blank line before choices in FAE footer template');
         assert.ok(!osrFooter.includes('STRICT FOOTER RULE: NEVER output "Level X"'), 'Must remove negative D&D rule');
 
         // Custom pools override
@@ -509,6 +510,7 @@ describe('Stage 2: Quick Start Party Override, Footer All-Pools, CYOA Pool Disam
         const cyoaOsr = buildFaeCyoaPrompt('osr_dungeon');
         assert.ok(cyoaOsr.includes('CRITICAL BRACKET RULE:'), 'Must include CRITICAL BRACKET RULE');
         assert.ok(cyoaOsr.includes('Health, Resolve, Torch & Supplies'), 'Must enumerate all 3 OSR pools in bracket rule');
+        assert.ok(cyoaOsr.includes('There MUST be a blank line (\n\n) between the two-line italicized status/location footer and the <choices> block'), 'Must enforce blank line before choices in FAE CYOA prompt');
         assert.ok(cyoaOsr.includes('— [Health | +Trap-Wise]'), 'Must provide proper Style B pipe tag example');
         assert.ok(!cyoaOsr.includes('[Stepping-Stone:'), 'Must not contain legacy Stepping-Stone jargon');
     });

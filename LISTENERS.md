@@ -108,11 +108,12 @@ This is the only post-generation assistant-turn listener. Automated CYOA dispatc
 Streaming finishes ->
 T+0ms:    [index.js] CHARACTER_MESSAGE_RENDERED fires (EVT-07):
           Ignores type === 'first_message'; aborts if !isAdventureActive().
+          repairMixedFooterAndChoicesInChat() -> splits fused footer/<choices> paragraphs & repairs msg.mes (WRK-08).
           scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)   -> persona / portrait / memo sync.
           coordinateTierSyncAfterTurn():
             awaits MultiHog Lorebook Agent (rt_lore_agent_step finish/error) if isRouterRunning(),
             then checkAndSyncTierCrossovers() & updateRelationshipSyncUI().
-(No CYOA listener fires here. If the user later taps the Wand action, DOM-07 evaluates the latest settled message.)
+(No automated CYOA generator fires here; Wand action DOM-07 provides on-demand generation.)
 ```
 
 ---
@@ -185,7 +186,7 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
   3. Verifies projection integrity via `checkTrackerProjectionIntegrity` (quarantines damaged partitions if foreign state leaks).
   4. Enforces ruleset consistency via `ensureActiveChatRulesetConsistency` (cleanses D&D 5e prompts if stock chat, or hydrates PbtA cartridge if PbtA campaign).
   5. Synchronizes live persona and portrait to current chat via `runSync('CHAT_CHANGED')`.
-  6. Updates UI badges, Lorebook Sync UI, NameRAG adhoc prompt, and relationship sync.
+  6. Updates UI badges, Lorebook Sync UI, normalizes CYOA footers (`repairMixedFooterAndChoicesInChat`), NameRAG adhoc prompt, and relationship sync.
 * **Cancellation Guard:** Token checked on every continuation (`if (token !== _activeChatChangedToken) return;`). If the user rapidly switches chats again, pending work instantly aborts.
 * **Blast Radius:** Switching between D&D and PbtA campaigns will contaminate prompts; damaged partitions will not be quarantined; relationship tiers will not display.
 * **Optimization Status:** **OPTIMIZED (Phase 2)**. Staggered `setTimeout` ladder eliminated; token invalidation prevents stale cross-chat overwrites.
@@ -218,8 +219,9 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 * **Handler:** Canonical assistant turn event:
   1. **Greeting Guard:** Ignores `type === 'first_message'`.
   2. **Clean Chat Guard:** Aborts if `!isAdventureActive()` to prevent polluting unstarted chats.
-  3. **T+400ms Persona Sync:** Calls `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` to synchronize persona/player portrait and memo state.
-  4. **Reactive Relationship Coordinator (`coordinateTierSyncAfterTurn`):** Inspects MultiHog's `isRouterRunning()`. If MultiHog's Lorebook Agent is actively running on this turn, yields and awaits the completion event `rt_lore_agent_step` (`finish`/`error`). Once MultiHog is done (or immediately if Lorebook Agent is inactive), executes `checkAndSyncTierCrossovers()` to evaluate whether NPC friendship/affection crossed a tier threshold, surgically updating `[CORE]` / appending milestones in the lorebook without clobbering MultiHog's updates.
+  3. **CYOA Footer Normalization (`repairMixedFooterAndChoicesInChat`):** Normalizes turns where `<choices>` merged with the status footer due to single newlines, splitting the paragraph and restoring readable typography (`WRK-08`).
+  4. **T+400ms Persona Sync:** Calls `scheduleSync('CHARACTER_MESSAGE_RENDERED', 400)` to synchronize persona/player portrait and memo state.
+  5. **Reactive Relationship Coordinator (`coordinateTierSyncAfterTurn`):** Inspects MultiHog's `isRouterRunning()`. If MultiHog's Lorebook Agent is actively running on this turn, yields and awaits the completion event `rt_lore_agent_step` (`finish`/`error`). Once MultiHog is done (or immediately if Lorebook Agent is inactive), executes `checkAndSyncTierCrossovers()` to evaluate whether NPC friendship/affection crossed a tier threshold, surgically updating `[CORE]` / appending milestones in the lorebook without clobbering MultiHog's updates.
 * **Precondition:** `isAdventureActive()`
 * **Blast Radius:** Relationship tier progression and health synchronization will not update after LLM turns.
 * **Optimization Status:** **CANONICAL (Phase 2 & 4)**. Single message-turn listener; `setTimeout` ladder retired in favor of reactive event coordinator.

@@ -40,7 +40,7 @@
 | **WRK-05** | **Unstarted Chat Premature Sync & LLM Triggering** | 🟡 **MODERATE**: Upstream runs background passes on blank chats. | [`FEAT-04 (Rel Sync)`](./FEATURES.md#feat-04-relationship-narrative-sync)<br>[`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine) | [`adventure-chat.js`](./adventure-chat.js) (`isChatClean`, `isAdventureActive`)<br>[`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled) | High (Upstream adds `isAdventureActive()` check). |
 | **WRK-06** | **Historical CYOA Context Poisoning [RETIRED]** | ⚪ **RETIRED**: Defer to upstream MultiHog's native `stripOldChoicesFromPrompt`. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | Retired ([`EVT-12`](./LISTENERS.md#evt-12-chat_completion_prompt_ready-retired-formerly-outgoing-cyoa-prompt-sanitizer)) | Retired (Upstream native feature). |
 | **WRK-07** | **Truncated Message Stop Button Choice Injection** | 🟡 **MODERATE**: ST emits message rendered on user stop click. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-cyoa-stop-guard--aborted-message-shield)<br>[`DOM-06 (Capture Stop)`](./LISTENERS.md#dom-06) | Low (SillyTavern event design choice). |
-| **WRK-08** | **Level-Up & Permadeath Pause Protocol Shield** | 🟡 **MODERATE**: Upstream protocol commands narrative pause without choices. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`cyoa-safety-net.js`](./cyoa-safety-net.js) (`isLevelUpPending`, `isProtagonistDead`) | Medium (Upstream includes explicit turn pause flag). |
+| **WRK-08** | **Level-Up, Permadeath & Paragraph Fusion Footer Shield** | 🟡 **MODERATE**: Protocol pause collision & 0px footer crushing on single newline. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`style.css`](./style.css)<br>[`cyoa-safety-net.js`](./cyoa-safety-net.js) | Medium (Upstream scopes button CSS rules). |
 
 ---
 
@@ -195,11 +195,14 @@ SillyTavern suppresses post-generation message events when generation is termina
 
 ### WRK-08: Level-Up & Permadeath Pause Protocol Shield
 
-* **Target Surface:** Upstream `<level_up_protocol>` (`constants.js#L515`) and Deceased Character States
+* **Target Surface:** Upstream `<level_up_protocol>` (`constants.js#L515`), Deceased Character States, Upstream `.mes_text p:has(> button:nth-of-type(2))` CSS (`style.css:10230`), and SillyTavern Markdown Single-Newline Paragraph Merging
 * **Associated Feature:** [`FEAT-03 (CYOA On-Demand Choice Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair)
-* **Associated Mechanisms:** [`cyoa-safety-net.js`](./cyoa-safety-net.js) (`isLevelUpPending`, `isProtagonistDead`)
+* **Associated Mechanisms:** [`style.css`](./style.css) (CSS Safety Net), [`cyoa-safety-net.js`](./cyoa-safety-net.js) (`isLevelUpPending`, `isProtagonistDead`, `ensureBlankLineBeforeChoices`, `repairMixedFooterAndChoicesInChat`, `splitMixedFooterAndChoicesInDOM`), [`fae-ruleset.js`](./fae-ruleset.js), [`pbta-ruleset.js`](./pbta-ruleset.js)
 
 #### The Upstream Defect / Protocol Collision
+This workaround provides multi-hazard protection across two primary failure vectors:
+
+##### Vector A: Level-Up & Permadeath Pause Protocol Collision
 Upstream MultiHog's `<level_up_protocol>` commands the narrator to immediately halt story progression when an XP milestone is crossed mid-output:
 1. *"Finish the current sentence only — do not continue the narrative."*
 2. *"Insert: `--- \n ⬆ LEVEL UP — Now Level [X]... → Awaiting your choice before the story continues. \n ---`"*
@@ -208,15 +211,24 @@ Upstream MultiHog's `<level_up_protocol>` commands the narrator to immediately h
 
 Because the narrator obeys protocol and outputs zero `<choices>` markup, a Wand / slash CYOA invocation (`FEAT-03`) on that turn would see "no choices", generate fresh ones, and append standard story actions (e.g. `<button>⚔️ Press on into the crypt</button>`), tempting players to click a story action and narrate past the pending level-up without applying stat/feat advancements. A similar collision occurs when a character suffers permanent death (`Status: Dead`), where on-demand CYOA generation would produce death saving throw choices for an already deceased character.
 
+##### Vector B: CYOA Paragraph Fusion & Zero-Pixel Footer Collision
+When the LLM outputs narrative prose followed by a two-line italicized status/location footer (e.g. `*(Health: 10/10) | ...*\n*[08:00 AM], Day 1*`) and then `<choices>` with only a single newline (`\n`) instead of a blank line (`\n\n`), SillyTavern's Markdown parser (Showdown) treats the lines as a contiguous paragraph and merges the `<em>` footer nodes and `<button>` elements into the exact same `<p>` tag.
+Upstream MultiHog applies `.mes_text p:has(> button:nth-of-type(2)) { font-size: 0 !important; line-height: 0 !important; }` to collapse Chromium whitespace between buttons. Because the footer is trapped inside the same `<p>`, it inherits `font-size: 0 !important; line-height: 0 !important;`, crushing the status/location footer to 0px and making it completely invisible to the user.
+
 #### Companion Mitigation
-`coordinateCyoaForMessage` inspects message prose and state memo before evaluating choice generation:
 1. **Level-Up Guard (`isLevelUpPending`)**: Detects `⬆ LEVEL UP`, `Awaiting your choice before the story continues`, or PbtA `Level Up! Choose an Advance:`. If detected (and the call is not `force`d), CYOA generation is safely paused, returning `false` with zero LLM overhead.
 2. **Permadeath Guard (`isProtagonistDead`)**: Scans `[CHARACTER]` for `Status: Dead/Deceased/Slain/Killed`. If true, button generation is completely suppressed, preserving the final ending narrative.
+3. **CSS Safety Net (`style.css`)**: Injects an explicit override ensuring that any `> em`, `> i`, `> strong`, `> b`, or non-mechanism `> span` inside `.mes_text p:has(> button:nth-of-type(2))` retains readable typography (`font-size: 0.92rem !important; line-height: 1.45 !important; display: block !important; margin-bottom: 2px !important;`) rather than collapsing to 0px.
+4. **Markdown Normalizer (`ensureBlankLineBeforeChoices`)**: Detects single newlines preceding `<choices>` (`/([^\r\n])\r?\n([ \t]*<choices\b)/i`) and expands them to `\n\n`, cleanly separating paragraphs at the Markdown source level. Invoked in `coordinateCyoaForMessage` (Happy Path) and batch chat normalizers.
+5. **DOM Paragraph Splitter (`splitMixedFooterAndChoicesInDOM`)**: Inspects live DOM `.mes_text p` nodes and extracts any leading footer nodes preceding `<button>` elements into a dedicated preceding `<p>`, isolating the choice container so upstream styling applies strictly to the buttons.
+6. **Chat Switch & Render Coordinators (`repairMixedFooterAndChoicesInChat`)**: Runs automatically during `runInitialLoadCoordinator` (F5 refresh), `runChatChangedCoordinator` (chat switch), and `CHARACTER_MESSAGE_RENDERED` (new assistant turns).
+7. **Prompt System Rules (`fae-ruleset.js`, `pbta-ruleset.js`)**: Explicitly mandates a blank line (`\n\n`) between the two-line italicized status/location footer and the `<choices>` block across both FAE and PbtA ruleset prompts.
 
 #### Blast Radius If Removed
 * Level-up screens receive unwanted narrative buttons, prompting players to skip level advancements and corrupting character stat progression.
 * Deceased characters receive survival or combat buttons on final death scenes.
+* Any assistant turn where the LLM outputs a single newline before `<choices>` completely hides the two-line status/location footer, blinding the user to HP, Resolve, Supplies, Scenes, and Time.
 
 #### Retirement Criteria
-Upstream MultiHog or SillyTavern provides explicit turn pause metadata in `chat[idx]` indicating that a message is awaiting structured system input rather than story choices.
+Upstream MultiHog scopes its 0px font size rule strictly to choice button wrappers without targeting parent paragraphs, or SillyTavern provides explicit turn pause metadata in `chat[idx]`.
 

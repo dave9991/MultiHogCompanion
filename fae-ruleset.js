@@ -1372,7 +1372,7 @@ export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) 
 ALWAYS end every narrative message (including turns after a tool call, right above <choices>) with these exact two italicized lines:
 *${poolSegments} | (Scenes: [current]/[target]) | (Location: [Site Name, Current Area])*
 *${timeFmt}*
-(followed only by any active subfooters such as <choices>)
+(followed only by any active subfooters such as <choices>; there MUST be a blank line between the status footer and <choices>)
 </end_of_output_footer>`;
 }
 
@@ -1468,6 +1468,7 @@ export function buildFaeCyoaPrompt(genreKey = 'cosmic_horror', overrides = {}) {
     return `[SUBFOOTER: INTERACTIVE CHOICE BUTTONS]
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for {{user}}.
 - Output sequence: (1) Scene narrative -> (2) Two-line italicized status/location footer -> (3) <choices> block.
+- CRITICAL FORMATTING: There MUST be a blank line (\n\n) between the two-line italicized status/location footer and the <choices> block so Markdown parsers do not merge the footer into the choices container.
 - Enclose all choices inside a single <choices> XML block.
 - Wrap every single choice in a <button> tag with a number and fitting emoji.
 - FORMATTING FAE CHOICES (STYLE B):

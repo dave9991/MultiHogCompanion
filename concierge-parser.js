@@ -35,6 +35,9 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
             };
         }
 
+        const isHeroicDefault = Boolean(genreObj.knobs?.heroic_tier ?? (systemKey === 'osr_dungeon'));
+        const defaultHeroicDomain = isHeroicDefault ? (genreObj.defaultHeroicDomain || '') : '';
+
         const dossier = {
             meta: {
                 title: 'Untitled FAE Campaign',
@@ -55,6 +58,7 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
                 personality: '',
                 background: '',
                 habits: '',
+                heroicDomain: defaultHeroicDomain,
                 stats: {},
                 startingMoves: [],
                 positiveTags: [],
@@ -101,7 +105,8 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
                     statusToken: '(-) Incapacitated',
                     cyoaStyle: 'crisis',
                 },
-                knobs: { ...genreObj.knobs },
+                heroicTier: isHeroicDefault,
+                knobs: { ...genreObj.knobs, heroic_tier: isHeroicDefault },
                 pacingScenes: 4,
             },
         };
@@ -111,6 +116,7 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
         dossier.character = {
             name: '',
             archetype: genreObj.archetypes[0],
+            heroic_domain: isHeroicDefault ? (defaultHeroicDomain || null) : null,
             positive_tags: dossier.protagonist.positiveTags,
             negative_tags: dossier.protagonist.negativeTags,
             scenes_completed: 0,
@@ -142,6 +148,7 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
             personality: '',
             background: '',
             habits: '',
+            heroicDomain: '',
             stats: {},
             startingMoves: [],
             harm: { max: 5, current: 0, armor: 0 },
@@ -185,6 +192,7 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
                 statusToken: '(-) Incapacitated',
                 cyoaStyle: 'crisis',
             },
+            heroicTier: false,
         },
     };
 }
@@ -713,9 +721,10 @@ The Kick: Unset
     // Full-detail view, written in the same key: value shape as [UPDATE_DOSSIER] blocks so the
     // model can copy names/keys exactly and emit precise partial edits.
     const cfg = dossier.config || {};
+    const isHeroicTier = Boolean(cfg.heroicTier ?? cfg.knobs?.heroic_tier ?? false);
     const fatePart = cfg.maxHarmFate?.rule ? `, max_harm_fate=${cfg.maxHarmFate.rule}` : '';
     const knobsPart = (isFae && cfg.knobs)
-        ? `, flee_grace=${cfg.knobs.flee_grace_toggle ? 'on' : 'off'}, base_attrition_shift=${cfg.knobs.base_attrition_shift ?? 0}, overflow_default=${cfg.knobs.overflow_default || 'scar_and_ko'}, pacing_scenes=${cfg.pacingScenes ?? 4}`
+        ? `, heroic_tier=${isHeroicTier ? 'on' : 'off'}, flee_grace=${cfg.knobs.flee_grace_toggle ? 'on' : 'off'}, base_attrition_shift=${cfg.knobs.base_attrition_shift ?? 0}, overflow_default=${cfg.knobs.overflow_default || 'scar_and_ko'}, pacing_scenes=${cfg.pacingScenes ?? 4}`
         : '';
     lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}${fatePart}${knobsPart}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
@@ -731,6 +740,9 @@ The Kick: Unset
         if (p.background) lines.push(`background: ${p.background}`);
         if (p.habits) lines.push(`habits: ${p.habits}`);
         if (isFae) {
+            if (isHeroicTier || p.heroicDomain) {
+                lines.push(`heroic_domain: ${p.heroicDomain || 'Archetype [specific domains]'}`);
+            }
             if (p.positiveTags && p.positiveTags.length) {
                 lines.push(`positive_tags: ${p.positiveTags.join(', ')}`);
             }
@@ -1176,6 +1188,13 @@ export function applyDossierUpdates(text, dossier) {
                 updated.protagonist.pools = clonedPools;
                 updated.config = updated.config || {};
                 updated.config.knobs = { ...FAE_GENRES[key].knobs };
+                const genreHeroic = Boolean(FAE_GENRES[key].knobs?.heroic_tier);
+                if (updated.config.heroicTier === undefined || updated.meta.systemKey !== key) {
+                    updated.config.heroicTier = genreHeroic;
+                    if (genreHeroic && !updated.protagonist.heroicDomain) {
+                        updated.protagonist.heroicDomain = FAE_GENRES[key].defaultHeroicDomain || '';
+                    }
+                }
             } else {
                 const customKey = rawKey.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'custom';
                 const customLabel = sysLabelMatch ? sysLabelMatch[1].trim() : (customKey === 'custom' ? 'Custom FAE Setting' : rawKey.trim());
@@ -1377,6 +1396,24 @@ export function applyDossierUpdates(text, dossier) {
             const derivedGear = splitEquipmentIntoGearList(equip);
             if (derivedGear.length) {
                 updated.protagonist.gear = derivedGear;
+            }
+        }
+
+        // FAE Heroic Domain
+        const domainVal = kv.heroic_domain || kv.domain;
+        if (domainVal !== undefined) {
+            const cleanDomain = String(domainVal).trim().replace(/^["']|["']$/g, '');
+            const isNone = /^(?:none|null|false|off|n\/a)$/i.test(cleanDomain) || cleanDomain === '';
+            const finalDomain = isNone ? '' : cleanDomain;
+            if (updated.protagonist.heroicDomain !== finalDomain) {
+                updated.protagonist.heroicDomain = finalDomain;
+                changes.push(`Protagonist Heroic Domain: "${finalDomain || 'None'}"`);
+                if (finalDomain) {
+                    updated.config = updated.config || {};
+                    updated.config.heroicTier = true;
+                    updated.config.knobs = updated.config.knobs || {};
+                    updated.config.knobs.heroic_tier = true;
+                }
             }
         }
 
@@ -2227,6 +2264,15 @@ export function applyDossierUpdates(text, dossier) {
 
         // FAE Knobs in CONFIG
         updated.config.knobs = updated.config.knobs || {};
+        const heroicRaw = kv.heroic_tier !== undefined ? kv.heroic_tier : (kv.heroic !== undefined ? kv.heroic : kv.heroic_domain_active);
+        if (heroicRaw !== undefined) {
+            const val = /^(?:true|on|yes|1)$/i.test(String(heroicRaw).trim());
+            if (updated.config.heroicTier !== val) {
+                updated.config.heroicTier = val;
+                updated.config.knobs.heroic_tier = val;
+                changes.push(`Heroic Tier dial set to ${val ? 'ON' : 'OFF'}`);
+            }
+        }
         const fleeRaw = kv.flee_grace_toggle !== undefined ? kv.flee_grace_toggle : kv.flee_grace;
         if (fleeRaw !== undefined) {
             const val = /true|on/i.test(String(fleeRaw).trim());
@@ -2255,6 +2301,15 @@ export function applyDossierUpdates(text, dossier) {
 
     // Top-level or outside-CONFIG FAE Knobs
     updated.config.knobs = updated.config.knobs || {};
+    const topHeroicMatch = topLevelRaw.match(/heroic(?:_tier)?\s*:\s*(true|false|on|off|yes|no)/i);
+    if (topHeroicMatch) {
+        const val = /^(?:true|on|yes)$/i.test(String(topHeroicMatch[1]).trim());
+        if (updated.config.heroicTier !== val) {
+            updated.config.heroicTier = val;
+            updated.config.knobs.heroic_tier = val;
+            changes.push(`Heroic Tier dial set to ${val ? 'ON' : 'OFF'}`);
+        }
+    }
     const topFleeMatch = topLevelRaw.match(/flee_grace(?:_toggle)?\s*:\s*(true|false|on|off)/i);
     if (topFleeMatch) {
         const val = /true|on/i.test(String(topFleeMatch[1]).trim());
@@ -2291,6 +2346,7 @@ export function applyDossierUpdates(text, dossier) {
         updated.character = {
             name: updated.protagonist.name || 'Protagonist',
             archetype: updated.protagonist.archetype || updated.protagonist.playbook || 'Investigator',
+            heroic_domain: updated.config?.heroicTier ? (updated.protagonist.heroicDomain || null) : null,
             positive_tags: updated.protagonist.positiveTags || [],
             negative_tags: updated.protagonist.negativeTags || [],
             scenes_completed: 0,
@@ -2448,11 +2504,19 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
         : '';
 
     const isFae = meta.ruleset === 'fae';
+    const isHeroicTier = Boolean(
+        dossier.config?.heroicTier ||
+        dossier.config?.heroic_tier ||
+        dossier.config?.knobs?.heroic_tier ||
+        dossier.character?.heroic_domain ||
+        dossier.protagonist?.heroicDomain
+    );
     const systemLine = isFae
         ? `* **System Engine:** Freeform Attrition Engine (${meta.systemLabel || 'Cosmic Horror'}) (\`${meta.systemKey || 'cosmic_horror'}\`)`
         : `* **System Engine:** ${meta.systemLabel || 'PbtA Fantasy'} (\`${meta.systemKey || 'fantasy'}\`)`;
+    const heroicKnobStr = (isFae && isHeroicTier) ? ' | Heroic: ON' : '';
     const knobsLine = (isFae && dossier.config?.knobs)
-        ? `\n* **FAE Knobs:** Flee Grace: ${dossier.config.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${dossier.config.knobs.base_attrition_shift >= 0 ? '+' + dossier.config.knobs.base_attrition_shift : dossier.config.knobs.base_attrition_shift} | Overflow: ${dossier.config.knobs.overflow_default || 'scar_and_ko'}`
+        ? `\n* **FAE Knobs:** Flee Grace: ${dossier.config.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${dossier.config.knobs.base_attrition_shift >= 0 ? '+' + dossier.config.knobs.base_attrition_shift : dossier.config.knobs.base_attrition_shift} | Overflow: ${dossier.config.knobs.overflow_default || 'scar_and_ko'}${heroicKnobStr}`
         : '';
 
     let protagonistSection = '';
@@ -2464,8 +2528,11 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
         const posTagsMd = (p.positiveTags || []).map(t => `* ${t}`).join('\n') || '* No positive tags registered yet.';
         const negTagsMd = (p.negativeTags || []).map(t => `* ${t}`).join('\n') || '* None.';
 
+        const heroicDomain = p.heroicDomain || p.heroic_domain || dossier.character?.heroic_domain;
+        const heroicDomainLine = (isHeroicTier && heroicDomain) ? `\n* **Heroic Domain:** ${heroicDomain}` : '';
+
         protagonistSection = `## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
-* **Archetype:** ${p.playbook || 'Investigator'}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}
+* **Archetype:** ${p.playbook || 'Investigator'}${heroicDomainLine}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}
 * **Background Bio:** ${p.bio || p.background || 'None'}
 
 ### 🧪 Resource Pools:
@@ -2706,6 +2773,27 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         dossier.config.knobs = { ...faeGenreObj.knobs, ...(dossier.config.knobs || {}) };
         dossier.config.pacingScenes = dossier.config.pacingScenes || 4;
 
+        const isHeroic = Boolean(
+            dossier.config.heroicTier !== undefined
+                ? dossier.config.heroicTier
+                : (dossier.config.heroic_tier !== undefined
+                    ? dossier.config.heroic_tier
+                    : (dossier.config.knobs?.heroic_tier !== undefined
+                        ? dossier.config.knobs.heroic_tier
+                        : Boolean(faeGenreObj.knobs?.heroic_tier)))
+        );
+        dossier.config.heroicTier = isHeroic;
+        dossier.config.heroic_tier = isHeroic;
+        dossier.config.knobs.heroic_tier = isHeroic;
+
+        let heroicDomain = dossier.protagonist.heroicDomain ?? dossier.protagonist.heroic_domain ?? dossier.character?.heroic_domain;
+        if (heroicDomain === undefined || heroicDomain === null) {
+            heroicDomain = isHeroic ? (faeGenreObj.defaultHeroicDomain || null) : null;
+        } else if (!isHeroic) {
+            heroicDomain = null;
+        }
+        dossier.protagonist.heroicDomain = heroicDomain;
+
         dossier.protagonist.positiveTags = Array.isArray(dossier.protagonist.positiveTags)
             ? dossier.protagonist.positiveTags
             : (Array.isArray(dossier.protagonist.tags) ? dossier.protagonist.tags : [...faeGenreObj.defaultPositiveTags]);
@@ -2733,6 +2821,7 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         dossier.character = {
             name: dossier.protagonist.name || 'Protagonist',
             archetype: dossier.protagonist.playbook || faeGenreObj.archetypes[0],
+            heroic_domain: isHeroic ? (heroicDomain || null) : null,
             positive_tags: dossier.protagonist.positiveTags,
             negative_tags: dossier.protagonist.negativeTags,
             scenes_completed: 0,
@@ -2870,10 +2959,27 @@ export function parseMarkdownToDossier(markdown) {
     if (systemLineMatch) {
         const fullSysLine = systemLineMatch[1].trim();
         const keyMatch = fullSysLine.match(/[`(]([a-z0-9_\-]+)[`)]/i);
-        if (keyMatch && PBTA_GENRES[keyMatch[1].toLowerCase()]) {
+        if (keyMatch && (PBTA_GENRES[keyMatch[1].toLowerCase()] || FAE_GENRES[keyMatch[1].toLowerCase()])) {
             dossier.meta.systemKey = keyMatch[1].toLowerCase();
         }
         dossier.meta.systemLabel = fullSysLine.replace(/\s*\(?`?[a-z0-9_\-]+`?\)?\s*$/i, '').trim();
+    }
+
+    // 2b. FAE Knobs
+    const knobsMatch = markdown.match(/\*\s*\*\*FAE Knobs:\*\*\s*([^\n\r]+)/i);
+    if (knobsMatch) {
+        dossier.config = dossier.config || {};
+        dossier.config.knobs = dossier.config.knobs || {};
+        const kStr = knobsMatch[1];
+        if (/\bHeroic:\s*ON\b/i.test(kStr)) {
+            dossier.config.heroicTier = true;
+            dossier.config.heroic_tier = true;
+            dossier.config.knobs.heroic_tier = true;
+        } else if (/\bHeroic:\s*OFF\b/i.test(kStr)) {
+            dossier.config.heroicTier = false;
+            dossier.config.heroic_tier = false;
+            dossier.config.knobs.heroic_tier = false;
+        }
     }
 
     // 3. Premise & Tone
@@ -2889,8 +2995,13 @@ export function parseMarkdownToDossier(markdown) {
     const protoMatch = markdown.match(/(?:##\s*)?(?:👤\s*)?Protagonist[:\s]*([^\n\r]+)/i);
     if (protoMatch) dossier.protagonist.name = protoMatch[1].trim();
 
-    const playbookMatch = markdown.match(/\*\s*\*\*Playbook:\*\*\s*([^\n\r]+)/i);
+    const playbookMatch = markdown.match(/\*\s*\*\*(?:Playbook|Archetype):\*\*\s*([^\n\r]+)/i);
     if (playbookMatch) dossier.protagonist.playbook = playbookMatch[1].trim();
+
+    const heroicDomainMatch = markdown.match(/\*\s*\*\*Heroic Domain:\*\*\s*([^\n\r]+)/i);
+    if (heroicDomainMatch) {
+        dossier.protagonist.heroicDomain = heroicDomainMatch[1].trim();
+    }
 
     const statsMatch = markdown.match(/\*\s*\*\*Stats:\*\*\s*([^\n\r]+)/i);
     if (statsMatch) {
@@ -2951,6 +3062,22 @@ export function parseMarkdownToDossier(markdown) {
             .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
             .filter(l => l && !l.startsWith('_No') && !l.startsWith('Basic'));
         if (lines.length) dossier.protagonist.gear = lines;
+    }
+
+    // 6a. FAE Positive Tags & Scars
+    const posTagsMatch = markdown.match(/###\s*(?:🏷️\s*)?Positive Tags[^\n]*:\s*([\s\S]*?)(?=###|##|---|$)/i);
+    if (posTagsMatch) {
+        const lines = posTagsMatch[1].split('\n')
+            .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+            .filter(l => l && !l.startsWith('_No') && !l.startsWith('No positive'));
+        if (lines.length) dossier.protagonist.positiveTags = lines;
+    }
+    const scarsMatch = markdown.match(/###\s*(?:🩹\s*)?(?:Scars & Debuffs|Scars)[^\n]*:\s*([\s\S]*?)(?=###|##|---|$)/i);
+    if (scarsMatch) {
+        const lines = scarsMatch[1].split('\n')
+            .map(l => l.replace(/^\s*[\*\-]\s*/, '').trim())
+            .filter(l => l && !l.startsWith('_No') && !l.startsWith('None'));
+        if (lines.length) dossier.protagonist.negativeTags = lines;
     }
 
     // 6b. Supporting NPCs / Allies

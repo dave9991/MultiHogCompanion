@@ -139,11 +139,19 @@ export function formatFaeCharacterMemoBlock(faeState) {
     }
 
     // Knobs and Active Temporary Advantage
+    const hasHeroicDomain = Boolean(char.heroic_domain && !/^(?:none|null)$/i.test(String(char.heroic_domain).trim()));
+    const isHeroic = Boolean(knobs.heroic_tier || hasHeroicDomain);
+
     const shiftStr = knobs.base_attrition_shift >= 0 ? `+${knobs.base_attrition_shift}` : `${knobs.base_attrition_shift}`;
     const advSnippet = char.temp_advantage ? ` | [Advantage: ${char.temp_advantage}]` : '';
+    const heroicSnippet = isHeroic ? ' | Heroic: ON' : '';
     lines.push(
-        `FAE Knobs: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${shiftStr} | Overflow: ${knobs.overflow_default}${advSnippet}`
+        `FAE Knobs: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${shiftStr} | Overflow: ${knobs.overflow_default}${heroicSnippet}${advSnippet}`
     );
+
+    if (isHeroic) {
+        lines.push(`Heroic Domain: ${char.heroic_domain || 'None'}`);
+    }
 
     // Positive Tags
     const rawPosTags = Array.isArray(char.positive_tags) ? char.positive_tags : [];
@@ -250,19 +258,37 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         }
     }
 
-    // 2. FAE Knobs Line: FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko | [Advantage: ...]
-    const knobsRegex = /FAE Knobs:\s*Flee Grace:\s*(ON|OFF)\s*\|\s*Shift:\s*([+-]?\d+)\s*\|\s*Overflow:\s*([a-zA-Z0-9_:]+)(?:\s*\|\s*\[Advantage:\s*([^\]]+)\])?/i;
-    const knobsMatch = charText.match(knobsRegex);
-
+    // 2. FAE Knobs Line: FAE Knobs: [Heroic: ON | ]Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko[ | Heroic: ON][ | [Advantage: ...]]
+    const knobsLineMatch = charText.match(/FAE Knobs:\s*([^\n\r]+)/i);
     const knobs = { ...baseState.knobs };
     let tempAdvantage = null;
 
-    if (knobsMatch) {
-        knobs.flee_grace_toggle = (knobsMatch[1].toUpperCase() === 'ON');
-        knobs.base_attrition_shift = parseInt(knobsMatch[2], 10) || 0;
-        knobs.overflow_default = knobsMatch[3].trim();
-        if (knobsMatch[4]) {
-            tempAdvantage = knobsMatch[4].trim();
+    if (knobsLineMatch) {
+        const kLine = knobsLineMatch[1];
+        const fleeM = kLine.match(/Flee Grace:\s*(ON|OFF)/i);
+        if (fleeM) knobs.flee_grace_toggle = fleeM[1].toUpperCase() === 'ON';
+
+        const shiftM = kLine.match(/Shift:\s*([+-]?\d+)/i);
+        if (shiftM) knobs.base_attrition_shift = parseInt(shiftM[1], 10) || 0;
+
+        const overM = kLine.match(/Overflow:\s*([a-zA-Z0-9_:]+)/i);
+        if (overM) knobs.overflow_default = overM[1].trim();
+
+        const heroicM = kLine.match(/\bHeroic:\s*(ON|OFF|true|false)\b/i);
+        if (heroicM) knobs.heroic_tier = /^(?:ON|true)$/i.test(heroicM[1]);
+
+        const advM = kLine.match(/\[Advantage:\s*([^\]]+)\]/i);
+        if (advM) tempAdvantage = advM[1].trim();
+    }
+
+    // Parse Heroic Domain slot if present
+    let heroicDomain = null;
+    const domainMatch = charText.match(/^Heroic Domain:\s*(.+)$/m);
+    if (domainMatch) {
+        const val = domainMatch[1].trim();
+        if (val && !/^(?:none|null)$/i.test(val)) {
+            heroicDomain = val;
+            knobs.heroic_tier = true;
         }
     }
 
@@ -409,6 +435,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         character: {
             name,
             archetype,
+            heroic_domain: knobs.heroic_tier ? (heroicDomain || (fallbackGenre.knobs?.heroic_tier ? fallbackGenre.defaultHeroicDomain : null)) : null,
             positive_tags: sanitizeFaePositiveTags(positiveTags, 5),
             negative_tags: negativeTags,
             temp_advantage: tempAdvantage,
@@ -611,20 +638,38 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
         } else {
             const genreKey = faeStateOrGenreKey.genreKey || faeStateOrGenreKey.config?.genre || faeStateOrGenreKey.config?.faeGenre || faeStateOrGenreKey.genre || options.genreKey || 'cosmic_horror';
             const p = faeStateOrGenreKey.protagonist || faeStateOrGenreKey.character || {};
+            const isHeroic = Boolean(
+                faeStateOrGenreKey.config?.heroicTier ??
+                faeStateOrGenreKey.config?.heroic_tier ??
+                faeStateOrGenreKey.heroicTier ??
+                faeStateOrGenreKey.heroic_tier ??
+                faeStateOrGenreKey.knobs?.heroic_tier ??
+                faeStateOrGenreKey.config?.knobs?.heroic_tier ??
+                options.heroicTier ??
+                options.heroic_tier ??
+                (FAE_GENRES[genreKey]?.knobs?.heroic_tier ?? false)
+            );
+            const resolvedDomain = p.heroicDomain || p.heroic_domain || faeStateOrGenreKey.character?.heroic_domain || (isHeroic ? FAE_GENRES[genreKey]?.defaultHeroicDomain : null) || null;
             const charOverrides = {
                 name: p.name || 'Protagonist',
                 archetype: p.archetype || p.playbook,
                 positive_tags: p.positiveTags || p.positive_tags || p.tags,
                 negative_tags: p.negativeTags || p.negative_tags || p.scars,
+                heroic_domain: resolvedDomain,
                 temp_advantage: p.temp_advantage,
                 scenes_completed: p.scenes_completed,
                 scenes_target: p.scenes_target,
             };
             const overrides = {
                 ...faeStateOrGenreKey,
+                heroic_tier: isHeroic,
+                heroic_domain: resolvedDomain,
                 character: { ...charOverrides, ...(faeStateOrGenreKey.character || {}) },
                 pools: faeStateOrGenreKey.pools || p.pools || options.pools,
-                knobs: faeStateOrGenreKey.knobs || faeStateOrGenreKey.config?.knobs || options.knobs,
+                knobs: {
+                    ...(faeStateOrGenreKey.knobs || faeStateOrGenreKey.config?.knobs || options.knobs || {}),
+                    heroic_tier: isHeroic,
+                },
             };
             state = createInitialFaeState(genreKey, overrides);
         }

@@ -70,7 +70,18 @@ Characters begin with **3 to 4 Positive Tags** and **0 to 1 Negative Tag (Scar)*
   2. **Tier B — Remove Only True Omnipotence (With Clear Replacement):** If a proposed tag claims absolute immunity or breaks the attrition engine entirely (`Invincible`, `Never Misses`, `Immortal`, `Omniscient`), the LLM omits it and proposes a grounded `Trait [context]` alternative fitting FAE's math.
   3. **Turn-by-Turn Evaluation:** The Narrator respects bracketed `[context]` qualifiers when calculating attrition mitigation.
 
-### 8. Interactive Choice Formatting (Style B CYOA)
+### 8. Heroic Domains (Pre-Math Leverage Permissions — Section 2.5)
+In heroic tier campaigns (`heroic_tier: true`, such as `osr_dungeon` or when toggled ON via the Campaign Calibration Dials), the protagonist possesses a dedicated **Heroic Domain** (e.g. `Spellblade [short-range blink and arcane ward-breaking]`, `Arch-Mage [elemental conjuration and warding]`):
+* **Format:** Recorded directly in `[CHARACTER]` as `Heroic Domain: Archetype [specific domains]`.
+* **The 3 Pre-Math Leverage Rules:**
+  1. **Expands Threat 0:** Trivial or routine tasks matching the domain resolve cleanly at Threat 0 with zero attrition roll needed.
+  2. **Extraordinary Leverage:** Grants fictional permission to attempt impossible or arcane feats, bypassing `Leverage Barriers` and preventing automatic `pivot` escalations.
+  3. **Neutralizes Pressures:** Channeling the domain's power can directly neutralize an active scene pressure (reducing effective Threat by $-1$).
+* **Pure Pre-Math Leverage (Never an Attrition Tag):** A Heroic Domain acts strictly as pre-math fictional permission and **NEVER** counts as a $-1$ Positive Tag in the 4dF attrition formula (`resolveAction`). It cannot be stacked with Positive Tags to reduce dice attrition directly.
+* **Party Play Strain Routing:** In party play or high-exertion heroic sequences, exceeding natural bounds routes strain into the group's collective `Resolve` pool.
+* **Conditional Prompt Injection & Zero Leakage:** When `heroic_tier: false` (the default for standard survival, cosmic horror, and gritty settings), all cartridges, system prompts, quick-start instructions, and character memos have **zero mention** of Heroic Domains or class permissions.
+
+### 9. Interactive Choice Formatting (Style B CYOA)
 In CYOA mode, interactive `<button>` choices in FAE follow **Style B** bracket formatting:
 * **Risky Actions with Matching Tags / Advantage:** `— [Pool | +Tag1, +Tag2]` or `— [Pool | +Tag1, +Advantage]`.
   - For companion tags: `— [Health | +Companion: Brother Marcus]` or `— [Health | +Brother Marcus]`.
@@ -162,7 +173,8 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Health (10/10)`: Physical fortitude and parrying shock, recovery via `camp_or_sleep`.
   - `Resolve (6/6)`: Frayed nerves and morale, recovery via `scene_breather`. Overflow redirects to `Health`.
   - `Torch & Supplies (6/6)`: Illumination and rations, recovery via `haven_or_specialist`. Passive drain: $-1$ on `camp_or_sleep`. Overflow redirects to `Resolve`.
-* **Knobs:** Flee Grace: `OFF`, Shift: `0`, Overflow: `lethal`.
+* **Knobs:** Flee Grace: `OFF`, Shift: `0`, Overflow: `lethal`, Heroic Tier: `ON`.
+* **Default Heroic Domain:** `Spellblade [short-range blink and arcane ward-breaking]`.
 * **Archetypes:** The Sellsword, The Grave Robber, The Torchbearer, The Hedge Cleric, The Outcast Mage.
 * **Positive Tags:** `Veteran Mercenary (Frontline battle tactics and armor comfort)`, `Heavy Shield (Sturdy oak shield for parrying)`, `Trap-Wise (Keen eye for floor plates and tripwires)`, `Companion: Brother Marcus (Cleric — blesses blades and wards off undead)`.
 

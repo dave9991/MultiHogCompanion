@@ -456,7 +456,14 @@ function updateBlueprintDeck() {
         const fleeStr = knobs.flee_grace_toggle ? 'ON' : 'OFF';
         $('#mhc_dial_harm_btn').text(`⚖️ Shift: ${shiftStr}`);
         $('#mhc_dial_downed_btn').text(`🏃 Flee Grace: ${fleeStr}`);
+
+        const isHeroic = Boolean(cfg.heroicTier || cfg.heroic_tier || knobs.heroic_tier);
+        $('#mhc_dial_heroic_btn')
+            .text(`⚡ Heroic: ${isHeroic ? 'ON' : 'OFF'}`)
+            .css('opacity', isHeroic ? '1' : '0.65')
+            .show();
     } else {
+        $('#mhc_dial_heroic_btn').hide();
         const harmMax = cfg.harmMax || 5;
         let harmTag = '(Standard)';
         if (harmMax === 3) harmTag = '(Gritty)';
@@ -542,6 +549,15 @@ function updateBlueprintDeck() {
     // Protagonist Card
     $('#mhc_deck_char_playbook').text(proto.archetype || proto.playbook || 'In Development');
     $('#mhc_deck_char_name').text(proto.name || 'Unnamed Adventurer');
+
+    const heroicDomain = proto.heroicDomain || proto.heroic_domain || activeDossier.character?.heroic_domain;
+    const isHeroicTier = Boolean(cfg.heroicTier || cfg.heroic_tier || cfg.knobs?.heroic_tier);
+    if (isFae && (isHeroicTier || heroicDomain)) {
+        $('#mhc_deck_char_heroic_domain_text').text(heroicDomain || 'Heroic Permissions Active');
+        $('#mhc_deck_char_heroic_domain').show();
+    } else {
+        $('#mhc_deck_char_heroic_domain').hide();
+    }
 
     if (isFae) {
         if (isUntouchedAndUnestablished) {
@@ -2241,6 +2257,36 @@ function bindModalEvents() {
     };
     $('#mhc_deck_dial_playstyle').on('click', cyclePlaystyle);
     $('#mhc_dial_playstyle_btn').on('click', cyclePlaystyle);
+
+    $('#mhc_dial_heroic_btn').on('click', () => {
+        const isFae = activeDossier.meta?.ruleset === 'fae';
+        if (!isFae) return;
+        activeDossier.config = activeDossier.config || {};
+        activeDossier.config.knobs = activeDossier.config.knobs || activeDossier.knobs || {};
+        const curHeroic = Boolean(
+            activeDossier.config.heroicTier ??
+            activeDossier.config.heroic_tier ??
+            activeDossier.config.knobs.heroic_tier
+        );
+        const nextHeroic = !curHeroic;
+        activeDossier.config.heroicTier = nextHeroic;
+        activeDossier.config.heroic_tier = nextHeroic;
+        activeDossier.config.knobs.heroic_tier = nextHeroic;
+        if (activeDossier.knobs) activeDossier.knobs.heroic_tier = nextHeroic;
+
+        if (nextHeroic) {
+            const systemKey = activeDossier.meta?.systemKey || 'osr_dungeon';
+            const genreObj = FAE_GENRES[systemKey] || FAE_GENRES.osr_dungeon;
+            if (!activeDossier.protagonist?.heroicDomain && !activeDossier.character?.heroic_domain) {
+                const defaultDomain = genreObj?.defaultHeroicDomain || 'Spellblade [short-range blink and arcane ward-breaking]';
+                if (activeDossier.protagonist) activeDossier.protagonist.heroicDomain = defaultDomain;
+                if (activeDossier.character) activeDossier.character.heroic_domain = defaultDomain;
+            }
+        }
+        changelog.push(`Toggled Heroic Tier to ${nextHeroic ? 'ON' : 'OFF'}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
 
     $('#mhc_dial_harm_btn').on('click', () => {
         const isFae = activeDossier.meta?.ruleset === 'fae';

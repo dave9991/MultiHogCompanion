@@ -26,6 +26,7 @@ import {
     applyDossierUpdates,
     formatDossierForContext,
     serializeDossierToMarkdown,
+    parseMarkdownToDossier,
     healAndNormalizeDossier,
 } from '../concierge-parser.js';
 
@@ -662,5 +663,90 @@ Status: Healthy
         const charTags = charBlockMatch ? charBlockMatch[0] : '';
         const charMatches = charTags.match(/Companion:\s*Bran/gi) || [];
         assert.equal(charMatches.length, 1, 'Companion must only appear once in [CHARACTER] Positive Tags');
+    });
+});
+
+describe('FAE Heroic Domains & Concierge Integration', () => {
+    test('1. createEmptyDossier sets heroicTier and heroicDomain based on genre skeleton', () => {
+        const osrDossier = createEmptyDossier('fae', 'osr_dungeon');
+        assert.equal(osrDossier.config.heroicTier, true);
+        assert.equal(osrDossier.config.knobs.heroic_tier, true);
+        assert.equal(osrDossier.protagonist.heroicDomain, 'Spellblade [short-range blink and arcane ward-breaking]');
+
+        const cosmicDossier = createEmptyDossier('fae', 'cosmic_horror');
+        assert.equal(cosmicDossier.config.heroicTier, false);
+        assert.equal(cosmicDossier.config.knobs.heroic_tier, false);
+        assert.equal(cosmicDossier.protagonist.heroicDomain, '');
+    });
+
+    test('2. applyDossierUpdates parses heroic_tier in [CONFIG] and heroic_domain in [PROTAGONIST]', () => {
+        const baseDossier = createEmptyDossier('fae', 'cosmic_horror');
+        const updateText = `
+[UPDATE_DOSSIER]
+summary: Activating heroic tier and domain
+ruleset: fae
+system: cosmic_horror
+
+[CONFIG]
+heroic_tier: true
+[/CONFIG]
+
+[PROTAGONIST]
+name: Jessica
+playbook: The Occultist
+heroic_domain: Arch-Mage [elemental conjuration and warding]
+positive_tags: Ward Crafter (protective runes), Fast Reflexes (dodging)
+[/PROTAGONIST]
+[/UPDATE_DOSSIER]
+`;
+        const result = applyDossierUpdates(updateText, baseDossier);
+        assert.ok(result.success);
+        assert.equal(result.updatedDossier.config.heroicTier, true);
+        assert.equal(result.updatedDossier.config.knobs.heroic_tier, true);
+        assert.equal(result.updatedDossier.protagonist.heroicDomain, 'Arch-Mage [elemental conjuration and warding]');
+
+        const contextStr = formatDossierForContext(result.updatedDossier);
+        assert.ok(contextStr.includes('heroic_tier=on'));
+        assert.ok(contextStr.includes('heroic_domain: Arch-Mage [elemental conjuration and warding]'));
+    });
+
+    test('3. serializeDossierToMarkdown and parseMarkdownToDossier roundtrip preserves Heroic Tier and Domain', () => {
+        const heroicDossier = createEmptyDossier('fae', 'osr_dungeon');
+        heroicDossier.meta.title = 'The Lost Tombs';
+        heroicDossier.protagonist.name = 'Valeria';
+        heroicDossier.protagonist.playbook = 'Spellblade';
+        heroicDossier.protagonist.heroicDomain = 'Spellblade [short-range blink and arcane ward-breaking]';
+
+        const md = serializeDossierToMarkdown(heroicDossier);
+        assert.ok(md.includes('Heroic: ON'), 'Markdown must serialize Heroic: ON in FAE Knobs');
+        assert.ok(md.includes('* **Heroic Domain:** Spellblade [short-range blink and arcane ward-breaking]'), 'Markdown must serialize Heroic Domain');
+
+        const parsed = parseMarkdownToDossier(md);
+        assert.ok(parsed, 'Parsed dossier must not be null');
+        assert.equal(parsed.config.heroicTier, true);
+        assert.equal(parsed.config.knobs.heroic_tier, true);
+        assert.equal(parsed.protagonist.heroicDomain, 'Spellblade [short-range blink and arcane ward-breaking]');
+
+        // Non-heroic dossier roundtrip
+        const nonHeroic = createEmptyDossier('fae', 'cosmic_horror');
+        nonHeroic.meta.title = 'Shadows Over Innsmouth';
+        nonHeroic.protagonist.name = 'Arthur';
+        const mdNonHeroic = serializeDossierToMarkdown(nonHeroic);
+        assert.ok(!mdNonHeroic.includes('Heroic: ON'));
+        assert.ok(!mdNonHeroic.includes('Heroic Domain:'));
+
+        const parsedNonHeroic = parseMarkdownToDossier(mdNonHeroic);
+        assert.ok(parsedNonHeroic);
+        assert.equal(parsedNonHeroic.config.heroicTier, false);
+        assert.equal(parsedNonHeroic.protagonist.heroicDomain, null);
+    });
+
+    test('4. concierge-modal.html contains heroic dial button and protagonist heroic domain elements', () => {
+        const modalHtmlPath = path.resolve(__dirname, '../concierge-modal.html');
+        const modalHtml = fs.readFileSync(modalHtmlPath, 'utf8');
+
+        assert.ok(modalHtml.includes('id="mhc_dial_heroic_btn"'), 'Modal must contain #mhc_dial_heroic_btn');
+        assert.ok(modalHtml.includes('id="mhc_deck_char_heroic_domain"'), 'Modal must contain #mhc_deck_char_heroic_domain');
+        assert.ok(modalHtml.includes('id="mhc_deck_char_heroic_domain_text"'), 'Modal must contain #mhc_deck_char_heroic_domain_text');
     });
 });

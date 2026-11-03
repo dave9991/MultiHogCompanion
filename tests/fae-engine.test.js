@@ -20,6 +20,8 @@ import {
     toMultihogBarMarker,
     buildFaePartyContent,
     buildFaeConstraintsContent,
+    buildFaeRoleContent,
+    buildFaeCombatContent,
     buildFaeStockPrompts,
     buildFaeQuickStartInstructions,
     buildFaeRngContent,
@@ -737,5 +739,162 @@ Status: Healthy
         assert.ok(partyXml.includes('Companions as Narrative Buffer'), 'Must mention Companions as Narrative Buffer');
         assert.ok(!partyXml.includes('Every companion tracks their own Primary Pool'), 'Must NOT have separate companion pool tracking');
         assert.ok(!partyXml.includes('Name (Archetype): 8/8 HP'), 'Must NOT declare individual creature HP stats');
+    });
+});
+
+describe('Freeform Attrition Engine (FAE) — Heroic Domains (Pre-Math Leverage Permissions)', () => {
+    test('1. FAE_GENRES genre defaults: osr_dungeon is heroic_tier true with defaultHeroicDomain, others are false', () => {
+        assert.strictEqual(FAE_GENRES.osr_dungeon.knobs.heroic_tier, true);
+        assert.strictEqual(FAE_GENRES.osr_dungeon.defaultHeroicDomain, 'Spellblade [short-range blink and arcane ward-breaking]');
+
+        const nonHeroic = ['cosmic_horror', 'survival_horror', 'post_apocalyptic', 'cyberpunk_noir', 'deep_space', 'weird_west'];
+        for (const key of nonHeroic) {
+            assert.strictEqual(FAE_GENRES[key].knobs.heroic_tier, false, `${key} should have heroic_tier: false`);
+            assert.strictEqual(FAE_GENRES[key].defaultHeroicDomain, null, `${key} should have defaultHeroicDomain: null`);
+        }
+    });
+
+    test('2. createInitialFaeState initializes heroic_tier and heroic_domain appropriately', () => {
+        const osrState = createInitialFaeState('osr_dungeon');
+        assert.strictEqual(osrState.knobs.heroic_tier, true);
+        assert.strictEqual(osrState.character.heroic_domain, 'Spellblade [short-range blink and arcane ward-breaking]');
+
+        const cosmicState = createInitialFaeState('cosmic_horror');
+        assert.strictEqual(cosmicState.knobs.heroic_tier, false);
+        assert.strictEqual(cosmicState.character.heroic_domain, null);
+
+        const customHeroic = createInitialFaeState('cosmic_horror', {
+            heroic_tier: true,
+            heroic_domain: 'Arch-Mage [elemental fire and warding]',
+        });
+        assert.strictEqual(customHeroic.knobs.heroic_tier, true);
+        assert.strictEqual(customHeroic.character.heroic_domain, 'Arch-Mage [elemental fire and warding]');
+    });
+
+    test('3. Zero Leakage when heroic_tier is false across prompts and cartridges', () => {
+        const roleXml = buildFaeRoleContent({ heroicTier: false });
+        assert.ok(!roleXml.includes('Heroic Domain'), 'Role XML must not mention Heroic Domain when false');
+        assert.ok(!roleXml.includes('Pre-Math Leverage'), 'Role XML must not mention Pre-Math Leverage when false');
+
+        const combatXml = buildFaeCombatContent({ heroicTier: false });
+        assert.ok(!combatXml.includes('or Heroic Domain'), 'Combat XML must not mention Heroic Domain when false');
+
+        const constraintsXml = buildFaeConstraintsContent({ heroicTier: false });
+        assert.ok(!constraintsXml.includes('Heroic Domain'), 'Constraints XML must not mention Heroic Domain when false');
+
+        const stockPrompts = buildFaeStockPrompts('cosmic_horror', { heroicTier: false });
+        assert.ok(!stockPrompts.character.includes('Heroic Domain'), 'Stock prompt must not include Heroic Domain when false');
+        assert.ok(!stockPrompts.character.includes('Heroic: ON'), 'Stock prompt knobs must not say Heroic: ON when false');
+
+        const quickStart = buildFaeQuickStartInstructions('cosmic_horror', { heroicTier: false });
+        assert.ok(!quickStart.includes('HEROIC DOMAIN'), 'Quick start must not include HEROIC DOMAIN when false');
+        assert.ok(!quickStart.includes('Heroic: ON'), 'Quick start must not include Heroic: ON when false');
+
+        const cartridge = buildFaeCartridge('cosmic_horror', { heroicTier: false });
+        const allCartridgeText = JSON.stringify(cartridge);
+        assert.ok(!allCartridgeText.includes('Heroic Domain'), 'Cartridge payload must have zero mention of Heroic Domain when false');
+
+        const nonHeroicState = createInitialFaeState('cosmic_horror');
+        const memo = formatFaeCharacterMemoBlock(nonHeroicState);
+        assert.ok(!memo.includes('Heroic Domain:'), 'Memo block must not mention Heroic Domain when false');
+        assert.ok(!memo.includes('Heroic: ON'), 'Memo block must not include Heroic: ON when false');
+    });
+
+    test('4. Full Injection when heroic_tier is true across prompts and cartridges', () => {
+        const roleXml = buildFaeRoleContent({ heroicTier: true });
+        assert.ok(roleXml.includes('HEROIC DOMAINS (PRE-MATH LEVERAGE PERMISSIONS)'), 'Role XML must contain Heroic Domains section');
+        assert.ok(roleXml.includes('Expands Threat 0'), 'Role XML must describe Threat 0 expansion');
+        assert.ok(roleXml.includes('Grants Extraordinary Leverage'), 'Role XML must describe Extraordinary Leverage');
+        assert.ok(roleXml.includes('Neutralizes Encounter Pressures'), 'Role XML must describe Pressure neutralization');
+        assert.ok(roleXml.includes('Pure Pre-Math Leverage'), 'Role XML must state it is pure pre-math leverage');
+
+        const combatXml = buildFaeCombatContent({ heroicTier: true });
+        assert.ok(combatXml.includes('or Heroic Domain'), 'Combat XML must include Heroic Domain leverage in pressure neutralization');
+
+        const constraintsXml = buildFaeConstraintsContent({ heroicTier: true });
+        assert.ok(constraintsXml.includes('pure pre-math leverage'), 'Constraints XML must enforce pure pre-math leverage');
+
+        const stockPrompts = buildFaeStockPrompts('osr_dungeon', { heroicTier: true });
+        assert.ok(stockPrompts.character.includes('Heroic: ON'), 'Stock prompt knobs must include Heroic: ON');
+        assert.ok(stockPrompts.character.includes('Heroic Domain: Archetype [specific domains]'), 'Stock prompt must include Heroic Domain template');
+
+        const quickStart = buildFaeQuickStartInstructions('osr_dungeon', { heroicTier: true });
+        assert.ok(quickStart.includes('Heroic: ON'), 'Quick start must include Heroic: ON');
+        assert.ok(quickStart.includes('HEROIC DOMAIN: Include "Heroic Domain:'), 'Quick start must mandate Heroic Domain format');
+
+        const cartridge = buildFaeCartridge('osr_dungeon');
+        const allCartridgeText = JSON.stringify(cartridge);
+        assert.ok(allCartridgeText.includes('Heroic Domain'), 'Cartridge payload must include Heroic Domain when true');
+
+        const heroicState = createInitialFaeState('osr_dungeon');
+        const memo = formatFaeCharacterMemoBlock(heroicState);
+        assert.ok(memo.includes('Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]'), 'Memo block must serialize Heroic Domain');
+        assert.ok(memo.includes('Heroic: ON'), 'Memo block knobs must include Heroic: ON');
+    });
+
+    test('5. resolveAction strictly filters out heroic_domain from matched_positive_tags (Never reduces attrition)', () => {
+        const state = createInitialFaeState('osr_dungeon');
+        assert.strictEqual(state.character.heroic_domain, 'Spellblade [short-range blink and arcane ward-breaking]');
+
+        // Case A: Action includes heroic domain as matched positive tag
+        const resultWithDomain = resolveAction(state, {
+            pool_name: 'health',
+            threat_level: 2,
+            fixedDiceRoll: 0,
+            matched_positive_tags: ['Spellblade [short-range blink and arcane ward-breaking]'],
+        });
+        assert.deepStrictEqual(resultWithDomain.matched_positive_tags, [], 'heroic_domain must be filtered out of matched_positive_tags');
+        assert.strictEqual(resultWithDomain.attrition, 2, 'Heroic domain must NOT reduce attrition (remains 2)');
+
+        // Case B: Action includes standard positive tag alongside heroic domain
+        const resultWithBoth = resolveAction(state, {
+            pool_name: 'health',
+            threat_level: 2,
+            fixedDiceRoll: 0,
+            matched_positive_tags: ['Veteran Mercenary', 'Spellblade [short-range blink and arcane ward-breaking]'],
+        });
+        assert.deepStrictEqual(resultWithBoth.matched_positive_tags, ['Veteran Mercenary'], 'Only legitimate positive tag should be retained');
+        assert.strictEqual(resultWithBoth.attrition, 1, 'Attrition reduced by 1 only from Veteran Mercenary');
+
+        // Case C: Action includes literal string prefix "Heroic Domain:"
+        const resultWithPrefix = resolveAction(state, {
+            pool_name: 'health',
+            threat_level: 3,
+            fixedDiceRoll: 0,
+            matched_positive_tags: ['Heroic Domain: Spellblade [blink]', 'Heavy Shield'],
+        });
+        assert.deepStrictEqual(resultWithPrefix.matched_positive_tags, ['Heavy Shield']);
+        assert.strictEqual(resultWithPrefix.attrition, 2);
+    });
+
+    test('6. parseFaeStateFromMemo and formatInitialFaeMemo roundtrip preserves Heroic Tier and Domain', () => {
+        const rawMemo = `[SYSTEM]
+MultiHog DnD Framework: Active
+FAE Knobs: Flee Grace: OFF | Shift: 0 | Overflow: lethal | Heroic: ON
+[/SYSTEM]
+
+[CHARACTER]
+Name: Lou
+Archetype: Spellblade
+Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]
+((BARRED)) Health: 10/10
+((BARCYAN)) Resolve: 6/6
+((BARGOLD)) Torch & Supplies: 6/6
+((PILLS)) Positive Tags: Veteran Mercenary, Heavy Shield
+[/CHARACTER]`;
+
+        const parsed = parseFaeStateFromMemo(rawMemo);
+        assert.strictEqual(parsed.knobs.heroic_tier, true);
+        assert.strictEqual(parsed.character.heroic_domain, 'Spellblade [short-range blink and arcane ward-breaking]');
+
+        const serialized = formatFaeCharacterMemoBlock(parsed);
+        assert.ok(serialized.includes('Heroic: ON'));
+        assert.ok(serialized.includes('Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]'));
+
+        // When Heroic is OFF
+        const rawMemoOff = rawMemo.replace('Heroic: ON', 'Heroic: OFF').replace('Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]\n', '');
+        const parsedOff = parseFaeStateFromMemo(rawMemoOff);
+        assert.strictEqual(parsedOff.knobs.heroic_tier, false);
+        assert.strictEqual(parsedOff.character.heroic_domain, null);
     });
 });

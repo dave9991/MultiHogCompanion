@@ -73,7 +73,9 @@ export const FAE_GENRES = {
             base_attrition_shift: 0,
             overflow_default: 'scar_and_ko',
             breather_available: true,
+            heroic_tier: false,
         },
+        defaultHeroicDomain: null,
         pools: {
             health: {
                 key: 'health',
@@ -141,7 +143,9 @@ Status: Unsearched`,
             base_attrition_shift: 0,
             overflow_default: 'lethal',
             breather_available: true,
+            heroic_tier: true,
         },
+        defaultHeroicDomain: 'Spellblade [short-range blink and arcane ward-breaking]',
         pools: {
             health: {
                 key: 'health',
@@ -220,7 +224,9 @@ Status: Entrenched`,
             base_attrition_shift: 1,
             overflow_default: 'lethal',
             breather_available: true,
+            heroic_tier: false,
         },
+        defaultHeroicDomain: null,
         pools: {
             health: {
                 key: 'health',
@@ -299,7 +305,9 @@ Status: Stalking`,
             base_attrition_shift: 0,
             overflow_default: 'scar_and_ko',
             breather_available: true,
+            heroic_tier: false,
         },
+        defaultHeroicDomain: null,
         pools: {
             body: {
                 key: 'body',
@@ -378,7 +386,9 @@ Status: Alerted`,
             base_attrition_shift: 0,
             overflow_default: 'scene_fail',
             breather_available: true,
+            heroic_tier: false,
         },
+        defaultHeroicDomain: null,
         pools: {
             body: {
                 key: 'body',
@@ -457,7 +467,9 @@ Status: Lockdown`,
             base_attrition_shift: 1,
             overflow_default: 'lethal',
             breather_available: true,
+            heroic_tier: false,
         },
+        defaultHeroicDomain: null,
         pools: {
             body: {
                 key: 'body',
@@ -536,7 +548,9 @@ Status: Decompressing`,
             base_attrition_shift: -1,
             overflow_default: 'scar_and_ko',
             breather_available: true,
+            heroic_tier: false,
         },
+        defaultHeroicDomain: null,
         pools: {
             grit: {
                 key: 'grit',
@@ -768,6 +782,20 @@ export function createInitialFaeState(genreKey = 'cosmic_horror', overrides = {}
     const posTags = charOverrides.positive_tags || charOverrides.tags || genre.defaultPositiveTags;
     const negTags = charOverrides.negative_tags || charOverrides.scars || [];
 
+    const isHeroic = Boolean(
+        overrides.knobs?.heroic_tier ??
+        overrides.heroic_tier ??
+        overrides.heroicTier ??
+        overrides.config?.heroic_tier ??
+        overrides.config?.heroicTier ??
+        genre.knobs?.heroic_tier ??
+        false
+    );
+
+    const resolvedHeroicDomain = isHeroic
+        ? (charOverrides.heroic_domain ?? charOverrides.heroicDomain ?? overrides.heroic_domain ?? overrides.heroicDomain ?? genre.defaultHeroicDomain ?? null)
+        : null;
+
     return {
         genre: genre.label,
         genreKey: genre.id,
@@ -776,10 +804,12 @@ export function createInitialFaeState(genreKey = 'cosmic_horror', overrides = {}
             base_attrition_shift: overrides.knobs?.base_attrition_shift ?? genre.knobs.base_attrition_shift,
             overflow_default: overrides.knobs?.overflow_default ?? genre.knobs.overflow_default,
             breather_available: overrides.knobs?.breather_available ?? genre.knobs.breather_available ?? true,
+            heroic_tier: isHeroic,
         },
         character: {
             name: charOverrides.name || 'Protagonist',
             archetype: charOverrides.archetype || genre.archetypes[0],
+            heroic_domain: resolvedHeroicDomain,
             positive_tags: sanitizeFaePositiveTags(posTags, 5),
             negative_tags: Array.isArray(negTags) ? [...negTags] : [],
             temp_advantage: charOverrides.temp_advantage || null,
@@ -1065,13 +1095,25 @@ export function resolveAction(state, {
     let effective_pos_tags;
     const effective_neg_tags = [...matched_negative_tags];
 
+    // Filter out Heroic Domain from positive tags (Pure Pre-Math Leverage, Section 2.5: NEVER a -1 tag!)
+    const heroicDomain = state.character?.heroic_domain ? String(state.character.heroic_domain).trim() : '';
+    const heroicArchetype = heroicDomain ? heroicDomain.split('[')[0].trim().toLowerCase() : '';
+    const filteredPosTags = matched_positive_tags.filter(tag => {
+        if (!tag || typeof tag !== 'string') return false;
+        const cleanTag = tag.trim().toLowerCase();
+        if (/^heroic(?:\s*domain)?\s*:/i.test(cleanTag)) return false;
+        if (heroicDomain && (cleanTag === heroicDomain.toLowerCase() || cleanTag.startsWith(heroicDomain.toLowerCase()))) return false;
+        if (heroicArchetype && (cleanTag === heroicArchetype || cleanTag.startsWith(`${heroicArchetype} [`))) return false;
+        return true;
+    });
+
     if (was_at_zero) {
         effective_pos_tags = []; // Positive tags disabled when pool is at 0
         if (!effective_neg_tags.includes(pool.zero_debuff)) {
             effective_neg_tags.push(pool.zero_debuff);
         }
     } else {
-        effective_pos_tags = matched_positive_tags.slice(0, 2); // Hard cap at 2 character tags
+        effective_pos_tags = filteredPosTags.slice(0, 2); // Hard cap at 2 character tags
         if (state.character.temp_advantage) {
             effective_pos_tags.push(state.character.temp_advantage);
             state.character.temp_advantage = null;
@@ -1120,6 +1162,8 @@ export function resolveAction(state, {
             attrition: 0,
             pool_remaining: pool.current,
             remaining: pool.current,
+            matched_positive_tags: effective_pos_tags,
+            matched_negative_tags: effective_neg_tags,
             directive: `${scale_note} Cost: 0 ${pool_name}. Highlight protection from ${effective_pos_tags.join(', ') || 'decisive action'}.`,
         };
     }
@@ -1131,6 +1175,8 @@ export function resolveAction(state, {
             attrition,
             pool_remaining: 0,
             remaining: 0,
+            matched_positive_tags: effective_pos_tags,
+            matched_negative_tags: effective_neg_tags,
             directive: (
                 "Player retreated at 0 pool with Flee Grace active and took overflow attrition. Escape succeeds! " +
                 "Do NOT trigger lethal overflow; instead, Narrator selects a fitting gear tag to lose, companion to sideline, or permanent Scar."
@@ -1141,6 +1187,8 @@ export function resolveAction(state, {
     // 5. Apply Pool Loss (Strain vs. Trauma), Zero Clamp, or Overflow
     const loss_result = applyPoolLoss(state, pool_name, attrition, scale_note);
     loss_result.dice = dice_roll;
+    loss_result.matched_positive_tags = effective_pos_tags;
+    loss_result.matched_negative_tags = effective_neg_tags;
     return loss_result;
 }
 
@@ -1215,13 +1263,41 @@ export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lin
 /**
  * Builds the FAE role prompt section.
  *
- * @param {boolean} [isFreeform=false]
+ * @param {boolean|object} [isFreeform=false]
+ * @param {object} [options={}]
  * @returns {string} XML role prompt block
  */
-export function buildFaeRoleContent(isFreeform = false) {
+export function buildFaeRoleContent(isFreeform = false, options = {}) {
+    if (typeof isFreeform === 'object' && isFreeform !== null) {
+        options = isFreeform;
+        isFreeform = Boolean(options.isFreeform);
+    }
+    const isHeroic = Boolean(options?.heroicTier ?? options?.heroic_tier ?? false);
+
     const coreLoopStep1 = isFreeform
         ? `1. Describe the situation honestly and establish immediate stakes, then ask what {{user}} does.`
         : `1. Describe the situation honestly and establish immediate scene stakes (tactical choices belong exclusively in the <choices> block at the end; do not write "What do you do?" in narrative prose).`;
+
+    const twoTierNarration = isHeroic
+        ? `4. TWO-TIER POOL NARRATION (STRAIN vs. TRAUMA):
+   - Above Zero (Pool > 0): STRAIN ONLY. Narrate parrying shock, bruised muscles, winded breath, near-misses, cold sweat, arcane exertion, spent focus, rattled composure, or sensory static. NEVER narrate disabling wounds, broken bones, burnout, or permanent madness while a pool is above 0!
+   - Reaching Zero (Pool == 0): BREAKING POINT CLAMP. Clamping at 0 is the exact narrative moment the character's guard breaks and they suffer their tangible injury, burnout, or psychological breakdown (their pool's zero_debuff).
+   - Taking Loss at 0: OVERFLOW. Triggers the pool's on_overflow consequence (redirect, scar_and_ko, scene_fail, or lethal).`
+        : `4. TWO-TIER POOL NARRATION (STRAIN vs. TRAUMA):
+   - Above Zero (Pool > 0): STRAIN ONLY. Narrate parrying shock, bruised muscles, winded breath, near-misses, cold sweat, or sensory static. NEVER narrate disabling wounds, broken bones, or permanent madness while a pool is above 0!
+   - Reaching Zero (Pool == 0): BREAKING POINT CLAMP. Clamping at 0 is the exact narrative moment the character's guard breaks and they suffer their tangible injury or breakdown (their pool's zero_debuff).
+   - Taking Loss at 0: OVERFLOW. Triggers the pool's on_overflow consequence (redirect, scar_and_ko, scene_fail, or lethal).`;
+
+    const heroicDomainLaw = isHeroic
+        ? `\n6. HEROIC DOMAINS (PRE-MATH LEVERAGE PERMISSIONS):
+   - Formatted as Archetype [specific domains] (e.g. Wizard [illusions and teleportation], Rogue [masterwork locks and shadow-stealth], Spellblade [short-range blink and arcane ward-breaking]).
+   - Pure Pre-Math Leverage (Not a Tag): Heroic Domains govern what is possible (Leverage), NEVER what hurts less. A Heroic Domain NEVER counts as a Positive Tag or a -1 Attrition modifier!
+   - Three Pre-Math Effects:
+     1. Expands Threat 0 (Brush-Aside): Mundane obstacles squarely inside the domain drop to Threat 0 (resolved effortlessly with 0 attrition and no dice roll).
+     2. Grants Extraordinary Leverage (Avoids pivot): Actions inside the domain that would force a "pivot" for a normal human count as valid "stepping_stone" or "full" actions.
+     3. Neutralizes Encounter Pressures (-1 Threat): Using a Heroic Domain to directly counter an Encounter's listed Pressure grants the standard -1 Threat modifier.
+   - Pool Routing: Against Threat 1–4 obstacles, route Heroic strain into Resolve in party/shared-pool play (or into the bespoke class pool like Mana, Daring, or Conviction in solo specialist play).`
+        : '';
 
     return `<role>
 You are the Game Master (GM) running the Freeform Attrition Engine (FAE). FAE replaces binary pass/fail checks with single-pass forward momentum measured by resource attrition.
@@ -1235,16 +1311,13 @@ CORE LAWS OF FAE RESOLUTION:
 1. SINGLE-PASS RESOLUTION: {{user}} declares Task and Intent. You evaluate the fiction, check the Pre-Computed Turn Resolution Matrix or call resolve_action(), and narrate the complete outcome in the same turn. NEVER halt the turn for meta-currency haggling or menu choices.
 2. ENCOUNTER-WIDE RESOLUTION (NO ACTION ECONOMY): FAE has no initiative, combat rounds, or individual creature turns. The Threat describes the ENTIRE encounter as a whole, resolved in a single player turn.
 3. ATTRITION OVER FAILURE: Actions succeed or advance. The dice (4dF from -4 to +4, tight bell curve on 0) determine how much wear-and-tear the character absorbs along the way.
-4. TWO-TIER POOL NARRATION (STRAIN vs. TRAUMA):
-   - Above Zero (Pool > 0): STRAIN ONLY. Narrate parrying shock, bruised muscles, winded breath, near-misses, cold sweat, or sensory static. NEVER narrate disabling wounds, broken bones, or permanent madness while a pool is above 0!
-   - Reaching Zero (Pool == 0): BREAKING POINT CLAMP. Clamping at 0 is the exact narrative moment the character's guard breaks and they suffer their tangible injury or breakdown (their pool's zero_debuff).
-   - Taking Loss at 0: OVERFLOW. Triggers the pool's on_overflow consequence (redirect, scar_and_ko, scene_fail, or lethal).
+${twoTierNarration}
 5. INTENT SCOPING & PROPORTIONAL LEVERAGE (TAGS + GEAR + PARTY):
    - Leverage is evaluated using personal tags, tools, terrain, and active companions/party members.
    - Threat 0 (Trivial/Mook): Do NOT roll. Narrate effortless brush-aside with 0 attrition.
    - Narrow / Bypass Intent (Flee, slip past, grab clue): Resolves encounter in 1 turn ("full").
    - Total Intent vs 2+/Y Layers Left: Resolves as "stepping_stone" (-1 Layer, cross off a Barrier, grant [+] Advantage: Setup for next turn). Coordinating companions or a decisive silver bullet can achieve "full" resolution or neutralize a listed Pressure (-1 Threat).
-   - Wrong Tools / Zero Leverage: Resolves as "pivot" (+1 Threat, action connects, reveals necessary angle). Directing a relevant companion unlocks angles to avoid a "pivot".
+   - Wrong Tools / Zero Leverage: Resolves as "pivot" (+1 Threat, action connects, reveals necessary angle). Directing a relevant companion unlocks angles to avoid a "pivot".${heroicDomainLaw}
 
 CORE LOOP (every turn):
 ${coreLoopStep1}
@@ -1294,11 +1367,28 @@ Example: *(FAE Action [Sanity]: 4dF [Roll: +1, 0, +1, 0 = +2] + Threat 3 - 1 (Ca
 /**
  * Builds the FAE combat rules section with Encounter Block format.
  *
- * @param {string} [genreKey='cosmic_horror']
+ * @param {string|object} [genreKey='cosmic_horror']
+ * @param {object} [options={}]
  * @returns {string} XML combat prompt block
  */
-export function buildFaeCombatContent(genreKey = 'cosmic_horror') {
+export function buildFaeCombatContent(genreKey = 'cosmic_horror', options = {}) {
+    if (typeof genreKey === 'object' && genreKey !== null) {
+        options = genreKey;
+        genreKey = options.genreKey || options.genre || 'cosmic_horror';
+    }
     const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const isHeroic = Boolean(
+        options.heroicTier ??
+        options.heroic_tier ??
+        options.config?.heroicTier ??
+        options.config?.heroic_tier ??
+        genre.knobs?.heroic_tier ??
+        false
+    );
+
+    const threatReductionLine = isHeroic
+        ? '- -1 Threat (min 1): Player uses a clever environmental interaction, coordinated companion maneuver, or Heroic Domain that directly neutralizes one of the listed Pressures.'
+        : '- -1 Threat (min 1): Player uses a clever environmental interaction or coordinated companion maneuver that directly neutralizes one of the listed Pressures.';
 
     return `<combat>
 NO INITIATIVE TURNS. NO ACTION ECONOMY.
@@ -1325,7 +1415,7 @@ ENCOUNTER THREAT SCALE (1 to 4):
 
 STRICT THREAT MODIFIERS (max +/- 1):
 - +1 Threat: Player charges directly into an active Pressure without prep, OR attempts a pivot action.
-- -1 Threat (min 1): Player uses a clever environmental interaction or coordinated companion maneuver that directly neutralizes one of the listed Pressures.
+${threatReductionLine}
 
 TWO-TIER STRAIN VS TRAUMA RULE:
 - Never narrate broken limbs or permanent damage when HP/Pool > 0.
@@ -1412,10 +1502,21 @@ Rather than tracking separate pools or turns for companions, companions are fold
 /**
  * Builds the FAE constraints block.
  *
- * @param {boolean} [_isFreeform=false]
+ * @param {boolean|object} [_isFreeform=false]
+ * @param {object} [options={}]
  * @returns {string} XML constraints block
  */
-export function buildFaeConstraintsContent(_isFreeform = false) {
+export function buildFaeConstraintsContent(_isFreeform = false, options = {}) {
+    if (typeof _isFreeform === 'object' && _isFreeform !== null) {
+        options = _isFreeform;
+        _isFreeform = Boolean(options.isFreeform);
+    }
+    const isHeroic = Boolean(options?.heroicTier ?? options?.heroic_tier ?? false);
+
+    const heroicConstraint = isHeroic
+        ? '\n- Heroic Domains (Pre-Math Leverage): A Heroic Domain (Archetype [specific domains]) is pure pre-math leverage and NEVER counts as a Positive Tag or a -1 Attrition modifier.'
+        : '';
+
     return `<constraints>
 <resolution_constraints>
 Single-pass resolution is mandatory. Never pause mid-turn to ask players for mechanical rolls or choices. Intent determines outcome scale; 4dF attrition measures the cost. Never pre-judge the dice roll or predict whether a pool will hit 0 prior to evaluating the action.
@@ -1432,7 +1533,7 @@ The Trait Qualification Protocol (Cooperative Qualification):
   • Lucky -> Lucky [for narrowly surviving cave-ins and falls]
   • Tough -> Tough [against harsh poisons and extreme weather]
 - Tier B — Remove Only True Omnipotence (With Clear Replacement): If a proposed tag claims absolute immunity or breaks the attrition engine entirely (Invincible, Never Misses, Immortal, Omniscient), omit/replace it, clearly explain why in narrative/chat, and offer a grounded Trait [context] alternative.
-- Turn-by-Turn Evaluation: When matching up to 2 Positive Tags for -1 Attrition on a roll, respect any bracketed [context] qualifier (or if an unqualified broad tag exists on the sheet, interpret it narrowly within the character's archetype and auto-qualify it with [...] on the next State Tracker update).
+- Turn-by-Turn Evaluation: When matching up to 2 Positive Tags for -1 Attrition on a roll, respect any bracketed [context] qualifier (or if an unqualified broad tag exists on the sheet, interpret it narrowly within the character's archetype and auto-qualify it with [...] on the next State Tracker update).${heroicConstraint}
 </tag_and_zero_constraints>
 <passive_drain_constraints>
 Passive upkeep drain (rations at camp, environmental aura) is unmitigated by tags. It obeys the zero clamp (warns first), and triggers overflow if already at 0.
@@ -1500,6 +1601,15 @@ ${exampleButtons}
  */
 export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {}) {
     const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const isHeroic = Boolean(
+        overrides?.heroicTier ??
+        overrides?.heroic_tier ??
+        overrides?.config?.heroicTier ??
+        overrides?.config?.heroic_tier ??
+        overrides?.knobs?.heroic_tier ??
+        genre.knobs?.heroic_tier ??
+        false
+    );
     const poolKeys = Object.keys(genre.pools);
     const primary = genre.pools[poolKeys[0]];
     const secondaryList = poolKeys.slice(1).map(k => genre.pools[k]);
@@ -1510,6 +1620,18 @@ export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {})
 
     const sampleTags = genre.defaultPositiveTags.join(', ');
 
+    const knobsLine = isHeroic
+        ? `FAE Knobs: Heroic: ON | Flee Grace: ${genre.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${genre.knobs.base_attrition_shift >= 0 ? '+' + genre.knobs.base_attrition_shift : genre.knobs.base_attrition_shift} | Overflow: ${genre.knobs.overflow_default}`
+        : `FAE Knobs: Flee Grace: ${genre.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${genre.knobs.base_attrition_shift >= 0 ? '+' + genre.knobs.base_attrition_shift : genre.knobs.base_attrition_shift} | Overflow: ${genre.knobs.overflow_default}`;
+
+    const heroicDomainLine = isHeroic
+        ? `Heroic Domain: ${overrides?.heroicDomain || overrides?.heroic_domain || overrides?.character?.heroic_domain || overrides?.character?.heroicDomain || genre.defaultHeroicDomain || 'Archetype [specific domains]'}\n`
+        : '';
+
+    const heroicPillInstruction = isHeroic
+        ? '\n- Heroic Domain: Archetype [specific domains] is pure pre-math leverage and is kept on its own line, separate from Positive Tags.'
+        : '';
+
     return {
         character: `Main character's core stats. MECHANICS ONLY.
 NO D&D MECHANICS: Use FAE Archetypes and Resource Pools. Never write "1d8 damage", "AC", "spell slots", or "saving throws".
@@ -1517,15 +1639,15 @@ Format:
 [CHARACTER]
 {{user}} (${genre.archetypes[0]}): ${primary.current}/${primary.max} HP | Pool: ${primary.label} (${primary.current}/${primary.max}) | Scenes: 0/4 | XP: 0/4
 ${secondaryBars}
-FAE Knobs: Flee Grace: ${genre.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${genre.knobs.base_attrition_shift >= 0 ? '+' + genre.knobs.base_attrition_shift : genre.knobs.base_attrition_shift} | Overflow: ${genre.knobs.overflow_default}
-((PILLS)) Positive Tags: ${sampleTags}
+${knobsLine}
+${heroicDomainLine}((PILLS)) Positive Tags: ${sampleTags}
 ((PILLS)) Scars & Debuffs: None
 Status: Healthy
 [/CHARACTER]
 
 PILL FORMATTING:
 - Positive Tags: Name (descriptive detail) or Trait [context qualifier] (~25–30% situational scope, e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). Can include personal traits, signature gear, or companions, e.g. Companion: Name (Role — detail). Auto-qualify broad traits via Tier A Trait Qualification Protocol.
-- Scars & Debuffs: Prefix harmful debuffs with (-) for red pills, e.g. (-) ${primary.zero_debuff} (Trauma). Active temporary advantage tags prefix with (+) for green pills, e.g. (+) Advantage: Setup (-1 Attrition).`,
+- Scars & Debuffs: Prefix harmful debuffs with (-) for red pills, e.g. (-) ${primary.zero_debuff} (Trauma). Active temporary advantage tags prefix with (+) for green pills, e.g. (+) Advantage: Setup (-1 Attrition).${heroicPillInstruction}`,
 
         combat: `Active encounter and situational obstacles in FAE.
 Format:
@@ -1570,12 +1692,22 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
     const config = overrides.config || overrides || {};
     const playstyle = config.playstyle || overrides.playstyle || 'cyoa_5';
     const isFreeform = playstyle === 'freeform';
+    const isHeroic = Boolean(
+        config.heroicTier ??
+        config.heroic_tier ??
+        overrides.heroicTier ??
+        overrides.heroic_tier ??
+        overrides.knobs?.heroic_tier ??
+        overrides.knobs?.heroicTier ??
+        genre.knobs?.heroic_tier ??
+        false
+    );
 
     const customSyspromptLibrary = [
         {
             id: 'fae_base_override_role',
             tag: 'role',
-            content: buildFaeRoleContent(isFreeform),
+            content: buildFaeRoleContent(isFreeform, { heroicTier: isHeroic }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-feather-pointed',
@@ -1597,7 +1729,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         {
             id: 'fae_base_override_combat',
             tag: 'combat',
-            content: buildFaeCombatContent(genreKey),
+            content: buildFaeCombatContent(genreKey, { heroicTier: isHeroic }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-shield-halved',
@@ -1652,7 +1784,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         {
             id: 'fae_base_override_constraints',
             tag: 'constraints',
-            content: buildFaeConstraintsContent(isFreeform),
+            content: buildFaeConstraintsContent(isFreeform, { heroicTier: isHeroic }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-ban',
@@ -1692,7 +1824,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         customSyspromptLibrary,
         syspromptModules,
         syspromptSectionOrder: [],
-        stockPrompts: buildFaeStockPrompts(genreKey, overrides),
+        stockPrompts: buildFaeStockPrompts(genreKey, { ...overrides, heroicTier: isHeroic }),
         cyoaConfig: {
             useCustomPrompt: !isFreeform,
             customPromptText: isFreeform ? '' : buildFaeCyoaPrompt(genreKey, overrides),
@@ -1815,28 +1947,59 @@ ${otherGenresList}
  * Builds the Quick Start instructions string passed to MultiHog character creation for FAE.
  *
  * @param {string} [genreKey='cosmic_horror']
- * @param {string} [charName='']
+ * @param {string|object} [charName='']
  * @param {string} [customNotes='']
  * @param {object|null} [customKnobs=null]
+ * @param {object} [options={}]
  * @returns {string} Quick start instructions
  */
-export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charName = '', customNotes = '', customKnobs = null) {
+export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charName = '', customNotes = '', customKnobs = null, options = {}) {
+    if (typeof charName === 'object' && charName !== null) {
+        options = charName;
+        charName = options.charName || options.name || '';
+        customNotes = options.customNotes || options.notes || '';
+        customKnobs = options.customKnobs || options.knobs || null;
+    }
     const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
     const poolKeys = Object.keys(genre.pools);
     const poolsStr = poolKeys.map(k => `${genre.pools[k].label} (${genre.pools[k].current}/${genre.pools[k].max})`).join(', ');
     const archetypesSnippet = genre.archetypes.slice(0, 4).join(', ');
     const tagsSnippet = genre.defaultPositiveTags.join(', ');
     const knobs = Object.assign({}, genre.knobs, customKnobs || {});
+    const isHeroic = Boolean(
+        options?.heroicTier ??
+        options?.heroic_tier ??
+        options?.config?.heroicTier ??
+        options?.config?.heroic_tier ??
+        customKnobs?.heroic_tier ??
+        customKnobs?.heroicTier ??
+        knobs.heroic_tier ??
+        genre.knobs?.heroic_tier ??
+        false
+    );
+
+    const heroicDomainInstruction = isHeroic
+        ? `HEROIC DOMAIN: Include "Heroic Domain: Archetype [specific domains]" (e.g. ${genre.defaultHeroicDomain || 'Spellblade [short-range blink and arcane ward-breaking]'}) on its own line above Positive Tags. It represents pure pre-math leverage and never counts as a Positive Tag.`
+        : null;
+
+    const knobsLineFmt = isHeroic
+        ? `KNOBS: Heroic: ON | Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${knobs.base_attrition_shift >= 0 ? '+' + knobs.base_attrition_shift : knobs.base_attrition_shift} | Overflow: ${knobs.overflow_default}.`
+        : `KNOBS: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${knobs.base_attrition_shift >= 0 ? '+' + knobs.base_attrition_shift : knobs.base_attrition_shift} | Overflow: ${knobs.overflow_default}.`;
+
+    const formatMandateFmt = isHeroic
+        ? `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6" (NEVER use a colon inside ((BAR...)), e.g. write ((BARBLUE)) or ((BARGOLD)), and do NOT append Zero Debuff/Recovery text on the bar line), FAE Knobs line (including Heroic: ON), Heroic Domain: Archetype [specific domains], ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`
+        : `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6" (NEVER use a colon inside ((BAR...)), e.g. write ((BARBLUE)) or ((BARGOLD)), and do NOT append Zero Debuff/Recovery text on the bar line), FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`;
 
     return [
         `RULES: Freeform Attrition Engine (FAE) — ${genre.label}.`,
         charName ? `NAME: ${charName}.` : null,
         `ARCHETYPE: Choose ONE FAE Archetype (e.g. ${archetypesSnippet}). Output as "Name (Archetype)". FORBIDDEN: No D&D classes or subclasses (no Fighter, Wizard, Paladin, etc.).`,
+        heroicDomainInstruction,
         `RESOURCE POOLS: ${poolsStr}. Primary pool mirrors HP.`,
         `POSITIVE TAGS: Pick 4 distinct descriptive tags (~25–30% situational scope: personal traits, bracketed qualifiers like Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock], signature gear, or "Companion: Name (Role — detail)" if the scenario includes friends/companions/party): ${tagsSnippet}. Follow Trait Qualification Protocol (Tier A: auto-qualify broad traits into Trait [context]; Tier B: omit true omnipotence with grounded Trait [context] replacement).`,
-        `KNOBS: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${knobs.base_attrition_shift >= 0 ? '+' + knobs.base_attrition_shift : knobs.base_attrition_shift} | Overflow: ${knobs.overflow_default}.`,
+        knobsLineFmt,
         `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or polyhedral damage dice. Use 4dF Attrition, Positive Tags, and Scars/Debuffs in [CHARACTER].`,
-        `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6" (NEVER use a colon inside ((BAR...)), e.g. write ((BARBLUE)) or ((BARGOLD)), and do NOT append Zero Debuff/Recovery text on the bar line), FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`,
+        formatMandateFmt,
         customNotes ? `ADDITIONAL DETAILS: ${customNotes}` : null,
     ].filter(Boolean).join('\n');
 }

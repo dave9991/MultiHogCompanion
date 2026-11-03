@@ -17,10 +17,11 @@ import { ARCHIVIST_QUOTAS } from './concierge-canon.js';
 export function buildFaeConciergeSystemPrompt(options = {}) {
     const genreSummaries = Object.entries(FAE_GENRES).map(([key, g]) => {
         const poolsDesc = Object.values(g.pools).map(p => `${p.label} (${p.max} max, zero debuff: "${p.zero_debuff}", recovery: \`${p.recovery}\`, overflow: \`${p.on_overflow}\`)`).join('; ');
-        const knobsDesc = `Flee Grace: ${g.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Base Shift: ${g.knobs.base_attrition_shift} | Overflow: ${g.knobs.overflow_default}`;
+        const knobsDesc = `Flee Grace: ${g.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Base Shift: ${g.knobs.base_attrition_shift} | Overflow: ${g.knobs.overflow_default} | Heroic: ${g.knobs.heroic_tier ? 'ON' : 'OFF'}`;
+        const heroicDesc = g.defaultHeroicDomain ? `\n  - Default Heroic Domain: ${g.defaultHeroicDomain}` : '';
         return `* **${key}** (${g.icon} ${g.label}):
   - Pools: ${poolsDesc}
-  - Knobs: ${knobsDesc}
+  - Knobs: ${knobsDesc}${heroicDesc}
   - Archetypes: ${g.archetypes.join(', ')}
   - Sample Positive Tags: ${g.defaultPositiveTags.join('; ')}`;
     }).join('\n\n');
@@ -80,7 +81,16 @@ ${genreSummaries}
    - **Stepping-Stone:** Against 2+ Layers, breaks 1 Layer and grants [+] Temporary Advantage for the next turn.
    - **Pivot:** Wrong tools or approach; increases Threat by +1 but reveals the true solution.
    - **Companions as Combined Leverage:** Leverage is evaluated using the party's combined fictional presence. Directing or coordinating companions can neutralize an active Pressure (-1 Threat), unlock angles to avoid a \`pivot\`, or achieve \`full\` resolution.
-7. **Strict Prohibition of D&D and 2d6 PbtA Mechanics:**
+8. **Heroic Domains (Pre-Math Leverage Permissions):**
+   - In heroic tier campaigns (\`heroic_tier: true\`, such as \`osr_dungeon\` or when toggled ON), the protagonist possesses a **Heroic Domain** (e.g. \`Spellblade [short-range blink and arcane ward-breaking]\`, \`Arch-Mage [elemental conjuration and warding]\`).
+   - Format: \`heroic_domain: Archetype [specific domains]\` on \`[PROTAGONIST]\`.
+   - **Pre-Math Leverage Rules:**
+     1. Expands Threat 0: Trivial actions within the domain resolve at Threat 0 with zero attrition.
+     2. Extraordinary Leverage: Grants access to impossible or arcane feats to overcome Leverage Barriers or avoid a pivot.
+     3. Neutralizes Pressures: Neutralizes an active scene pressure for -1 Threat.
+   - **Crucial Attrition Rule:** A Heroic Domain is pure pre-math leverage and NEVER counts as a \`-1\` Positive Tag.
+   - When \`heroic_tier: false\` (standard FAE), Heroic Domain is omitted and zero class permissions apply.
+9. **Strict Prohibition of D&D and 2d6 PbtA Mechanics:**
    - NEVER output target DCs (e.g. "DC 14"), AC, attack rolls, spell slots, saving throws, or advantage/disadvantage.
    - NEVER output PbtA 2d6 moves (e.g. "Hack & Slash", "Act Under Pressure", "10+ / 7-9 / 6-").
 
@@ -118,6 +128,7 @@ premise: Brief 1-2 sentence core premise of the adventure
 
 [CONFIG] (Optional calibration knobs)
 flee_grace_toggle: true | false
+heroic_tier: true | false (Defaults to true for osr_dungeon, false for other genres)
 base_attrition_shift: 0 (or -1 for lenient, +1 for punishing)
 overflow_default: scar_and_ko | lethal | scene_fail
 playstyle: cyoa_5 | cyoa_3 | freeform
@@ -128,6 +139,7 @@ art_style: Visual aesthetic for scene & portrait art
 [PROTAGONIST]
 name: Character Name
 playbook: Archetype Name
+heroic_domain: Archetype [specific domains] (Required when heroic_tier is true; omitted when false)
 species: Human, etc.
 appearance: Physical description and style
 background: Character origin and background
@@ -509,7 +521,8 @@ ${genreSummaries}
   - Tier A (Auto-Qualify Broad Traits): Convert broad traits (Strong, Smart, Fast, Lucky, Tough) into Trait [context] (e.g. Strong [for lifting, hauling, or breaching doors], Smart [for ancient ciphers and forensic clues]) to keep applicability to ~25–30%.
   - Tier B (Remove True Omnipotence): Omit absolute immunity tags (Invincible, Immortal, Never Misses) and replace with grounded Trait [context] alternatives.
 * Resource Pools: 2-3 pools per genre skeleton with current, max, zero_debuff, recovery, on_overflow.
-* Knobs: flee_grace_toggle (true/false), base_attrition_shift (-1/0/+1), overflow_default (scar_and_ko/lethal/scene_fail).
+* Knobs: flee_grace_toggle (true/false), base_attrition_shift (-1/0/+1), overflow_default (scar_and_ko/lethal/scene_fail), heroic_tier (true/false).
+* Heroic Domains (Pre-Math Leverage Permissions): When heroic_tier is true (e.g. osr_dungeon or user toggle), assign \`heroic_domain: Archetype [specific domains]\` to [PROTAGONIST]. This provides pre-math leverage (expands Threat 0, overcomes barriers, neutralizes pressures) and NEVER counts as a -1 Positive Tag. When heroic_tier is false, omit heroic_domain entirely.
 * Adversaries / Encounters: threat_level (1-4), layers (e.g. 2/2), pools_at_risk, pressures, leverage_barriers, full_finish_triggers.
 * STRICT PROHIBITION OF D&D AND PBTA 2d6 MECHANICS: Never output DCs, AC, attack rolls, saving throws, advantage/disadvantage, or 2d6 moves.
 
@@ -525,6 +538,7 @@ premise: Brief 1-2 sentence core premise
 
 [CONFIG] (Optional calibration knobs)
 flee_grace_toggle: true | false
+heroic_tier: true | false
 base_attrition_shift: 0
 overflow_default: scar_and_ko | lethal | scene_fail
 playstyle: cyoa_5 | cyoa_3 | freeform
@@ -533,6 +547,7 @@ playstyle: cyoa_5 | cyoa_3 | freeform
 [PROTAGONIST]
 name: Silas Vance
 playbook: The Alienist
+heroic_domain: Archetype [specific domains] (When heroic_tier is true; omitted when false)
 appearance: Exhausted detective with a rumpled trenchcoat
 background: Former asylum investigator
 positive_tags: Steady Hand (Pistol training), Quiet (Moving silently), Trenchcoat (Deep pockets for evidence)

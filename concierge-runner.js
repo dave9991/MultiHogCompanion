@@ -487,6 +487,12 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 positive_tags: dossier.protagonist?.positiveTags,
                 negative_tags: dossier.protagonist?.negativeTags,
                 pools: dossier.protagonist?.pools,
+                heroicTier: Boolean(
+                    dossier.config?.heroicTier ??
+                    dossier.config?.heroic_tier ??
+                    dossier.config?.knobs?.heroic_tier
+                ),
+                heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
                 config: dossier.config || {},
                 knobs: dossier.config?.knobs || {},
             };
@@ -979,6 +985,12 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 positive_tags: dossier.protagonist?.positiveTags,
                 negative_tags: dossier.protagonist?.negativeTags,
                 pools: dossier.protagonist?.pools,
+                heroicTier: Boolean(
+                    dossier.config?.heroicTier ??
+                    dossier.config?.heroic_tier ??
+                    dossier.config?.knobs?.heroic_tier
+                ),
+                heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
                 config: dossier.config || {},
                 knobs: dossier.config?.knobs || {},
             };

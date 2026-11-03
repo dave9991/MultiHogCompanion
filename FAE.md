@@ -39,7 +39,7 @@ Characters track finite Resource Pools (e.g., *Health*, *Sanity*, *Supplies*). F
   - `redirect:<pool>`: Loss overflows into a secondary pool (e.g., losing Armor redirects excess attrition directly into Health).
   - `scene_fail`: The active scene or mission ends in catastrophic failure (captured, objective destroyed, party forced to flee).
   - `lethal`: Fatal trauma or permanent, irreversible madness.
-* **Flee Grace (`flee_grace_toggle`):** When enabled, if a character is at 0 in their primary pool and chooses to turn tail and run (`[Narrow Escape]`), they escape with a minor narrative scar instead of suffering terminal overflow or death.
+* **Flee Grace (`flee_grace_toggle`):** When enabled, if a character is at 0 in their primary pool and chooses to turn tail and run (e.g. `— [Health]` or tactical disengagement), they escape with a minor narrative scar instead of suffering terminal overflow or death.
 
 ### 5. Strain vs. Trauma Narration
 To maintain high-stakes grit without cartoonish gore:
@@ -69,6 +69,15 @@ Characters begin with **3 to 4 Positive Tags** and **0 to 1 Negative Tag (Scar)*
      - `Tough` $\rightarrow$ `Tough [against harsh poisons and extreme weather]`
   2. **Tier B — Remove Only True Omnipotence (With Clear Replacement):** If a proposed tag claims absolute immunity or breaks the attrition engine entirely (`Invincible`, `Never Misses`, `Immortal`, `Omniscient`), the LLM omits it and proposes a grounded `Trait [context]` alternative fitting FAE's math.
   3. **Turn-by-Turn Evaluation:** The Narrator respects bracketed `[context]` qualifiers when calculating attrition mitigation.
+
+### 8. Interactive Choice Formatting (Style B CYOA)
+In CYOA mode, interactive `<button>` choices in FAE follow **Style B** bracket formatting:
+* **Risky Actions with Matching Tags / Advantage:** `— [Pool | +Tag1, +Tag2]` or `— [Pool | +Tag1, +Advantage]`.
+  - For companion tags: `— [Health | +Companion: Brother Marcus]` or `— [Health | +Brother Marcus]`.
+* **Risky Actions without Tags:** `— [Pool]` (e.g. `— [Resolve]` or `— [Health]`).
+* **Zero-Roll Actions & Spoken Dialogue:** Omit brackets entirely.
+* **No Mechanical Scope Jargon:** Never display `Stepping-Stone:`, `Full Resolution:`, `Tactical Caution:`, or `Narrow Escape` inside button brackets. Intent scope is evaluated internally by the GM when resolving the turn, keeping buttons clean and immersive.
+* **Pool Slot Integrity:** The first item before `|` inside brackets MUST always be an active Resource Pool name (never a Tag).
 
 ---
 

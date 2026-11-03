@@ -85,7 +85,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 * **Overview:** Delivers Choose-Your-Own-Adventure (CYOA) interactive buttons and instant choice auto-repair via on-demand user controls (Wand Menu and Slash Commands), eliminating background listener collisions with tool calls and reasoning models.
 * **Core Capabilities:**
   * **Deterministic Markdown Auto-Repair:** Local synchronous regex parser extracts numbered markdown option lists (`What do you do? 1. Attack 2. Flee`) and auto-repairs them into native interactive buttons with zero LLM latency and zero tokens.
-  * **FAE Proportional Leverage Choice Formatting:** In FAE campaigns, formats choice actions with explicit intent scopes and targeted resource pools (e.g. `— [Stepping-Stone: Sanity]`, `— [Full Resolution: Health]`, or crisis retreat `— [Narrow Escape]`).
+  * **FAE Style B Choice Formatting:** In FAE campaigns, formats choice actions with clean Style B resource pool and tag brackets (e.g. `— [Sanity | +Occult Scholar]`, `— [Health]`, or free actions without brackets), omitting internal GM scope jargon from player buttons.
   * **Wand Menu Interactive Trigger (Fix / Reroll):** Dedicated wand action (`#mhc_wand_cyoa_fix_reroll`) enabling on-demand 1-click choice repair or generation directly on the latest settled narrator message, failing safely if invoked during intermediary toolcall turns.
   * **On-Demand Choice Generator:** When invoked manually via wand or slash commands (`/cyoafix`, `/cyoagen`, `/cyoaretry`), formulates fresh, context-tailored tactical action buttons without altering the story narrative.
   * **Historical Context Sanitizer:** Retired in favor of native upstream MultiHog choice pruning (`cyoaConfig.stripOldChoicesFromPrompt`).

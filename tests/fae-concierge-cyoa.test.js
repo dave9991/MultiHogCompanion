@@ -324,10 +324,8 @@ FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
 
     assert.ok(systemPrompt.includes('Freeform Attrition Engine'));
     assert.ok(systemPrompt.includes('Cyberpunk / Syndicate Noir'));
-    assert.ok(systemPrompt.includes('FAE SCOPE & INTENT:'));
-    assert.ok(systemPrompt.includes('Stepping-Stone: Partial progress to crack a leverage layer'));
-    assert.ok(systemPrompt.includes('Full Finish: Direct resolution'));
-    assert.ok(systemPrompt.includes('Bypass / Tactical Pivot'));
+    assert.ok(systemPrompt.includes('STYLE B BRACKET RULES:'));
+    assert.ok(systemPrompt.includes('NO MECHANICAL SCOPE JARGON: NEVER output "Stepping-Stone:"'));
     assert.ok(systemPrompt.includes('TAG MATCHING:'));
     assert.ok(systemPrompt.includes('NEVER output D&D target DCs'));
     assert.ok(systemPrompt.includes('NEVER output PbtA 2d6 move names'));
@@ -357,9 +355,9 @@ FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
 test('CYOA Choice Engine: Markup Extraction Resilience', () => {
     const rawFaeOutput = `Here are the choices:
 <choices>
-<button>1. 🔫 Line up the silenced pistol on the enforcer's hydraulic knee — [Stepping-Stone: Body | Tag: Silenced Pistol]</button>
-<button>2. 💻 Deploy an optic glitch packet to blind their cyberware — [Stepping-Stone: Nerve | Tag: Subdermal Cyberdeck]</button>
-<button>3. 🏃 Dive through the emergency escape chute into the service vents — [Bypass/Retreat: Body]</button>
+<button>1. 🔫 Line up the silenced pistol on the enforcer's hydraulic knee — [Body | +Silenced Pistol]</button>
+<button>2. 💻 Deploy an optic glitch packet to blind their cyberware — [Nerve | +Subdermal Cyberdeck]</button>
+<button>3. 🏃 Dive through the emergency escape chute into the service vents — [Body]</button>
 <button>4. 🎙️ "You don't want to do this, chomba. Arasaka already scrubbed your team's pension."</button>
 <button>5. 🛡️ Drop prone behind the server rack and cut the power breakers</button>
 </choices>`;
@@ -491,11 +489,11 @@ describe('Stage 2: Quick Start Party Override, Footer All-Pools, CYOA Pool Disam
         assert.ok(solo.includes('NEVER wrap the character name or header line in markdown bold (**)'));
     });
 
-    test('3. buildFaeFooterContent formats all active pools for multi-pool genres and enforces STRICT FOOTER RULE', () => {
+    test('3. buildFaeFooterContent formats all active pools for multi-pool genres and enforces positive 2-line footer', () => {
         const osrFooter = buildFaeFooterContent('osr_dungeon');
-        assert.ok(osrFooter.includes('*(Health: [current]/[max]) | (Resolve: [current]/[max]) | (Torch & Supplies: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Coarse, Sub-location])*'), 'Must format all 3 OSR pools in footer template');
-        assert.ok(osrFooter.includes('STRICT FOOTER RULE: NEVER output "Level X", "(Status: ... HP)", or "(XP: ...)" in the footer'), 'Must include negative constraint against D&D levels');
-        assert.ok(osrFooter.includes('display ONLY the active Resource Pools (Health, Resolve, Torch & Supplies)'));
+        assert.ok(osrFooter.includes('*(Health: [current]/[max]) | (Resolve: [current]/[max]) | (Torch & Supplies: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Site Name, Current Area])*'), 'Must format all 3 OSR pools in footer template');
+        assert.ok(osrFooter.includes('ALWAYS end every narrative message (including turns after a tool call, right above <choices>) with these exact two italicized lines:'), 'Must include positive instruction');
+        assert.ok(!osrFooter.includes('STRICT FOOTER RULE: NEVER output "Level X"'), 'Must remove negative D&D rule');
 
         // Custom pools override
         const customFooter = buildFaeFooterContent('custom', {
@@ -504,15 +502,15 @@ describe('Stage 2: Quick Start Party Override, Footer All-Pools, CYOA Pool Disam
                 honor: { label: 'Honor' },
             },
         });
-        assert.ok(customFooter.includes('*(Chi: [current]/[max]) | (Honor: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Coarse, Sub-location])*'));
-        assert.ok(customFooter.includes('display ONLY the active Resource Pools (Chi, Honor)'));
+        assert.ok(customFooter.includes('*(Chi: [current]/[max]) | (Honor: [current]/[max]) | (Scenes: [current]/[target]) | (Location: [Site Name, Current Area])*'));
     });
 
     test('4. buildFaeCyoaPrompt includes CRITICAL BRACKET RULE and specifies active Resource Pools', () => {
         const cyoaOsr = buildFaeCyoaPrompt('osr_dungeon');
         assert.ok(cyoaOsr.includes('CRITICAL BRACKET RULE:'), 'Must include CRITICAL BRACKET RULE');
         assert.ok(cyoaOsr.includes('Health, Resolve, Torch & Supplies'), 'Must enumerate all 3 OSR pools in bracket rule');
-        assert.ok(cyoaOsr.includes('— [Stepping-Stone: Health | Tag: Trap-Wise]'), 'Must provide proper pipe tag example');
+        assert.ok(cyoaOsr.includes('— [Health | +Trap-Wise]'), 'Must provide proper Style B pipe tag example');
+        assert.ok(!cyoaOsr.includes('[Stepping-Stone:'), 'Must not contain legacy Stepping-Stone jargon');
     });
 
     test('5. buildCyoaPrompt dynamically extracts active pool names from memo and includes CRITICAL BRACKET RULE', () => {
@@ -541,7 +539,8 @@ Status: Healthy
         assert.ok(systemPrompt.includes('CRITICAL BRACKET RULE:'), 'Prompt must include CRITICAL BRACKET RULE');
         assert.ok(systemPrompt.includes('Health, Resolve, Torch & Supplies'), 'Prompt must resolve active pool names from memo');
         assert.ok(systemPrompt.includes('NEVER put a Positive Tag name in place of the Pool name!'));
-        assert.ok(systemPrompt.includes('[Stepping-Stone: Health | Tag: Trap-Wise]'));
+        assert.ok(systemPrompt.includes('[Health | +Trap-Wise]'));
+        assert.ok(!systemPrompt.includes('[Stepping-Stone:'));
     });
 
     test('6. formatInitialFaeMemo with companion NPCs, maps, and factions renders [PARTY], [DUNGEON], and [FACTIONS]', () => {

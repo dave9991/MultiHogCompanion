@@ -167,26 +167,28 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSet
             guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS AT A BREAKING POINT / ZERO-STATE (0 HP / Incapacitated):
 - Strict negative constraint: Tags are DISABLED at 0 HP. DO NOT offer bold physical attacks, confident feats, or normal offensive actions.
 - The character has hit a breaking point or primary pool exhaustion.
-- You must generate exactly ${choiceCount} Crisis Survival / Pivot choices reflecting their dire situation:
-  1. FLEE GRACE ESCAPE / DESPERATE RETREAT: If Flee Grace is ON, slip past the danger or scramble into cover at heavy consequence — [Bypass/Retreat: At-Risk Pool]
-  2. PIVOT TO SECONDARY POOL: Abandon the direct contest and absorb the shock through another pool (e.g. burning Nerve/Sanity or Supplies) — [Pivot]
+- You must generate exactly ${choiceCount} Crisis Survival / Pivot choices reflecting their dire situation (Style B: [Pool] or no brackets):
+  1. FLEE GRACE ESCAPE / DESPERATE RETREAT: If Flee Grace is ON, slip past the danger or scramble into cover at heavy consequence — [${primaryPoolLabel}]
+  2. PIVOT TO SECONDARY POOL: Abandon the direct contest and absorb the shock through another pool (e.g. burning Nerve/Sanity or Supplies) — [Secondary Pool]
   3. DESPERATE PLEA / ALLY SHIELD: Call upon an ally, mentor, or bystander to intervene or distract the threat.
   ${choiceCount === 5 ? '4. BRACE FOR OVERFLOW / LAST STAND: Absorb the overflow damage and accept a lasting Scar/Debuff.\n  5. COLLAPSE / SUCCUMB: Fall back, play dead, or let darkness take you to avoid immediate lethality.' : ''}`;
         } else {
-            guidelines = `Freeform Attrition Engine (FAE) Tactical & Narrative Choices:
+            guidelines = `Freeform Attrition Engine (FAE) Tactical & Narrative Choices (Style B Format):
 - Generate exactly ${choiceCount} actionable, suspenseful choices tailored to the current scene and fictional stakes.
-- FAE SCOPE & INTENT:
-  * Full Finish: Direct resolution against the encounter or objective (requires breaking leverage barriers first if present) — [Full: At-Risk Pool]
-  * Stepping-Stone: Partial progress to crack a leverage layer, seize positional advantage, or weaken the opposition — [Stepping-Stone: At-Risk Pool]
-  * Bypass / Tactical Pivot: Avoid the threat, create distance, flee, or change the angle of engagement — [Bypass/Retreat: At-Risk Pool]
-- CRITICAL BRACKET RULE: The target immediately after the colon in [Stepping-Stone: <Pool>] or [Full: <Pool>] MUST be an active Resource Pool name (e.g. ${poolNamesStr}) — NEVER put a Positive Tag name in place of the Pool name! If a Positive Tag applies, write [Stepping-Stone: <Pool> | Tag: <TagName>] (e.g., [Stepping-Stone: Health | Tag: Trap-Wise], NEVER [Stepping-Stone: Trap-Wise]).
-- TAG MATCHING: At most 1–2 choices may explicitly match a relevant Positive Tag from the protagonist sheet in brackets: e.g. "— [Stepping-Stone: Health | Tag: Fire Axe]" or "— [Full: Nerve | Tag: Street-Smart]".
-- THREAT & ATTRITION AT RISK: Actions should note which pool is at risk if attrition is suffered (e.g. Health, Nerve, Body, Sanity).
+- STYLE B BRACKET RULES:
+  * Choices that risk a Resource Pool append a clean bracket at the end of the button:
+    - With one or more Positive Tags (trait, gear, companion) or active Advantage: "— [Pool | +Tag1, +Tag2]" (or "— [Pool | +Tag1, +Advantage]"). For companion tags like Companion: Brother Marcus (Cleric), write "+Companion: Brother Marcus" or "+Brother Marcus".
+    - Without a matching Positive Tag: "— [Pool]" (e.g., "— [Resolve]" or "— [Health]").
+    - Spoken dialogue or zero-roll free actions: omit the bracket entirely.
+  * NO MECHANICAL SCOPE JARGON: NEVER output "Stepping-Stone:", "Full Resolution:", "Tactical Caution:", or "Narrow Escape" inside button brackets. (The GM evaluates intent scope internally when resolving the turn).
+- CRITICAL BRACKET RULE: The first item before "|" in [...] MUST always be an active Resource Pool name (e.g. ${poolNamesStr}) — NEVER put a Positive Tag name in place of the Pool name! (Write [${primaryPoolLabel} | +Trap-Wise], NEVER [+Trap-Wise] or [Trap-Wise]).
+- TAG MATCHING: At most 1–2 choices may explicitly match a relevant Positive Tag from the protagonist sheet: e.g. "— [${primaryPoolLabel} | +Fire Axe]" or "— [${activePoolNames[1] || primaryPoolLabel} | +Street-Smart]".
+- THREAT & ATTRITION AT RISK: The bracketed pool designates which resource is at risk if attrition is suffered (${poolNamesStr}).
 - STRICT NEGATIVE RESTRAINTS:
   * NEVER output D&D target DCs (e.g. "DC 14"), AC, saving throws, or d20 bonuses.
   * NEVER output PbtA 2d6 move names (e.g. "Hack & Slash", "Act Under Fire"). FAE uses 4dF attrition rolls against Threat Levels (1–5) and pool strain.
 - REACTION / COMPLICATION CONTINUATION: If the preceding turn inflicted pool strain or a complication, provide options to react, reposition, or patch the wound.
-- Remaining choices should offer dialogue in quotes, cautious observation, or clever environmental tricks.`;
+- Remaining choices should offer dialogue in quotes, cautious observation, or clever environmental tricks without brackets.`;
         }
 
         systemPrompt = `You are the specialized CYOA Choice Engine for a Freeform Attrition Engine (${genre.label}) tabletop RPG.
@@ -194,18 +196,18 @@ Your sole job is to formulate ${choiceCount} suspenseful player choices based on
 
 ${guidelines}
 
-- CRITICAL BRACKET RULE: The target immediately after the colon in [Stepping-Stone: <Pool>] or [Full: <Pool>] MUST be an active Resource Pool name (e.g. ${poolNamesStr}) — NEVER put a Positive Tag name in place of the Pool name! If a Positive Tag applies, write [Stepping-Stone: <Pool> | Tag: <TagName>] (e.g., [Stepping-Stone: Health | Tag: Trap-Wise], NEVER [Stepping-Stone: Trap-Wise]).
+- CRITICAL BRACKET RULE: The first item inside [...] MUST be an active Resource Pool name (e.g. ${poolNamesStr}) — NEVER put a Positive Tag name in place of the Pool name! If a Positive Tag applies, write [Pool | +TagName] (e.g., [${primaryPoolLabel} | +Trap-Wise], NEVER [Trap-Wise]).
 
 FORMAT CONTRACT:
 - Output ONLY a <choices> block containing <button> elements.
 ${cyoaEmojis ? '- Prefix each choice option with an appropriate thematic emoji.' : ''}
-- Example format:
+- Example format (Style B):
 <choices>
-<button>1. 🪓 Swing the fire axe into the creature's exposed sensory tentacles — [Stepping-Stone: Health | Tag: Fire Axe]</button>
-<button>2. 🔦 Flash the high-beam strobe into its milky eyes to blind it — [Stepping-Stone: Nerve]</button>
+<button>1. 🪓 Swing the fire axe into the creature's exposed sensory tentacles — [Health | +Fire Axe]</button>
+<button>2. 🔦 Flash the high-beam strobe into its milky eyes to blind it — [Nerve]</button>
 <button>3. 🤫 Hold your breath behind the overturned gurney until the tentacles retract</button>
 <button>4. 🤝 Grab the wounded orderly and haul them into the security office</button>
-<button>5. 🏃 Sprint for the emergency stairwell and throw the iron deadbolt — [Bypass/Retreat: Health]</button>
+<button>5. 🏃 Sprint for the emergency stairwell and throw the iron deadbolt — [Health]</button>
 </choices>
 Do NOT include any narrative explanation, commentary, or extra text outside the <choices>...</choices> block.`;
     } else if (isPbta) {

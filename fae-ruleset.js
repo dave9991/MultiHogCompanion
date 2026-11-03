@@ -124,11 +124,11 @@ Leverage Barriers (2 Layers): [1. Ciphered Ritual Ledger] [2. Locked Iron Safe]
 Full-Finish Triggers: Grab the ledger and run (1 Turn), OR crack both layers to uncover the ritual's true weakness
 Status: Unsearched`,
         cyoaExamples: [
-            '1. 📜 Decipher the rituals in the ledger on the oak desk — [Stepping-Stone: Sanity]',
-            '2. 🔦 Search the walls for hidden compartments or the safe — [Stepping-Stone: Sanity]',
+            '1. 📜 Decipher the rituals in the ledger on the oak desk — [Sanity | +Occult Scholar]',
+            '2. 🔦 Search the walls for hidden compartments or the safe — [Sanity]',
             '3. 🚪 Wedge a chair under the door handle to buy time against the cultists',
             '4. 💬 "We only have minutes. Help me find the seal before they break through!"',
-            '5. 🏃 Grab the ledger and flee through the bay window before your mind breaks — [Narrow Escape]',
+            '5. 🏃 Grab the ledger and flee through the bay window before your mind breaks — [Sanity]',
         ],
     },
     osr_dungeon: {
@@ -203,11 +203,11 @@ Leverage Barriers (2 Layers): [1. High Ground Crossbows] [2. Boss's Heavy Shield
 Full-Finish Triggers: Slip past into the cave (1 Turn), OR break a Barrier first to rout the group
 Status: Entrenched`,
         cyoaExamples: [
-            '1. ⚔️ Raise your shield and charge the warhammer boss — [Stepping-Stone: Health]',
-            '2. 🏹 Return fire at the crossbow snipers pinned on the high ledge — [Stepping-Stone: Resolve]',
+            '1. ⚔️ Raise your shield and charge the warhammer boss — [Health | +Heavy Shield]',
+            '2. 🏹 Return fire at the crossbow snipers pinned on the high ledge — [Resolve]',
             '3. 🪨 Duck behind a stone outcrop to catch your breath and assess positions',
             '4. 🗣️ "Throw down your weapons! The cavern behind you is collapsing!"',
-            '5. 🏃 Dive through the volley toward the dark cave entrance — [Narrow Escape]',
+            '5. 🏃 Dive through the volley toward the dark cave entrance — [Health]',
         ],
     },
     survival_horror: {
@@ -282,11 +282,11 @@ Leverage Barriers (2 Layers): [1. Armored Chitin Husk] [2. Blind Flailing Claws]
 Full-Finish Triggers: Jam the fire door shut to trap it (1 Turn), OR sever the sensory tentacles to dispatch it
 Status: Stalking`,
         cyoaExamples: [
-            '1. 🪓 Swing the fire axe into the creature\'s exposed sensory tentacles — [Stepping-Stone: Health]',
-            '2. 🔦 Flash the high-beam strobe into its milky eyes to blind it — [Stepping-Stone: Nerve]',
+            '1. 🪓 Swing the fire axe into the creature\'s exposed sensory tentacles — [Health | +Fire Axe]',
+            '2. 🔦 Flash the high-beam strobe into its milky eyes to blind it — [Nerve]',
             '3. 🤫 Hold your breath behind the overturned gurney until the tentacles retract',
             '4. 🤝 Grab the wounded orderly and haul them into the security office',
-            '5. 🏃 Sprint for the emergency stairwell and throw the iron deadbolt — [Narrow Escape]',
+            '5. 🏃 Sprint for the emergency stairwell and throw the iron deadbolt — [Health]',
         ],
     },
     post_apocalyptic: {
@@ -361,11 +361,11 @@ Leverage Barriers (2 Layers): [1. Sandbag Bunker Gunner] [2. Welded Gate Chain]
 Full-Finish Triggers: Floor the buggy through the drainage ditch (1 Turn), OR suppress the gunner to seize the toll gate
 Status: Alerted`,
         cyoaExamples: [
-            '1. 💥 Fire a slug into the gunner\'s observation slit — [Stepping-Stone: Body]',
-            '2. 🚗 Floor the accelerator toward the barricade gap — [Stepping-Stone: Grit]',
+            '1. 💥 Fire a slug into the gunner\'s observation slit — [Body | +Scrap Rifle]',
+            '2. 🚗 Floor the accelerator toward the barricade gap — [Grit]',
             '3. 🔧 Splice the bypass cable under the dashboard to boost nitrous oxide',
             '4. 🗣️ "We have antibiotics and copper wire! Let\'s barter safe passage!"',
-            '5. 🏃 Reverse into the ravine smoke screen to disengage — [Narrow Escape]',
+            '5. 🏃 Reverse into the ravine smoke screen to disengage — [Grit]',
         ],
     },
     cyberpunk_noir: {
@@ -440,11 +440,11 @@ Leverage Barriers (2 Layers): [1. Heavy Enforcer Body Armor] [2. Biometric Termi
 Full-Finish Triggers: Grab the decrypted data shard and zip-line off the balcony (1 Turn), OR crack the mainframe
 Status: Lockdown`,
         cyoaExamples: [
-            '1. 💻 Burn through the ICE gate with an overclocked virus spike — [Stepping-Stone: Nerve]',
-            '2. 🔫 Empty the silenced pistol into the enforcer\'s optic cluster — [Stepping-Stone: Body]',
+            '1. 💻 Burn through the ICE gate with an overclocked virus spike — [Nerve | +Cyberdeck]',
+            '2. 🔫 Empty the silenced pistol into the enforcer\'s optic cluster — [Body | +Silenced Pistol]',
             '3. 🥷 Cut the room lights and blend into the server rack shadows',
             '4. 🎙️ Tap into the corp security frequency with a spoofed clearance code',
-            '5. 🏃 Shatter the penthouse window and launch the grapple-line — [Narrow Escape]',
+            '5. 🏃 Shatter the penthouse window and launch the grapple-line — [Body]',
         ],
     },
     deep_space: {
@@ -519,11 +519,11 @@ Leverage Barriers (2 Layers): [1. Jammed Pressure Bulkhead] [2. Severed Emergenc
 Full-Finish Triggers: Manual seal of emergency hatch (1 Turn), OR secure tether and splice power
 Status: Decompressing`,
         cyoaExamples: [
-            '1. ⚡ Fire thrusters against the vacuum pull to reach the manual crank — [Stepping-Stone: Body]',
-            '2. 🔧 Splice the severed emergency bulkhead cable with wire-clips — [Stepping-Stone: Oxygen & Power]',
+            '1. ⚡ Fire thrusters against the vacuum pull to reach the manual crank — [Body | +Heavy Loader Rig]',
+            '2. 🔧 Splice the severed emergency bulkhead cable with wire-clips — [Oxygen & Power | +Systems Engineer]',
             '3. 🧲 Magnetize boots to the deck plate and brace against the howling air rush',
             '4. 🎙️ "Atmospheric venting in Hydroponics! Seal the corridor behind me!"',
-            '5. 🏃 Throw yourself through the auxiliary hatch and slam the manual lever — [Narrow Escape]',
+            '5. 🏃 Throw yourself through the auxiliary hatch and slam the manual lever — [Body]',
         ],
     },
     weird_west: {
@@ -598,11 +598,11 @@ Leverage Barriers (2 Layers): [1. Unnatural Mist Veil] [2. Supernatural Armor of
 Full-Finish Triggers: Gallop past the church on horseback (1 Turn), OR pierce the heart with cold iron
 Status: Circling`,
         cyoaExamples: [
-            '1. 🤠 Fan the hammer of the cold iron Colt through the dust — [Stepping-Stone: Grit]',
-            '2. 📖 Recite the holy verses of protection aloud to dispel the voices — [Stepping-Stone: Resolve]',
+            '1. 🤠 Fan the hammer of the cold iron Colt through the dust — [Grit | +Cold Iron Colt]',
+            '2. 📖 Recite the holy verses of protection aloud to dispel the voices — [Resolve]',
             '3. 🐴 Whistle sharp to keep your frightened mare from bolting into the scrub',
             '4. 👁️ Track the beast\'s prints in the dust to predict where it will strike next',
-            '5. 🐎 Spur your horse hard toward the canyon pass before the circle closes — [Narrow Escape]',
+            '5. 🐎 Spur your horse hard toward the canyon pass before the circle closes — [Grit]',
         ],
     },
 };
@@ -1359,7 +1359,6 @@ export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) 
             ? options.config.pools
             : genre.pools;
     const poolSegments = Object.values(activePools).map(p => `(${p.label}: [current]/[max])`).join(' | ');
-    const poolLabels = Object.values(activePools).map(p => p.label).join(', ');
 
     let timeFmt = '[HH:MM AM/PM], Day [X]';
     if (options.use24hTime) {
@@ -1370,12 +1369,10 @@ export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) 
     }
 
     return `<end_of_output_footer>
-ALWAYS end every narrative output with:
-*${poolSegments} | (Scenes: [current]/[target]) | (Location: [Coarse, Sub-location])*
+ALWAYS end every narrative message (including turns after a tool call, right above <choices>) with these exact two italicized lines:
+*${poolSegments} | (Scenes: [current]/[target]) | (Location: [Site Name, Current Area])*
 *${timeFmt}*
-(followed only by any active subfooters explicitly defined elsewhere in your instructions)
-Footer shows ONLY {{user}}'s pool status, scenes completed, location, and time.
-STRICT FOOTER RULE: NEVER output "Level X", "(Status: ... HP)", or "(XP: ...)" in the footer. FAE has no character levels; display ONLY the active Resource Pools (${poolLabels}), (Scenes: [current]/[target]), (Location: ...), and the time line.
+(followed only by any active subfooters such as <choices>)
 </end_of_output_footer>`;
 }
 
@@ -1470,16 +1467,21 @@ export function buildFaeCyoaPrompt(genreKey = 'cosmic_horror', overrides = {}) {
 
     return `[SUBFOOTER: INTERACTIVE CHOICE BUTTONS]
 - You MUST ALWAYS end your response with exactly ${choiceCount} choices for {{user}}.
-- Output sequence: (1) Scene narrative -> (2) Status footer -> (3) <choices> block.
+- Output sequence: (1) Scene narrative -> (2) Two-line italicized status/location footer -> (3) <choices> block.
 - Enclose all choices inside a single <choices> XML block.
 - Wrap every single choice in a <button> tag with a number and fitting emoji.
-- FORMATTING FAE CHOICES:
-  • Primary Action: Include intent scope and targeted pool, e.g. — [Stepping-Stone: Health] or — [Full Resolution: Resolve]
-  • Environmental / Pressure Neutralizer: Action targeting an active Pressure from the Encounter Block to reduce Threat.
-  • Tactical Caution / Defensive Bracing: Zero-roll repositioning or setting up leverage.
-  • Social / Dialogue: Spoken words or negotiation in quotes.
-  • Retreat / Fallback: Narrow escape or disengagement — [Narrow Escape].
-- CRITICAL BRACKET RULE: The word immediately after the colon in [Stepping-Stone: <Pool>] or [Full: <Pool>] MUST be one of the active Resource Pools (${poolLabels}) — NEVER put a Positive Tag, Boon, or skill name in the <Pool> slot! If a Positive Tag or Boon applies, append it after a pipe: e.g. — [Stepping-Stone: ${primaryPoolLabel} | Tag: Trap-Wise].
+- FORMATTING FAE CHOICES (STYLE B):
+  • Primary / Risky Action: Append the targeted Resource Pool in brackets: — [Pool] or — [Pool | +Tag, +Advantage].
+  • Environmental / Pressure Neutralizer: Action targeting an active Pressure from the Encounter Block to reduce Threat — [Pool] or — [Pool | +Tag].
+  • Tactical Caution / Defensive Bracing: Zero-roll repositioning or setting up leverage (omit brackets).
+  • Social / Dialogue: Spoken words or negotiation in quotes (omit brackets).
+  • Retreat / Fallback: Disengagement or tactical withdrawal — [Pool] (or [Pool | +Tag]).
+- CRITICAL BRACKET RULE:
+  • The first item inside brackets [Pool | ...] MUST always be one of the active Resource Pools (${poolLabels}) — NEVER put a Tag, Boon, or skill name in the Pool slot!
+  • If one or more Positive Tags (trait, gear, or companion) or an active Advantage apply: write — [Pool | +Tag1, +Tag2] (e.g. — [${primaryPoolLabel} | +Trap-Wise] or — [${primaryPoolLabel} | +Trap-Wise, +Advantage]). For companion tags like Companion: Brother Marcus (Cleric), write +Companion: Brother Marcus or +Brother Marcus.
+  • If no Positive Tag applies: write — [Pool] (e.g. — [${primaryPoolLabel}]).
+  • For pure dialogue or zero-roll free actions: omit the bracket entirely.
+  • NO mechanical scope jargon: NEVER output "Stepping-Stone:", "Full Resolution:", "Tactical Caution:", or "Narrow Escape" inside the button brackets. (The GM evaluates intent scope internally when resolving the turn).
 - ZERO-STATE ADAPTATION: If {{user}} is at 0 in their primary pool, choices MUST reflect desperation, crisis defense, or frantic flight.
 
 EXAMPLES:
@@ -1798,6 +1800,8 @@ ${active.defaultPositiveTags.map(t => `  • ${t}`).join('\n')}
    - Primary Pool syncs in tandem with Line 1 HP (\`cur/max HP\`).
    - Secondary pools are tracked via \`((BAR<COLOR>))\` progress bars (e.g. \`((BARBLUE))\`, \`((BARGOLD))\`, \`((BARPURPLE))\`).
    - Milestone advancement occurs every 3–5 completed scenes (\`Scenes: X/Y\` and \`XP: X/Y\`).
+4. **Interactive Choice Buttons (Style B):**
+   - Format player choices using Style B: \`— [Pool | +Tag, +Advantage]\` or \`— [Pool]\`. Dialogue and zero-roll actions omit brackets. Never display mechanical scope jargon inside button text.
 
 ---
 

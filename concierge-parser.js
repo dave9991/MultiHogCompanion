@@ -6,7 +6,7 @@
  */
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
-import { FAE_GENRES, sanitizeFaePositiveTags, isGodTag } from './fae-ruleset.js';
+import { FAE_GENRES, sanitizeFaePositiveTags } from './fae-ruleset.js';
 import { stripThinkingContent } from './concierge-connection.js';
 
 /**
@@ -1391,7 +1391,7 @@ export function applyDossierUpdates(text, dossier) {
             posTagsList = splitTopLevelItems(rawVal, { splitCommas: true });
         }
         if (posTagsList.length > 0) {
-            const cleanPos = sanitizeFaePositiveTags(posTagsList, 4);
+            const cleanPos = sanitizeFaePositiveTags(posTagsList, 5);
             updated.protagonist.positiveTags = cleanPos;
             if (!updated.protagonist.startingMoves || updated.protagonist.startingMoves.length === 0) {
                 updated.protagonist.startingMoves = [...cleanPos];

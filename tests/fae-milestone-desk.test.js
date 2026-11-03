@@ -9,8 +9,9 @@ import {
     resolveFaeGenreKey,
     extractConciergeDirectives,
     FAE_MILESTONE_CATALOG,
+    buildFaeMilestonePrompt,
 } from '../level-up-runner.js';
-import { FAE_GENRES, isGodTag } from '../fae-ruleset.js';
+import { FAE_GENRES } from '../fae-ruleset.js';
 import { openLevelUpModal, closeLevelUpModal } from '../level-up-ui.js';
 
 const sampleFaeMemo = `[CHARACTER]
@@ -220,23 +221,29 @@ test('FAE Milestone Desk: applyFaeMilestoneSelection & applyLevelUpCommit for al
     assert.ok(!res1.updatedMemo.includes('Splintered Ribs'), 'Healed scar must not appear in memo');
 
     // ─────────────────────────────────────────────────────────────
-    // Reward 2: new_capability (with God Tag rejection verification)
+    // Reward 2: new_capability (Trait Qualification Protocol & Bracketed Qualifiers)
     // ─────────────────────────────────────────────────────────────
     const prop2 = formulateLevelUpProposal(dossier, null, null, {
         isRespec: false,
         currentMemo: sampleFaeMemo,
     });
 
-    // 2a. Reject blacklisted God Tag (e.g. "Lucky")
-    assert.strictEqual(isGodTag('Lucky'), true);
+    // 2a. Reject empty tag selection
     applyFaeMilestoneSelection(prop2, {
         type: 'new_capability',
-        tag: 'Lucky (Always favored by fate)',
+        tag: '   ',
     });
     assert.strictEqual(prop2.faeMilestone.rejected, true);
-    assert.strictEqual(prop2.positiveTags.some(t => /Lucky/i.test(t)), false, 'God tag must NOT be added');
 
-    // 2b. Accept valid specific capability tag
+    // 2b. Accept bracket-qualified trait (Tier A: Trait [context])
+    applyFaeMilestoneSelection(prop2, {
+        type: 'new_capability',
+        tag: 'Strong [for lifting or carrying]',
+    });
+    assert.strictEqual(prop2.faeMilestone.applied, true);
+    assert.ok(prop2.positiveTags.some(t => t.includes('Strong [for lifting or carrying]')));
+
+    // 2c. Accept valid specific capability tag
     applyFaeMilestoneSelection(prop2, {
         type: 'new_capability',
         tag: 'Occult Cryptography (Decipher ancient cosmic ciphers and sigils)',
@@ -253,7 +260,7 @@ test('FAE Milestone Desk: applyFaeMilestoneSelection & applyLevelUpCommit for al
     });
     assert.strictEqual(res2.success, true);
     assert.ok(res2.updatedMemo.includes('Occult Cryptography'), 'New positive tag must appear in memo');
-    assert.ok(!res2.updatedMemo.includes('Lucky'), 'God tag must never appear in memo');
+    assert.ok(res2.updatedMemo.includes('Strong [for lifting or carrying]'), 'Bracketed tag must appear in memo');
     assert.ok(res2.updatedMemo.includes('Scenes: 0/4 | XP: 0/4'), 'Scenes completed must reset to 0/4');
 
     // ─────────────────────────────────────────────────────────────
@@ -448,4 +455,21 @@ test('FAE Milestone Desk: openLevelUpModal isolates FAE interface with Stage 2 a
     } finally {
         globalThis.document = prevDoc;
     }
+});
+
+test('FAE Milestone Desk: buildFaeMilestonePrompt enforces Trait Qualification Protocol', () => {
+    const dossier = {
+        meta: { systemKey: 'cosmic_horror', ruleset: 'fae' },
+        protagonist: { name: 'Eileen Vance' },
+    };
+    const prop = formulateLevelUpProposal(dossier, null, null, {
+        isRespec: false,
+        currentMemo: sampleFaeMemo,
+    });
+    const prompt = buildFaeMilestonePrompt(prop, dossier);
+    assert.ok(prompt.includes('TRAIT QUALIFICATION PROTOCOL'));
+    assert.ok(prompt.includes('Tier A (Auto-Qualify Broad Traits)'));
+    assert.ok(prompt.includes('Strong [for lifting, hauling, or breaching doors]'));
+    assert.ok(prompt.includes('Tier B (Remove True Omnipotence)'));
+    assert.ok(prompt.includes('~25–30% situational scope'));
 });

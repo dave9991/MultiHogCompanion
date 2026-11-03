@@ -10,12 +10,12 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection, applyFaeMilestoneSelection, resolveFaeGenreKey, extractConciergeDirectives, splitTopLevelDirectives } from './level-up-runner.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection, applyFaeMilestoneSelection, resolveFaeGenreKey, extractConciergeDirectives, splitTopLevelDirectives, buildFaeMilestonePrompt } from './level-up-runner.js';
 import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, parseBlueprintFromResponse, normalizeBlueprint, normalizeLevelEntry, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
-import { FAE_GENRES, isGodTag, sanitizeFaePositiveTags } from './fae-ruleset.js';
+import { FAE_GENRES, sanitizeFaePositiveTags } from './fae-ruleset.js';
 import { normalizeFaePill } from './fae-state-sync.js';
 
 let _activeModalElement = null;
@@ -419,7 +419,7 @@ export function openLevelUpModal({
     let stage2QuickChipsHtml = '';
     if (isFae) {
         stage2QuickChipsHtml = `
-        <button class="mhc-chip" data-prompt="Suggest a new genre-appropriate Positive Tag for my character (no God Tags)">⚡ Suggest Positive Tag</button>
+        <button class="mhc-chip" data-prompt="Suggest a new genre-appropriate Positive Tag for my character (following Trait Qualification Protocol, ~25–30% scope or Trait [context])">⚡ Suggest Positive Tag</button>
         <button class="mhc-chip" data-prompt="Help me heal or replace one of my active Scars or Debuffs">🩹 Heal a Scar</button>
         <button class="mhc-chip" data-prompt="Recommend which pool capacity to increase based on recent scenes">🛡️ Hardened Reserve Advice</button>
         <button class="mhc-chip" data-prompt="Review my FAE Knobs (Flee Grace, Shift, Overflow) for the upcoming scenario">⚙️ Review Knobs &amp; Pools</button>
@@ -534,8 +534,8 @@ export function openLevelUpModal({
                             ${suggestedTagsHtml}
                             <option value="custom">Custom Tag (write below)</option>
                         </select>
-                        <input type="text" id="mhc_fae_custom_tag_input" class="text_pole" value="${escapeHtml(initialTag)}" placeholder="Tag Name (Specific scope and discipline...)" />
-                        <span style="font-size:0.8em; color:#f59e0b;"><i class="fa-solid fa-triangle-exclamation"></i> Broad God Tags (e.g. Lucky, Smart, Fast, Invincible) are strictly blacklisted.</span>
+                        <input type="text" id="mhc_fae_custom_tag_input" class="text_pole" value="${escapeHtml(initialTag)}" placeholder="e.g., Shield-Bearer, Strong [for breaching doors], Companion: Mira (Scout)" />
+                        <span style="font-size:0.8em; color:#a3e635;"><i class="fa-solid fa-circle-info"></i> Scope: ~25–30% applicability. Use bracketed qualifiers like <code>Trait [context]</code> for broad abilities.</span>
                     </div>
                 </div>
 
@@ -624,11 +624,8 @@ export function openLevelUpModal({
                 <!-- Populated by renderFaePosTags -->
             </ul>
             <div class="mhc-manual-add-row" style="margin-top: 8px; display: flex; gap: 6px;">
-                <input type="text" id="mhc_fae_manual_pos_tag_input" class="text_pole" placeholder="Add Positive Tag (e.g. Service Revolver, Lockpicking)..." style="flex: 1;" />
+                <input type="text" id="mhc_fae_manual_pos_tag_input" class="text_pole" placeholder="Add Positive Tag (e.g. Shield-Bearer, Strong [for breaching doors], Service Revolver)..." style="flex: 1;" />
                 <button class="menu_button" id="mhc_fae_manual_pos_tag_btn"><i class="fa-solid fa-plus"></i> Add Tag</button>
-            </div>
-            <div id="mhc_fae_god_tag_warning" style="display: none; color: #ef4444; font-size: 0.82em; margin-top: 4px;">
-                <i class="fa-solid fa-circle-exclamation"></i> <strong>God Tag Detected:</strong> Broad tags (e.g. Lucky, Smart, Strong, Fast, Invincible) are blacklisted in FAE.
             </div>
         </div>
 
@@ -1637,23 +1634,7 @@ GUIDELINES (D&D LITE PHILOSOPHY & MULTIHOG PILL RENDERING):
         if (conciergeSendBtn) conciergeSendBtn.disabled = true;
         if (conciergeTyping) conciergeTyping.style.display = 'flex';
 
-        const systemPrompt = isFae ? `You are the FAE Attrition Guide and Freeform Attrition Engine systems architect for "${proposal.characterName}", in the "${proposal.genreKey || 'cosmic_horror'}" genre.
-Active Pools: ${Object.entries(proposal.pools || {}).map(([k, p]) => `${p.label}: ${p.current}/${p.max}`).join(', ')}
-FAE Knobs: Flee Grace: ${proposal.knobs?.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${proposal.knobs?.base_attrition_shift >= 0 ? '+' : ''}${proposal.knobs?.base_attrition_shift} | Overflow: ${proposal.knobs?.overflow_default}
-Positive Tags: ${(proposal.positiveTags || []).join(', ') || 'None'}
-Scars & Debuffs: ${(proposal.negativeTags || []).join(', ') || 'None'}
-
-STRICT FAE ARCHITECTURAL RULES:
-1. PURE FAE RULES ONLY: No D&D levels (1-20), Hit Dice, spell slots, AC, or DC rolls. No PbtA 2d6 move rolls. FAE uses 4dF attrition and tag-driven resource pools.
-2. NO GOD TAGS: Universal blacklist: Lucky, Smart, Competent, Fast, Heroic, Strong, Good at everything, Invincible, Master, Omni. Positive tags must represent specific capabilities, background, or signature gear.
-3. DIRECTIVES FOR LIVE UPDATES:
-   - To add a Positive Tag: [ADD_TAG: Tag Name (specific narrative scope and capability)]
-   - To remove a Positive Tag: [REMOVE_TAG: Tag Name]
-   - To add a Scar/Debuff: [ADD_SCAR: (-) Scar Name (debilitating hindrance)]
-   - To remove/heal a Scar/Debuff: [REMOVE_SCAR: Scar Name]
-   - To update a Pool current or max: [SET_POOL: PoolKey | current/max] (e.g. [SET_POOL: sanity | 8/8])
-   - To update a Knob: [SET_KNOB: knob_name | value] (e.g. [SET_KNOB: flee_grace | ON], [SET_KNOB: shift | +0], [SET_KNOB: overflow | scar_and_ko])
-4. Keep your response atmospheric, sharp, and under 130 words.`
+        const systemPrompt = isFae ? buildFaeMilestonePrompt(proposal, dossier)
         : (isPbta ? `You are the Playbook Guide and PbtA narrative systems architect for "${proposal.characterName}", playing the "${proposal.playbookName || proposal.className}" playbook.
 Character Stats: ${JSON.stringify(proposal.stats || dossier?.protagonist?.stats || {})}
 Harm Capacity: ${proposal.harm?.max || 4} | Current Harm: ${proposal.harm?.current || 0} | Armor: ${proposal.harm?.armor ?? 1}
@@ -1725,7 +1706,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             for (const dir of directives) {
                 if (dir.tag === 'ADD_TAG' && isFae) {
                     const rawTag = dir.payload.trim();
-                    if (rawTag && !isGodTag(rawTag)) {
+                    if (rawTag) {
                         const norm = normalizeFaePill(rawTag, 'Positive Tag');
                         proposal.positiveTags = proposal.positiveTags || [];
                         const key = extractFeatureKey(norm);
@@ -1738,8 +1719,6 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                         proposal.newFeatures = [...proposal.positiveTags];
                         renderFaePosTags();
                         if (typeof toastr !== 'undefined') toastr.info(norm, 'Added Positive Tag');
-                    } else if (isGodTag(rawTag)) {
-                        if (typeof toastr !== 'undefined') toastr.warning(`Rejected God Tag: "${rawTag}". FAE tags must be specific.`, 'Tag Blacklisted');
                     }
                 } else if (dir.tag === 'REMOVE_TAG' && isFae) {
                     const target = dir.payload.trim();
@@ -2168,26 +2147,10 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
     if (isFae) {
         const posTagInput = modal.querySelector('#mhc_fae_manual_pos_tag_input');
         const posTagAddBtn = modal.querySelector('#mhc_fae_manual_pos_tag_btn');
-        const godTagWarning = modal.querySelector('#mhc_fae_god_tag_warning');
-
-        posTagInput?.addEventListener('input', () => {
-            const val = posTagInput.value.trim();
-            if (val && isGodTag(val)) {
-                if (godTagWarning) godTagWarning.style.display = 'block';
-            } else {
-                if (godTagWarning) godTagWarning.style.display = 'none';
-            }
-        });
 
         const handleAddPosTag = () => {
             const val = posTagInput?.value?.trim();
             if (!val) return;
-            if (isGodTag(val)) {
-                if (godTagWarning) godTagWarning.style.display = 'block';
-                if (typeof toastr !== 'undefined') toastr.warning(`Rejected God Tag: "${val}". FAE tags must be specific.`, 'Tag Blacklisted');
-                return;
-            }
-            if (godTagWarning) godTagWarning.style.display = 'none';
             const norm = normalizeFaePill(val, 'Capability');
             proposal.positiveTags = proposal.positiveTags || [];
             const key = extractFeatureKey(norm);

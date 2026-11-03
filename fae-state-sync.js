@@ -409,7 +409,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         character: {
             name,
             archetype,
-            positive_tags: sanitizeFaePositiveTags(positiveTags, 4),
+            positive_tags: sanitizeFaePositiveTags(positiveTags, 5),
             negative_tags: negativeTags,
             temp_advantage: tempAdvantage,
             scenes_completed: scenesCur,

@@ -10,7 +10,7 @@
 import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
-import { FAE_GENRES, sanitizeFaePositiveTags, isGodTag, createInitialFaeState } from './fae-ruleset.js';
+import { FAE_GENRES, sanitizeFaePositiveTags, createInitialFaeState } from './fae-ruleset.js';
 import { parseFaeStateFromMemo, formatFaeCharacterMemoBlock, normalizeFaePill } from './fae-state-sync.js';
 
 /**
@@ -691,7 +691,7 @@ export function applyFaeMilestoneSelection(proposal, milestoneSelection) {
         milestoneSelection.applied = true;
     } else if (type === 'new_capability') {
         const rawTag = (milestoneSelection.tag || '').trim();
-        if (rawTag && !isGodTag(rawTag)) {
+        if (rawTag) {
             const norm = normalizeFaePill(rawTag, 'Capability');
             proposal.positiveTags = Array.isArray(proposal.positiveTags) ? proposal.positiveTags : [];
             const key = extractFeatureKey(norm);
@@ -727,6 +727,46 @@ export function applyFaeMilestoneSelection(proposal, milestoneSelection) {
 
     proposal.faeMilestone = milestoneSelection;
     return proposal;
+}
+
+/**
+ * Builds the system prompt for the FAE Milestone Concierge.
+ * Enforces the Trait Qualification Protocol (Section 2.3.1).
+ *
+ * @param {object} proposal Current advancement proposal.
+ * @param {object} [dossier=null] Optional campaign dossier.
+ * @returns {string}
+ */
+export function buildFaeMilestonePrompt(proposal, dossier = null) {
+    const charName = proposal?.characterName || dossier?.protagonist?.name || 'Character';
+    const genreKey = proposal?.genreKey || resolveFaeGenreKey(dossier);
+    const poolsSummary = Object.entries(proposal?.pools || {})
+        .map(([k, p]) => `${p.label || k}: ${p.current}/${p.max}`)
+        .join(', ');
+    const knobsSummary = `Flee Grace: ${proposal?.knobs?.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${proposal?.knobs?.base_attrition_shift >= 0 ? '+' : ''}${proposal?.knobs?.base_attrition_shift ?? 0} | Overflow: ${proposal?.knobs?.overflow_default || 'scar_and_ko'}`;
+    const posTagsSummary = (proposal?.positiveTags || []).join(', ') || 'None';
+    const negTagsSummary = (proposal?.negativeTags || []).join(', ') || 'None';
+
+    return `You are the FAE Attrition Guide and Freeform Attrition Engine systems architect for "${charName}", in the "${genreKey}" genre.
+Active Pools: ${poolsSummary}
+FAE Knobs: ${knobsSummary}
+Positive Tags: ${posTagsSummary}
+Scars & Debuffs: ${negTagsSummary}
+
+STRICT FAE ARCHITECTURAL RULES:
+1. PURE FAE RULES ONLY: No D&D levels (1-20), Hit Dice, spell slots, AC, or DC rolls. No PbtA 2d6 move rolls. FAE uses 4dF attrition and tag-driven resource pools.
+2. TRAIT QUALIFICATION PROTOCOL (Cooperative Qualification):
+   - Tags must have ~25–30% situational scope (e.g. Shield-Bearer, Trap-Wise, Quiet, Service Revolver).
+   - Tier A (Auto-Qualify Broad Traits): Whenever a proposed tag uses a broad adjective (Strong, Smart, Fast, Lucky, Tough), do NOT reject it; qualify it with brackets to fit the character's archetype (e.g. "Strong [for lifting, hauling, or breaching doors]", "Smart [for ancient ciphers and forensic clues]", "Fast [for dodging traps and ambushes]", "Lucky [for narrowly surviving cave-ins and falls]").
+   - Tier B (Remove True Omnipotence): If true omnipotence is suggested (Invincible, Immortal, Never Misses), replace it with a grounded Trait [context] alternative and explain why.
+3. DIRECTIVES FOR LIVE UPDATES:
+   - To add a Positive Tag: [ADD_TAG: Tag Name [situational context qualifier]] (or [ADD_TAG: Tag Name (specific detail)])
+   - To remove a Positive Tag: [REMOVE_TAG: Tag Name]
+   - To add a Scar/Debuff: [ADD_SCAR: (-) Scar Name (debilitating hindrance)]
+   - To remove/heal a Scar/Debuff: [REMOVE_SCAR: Scar Name]
+   - To update a Pool current or max: [SET_POOL: PoolKey | current/max] (e.g. [SET_POOL: sanity | 8/8])
+   - To update a Knob: [SET_KNOB: knob_name | value] (e.g. [SET_KNOB: flee_grace | ON], [SET_KNOB: shift | +0], [SET_KNOB: overflow | scar_and_ko])
+4. Keep your response atmospheric, sharp, and under 130 words.`;
 }
 
 /**

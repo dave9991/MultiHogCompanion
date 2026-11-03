@@ -4,6 +4,7 @@ import {
     FAE_CARTRIDGE_ID,
     FAE_GOD_TAGS_BLACKLIST,
     FAE_GENRES,
+    FAE_GENRE_SKELETONS,
     rollFudgeDie,
     roll4dF,
     isGodTag,
@@ -18,6 +19,10 @@ import {
     buildTailoredFaeDocumentation,
     toMultihogBarMarker,
     buildFaePartyContent,
+    buildFaeConstraintsContent,
+    buildFaeStockPrompts,
+    buildFaeQuickStartInstructions,
+    buildFaeRngContent,
 } from '../fae-ruleset.js';
 import {
     formatFaeCharacterMemoBlock,
@@ -52,22 +57,19 @@ describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => 
         }
     });
 
-    test('isGodTag correctly identifies forbidden universal adjectives', () => {
-        for (const bad of FAE_GOD_TAGS_BLACKLIST) {
-            assert.strictEqual(isGodTag(bad), true, `Expected ${bad} to be recognized as God Tag`);
-            assert.strictEqual(isGodTag(`${bad.toUpperCase()} (Some description)`), true);
-        }
-        assert.strictEqual(isGodTag('Lucky (Always wins)'), true);
-        assert.strictEqual(isGodTag('Smart (Genius)'), true);
-        assert.strictEqual(isGodTag('Good at everything'), true);
+    test('isGodTag is deprecated and returns false for programmatic non-rejection', () => {
+        assert.ok(Array.isArray(FAE_GOD_TAGS_BLACKLIST), 'FAE_GOD_TAGS_BLACKLIST export preserved for backwards compatibility');
+        assert.strictEqual(isGodTag('Lucky'), false);
+        assert.strictEqual(isGodTag('Smart'), false);
+        assert.strictEqual(isGodTag('Strong'), false);
+        assert.strictEqual(isGodTag('Invincible'), false);
+    });
 
-        // Legitimate tags must pass cleanly
-        assert.strictEqual(isGodTag('Ex-Military (Combat training)'), false);
-        assert.strictEqual(isGodTag('Calm (Steady nerves)'), false);
-        assert.strictEqual(isGodTag('Service Revolver (Sidearm)'), false);
-        assert.strictEqual(isGodTag('Heavy Shield (Parrying oak)'), false);
-        assert.strictEqual(isGodTag('Trap-Wise (Keen perception)'), false);
-        assert.strictEqual(isGodTag('Companion: Brother Marcus (Cleric — blesses blades and wards off undead)'), false);
+    test('FAE_GENRES.cosmic_horror.defaultPositiveTags matches Section 4.1 Trait Qualification', () => {
+        const expected = ['Ex-Military', 'Calm [under gunfire and shock]', 'Quiet', 'Service Revolver'];
+        assert.deepStrictEqual(FAE_GENRES.cosmic_horror.defaultPositiveTags, expected);
+        assert.deepStrictEqual(FAE_GENRE_SKELETONS.COSMIC_HORROR.defaultPositiveTags, expected);
+        assert.deepStrictEqual(FAE_GENRE_SKELETONS.cosmic_horror.defaultPositiveTags, expected);
     });
 
     test('FAE_GENRES.osr_dungeon.defaultPositiveTags includes Brother Marcus companion tag', () => {
@@ -77,26 +79,54 @@ describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => 
         );
     });
 
-    test('sanitizeFaePositiveTags strips God Tags and caps at 4', () => {
+    test('sanitizeFaePositiveTags preserves compound and qualified tags without word-list stripping', () => {
         const raw = [
-            'Lucky',
-            'Ex-Military (Combat training)',
-            'Smart (High IQ)',
-            'Calm (Nerves)',
-            'Fast',
-            'Quiet (Stealth)',
+            '- Strong [for lifting or carrying]',
+            '* Fast Draw',
+            '• Lucky Coin (1 Use)',
+            '+ Calm [under gunfire and shock]',
             'Service Revolver',
-            'Invincible (God)',
-            'Extra Tag',
+            'duplicate tag',
+            'DUPLICATE TAG',
+            'Extra Excluded Tag (exceeds maxTags)',
         ];
-        const sanitized = sanitizeFaePositiveTags(raw, 4);
-        assert.strictEqual(sanitized.length, 4);
+        const sanitized = sanitizeFaePositiveTags(raw, 5);
+        assert.strictEqual(sanitized.length, 5);
         assert.deepStrictEqual(sanitized, [
-            'Ex-Military (Combat training)',
-            'Calm (Nerves)',
-            'Quiet (Stealth)',
+            'Strong [for lifting or carrying]',
+            'Fast Draw',
+            'Lucky Coin (1 Use)',
+            'Calm [under gunfire and shock]',
             'Service Revolver',
         ]);
+
+        // String splitting preserves commas inside brackets and parentheses
+        const strTags = 'Ex-Military, Strong [for lifting, hauling, or breaching doors], Quiet (Light footwork)';
+        const fromStr = sanitizeFaePositiveTags(strTags, 5);
+        assert.strictEqual(fromStr.length, 3);
+        assert.strictEqual(fromStr[1], 'Strong [for lifting, hauling, or breaching doors]');
+    });
+
+    test('FAE Prompts include Trait Qualification Protocol instructions and bracketed examples', () => {
+        const constraints = buildFaeConstraintsContent();
+        assert.ok(constraints.includes('The Trait Qualification Protocol (Cooperative Qualification)'));
+        assert.ok(constraints.includes('Tier A — Auto-Qualify Broad Traits'));
+        assert.ok(constraints.includes('Tier B — Remove Only True Omnipotence'));
+        assert.ok(constraints.includes('Strong [for lifting, hauling, or breaching doors]'));
+
+        const stock = buildFaeStockPrompts('cosmic_horror');
+        assert.ok(stock.character.includes('Trait [context qualifier]'));
+        assert.ok(stock.character.includes('Strong [for lifting, hauling, or breaching doors]'));
+        assert.ok(stock.character.includes('Tier A Trait Qualification Protocol'));
+
+        const quickStart = buildFaeQuickStartInstructions('cosmic_horror');
+        assert.ok(quickStart.includes('Trait Qualification Protocol'));
+        assert.ok(quickStart.includes('Strong [for lifting, hauling, or breaching doors]'));
+        assert.ok(quickStart.includes('Calm [under gunfire and shock]'));
+
+        const rng = buildFaeRngContent();
+        assert.ok(rng.includes('Strong [for lifting, hauling, or breaching doors]'));
+        assert.ok(rng.includes('Calm [under gunfire and shock]'));
     });
 });
 

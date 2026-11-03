@@ -11,7 +11,8 @@ export const CARTRIDGE_FORMAT = 'multihog-game-cartridge';
 export const CARTRIDGE_VERSION = 1;
 
 /**
- * Universal blacklist of "God Tags" that apply too broadly to almost any roll.
+ * @deprecated Deprecated in favor of the LLM Trait Qualification Protocol (Section 2.3.1).
+ * Universal blacklist of "God Tags" retained only for backwards compatibility.
  */
 export const FAE_GOD_TAGS_BLACKLIST = [
     'lucky',
@@ -104,10 +105,10 @@ export const FAE_GENRES = {
             },
         },
         defaultPositiveTags: [
-            'Ex-Military (Combat training and battlefield discipline)',
-            'Calm (Steady nerves under unnatural pressure)',
-            'Quiet (Moving silently through shadows)',
-            'Service Revolver (Reliable sidearm with heavy stopping power)',
+            'Ex-Military',
+            'Calm [under gunfire and shock]',
+            'Quiet',
+            'Service Revolver',
         ],
         archetypes: [
             'The Antiquarian',
@@ -607,6 +608,18 @@ Status: Circling`,
 };
 
 /**
+ * Backwards-compatible alias for FAE_GENRES supporting both camelCase and UPPERCASE access.
+ */
+export const FAE_GENRE_SKELETONS = new Proxy(FAE_GENRES, {
+    get(target, prop) {
+        if (typeof prop === 'string') {
+            return target[prop] || target[prop.toLowerCase()];
+        }
+        return target[prop];
+    },
+});
+
+/**
  * Rolls a single Fudge die (-1, 0, or +1) using cryptographic rejection sampling
  * with Math.random fallback.
  *
@@ -642,49 +655,74 @@ export function roll4dF() {
 }
 
 /**
- * Checks if a proposed tag name (before any parenthetical description) matches
- * the forbidden God Tags blacklist.
+ * @deprecated Deprecated in favor of the LLM Trait Qualification Protocol (Section 2.3.1).
+ * Broad traits are governed semantically by the LLM (Cooperative Qualification:
+ * Tier A auto-qualify into Trait [context]; Tier B omit true omnipotence with grounded alternative).
+ * Always returns false so programmatic hard-rejection is eliminated.
  *
- * @param {string} tagText
+ * @param {string} [_tagText]
  * @returns {boolean}
  */
-export function isGodTag(tagText) {
-    if (!tagText || typeof tagText !== 'string') return false;
-    const base = tagText
-        .split('(')[0]
-        .replace(/^[-*•+–—]\s*/, '')
-        .trim()
-        .toLowerCase();
-    if (!base) return false;
-
-    return FAE_GOD_TAGS_BLACKLIST.some(bad => {
-        if (base === bad || base === `the ${bad}`) return true;
-        const words = base.split(/\s+/);
-        return words.includes(bad);
-    });
+export function isGodTag(_tagText) {
+    return false;
 }
 
 /**
- * Strips God Tags and limits an array of tags to a maximum count (default 4).
+ * Splits a tags string by top-level delimiters (newlines, semicolons, commas)
+ * while preserving commas inside parentheses and brackets.
  *
- * @param {string[]|string} tags
- * @param {number} [maxTags=4]
+ * @param {string} str
  * @returns {string[]}
  */
-export function sanitizeFaePositiveTags(tags, maxTags = 4) {
+export function splitTopLevelTagItems(str) {
+    if (!str || typeof str !== 'string') return [];
+    const res = [];
+    let cur = '';
+    let depth = 0;
+    for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        if (c === '(' || c === '[') depth++;
+        else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+
+        const isSep = depth === 0 && (c === '\n' || c === ';' || c === ',');
+        if (isSep) {
+            if (cur.trim()) res.push(cur.trim());
+            cur = '';
+        } else {
+            cur += c;
+        }
+    }
+    if (cur.trim()) res.push(cur.trim());
+    return res;
+}
+
+/**
+ * Cleans formatting, strips bullets, deduplicates case-insensitively, and limits
+ * an array of tags to a maximum count (default 5).
+ * Broad trait scoping and omnipotence governance are delegated to the LLM via
+ * the Trait Qualification Protocol (Section 2.3.1) without brittle programmatic filtering.
+ *
+ * @param {string[]|string} tags
+ * @param {number} [maxTags=5]
+ * @returns {string[]}
+ */
+export function sanitizeFaePositiveTags(tags, maxTags = 5) {
     if (!tags) return [];
     const list = Array.isArray(tags)
         ? tags
         : typeof tags === 'string'
-            ? tags.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean)
+            ? splitTopLevelTagItems(tags)
             : [];
 
     const sanitized = [];
+    const seen = new Set();
     for (const item of list) {
         if (typeof item !== 'string') continue;
         const clean = item.trim().replace(/^[-*•+–—]\s*/, '').trim();
         if (!clean) continue;
-        if (isGodTag(clean)) continue;
+        const lower = clean.toLowerCase();
+        if (seen.has(lower)) continue;
+        seen.add(lower);
         sanitized.push(clean);
         if (sanitized.length >= maxTags) break;
     }
@@ -742,7 +780,7 @@ export function createInitialFaeState(genreKey = 'cosmic_horror', overrides = {}
         character: {
             name: charOverrides.name || 'Protagonist',
             archetype: charOverrides.archetype || genre.archetypes[0],
-            positive_tags: sanitizeFaePositiveTags(posTags, 4),
+            positive_tags: sanitizeFaePositiveTags(posTags, 5),
             negative_tags: Array.isArray(negTags) ? [...negTags] : [],
             temp_advantage: charOverrides.temp_advantage || null,
             scenes_completed: parseInt(charOverrides.scenes_completed, 10) || 0,
@@ -1229,7 +1267,7 @@ Each line provides 4 Fudge dice (-1, 0, or +1 each), summing to a total from -4 
 ATTRITION FORMULA:
 Attrition = max(0, Threat + 4dF - MatchedPosTags + MatchedNegTags + GenreShift)
 - Threat (1 to 4): Baseline encounter threat. Adjusted by +1 if entering a Pressure without prep, or -1 if neutralizing a Pressure via environment or coordinated companion maneuver.
-- Positive Tags (max 2): Each matched character, gear, or companion tag subtracts -1 from Attrition. (Plus 1 extra if an active [Advantage] tag is consumed).
+- Positive Tags (max 2): Each matched character, gear, or companion tag subtracts -1 from Attrition. Respect bracketed situational qualifiers (Trait [context], e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). (Plus 1 extra if an active [Advantage] tag is consumed).
   CRITICAL: If the target Pool is at 0, POSITIVE TAGS ARE DISABLED (0 tags apply)!
 - Negative Tags: Each active Scar or debuff hindering the action adds +1 to Attrition.
 - Genre Shift: -1 (Pulp), 0 (Gritty), +1 (Brutal/Horror).
@@ -1249,7 +1287,7 @@ OUTCOME TIERS:
 ROLL FORMAT (Strict SillyTavern Colorization):
 Always wrap the roll line in single asterisks and parentheses right before narrating its consequence:
 *(FAE Action [Pool]: 4dF [Roll: d1, d2, d3, d4 = Sum] + Threat N - PosTags + NegTags = Attrition X → Outcome)*
-Example: *(FAE Action [Sanity]: 4dF [Roll: +1, 0, +1, 0 = +2] + Threat 3 - 1 (Calm) = Attrition 4 → BREAKING POINT CLAMP (0/8))*
+Example: *(FAE Action [Sanity]: 4dF [Roll: +1, 0, +1, 0 = +2] + Threat 3 - 1 (Calm [under gunfire and shock]) = Attrition 4 → BREAKING POINT CLAMP (0/8))*
 </rng_system>`;
 }
 
@@ -1388,7 +1426,16 @@ Single-pass resolution is mandatory. Never pause mid-turn to ask players for mec
 <tag_and_zero_constraints>
 Hard stacking cap: At most 2 Positive Tags may be applied to an action (plus 1 active [Advantage] tag).
 Zero-State Rule: When a Pool is at 0, Positive Tags CANNOT be used to reduce attrition targeting that pool!
-No God Tags: Universal adjectives (Lucky, Smart, Competent, Fast, Heroic, Strong, Master, Omni) are strictly forbidden.
+The Trait Qualification Protocol (Cooperative Qualification):
+- Ideal Scope: A balanced tag applies to ~25–30% of genre situations (e.g. Ex-Military, Calm [under gunfire and shock], Quiet, Service Revolver, Trap-Wise).
+- Tier A — Auto-Qualify Broad Traits (Trait [context]): When a player or card proposes an overly broad adjective (Strong, Smart, Fast, Lucky, Tough), do NOT reject or silently delete it. Preserve the player's archetype by attaching a bracketed situational qualifier narrowing its applicability to ~25–30%:
+  • Strong -> Strong [for lifting, hauling, or breaching doors]
+  • Smart -> Smart [for ancient ciphers and forensic clues]
+  • Fast -> Fast [for dodging traps and ambushes]
+  • Lucky -> Lucky [for narrowly surviving cave-ins and falls]
+  • Tough -> Tough [against harsh poisons and extreme weather]
+- Tier B — Remove Only True Omnipotence (With Clear Replacement): If a proposed tag claims absolute immunity or breaks the attrition engine entirely (Invincible, Never Misses, Immortal, Omniscient), omit/replace it, clearly explain why in narrative/chat, and offer a grounded Trait [context] alternative.
+- Turn-by-Turn Evaluation: When matching up to 2 Positive Tags for -1 Attrition on a roll, respect any bracketed [context] qualifier (or if an unqualified broad tag exists on the sheet, interpret it narrowly within the character's archetype and auto-qualify it with [...] on the next State Tracker update).
 </tag_and_zero_constraints>
 <passive_drain_constraints>
 Passive upkeep drain (rations at camp, environmental aura) is unmitigated by tags. It obeys the zero clamp (warns first), and triggers overflow if already at 0.
@@ -1474,7 +1521,7 @@ Status: Healthy
 [/CHARACTER]
 
 PILL FORMATTING:
-- Positive Tags: Name (descriptive detail in parentheses). Can include personal traits, signature gear, or companions, e.g. Companion: Name (Role — detail).
+- Positive Tags: Name (descriptive detail) or Trait [context qualifier] (~25–30% situational scope, e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). Can include personal traits, signature gear, or companions, e.g. Companion: Name (Role — detail). Auto-qualify broad traits via Tier A Trait Qualification Protocol.
 - Scars & Debuffs: Prefix harmful debuffs with (-) for red pills, e.g. (-) ${primary.zero_debuff} (Trauma). Active temporary advantage tags prefix with (+) for green pills, e.g. (+) Advantage: Setup (-1 Attrition).`,
 
         combat: `Active encounter and situational obstacles in FAE.
@@ -1606,7 +1653,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
             enabled: true,
             scope: 'chat',
             icon: 'fa-ban',
-            description: 'FAE Tag caps, God Tag ban, and zero-state rules',
+            description: 'FAE Tag caps, Trait Qualification Protocol, and zero-state rules',
             origin: 'unlocked_base',
             baseTag: 'constraints',
         },
@@ -1781,7 +1828,7 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
         charName ? `NAME: ${charName}.` : null,
         `ARCHETYPE: Choose ONE FAE Archetype (e.g. ${archetypesSnippet}). Output as "Name (Archetype)". FORBIDDEN: No D&D classes or subclasses (no Fighter, Wizard, Paladin, etc.).`,
         `RESOURCE POOLS: ${poolsStr}. Primary pool mirrors HP.`,
-        `POSITIVE TAGS: Pick 4 distinct descriptive tags (personal traits, signature gear, background, or "Companion: Name (Role — detail)" if the scenario includes friends/companions/party): ${tagsSnippet}.`,
+        `POSITIVE TAGS: Pick 4 distinct descriptive tags (~25–30% situational scope: personal traits, bracketed qualifiers like Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock], signature gear, or "Companion: Name (Role — detail)" if the scenario includes friends/companions/party): ${tagsSnippet}. Follow Trait Qualification Protocol (Tier A: auto-qualify broad traits into Trait [context]; Tier B: omit true omnipotence with grounded Trait [context] replacement).`,
         `KNOBS: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${knobs.base_attrition_shift >= 0 ? '+' + knobs.base_attrition_shift : knobs.base_attrition_shift} | Overflow: ${knobs.overflow_default}.`,
         `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or polyhedral damage dice. Use 4dF Attrition, Positive Tags, and Scars/Debuffs in [CHARACTER].`,
         `FORMAT MANDATE: Output [CHARACTER] with primary pool HP, secondary pools formatted as "((BARBLUE)) Resolve: 6/6" or "((BARGOLD)) Torch & Supplies: 6/6" (NEVER use a colon inside ((BAR...)), e.g. write ((BARBLUE)) or ((BARGOLD)), and do NOT append Zero Debuff/Recovery text on the bar line), FAE Knobs line, ((PILLS)) Positive Tags: Tag (detail), ((PILLS)) Scars & Debuffs: None, Status: Healthy. NEVER wrap the character name or header line in markdown bold (**).`,

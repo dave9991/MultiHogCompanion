@@ -4,7 +4,7 @@
  * Comprehensive test suite verifying Freeform Attrition Engine (FAE)
  * support across the Session Zero Concierge and CYOA Choice Engine:
  * 1. FAE Empty Dossier initialization & untouched detection
- * 2. Parsing FAE [UPDATE_DOSSIER] blocks (pools, knobs, tags, god tag bans, encounter barriers)
+ * 2. Parsing FAE [UPDATE_DOSSIER] blocks (pools, knobs, tags, trait qualification, encounter barriers)
  * 3. Dossier formatting and serialization to Markdown roundtrip
  * 4. FAE Concierge system prompts and builder prompts
  * 5. CYOA Choice Engine prompt generation & Downed / Zero-state detection for FAE
@@ -85,7 +85,7 @@ test('FAE Session Zero Concierge: Dossier Initialization & Untouched Detection',
     assert.equal(isDossierEmptyOrUntouched(dossier), false);
 });
 
-test('FAE Session Zero Concierge: Parsing [UPDATE_DOSSIER] with FAE fields & God Tag ban', () => {
+test('FAE Session Zero Concierge: Parsing [UPDATE_DOSSIER] with FAE fields & Trait Qualification', () => {
     let dossier = createEmptyDossier('fae', 'cosmic_horror');
 
     const updateText = `
@@ -100,7 +100,7 @@ tone: Grim, investigative cosmic dread.
 [PROTAGONIST]
 name: Inspector Thomas Malone
 archetype: The Relentless Detective
-positive_tags: Revolver .38 (Heavy snubnose), Street-Smart (Underworld informants), Lucky (God tag), Invincible (Super god tag), Occult Library (Tome access)
+positive_tags: Revolver .38 (Heavy snubnose), Street-Smart (Underworld informants), Strong [for lifting heavy crates], Calm [under gunfire and shock], Occult Library (Tome access)
 negative_tags: Trembling Hands (Nerve Scar)
 bio: A veteran investigator burdened by forbidden sights.
 [/PROTAGONIST]
@@ -130,17 +130,18 @@ weakness: Bright magnesium fire
     assert.equal(dossier.meta.title, 'Shadows Over Arkham');
     assert.equal(dossier.meta.systemKey, 'cosmic_horror');
 
-    // Protagonist & God Tag filtering
+    // Protagonist & Trait preservation
     assert.equal(dossier.protagonist.name, 'Inspector Thomas Malone');
     assert.equal(dossier.protagonist.archetype, 'The Relentless Detective');
     
-    // Positive tags should have filtered 'Lucky' and 'Invincible'
+    // Positive tags should preserve all valid and qualified tags up to 5
     const tags = dossier.protagonist.positiveTags;
+    assert.equal(tags.length, 5);
     assert.ok(tags.some(t => t.includes('Revolver .38')));
     assert.ok(tags.some(t => t.includes('Street-Smart')));
+    assert.ok(tags.some(t => t.includes('Strong [for lifting heavy crates]')));
+    assert.ok(tags.some(t => t.includes('Calm [under gunfire and shock]')));
     assert.ok(tags.some(t => t.includes('Occult Library')));
-    assert.equal(tags.some(t => /lucky/i.test(t)), false, 'God tag "Lucky" must be filtered');
-    assert.equal(tags.some(t => /invincible/i.test(t)), false, 'God tag "Invincible" must be filtered');
 
     // Negative tags
     assert.ok(dossier.protagonist.negativeTags.some(t => t.includes('Trembling Hands')));
@@ -219,7 +220,10 @@ test('FAE Concierge System Prompts & Builder Prompt Routing', () => {
     assert.ok(faePrompt.includes('Two-Tier Pool Narration'));
     assert.ok(faePrompt.includes('Strict Prohibition of D&D and 2d6 PbtA Mechanics'));
     assert.ok(faePrompt.includes('NEVER output PbtA 2d6 moves'));
-    assert.ok(faePrompt.includes('STRICT FORBIDDEN GOD TAGS'));
+    assert.ok(faePrompt.includes('The Trait Qualification Protocol (Cooperative Qualification)'));
+    assert.ok(faePrompt.includes('Tier A (Auto-Qualify Broad Traits)'));
+    assert.ok(faePrompt.includes('Tier B (Remove True Omnipotence with Clear Reason)'));
+    assert.ok(faePrompt.includes('Strong [for lifting, hauling, or breaching doors]'));
     assert.ok(faePrompt.includes('Zero-Bookkeeping Model'));
     assert.ok(faePrompt.includes('Companion: Name (Role)'));
     assert.ok(faePrompt.includes('Companions as Combined Leverage'));

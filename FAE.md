@@ -55,6 +55,21 @@ FAE is protagonist-centered, but genres like OSR dungeon crawls or squad sci-fi 
 3. **Companions as Positive Tags (Subject to the 2-Tag Cap):** Notable companions or hirelings can be recorded as Positive Tags in `[CHARACTER]` (e.g., `Companion: Sister Valeria (Cleric)` or `Companion: Brother Marcus (Cleric)`). When they assist in the declared action, they count as 1 of the max 2 Positive Tags ($-1$ Attrition). Because the 2-tag ceiling never changes, adding companions never breaks the attrition math.
 4. **Companions as Narrative Buffer (At Breaking Point / Overflow):** When a pool clamps at `0`, triggers `scar_and_ko`, or resolves a `GRACE_RETREAT_WITH_SCAR`, consequences can manifest narratively on a companion—such as a retainer panicking and fleeing, or taking an injury (`(-) Companion Wounded: Marcus`) that disables their tag until `haven_or_specialist` recovery.
 
+### 7. Character Tags & The Trait Qualification Protocol (Section 2.3.1)
+Characters begin with **3 to 4 Positive Tags** and **0 to 1 Negative Tag (Scar)**.
+* **Ideal Scope:** A balanced tag applies to ~25–30% of genre situations (e.g. `Ex-Military`, `Calm [under gunfire and shock]`, `Quiet`, `Service Revolver`, `Trap-Wise`).
+* **Gear as Tags:** Signature equipment acts as a Positive Tag and can be temporarily lost, depleted, or broken as a narrative consequence.
+* **Hard Stacking Cap:** The engine enforces a maximum of **2 Positive Character/Companion Tags** per action ($-1$ Attrition each), plus $1$ extra if an active `[Advantage]` tag is consumed.
+* **Cooperative Qualification (Replacing Brittle Code Filtering):** Rather than brittle programmatic word-blacklists (`isGodTag`), tag governance is handled semantically by the LLM:
+  1. **Tier A — Auto-Qualify Broad Traits (`Trait [context]`):** Overly broad adjectives (`Strong`, `Smart`, `Fast`, `Lucky`, `Tough`) are never rejected or deleted. The LLM preserves the player's archetype by attaching a bracketed situational qualifier narrowing applicability to ~25–30%:
+     - `Strong` $\rightarrow$ `Strong [for lifting, hauling, or breaching doors]`
+     - `Smart` $\rightarrow$ `Smart [for ancient ciphers and forensic clues]`
+     - `Fast` $\rightarrow$ `Fast [for dodging traps and ambushes]`
+     - `Lucky` $\rightarrow$ `Lucky [for narrowly surviving cave-ins and falls]`
+     - `Tough` $\rightarrow$ `Tough [against harsh poisons and extreme weather]`
+  2. **Tier B — Remove Only True Omnipotence (With Clear Replacement):** If a proposed tag claims absolute immunity or breaks the attrition engine entirely (`Invincible`, `Never Misses`, `Immortal`, `Omniscient`), the LLM omits it and proposes a grounded `Trait [context]` alternative fitting FAE's math.
+  3. **Turn-by-Turn Evaluation:** The Narrator respects bracketed `[context]` qualifiers when calculating attrition mitigation.
+
 ---
 
 ## ⚔️ Native FAE Encounter Blocks
@@ -115,7 +130,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
 
 | Genre | Tone & Themes | Primary Resource Pools | Default Starting Positive Tags |
 | :--- | :--- | :--- | :--- |
-| **🐙 Cosmic Horror Investigation** (`cosmic_horror`) | 1920s Lovecraftian Investigation | `Health (8)`, `Sanity (8)` | `Ex-Military`, `Calm`, `Quiet`, `Service Revolver` |
+| **🐙 Cosmic Horror Investigation** (`cosmic_horror`) | 1920s Lovecraftian Investigation | `Health (8)`, `Sanity (8)` | `Ex-Military`, `Calm [under gunfire and shock]`, `Quiet`, `Service Revolver` |
 | **🗝️ OSR Dungeon Crawl** (`osr_dungeon`) | Dark Fantasy Dungeon Delve | `Health (10)`, `Resolve (6)`, `Torch & Supplies (6)` | `Veteran Mercenary`, `Heavy Shield`, `Trap-Wise`, `Companion: Brother Marcus (Cleric)` |
 | **🪓 Survival Horror** (`survival_horror`) | Isolated Slasher / Biohazard | `Grit (8)`, `Panic (6)`, `Ammunition (4)` | `Survivor`, `Fast Reflexes`, `First Aid Kit`, `Pump Shotgun` |
 | **☣️ Post-Apocalyptic** (`post_apocalyptic`) | Wasteland Scavenger | `Health (8)`, `Rads (6)`, `Scrap (6)` | `Scavenger`, `Wasteland Survival`, `Geiger Counter`, `Scrap Rifle` |
@@ -130,7 +145,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Sanity (8/8)`: Mental resilience against cosmic truth, recovery via `haven_or_specialist`. Passive drain: $-1$ on `day_pass`.
 * **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`.
 * **Archetypes:** The Antiquarian, The Alienist, The Private Investigator, The Occult Scholar, The Reluctant Heir.
-* **Positive Tags:** `Ex-Military (Combat training)`, `Calm (Steady nerves)`, `Quiet (Light footwork)`, `Service Revolver (.38 sidearm)`.
+* **Positive Tags:** `Ex-Military`, `Calm [under gunfire and shock]`, `Quiet`, `Service Revolver`.
 
 ### 2. 🗝️ OSR Dungeon Crawl (`osr_dungeon`)
 * **Tone:** Classic Old-School Renaissance dungeon survival (Dark Fantasy Delve).

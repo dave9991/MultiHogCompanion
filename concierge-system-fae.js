@@ -156,12 +156,10 @@ export class FaeSystemAdapter extends ConciergeSystemAdapter {
             }
         }
 
-        // FAE uses Positive Tags and Pools, not 2d6 startingMoves
+        // FAE uses Positive Tags and Pools, not 2d6 startingMoves or duplicate conditions
         protagonist.startingMoves = [];
         delete protagonist.moves;
-        if (!Array.isArray(protagonist.conditions) || protagonist.conditions.length === 0) {
-            protagonist.conditions = [...protagonist.negativeTags];
-        }
+        protagonist.conditions = [];
 
         if (dossier) {
             dossier.config = dossier.config || {};

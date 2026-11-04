@@ -639,7 +639,7 @@ The Kick: Unset
                 lines.push('armor: 0');
             }
         }
-        if (p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) {
+        if (!isFae && p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) {
             lines.push(`conditions: ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}`);
         }
         if (p.status) lines.push(`status: ${p.status}`);
@@ -1246,10 +1246,14 @@ export function applyDossierUpdates(text, dossier) {
         }
         const rawProtoConds = parseBulletOrListItems(pBlock, 'conditions');
         if (rawProtoConds.length || kv.conditions !== undefined) {
-            const condList = sanitizeConditionsList(rawProtoConds.length ? rawProtoConds : kv.conditions);
-            updated.protagonist.conditions = condList;
-            if (condList.length) {
-                changes.push(`Protagonist conditions set: ${condList.join(', ')}`);
+            if (updated.meta?.ruleset !== 'fae') {
+                const condList = sanitizeConditionsList(rawProtoConds.length ? rawProtoConds : kv.conditions);
+                updated.protagonist.conditions = condList;
+                if (condList.length) {
+                    changes.push(`Protagonist conditions set: ${condList.join(', ')}`);
+                }
+            } else {
+                updated.protagonist.conditions = [];
             }
         }
         if (kv.status) {
@@ -1328,8 +1332,12 @@ export function applyDossierUpdates(text, dossier) {
         }
         if (negTagsList.length > 0) {
             updated.protagonist.negativeTags = negTagsList;
-            if (!updated.protagonist.conditions || updated.protagonist.conditions.length === 0) {
-                updated.protagonist.conditions = [...negTagsList];
+            if (updated.meta?.ruleset !== 'fae') {
+                if (!updated.protagonist.conditions || updated.protagonist.conditions.length === 0) {
+                    updated.protagonist.conditions = [...negTagsList];
+                }
+            } else {
+                updated.protagonist.conditions = [];
             }
             changes.push(`Protagonist negative tags / scars updated (${negTagsList.length} registered)`);
         }

@@ -2781,17 +2781,25 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     }
     if (critique) {
         const isRevise = Boolean(critique.shouldRevise);
-        modalCritiqueBadge.text(`${critique.grade || 'B'} (${critique.score}/100 · ${critique.verdict})`).css({
-            background: isRevise ? 'rgba(251, 191, 36, 0.2)' : 'rgba(74, 222, 128, 0.2)',
-            color: isRevise ? '#fbbf24' : '#4ade80',
-        });
+        const refinerApplied = Boolean(tx.refinerPass?.hasMutations);
+        if (refinerApplied) {
+            modalCritiqueBadge.text(`REFINED (Pass 2 · ${critique.score}/100 ${critique.grade || 'C'})`).css({
+                background: 'rgba(168, 85, 247, 0.25)',
+                color: '#c084fc',
+            });
+        } else {
+            modalCritiqueBadge.text(`${critique.grade || 'B'} (${critique.score}/100 · ${critique.verdict})`).css({
+                background: isRevise ? 'rgba(251, 191, 36, 0.2)' : 'rgba(74, 222, 128, 0.2)',
+                color: isRevise ? '#fbbf24' : '#4ade80',
+            });
+        }
         contempParts.push(`
             <div style="background: rgba(0,0,0,0.28); border: 1px solid rgba(250, 204, 21, 0.25); border-radius: 4px; padding: 6px 8px;">
-                <div style="font-weight: 600; color: #fde047; margin-bottom: 3px;">⚖️ Judge Verdict: ${escapeHtml(critique.verdict)} (${critique.score}/100 · ${escapeHtml(critique.grade)})</div>
+                <div style="font-weight: 600; color: #fde047; margin-bottom: 3px;">⚖️ ${refinerApplied ? 'Pass 1 Judge Verdict' : 'Judge Verdict'}: ${escapeHtml(critique.verdict)} (${critique.score}/100 · ${escapeHtml(critique.grade)})</div>
                 ${critique.strengths?.length ? `<div style="color: #86efac;"><b>Strengths:</b> ${critique.strengths.map(s => escapeHtml(s)).join(' · ')}</div>` : ''}
                 ${critique.weaknesses?.length ? `<div style="color: #fca5a5;"><b>Weaknesses:</b> ${critique.weaknesses.map(w => escapeHtml(w)).join(' · ')}</div>` : ''}
                 ${critique.directives?.length ? `<div style="color: #93c5fd;"><b>Directives:</b> ${critique.directives.map(d => escapeHtml(d)).join(' · ')}</div>` : ''}
-                ${tx.refinerPass?.hasMutations ? `<div style="color: #c4b5fd; margin-top: 3px;"><b>🔨 Pass 2 Refiner Applied:</b> ${tx.refinerPass.changes.map(c => escapeHtml(c)).join('; ')}</div>` : ''}
+                ${tx.refinerPass?.hasMutations ? `<div style="color: #c4b5fd; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(168, 85, 247, 0.3);"><b>🔨 Pass 2 Refiner Applied:</b> ${tx.refinerPass.changes.map(c => escapeHtml(c)).join('; ')}</div>` : ''}
             </div>
         `);
     } else if (contempParts.length > 0) {

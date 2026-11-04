@@ -543,6 +543,7 @@ ${genreSummaries}
 * Ruleset: fae
 * The Pacing Triad: Endurance (pool capacity 6–12), Intensity (\`base_attrition_shift\` -1/0/+1), Tempo (\`action_tempo\`: action_serial, gritty_default, slow_burn, slice_of_life).
 * Protagonist: 3-4 specific Positive Tags (including signature gear tags) and 0-1 starting Scar in negative_tags.
+* Zero-Bookkeeping Directive (No Conditions): Protagonist debuffs, injuries, and scars live exclusively in \`negative_tags\`. DO NOT output a \`conditions:\` field in [PROTAGONIST].
 * Zero-Bookkeeping Companions: Companions who travel with the PC are recorded as \`Companion: Name (Role)\` entries in the [PROTAGONIST] positive_tags, not as separate [NPC] cards with moves or party roles. NPCs are external mentors, contacts, or faction allies.
 * NPC Scoping Directive: If the player's premise only involves the protagonist and a traveling companion, record the companion under [PROTAGONIST] positive_tags as \`Companion: [[NAME:companion]] (Role)\` and OMIT the [NPC] block entirely. Do not fabricate extraneous stationary contacts unless requested.
 * Trait Qualification Protocol (Cooperative Qualification):
@@ -554,8 +555,8 @@ ${genreSummaries}
 * Knobs: flee_grace_toggle (true/false), base_attrition_shift (-1/0/+1), action_tempo (action_serial/gritty_default/slow_burn/slice_of_life), overflow_default (scar_and_ko/lethal/scene_fail), heroic_tier (true/false).
 * Heroic Domains (Pre-Math Leverage Permissions): When heroic_tier is true (e.g. osr_dungeon or user toggle), assign \`heroic_domain: Archetype [specific domains]\` to [PROTAGONIST]. This provides pre-math leverage (expands Threat 0, overcomes barriers, neutralizes pressures) and NEVER counts as a -1 Positive Tag. When heroic_tier is false, omit heroic_domain entirely.
 * Adversaries / Encounters (4-Line Block): threat_level (1-4), layers (e.g. 2/2), pools_at_risk, pressures, instinct, status, leverage_barriers, full_finish_triggers. Bypass vs Total Intent tradeoff. $\pm 1$ Threat cap.
-  - leverage_barriers MUST use individual bracket formatting: \`[1. ...] [2. ...]\`.
-  - full_finish_triggers is MANDATORY for every adversary and defines the Bypass vs Total finish tradeoff: \`Bypass: <action> (1 turn) | Total: <action>\`.
+  - leverage_barriers MUST use individual bracket formatting: \`[1. ...] [2. ...]\` mapping barrier location and protective function to target layer/pool (e.g. \`[1. Heavy Chitin Plating guarding Layer 1/Health] [2. Blind Thrashing Tendrils shielding Layer 2/Sanity]\`).
+  - full_finish_triggers is MANDATORY for every adversary and defines the Bypass vs Total finish tradeoff: \`Bypass: Barricade the ward door (1 turn) | Total: Crack both armor layers and destroy its core\`. Triggers must define explicit mechanical thresholds (e.g. specific pool drain or tag cost to bypass vs layer/pool exhaustion for total finish).
 * STRICT PROHIBITION OF D&D AND PBTA 2d6 MECHANICS: Never output DCs, AC, attack rolls, saving throws, advantage/disadvantage, or 2d6 moves.
 
 ### 📋 Directives & Syntax:
@@ -604,7 +605,7 @@ pools_at_risk: Health, Sanity
 pressures: Tentacle lashes (Health), Psychic shriek (Sanity)
 instinct: To ambush intruders from shadow and drag them into ventilation shafts
 status: Entrenched
-leverage_barriers: [1. Armored Chitin Husk] [2. Blind Flailing Claws]
+leverage_barriers: [1. Armored Chitin Husk guarding Layer 1/Health] [2. Blind Flailing Claws shielding Layer 2/Sanity]
 full_finish_triggers: Bypass: Barricade the ward door (1 turn) | Total: Crack both armor layers and destroy its core
 [/MONSTER]
 
@@ -620,7 +621,7 @@ brief_description: The quarantined basement ward
 [KICK]
 starting_location: Starting Location Name
 crisis: Imminent crisis or pressure confronting the protagonist
-opening_prompt: In media res opening scene dropping the protagonist into the crucible
+opening_prompt: In media res opening scene dropping the protagonist into the crucible (must present an immediate dilemma defining a pre-roll attrition pressure, e.g. deciding which pool will bear the first strain of the encounter before rolling)
 [/KICK]
 [/UPDATE_DOSSIER]
 \`\`\`
@@ -881,17 +882,18 @@ Your ONLY job is to audit the candidate **[CURRENT_LIVE_BLUEPRINT]** against the
 ### ⚖️ 5-Point FAE Campaign Design Rubric (20 points each = 100 total):
 1. **Setting & Tone Cohesion (0–20):** Does the blueprint faithfully capture the player's pitch, inspiration material, tone, and genre without generic filler? If world axioms or setting rules are defined, do they establish atmospheric flavor and clear physical or cultural stakes?
 2. **FAE Encounter Anatomy & Adversary Design (0–20):**
-   - Each Encounter/Adversary MUST feature a clear \`threat_level\` (1 to 4), \`layers\` (e.g. 2/2), explicit \`pools_at_risk\`, evocative \`pressures\`, active \`instinct\`, \`status\`, and bracketed \`leverage_barriers\` (e.g. \`[1. Heavy Chitin Plating] [2. Blind Thrashing Tendrils]\`).
-   - Decisive \`full_finish_triggers\` that clearly define the Bypass vs. Total Intent tradeoff (how to sneak past or seal off vs. permanently neutralize the threat).
+   - Each Encounter/Adversary MUST feature a clear \`threat_level\` (1 to 4), \`layers\` (e.g. 2/2), explicit \`pools_at_risk\`, evocative \`pressures\`, active \`instinct\`, \`status\`, and bracketed \`leverage_barriers\` mapping barrier location and protective function (e.g. \`[1. Heavy Chitin Plating guarding Layer 1/Health] [2. Blind Thrashing Tendrils shielding Layer 2/Sanity]\`).
+   - Decisive \`full_finish_triggers\` that clearly define the Bypass vs. Total Intent tradeoff with explicit mechanical thresholds (e.g. specific pool drain, tag cost, or layer depletion to bypass vs reducing pool to 0 for total neutralization).
 3. **Resource Pools & Calibration Knobs (0–20):**
    - Protagonist tracks 2–3 setting-appropriate Resource Pools (capacity 6–12) with defined \`zero_debuff\`, \`recovery\` (e.g. \`camp_or_sleep\`, \`haven_or_specialist\`), and \`overflow\` rules.
    - Knobs (\`flee_grace_toggle\`, \`base_attrition_shift\`, \`action_tempo\`, \`overflow_default\`, \`heroic_tier\`) are deliberately tuned to the tone and genre.
    - If \`heroic_tier\` is true, the protagonist has a valid \`heroic_domain\` providing pre-math leverage; if false, \`heroic_domain\` is omitted.
 4. **Positive Tags, Scars & Mechanical Purity (0–20):**
-   - **Protagonist Tags:** 3–4 specific Positive Tags (Trait Qualification Protocol: ~25–30% situational applicability, using \`Trait [context]\` for broad adjectives) and 0–1 starting Scar in \`negative_tags\`.
+   - **Protagonist Tags & Scars:** 3–4 specific Positive Tags (Trait Qualification Protocol: ~25–30% situational applicability, using \`Trait [context]\` for broad adjectives) and 0–1 starting Scar in \`negative_tags\`.
+   - **Zero-Bookkeeping & Mechanical Purity:** All debuffs, scars, and lasting penalties must live exclusively in \`negative_tags\`. Protagonist MUST NOT have a redundant \`conditions\` field.
    - **Zero-Bookkeeping Companions & NPC Scoping Directive:** Travelling companions, recruits, or spunky sidekicks approaching or accompanying the PC belong strictly in \`[PROTAGONIST] positive_tags\` as \`Companion: Name (Role)\`. Do NOT order an \`[NPC]\` card for companions/recruits unless the player explicitly requests stationary external contacts, patrons, or merchants. \`[NPC]\` cards are reserved strictly for external contacts, mentors, or faction figures with \`moves_or_boons\` specifying fictional leverage.
    - **MANDATORY PURGE CHECK (NO PBTA / NO D&D):** The blueprint MUST NEVER contain PbtA moves ("When you... roll 2d6", 10+/7-9/6- hit outcomes, hold/forward, countdown doom tracks) or D&D terminology (DCs, AC, attack rolls, saving throws, advantage/disadvantage, spell slots). All mechanics strictly rely on the 4dF attrition ladder and resource pools.
-5. **The Kick's Immediate Crucible (0–20):** Does \`[KICK]\` place the protagonist directly at the starting \`[MAP]\` site *in media res* with an urgent crisis that connects to the staged cast/threats on Turn 1 without forcing an immediate dice roll?
+5. **The Kick's Immediate Crucible (0–20):** Does \`[KICK]\` place the protagonist directly at the starting \`[MAP]\` site *in media res* with an urgent crisis and a concrete pre-roll attrition pressure (e.g. deciding which pool will bear the first strain of the encounter) without forcing an immediate dice roll?
 
 ### 📋 Critique Directive Syntax:
 \`\`\`text

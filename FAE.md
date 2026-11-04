@@ -96,6 +96,8 @@ In CYOA mode, interactive `<button>` choices in FAE follow **Style B** bracket f
 * **No Mechanical Scope Jargon:** Never display `Stepping-Stone:`, `Full Resolution:`, `Tactical Caution:`, or `Narrow Escape` inside button brackets. Intent scope is evaluated internally by the GM when resolving the turn, keeping buttons clean and immersive.
 * **Pool Slot Integrity:** The first item before `|` inside brackets MUST always be an active Resource Pool name (never a Tag).
 
+**Pacing-aware choices:** `buildFaeCyoaPrompt` includes a `PACING-AWARE CHOICES` rule so the MultiHog Pacing knob tags (`<high_agency_mode_on>`, `<slice_of_life_mode_on>`, `<output_length>`) shape the choices (open-ended / relaxed / terse); Normal pacing is unchanged.
+
 ### 10. The Pacing Triad & Dynamic Tempo Counter
 Campaign pacing is calibrated along three interdependent axes:
 1. **Endurance (Pool Capacities):** Baseline resource pool sizes (6–12) dictate how many tests {{user}} can absorb before reaching the Breaking Point.
@@ -110,7 +112,7 @@ The engine tracks `state.state_flags.turns_since_last_test` across turns. When `
 - If an action roll occurred (`/*(FAE Action`), `turns_since_last_test` resets to `0`.
 - If no roll occurred (Threat 0 narrative turn), `turns_since_last_test` increments by $+1$.
 - `getPacingSuggestion(state, activeEncounter, options)` dynamically feeds the GM narrative guidance inside the RNG Queue block:
-  - **Turn 1 / Opening Scene Setup (`isOpeningTurn == true`):** Injects the Opening Scene Setup directive: `[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]`. Triggered when the user begins the adventure (`/^\s*Begin the adventure\b/i`) or when sending the very first user message in an adventure chat.
+  - **Turn 1 / Opening Scene Setup (`isOpeningTurn == true`):** Injects the Opening Scene Setup directive: `[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.] If the opening scene places the party at or inside an unmapped site (dungeon, ruin, building), call CreateAreaMap once before presenting choices.`. Triggered when the user begins the adventure (`/^\s*Begin the adventure\b/i`) or when sending the very first user message in an adventure chat.
   - If `!activeEncounter && turns < window.min`: GM favors Threat 0 (narrative breathing room).
   - If `turns >= window.max`: GM resolves proactive actions at Threat 1+ or introduces an external complication.
   - Otherwise: On rhythm status.

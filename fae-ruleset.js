@@ -691,7 +691,7 @@ export function getPacingSuggestion(state, activeEncounter = false, options = {}
         : Boolean(options?.isOpeningTurn || state?.state_flags?.is_opening_turn);
 
     if (isOpeningTurn) {
-        return '[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]';
+        return '[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.] If the opening scene places the party at or inside an unmapped site (dungeon, ruin, building), call CreateAreaMap once before presenting choices.';
     }
 
     const tempo = state?.knobs?.action_tempo || 'gritty_default';
@@ -1800,6 +1800,11 @@ export function buildFaeCyoaPrompt(genreKey = 'cosmic_horror', overrides = {}) {
   • For pure dialogue or zero-roll free actions: omit the bracket entirely.
   • NO mechanical scope jargon: NEVER output "Stepping-Stone:", "Full Resolution:", "Tactical Caution:", or "Narrow Escape" inside the button brackets. (The GM evaluates intent scope internally when resolving the turn).
 - ZERO-STATE ADAPTATION: If {{user}} is at 0 in their primary pool, choices MUST reflect desperation, crisis defense, or frantic flight.
+- PACING-AWARE CHOICES: When a pacing tag appears this turn, let it shape the choices:
+  • <high_agency_mode_on>: Offer open-ended, intent-driven choices that leave room for {{user}}'s own input; keep most choices zero-roll.
+  • <slice_of_life_mode_on>: Favor social, exploratory, relaxed choices; few or no pool tests; no forced danger.
+  • <output_length>: Keep each choice terse (one short line).
+  With no pacing tag, use normal variety.
 
 EXAMPLES:
 <choices>

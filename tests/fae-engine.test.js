@@ -90,7 +90,7 @@ describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => 
         assert.ok(suggEnc.includes('On rhythm'));
 
         // Opening Scene Setup directive on Turn 1 / opening turn
-        const openingDirective = '[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]';
+        const openingDirective = '[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.] If the opening scene places the party at or inside an unmapped site (dungeon, ruin, building), call CreateAreaMap once before presenting choices.';
         assert.strictEqual(getPacingSuggestion(state, false, true), openingDirective);
         assert.strictEqual(getPacingSuggestion(state, false, { isOpeningTurn: true }), openingDirective);
         assert.strictEqual(getPacingSuggestion(state, { isOpeningTurn: true }), openingDirective);

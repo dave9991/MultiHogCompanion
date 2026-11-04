@@ -154,6 +154,16 @@ console.log('Testing concierge-ui.js integration...');
     assert.ok(uiJs.includes('export function resetConciergeState'), 'concierge-ui.js must export resetConciergeState');
     assert.ok(uiJs.includes('export function loadValidatedDraft'), 'concierge-ui.js must export loadValidatedDraft');
     assert.ok(uiJs.includes('export const STORAGE_DRAFT_KEY'), 'concierge-ui.js must export STORAGE_DRAFT_KEY');
+    assert.ok(uiJs.includes('export function getDraftStorageKey'), 'concierge-ui.js must export getDraftStorageKey');
+    assert.ok(uiJs.includes('mhc_concierge_draft_'), 'concierge-ui.js must scope drafts by ruleset prefix');
+
+    // switchRulesetMode must clear chatHistory
+    assert.ok(uiJs.includes('chatHistory = [];'), 'switchRulesetMode must clear chatHistory');
+
+    // FAE UI Specialization
+    assert.ok(uiJs.includes("const boonsLabel = isFae ? 'Fictional Leverage:' : 'Boons/Moves:';"), 'concierge-ui.js must label Fictional Leverage in FAE');
+    assert.ok(uiJs.includes("$('#mhc_dial_party_btn').hide()"), 'concierge-ui.js must hide party dial in FAE');
+    assert.ok(uiJs.includes("$('#mhc_dial_relationships_btn').hide()"), 'concierge-ui.js must hide relationships dial in FAE');
 
     // Must call resetConciergeState on campaign launch success
     assert.ok(

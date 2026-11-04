@@ -103,6 +103,15 @@ try {
 
 export const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
 
+/**
+ * Returns the scoped localStorage draft key for the given ruleset.
+ * @param {string} [ruleset='pbta']
+ * @returns {string}
+ */
+export function getDraftStorageKey(ruleset = 'pbta') {
+    return `mhc_concierge_draft_${ruleset === 'fae' ? 'fae' : 'pbta'}`;
+}
+
 let modalInitialized = false;
 let activeDossier = createEmptyDossier();
 let loadedCampaignOriginChatId = null;
@@ -160,10 +169,15 @@ async function ensureModalMounted() {
  */
 function saveDraft() {
     try {
+        const ruleset = activeDossier?.meta?.ruleset === 'fae' ? 'fae' : 'pbta';
+        const key = getDraftStorageKey(ruleset);
         const hasChat = Array.isArray(chatHistory) && chatHistory.length > 0;
         const isUntouched = !hasChat && isDossierEmptyOrUntouched(activeDossier);
         if (isUntouched) {
-            localStorage.removeItem(STORAGE_DRAFT_KEY);
+            localStorage.removeItem(key);
+            if (ruleset === 'pbta') {
+                localStorage.removeItem(STORAGE_DRAFT_KEY);
+            }
             return;
         }
         const payload = {
@@ -174,36 +188,54 @@ function saveDraft() {
             originCampaignTitle: loadedCampaignOriginTitle,
             timestamp: Date.now(),
         };
-        localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify(payload));
+        localStorage.setItem(key, JSON.stringify(payload));
     } catch (_) {}
 }
 
 /**
  * Load and strictly validate draft from localStorage.
  * Returns { draft } if valid, { corrupted: true } if invalid/partial, or null if empty.
+ * @param {string|null} [targetRuleset=null]
  */
-export function loadValidatedDraft() {
+export function loadValidatedDraft(targetRuleset = null) {
+    const ruleset = targetRuleset || (activeDossier?.meta?.ruleset === 'fae' || isFaeActive() ? 'fae' : 'pbta');
+    const key = getDraftStorageKey(ruleset);
     try {
-        const raw = localStorage.getItem(STORAGE_DRAFT_KEY);
+        let raw = localStorage.getItem(key);
+        // Migration: read legacy 'mhc_pbta_concierge_draft' only for pbta
+        if (!raw && ruleset === 'pbta') {
+            raw = localStorage.getItem(STORAGE_DRAFT_KEY);
+            if (raw) {
+                try {
+                    localStorage.setItem(key, raw);
+                    localStorage.removeItem(STORAGE_DRAFT_KEY);
+                } catch (_) {}
+            }
+        }
         if (!raw) return null;
         let parsed = null;
         try {
             parsed = JSON.parse(raw);
         } catch (parseErr) {
-            console.warn('[PbtA Concierge] Corrupted JSON in draft storage; purging:', parseErr);
-            localStorage.removeItem(STORAGE_DRAFT_KEY);
+            console.warn(`[${ruleset === 'fae' ? 'FAE' : 'PbtA'} Concierge] Corrupted JSON in draft storage; purging:`, parseErr);
+            localStorage.removeItem(key);
+            if (ruleset === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
         const validated = validateDraft(parsed);
         if (!validated) {
-            console.warn('[PbtA Concierge] Incomplete draft detected; purging for clean start.');
-            localStorage.removeItem(STORAGE_DRAFT_KEY);
+            console.warn(`[${ruleset === 'fae' ? 'FAE' : 'PbtA'} Concierge] Incomplete draft detected; purging for clean start.`);
+            localStorage.removeItem(key);
+            if (ruleset === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
         return { draft: validated };
     } catch (err) {
-        console.warn('[PbtA Concierge] Unexpected error reading draft; purging:', err);
-        try { localStorage.removeItem(STORAGE_DRAFT_KEY); } catch (_) {}
+        console.warn(`[${ruleset === 'fae' ? 'FAE' : 'PbtA'} Concierge] Unexpected error reading draft; purging:`, err);
+        try {
+            localStorage.removeItem(key);
+            if (ruleset === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
+        } catch (_) {}
         return { corrupted: true };
     }
 }
@@ -285,11 +317,14 @@ function showConciergeConfirm({
  * Cleans out any saved draft from localStorage.
  */
 export function resetConciergeState({ showGreeting = true, ruleset = null, genreKey = null } = {}) {
+    const effectiveRuleset = ruleset || (isFaeActive() ? 'fae' : 'pbta');
     try {
-        localStorage.removeItem(STORAGE_DRAFT_KEY);
+        localStorage.removeItem(getDraftStorageKey(effectiveRuleset));
+        if (effectiveRuleset === 'pbta') {
+            localStorage.removeItem(STORAGE_DRAFT_KEY);
+        }
     } catch (_) {}
 
-    const effectiveRuleset = ruleset || (isFaeActive() ? 'fae' : 'pbta');
     activeDossier = createEmptyDossier(effectiveRuleset, genreKey);
     loadedCampaignOriginChatId = null;
     loadedCampaignOriginTitle = null;
@@ -349,6 +384,8 @@ export function switchRulesetMode(newRuleset = 'pbta', newGenreKey = null) {
     const isFae = newRuleset === 'fae';
     const defaultGenre = isFae ? (newGenreKey || 'cosmic_horror') : (newGenreKey || 'fantasy');
     activeDossier = createEmptyDossier(newRuleset, newGenreKey);
+    chatHistory = [];
+    $('#mhc_chat_messages').empty();
     changelog.push(`Switched ruleset mode to ${newRuleset.toUpperCase()} (${activeDossier.meta?.systemKey || defaultGenre})`);
     updateBlueprintDeck();
     saveDraft();
@@ -500,7 +537,15 @@ function updateBlueprintDeck() {
 
     const partyMode = cfg.partyMode || 'squad';
     const partyLabel = partyMode.charAt(0).toUpperCase() + partyMode.slice(1);
-    $('#mhc_dial_party_btn').text(`👥 Party: ${partyLabel}`);
+    const relsOn = cfg.relationships !== false;
+
+    if (isFae) {
+        $('#mhc_dial_party_btn').hide();
+        $('#mhc_dial_relationships_btn').hide();
+    } else {
+        $('#mhc_dial_party_btn').text(`👥 Party: ${partyLabel}`).show();
+        $('#mhc_dial_relationships_btn').text(`🤝 Relations: ${relsOn ? 'On' : 'Off'}`).css('opacity', relsOn ? '1' : '0.65').show();
+    }
 
     const emojisOn = cfg.cyoaEmojis !== false;
     $('#mhc_dial_emojis_btn').text(`✨ Emojis: ${emojisOn ? 'On' : 'Off'}`);
@@ -510,9 +555,6 @@ function updateBlueprintDeck() {
     if (simDepth === 'living_world') simLabel = 'Living World';
     else if (simDepth === 'static') simLabel = 'Static Solo';
     $('#mhc_dial_sim_depth_btn').text(`🌍 Sim: ${simLabel}`);
-
-    const relsOn = cfg.relationships !== false;
-    $('#mhc_dial_relationships_btn').text(`🤝 Relations: ${relsOn ? 'On' : 'Off'}`).css('opacity', relsOn ? '1' : '0.65');
 
     if (cfg.artStyle) {
         $('#mhc_deck_dial_art_text').text(cfg.artStyle);
@@ -652,7 +694,8 @@ function updateBlueprintDeck() {
             const demeanor = n.demeanor ? ` · <i>${n.demeanor}</i>` : '';
             const app = n.appearance ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Look:</b> ${n.appearance}</div>` : '';
             const rel = n.relationship ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Bond:</b> ${n.relationship}</div>` : '';
-            const boons = n.movesOrBoons ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>Boons/Moves:</b> ${n.movesOrBoons}</div>` : '';
+            const boonsLabel = isFae ? 'Fictional Leverage:' : 'Boons/Moves:';
+            const boons = n.movesOrBoons ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>${boonsLabel}</b> ${n.movesOrBoons}</div>` : '';
 
             let woundBadge = '';
             let condsHtml = '';
@@ -670,7 +713,7 @@ function updateBlueprintDeck() {
             }
 
             let relControls = '';
-            if (relsOn) {
+            if (relsOn && !isFae) {
                 const fVal = n.friendship ?? 0;
                 const aVal = n.affection ?? 0;
                 const fSign = fVal >= 0 ? '+' : '';
@@ -1354,7 +1397,7 @@ async function handleUserSend() {
                 const reportPrefix = m.builderReport ? `[BUILDER_REPORT: ${m.builderReport}]\n\n` : '';
                 return {
                     role: 'assistant',
-                    name: 'PbtA_Concierge',
+                    name: activeDossier?.meta?.ruleset === 'fae' ? 'FAE_Concierge' : 'PbtA_Concierge',
                     content: `${reportPrefix}${cleanContent}`,
                 };
             }
@@ -1505,7 +1548,9 @@ async function handleUserSend() {
                         {
                             role: 'user',
                             name: 'Player',
-                            content: 'Audit the current Campaign Blueprint against the 5-point PbtA design rubric and emit your [DOSSIER_CRITIQUE] block.',
+                            content: activeDossier?.meta?.ruleset === 'fae'
+                                ? 'Audit the current Campaign Blueprint against the 5-point FAE design rubric and emit your [DOSSIER_CRITIQUE] block.'
+                                : 'Audit the current Campaign Blueprint against the 5-point PbtA design rubric and emit your [DOSSIER_CRITIQUE] block.',
                         },
                     ];
 
@@ -2859,7 +2904,7 @@ export async function openConciergeModal({ ruleset = null, genreKey = null } = {
     populateInspirationDropdowns();
 
     // Check for existing draft or initialize greeting
-    const draftResult = loadValidatedDraft();
+    const draftResult = ruleset ? loadValidatedDraft(ruleset) : loadValidatedDraft();
 
     if (draftResult?.corrupted) {
         // Corrupted or incomplete draft in storage: discard and reset cleanly

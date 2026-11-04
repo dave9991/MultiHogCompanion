@@ -36,7 +36,19 @@ import {
     buildConciergeBuilderPrompt,
     buildFaeConciergeBuilderPrompt,
     buildConciergeBuilderContext,
+    buildFaeConciergeCriticPrompt,
+    buildConciergeCriticPrompt,
+    buildConciergeCriticContext,
+    buildFaeConciergeTalkerPrompt,
+    buildConciergeTalkerPrompt,
+    buildConciergeTalkerContext,
+    buildConciergeRefinerContext,
 } from '../concierge-prompt.js';
+
+import {
+    getDraftStorageKey,
+    STORAGE_DRAFT_KEY,
+} from '../concierge-ui.js';
 
 import {
     isProtagonistDowned,
@@ -801,5 +813,152 @@ full_finish_triggers: Scale the cliff or push through with heavy shields
         assert.equal(parsed.monsters.length, 1);
         assert.equal(parsed.monsters[0].instinct, 'To pin intruders in the canyon bottleneck and wear them down from high ground');
         assert.equal(parsed.monsters[0].status, 'Entrenched');
+    });
+
+    test('FAE Concierge: Empty Dossier defaults & healAndNormalizeDossier moves isolation', () => {
+        // 1. Empty dossier defaults
+        const faeDossier = createEmptyDossier('fae');
+        assert.equal(faeDossier.meta.ruleset, 'fae');
+        assert.equal(faeDossier.config.partyMode, 'solo', 'FAE empty dossier must default partyMode to solo');
+        assert.equal(faeDossier.config.relationships, false, 'FAE empty dossier must default relationships to false');
+        assert.deepEqual(faeDossier.protagonist.startingMoves, [], 'FAE protagonist startingMoves must default to empty');
+
+        const pbtaDossier = createEmptyDossier('pbta');
+        assert.equal(pbtaDossier.meta.ruleset, 'pbta');
+        assert.equal(pbtaDossier.config.partyMode, 'squad', 'PbtA empty dossier must default partyMode to squad');
+        assert.equal(pbtaDossier.config.relationships, true, 'PbtA empty dossier must default relationships to true');
+
+        // 2. healAndNormalizeDossier moves isolation
+        faeDossier.protagonist.positiveTags = ['Quick Reflexes', 'Trenchcoat'];
+        const healedFae = healAndNormalizeDossier(faeDossier);
+        assert.deepEqual(healedFae.protagonist.startingMoves, [], 'healAndNormalizeDossier must not alias startingMoves from positiveTags in FAE');
+
+        // 3. healAndNormalizeDossier purges moves if present in raw FAE object
+        const taintedFae = createEmptyDossier('fae');
+        taintedFae.protagonist.startingMoves = ['Hack & Slash', 'Volley'];
+        const cleansedFae = healAndNormalizeDossier(taintedFae);
+        assert.deepEqual(cleansedFae.protagonist.startingMoves, [], 'healAndNormalizeDossier must clear startingMoves in FAE');
+
+        // 4. PbtA startingMoves remain populated
+        const healedPbta = healAndNormalizeDossier(pbtaDossier);
+        assert.ok(healedPbta.protagonist.startingMoves.length >= 2, 'PbtA startingMoves must be populated');
+
+        // 5. applyDossierUpdates ignores moves in FAE
+        const updateWithMoves = `
+[UPDATE_DOSSIER]
+[PROTAGONIST]
+name: Jack
+moves:
+- Hack & Slash (roll +Might)
+- Defy Danger (roll +Agility)
+positive_tags: Gunsmith (Pistol maintenance)
+[/PROTAGONIST]
+[/UPDATE_DOSSIER]
+`;
+        const res = applyDossierUpdates(updateWithMoves, createEmptyDossier('fae'));
+        assert.deepEqual(res.updatedDossier.protagonist.startingMoves, [], 'applyDossierUpdates must not accept moves for FAE protagonist');
+        assert.ok(res.updatedDossier.protagonist.positiveTags.some(t => t.includes('Gunsmith')));
+    });
+
+    test('FAE Concierge: Critic Prompt 5-point rubric & context routing', () => {
+        // 1. buildFaeConciergeCriticPrompt content
+        const faeCritic = buildFaeConciergeCriticPrompt();
+        assert.ok(faeCritic.includes('FAE Blueprint Judge & Story Editor'));
+        assert.ok(faeCritic.includes('5-Point FAE Campaign Design Rubric'));
+        assert.ok(faeCritic.includes('1. **Setting & Tone Cohesion'));
+        assert.ok(faeCritic.includes('2. **FAE Encounter Anatomy & Adversary Design'));
+        assert.ok(faeCritic.includes('3. **Resource Pools & Calibration Knobs'));
+        assert.ok(faeCritic.includes('4. **Positive Tags, Scars & Mechanical Purity'));
+        assert.ok(faeCritic.includes('5. **The Kick\'s Immediate Crucible'));
+        assert.ok(faeCritic.includes('threat_level'));
+        assert.ok(faeCritic.includes('leverage_barriers'));
+        assert.ok(faeCritic.includes('zero_debuff'));
+        assert.ok(faeCritic.includes('Trait [context]'));
+        assert.ok(faeCritic.includes('Companion: Name (Role)'));
+        assert.ok(faeCritic.includes('[DOSSIER_CRITIQUE]'));
+
+        // PbtA purge check forbids PbtA moves/dice
+        assert.ok(faeCritic.includes('MANDATORY PURGE CHECK (NO PBTA / NO D&D)'));
+        assert.ok(!faeCritic.includes('+2, +1, +1, 0, -1'), 'FAE Critic must not mention PbtA stat array');
+        assert.ok(!faeCritic.includes('10+ full hit'), 'FAE Critic must not require 10+ hit outcomes');
+
+        // 2. buildConciergeCriticPrompt (PbtA) unchanged
+        const pbtaCritic = buildConciergeCriticPrompt();
+        assert.ok(pbtaCritic.includes('PbtA Blueprint Judge & Story Editor'));
+        assert.ok(pbtaCritic.includes('5-Point PbtA Campaign Design Rubric'));
+        assert.ok(pbtaCritic.includes('+2, +1, +1, 0, -1'));
+        assert.ok(pbtaCritic.includes('10+ full hit / 7–9 mixed hit'));
+
+        // 3. buildConciergeCriticContext routing
+        const faeDossier = createEmptyDossier('fae');
+        const faeCriticCtx = buildConciergeCriticContext(faeDossier, 'Explore the sunken ruins');
+        assert.ok(faeCriticCtx.includes('FAE Blueprint Judge'));
+        assert.ok(!faeCriticCtx.includes('PbtA Blueprint Judge'));
+
+        const pbtaDossier = createEmptyDossier('pbta');
+        const pbtaCriticCtx = buildConciergeCriticContext(pbtaDossier, 'Explore the dungeon');
+        assert.ok(pbtaCriticCtx.includes('PbtA Blueprint Judge'));
+        assert.ok(!pbtaCriticCtx.includes('FAE Blueprint Judge'));
+    });
+
+    test('FAE Concierge: Talker Prompt GM guidance & context routing', () => {
+        // 1. buildFaeConciergeTalkerPrompt content
+        const faeTalker = buildFaeConciergeTalkerPrompt();
+        assert.ok(faeTalker.includes('FAE Concierge'));
+        assert.ok(faeTalker.includes('4dF Attrition Ladder'));
+        assert.ok(faeTalker.includes('Resource Pools & Breaking Point'));
+        assert.ok(faeTalker.includes('Positive Tags & Scars (Trait Qualification)'));
+        assert.ok(faeTalker.includes('Encounters, Threat & Pressures'));
+        assert.ok(faeTalker.includes('Zero-Bookkeeping Companions'));
+
+        // Purity: no PbtA moves, 2d6 scale, doom tracks in rules philosophy
+        assert.ok(!faeTalker.includes('Protagonist Moves'), 'FAE Talker must not mention Protagonist Moves');
+        assert.ok(!faeTalker.includes('The 2d6 Scale:'), 'FAE Talker must not use 2d6 Scale');
+        assert.ok(!faeTalker.includes('+2, +1, +1, 0, -1'), 'FAE Talker must not mention PbtA stat array');
+        assert.ok(!faeTalker.includes('Soft vs. Hard Moves'), 'FAE Talker must not mention Soft vs Hard moves');
+
+        // 2. buildConciergeTalkerPrompt (PbtA) unchanged
+        const pbtaTalker = buildConciergeTalkerPrompt();
+        assert.ok(pbtaTalker.includes('PbtA Concierge'));
+        assert.ok(pbtaTalker.includes('The 2d6 Scale'));
+        assert.ok(pbtaTalker.includes('+2, +1, +1, 0, -1'));
+
+        // 3. buildConciergeTalkerContext routing
+        const faeDossier = createEmptyDossier('fae');
+        const faeTalkerCtx = buildConciergeTalkerContext(faeDossier, ['Initialized']);
+        assert.ok(faeTalkerCtx.includes('FAE Concierge'));
+        assert.ok(!faeTalkerCtx.includes('PbtA Concierge'));
+
+        const pbtaDossier = createEmptyDossier('pbta');
+        const pbtaTalkerCtx = buildConciergeTalkerContext(pbtaDossier, ['Initialized']);
+        assert.ok(pbtaTalkerCtx.includes('PbtA Concierge'));
+        assert.ok(!pbtaTalkerCtx.includes('FAE Concierge'));
+    });
+
+    test('FAE Concierge: Builder Prompt NPC role and Companion instructions', () => {
+        const builderPrompt = buildFaeConciergeBuilderPrompt();
+        assert.ok(builderPrompt.includes('role: Mentor | Contact | Ally'), 'FAE builder prompt example role must be Mentor | Contact | Ally');
+        assert.ok(!builderPrompt.includes('role: Companion (Party)'), 'FAE builder prompt must not suggest Companion (Party) role');
+        assert.ok(
+            /companions who travel with the PC are recorded as `Companion: Name \(Role\)` entries in the \[PROTAGONIST\] positive_tags/i.test(builderPrompt),
+            'FAE builder prompt must include positive instruction for companion tags'
+        );
+    });
+
+    test('FAE Concierge: Refiner context & draft storage key isolation', () => {
+        // 1. Refiner context routing
+        const faeDossier = createEmptyDossier('fae');
+        const faeRefinerCtx = buildConciergeRefinerContext(faeDossier, [], {
+            weaknesses: ['Thin encounter barriers'],
+            directives: ['Enrich leverage barriers'],
+        });
+        assert.ok(faeRefinerCtx.includes('FAE Blueprint Builder'));
+        assert.ok(faeRefinerCtx.includes('Enrich leverage barriers'));
+
+        // 2. Draft storage key isolation
+        assert.equal(getDraftStorageKey('fae'), 'mhc_concierge_draft_fae');
+        assert.equal(getDraftStorageKey('pbta'), 'mhc_concierge_draft_pbta');
+        assert.equal(getDraftStorageKey(null), 'mhc_concierge_draft_pbta');
+        assert.equal(STORAGE_DRAFT_KEY, 'mhc_pbta_concierge_draft');
     });
 });

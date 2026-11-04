@@ -289,3 +289,26 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `haven_or_specialist`
   - `day_pass`
   - `scene_transition`
+
+---
+
+## 🎩 FAE Concierge (Session Zero)
+
+The **FAE Concierge** provides an interactive, dual-pass collaborative Session Zero tailored strictly to Freeform Attrition Engine campaigns:
+
+### 1. Dual-Agent Architecture & PbtA Isolation
+* **FAE Blueprint Builder (`buildFaeConciergeBuilderPrompt`):** State compiler extracting setting details, 2–3 Resource Pools (capacity 6–12), 3–4 Positive Tags, Scars, Factions, Encounters/Adversaries, and Maps into `[UPDATE_DOSSIER]` directives without conversational clutter.
+* **FAE Blueprint Judge / Critic (`buildFaeConciergeCriticPrompt`):** Evaluates candidate blueprints against a strict 5-point FAE rubric (100-point scale), rejecting PbtA moves, 2d6 outcome tiers, countdown doom tracks, or D&D jargon.
+* **FAE Session Zero Facilitator / Talker (`buildFaeConciergeTalkerPrompt`):** Natural dialogue Session Zero GM grounded strictly in the live blueprint deck beside chat (`FAE_Concierge`). Never emits syntax blocks or launches play prematurely.
+
+### 2. 5-Point FAE Design Rubric
+1. **Setting & Tone Cohesion (0–20):** Premise faithfully captures player pitch, atmospheric tone, world axioms, and cultural/technological stakes without generic filler.
+2. **FAE Encounter Anatomy (0–20):** Threats 1–4 with explicit `layers`, `pools_at_risk`, evocative `pressures`, active `instinct`, status, bracketed `leverage_barriers`, and decisive `full_finish_triggers` (Bypass vs. Total Intent tradeoff).
+3. **Resource Pools & Calibration Knobs (0–20):** Protagonist has 2–3 genre-appropriate pools with defined `zero_debuff`, `recovery`, and `overflow` rules; knobs (`flee_grace_toggle`, `base_attrition_shift`, `action_tempo`, `overflow_default`, `heroic_tier`) are deliberately calibrated.
+4. **Positive Tags, Scars & Mechanical Purity (0–20):** 3–4 situational Positive Tags (Trait Qualification Protocol, ~25–30% applicability) and 0–1 Scar. Travelling allies are recorded as `Companion: Name (Role)` Positive Tags (zero-bookkeeping), and all PbtA 2d6 moves/doom tracks and D&D mechanics are strictly purged.
+5. **The Kick's Immediate Crucible (0–20):** *In media res* crisis placed directly at the starting site without forcing an immediate dice roll on Turn 1.
+
+### 3. Zero-Bookkeeping Companions & UI Specialization
+* **NPC Cards vs. Party Companions:** Travelling companions live exclusively as `Companion: Name (Role)` entries in `[PROTAGONIST]` `positive_tags`. `[NPC]` cards represent external contacts, mentors, or allies with `Fictional Leverage:` instead of `Boons/Moves:`.
+* **Cleaned Calibration Dials:** The party-mode dial (`mhc_dial_party_btn`) and relationship dial/sliders (`mhc_dial_relationships_btn`, `.mhc-npc-rel-controls`) are hidden in FAE mode. `createEmptyDossier('fae')` defaults to `partyMode: 'solo'` and `relationships: false`.
+* **Scoped Draft Isolation:** Session drafts are isolated by ruleset in localStorage (`mhc_concierge_draft_fae` vs. `mhc_concierge_draft_pbta`), migrating legacy `mhc_pbta_concierge_draft` safely without crossover pollution. Switching rulesets clears active chat history and staged blueprint state.

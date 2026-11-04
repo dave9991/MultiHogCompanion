@@ -95,11 +95,11 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
                 playstyle: 'cyoa_5',
                 cyoaEmojis: true,
                 harmMax: 5,
-                partyMode: 'squad',
+                partyMode: 'solo',
                 artStyle: '',
                 pacingXp: 5,
                 simulationDepth: 'active_fronts',
-                relationships: true,
+                relationships: false,
                 maxHarmFate: {
                     rule: 'Mortal Peril (Last Breath / Dying)',
                     statusToken: '(-) Incapacitated',
@@ -774,7 +774,7 @@ The Kick: Unset
             lines.push(`conditions: ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}`);
         }
         if (p.status) lines.push(`status: ${p.status}`);
-        if (p.startingMoves && p.startingMoves.length) {
+        if (!isFae && p.startingMoves && p.startingMoves.length) {
             lines.push('moves:');
             p.startingMoves.forEach(mv => lines.push(`- ${mv}`));
         }
@@ -1389,7 +1389,7 @@ export function applyDossierUpdates(text, dossier) {
         }
 
         const moves = parseBulletOrListItems(pBlock, 'moves', { splitCommas: false });
-        if (moves.length) {
+        if (moves.length && updated.meta?.ruleset !== 'fae') {
             updated.protagonist.startingMoves = moves;
             changes.push(`Protagonist moves updated (${moves.length} moves registered)`);
         }
@@ -1439,8 +1439,10 @@ export function applyDossierUpdates(text, dossier) {
         if (posTagsList.length > 0) {
             const cleanPos = sanitizeFaePositiveTags(posTagsList, 5);
             updated.protagonist.positiveTags = cleanPos;
-            if (!updated.protagonist.startingMoves || updated.protagonist.startingMoves.length === 0) {
-                updated.protagonist.startingMoves = [...cleanPos];
+            if (updated.meta?.ruleset !== 'fae') {
+                if (!updated.protagonist.startingMoves || updated.protagonist.startingMoves.length === 0) {
+                    updated.protagonist.startingMoves = [...cleanPos];
+                }
             }
             changes.push(`Protagonist positive tags updated (${cleanPos.length} tags registered)`);
         }
@@ -2839,9 +2841,9 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
             }
         }
 
-        if (!Array.isArray(dossier.protagonist.startingMoves) || dossier.protagonist.startingMoves.length === 0) {
-            dossier.protagonist.startingMoves = [...dossier.protagonist.positiveTags];
-        }
+        // In FAE, startingMoves is never aliased from positive tags and moves are not accepted
+        dossier.protagonist.startingMoves = [];
+        delete dossier.protagonist.moves;
         if (!Array.isArray(dossier.protagonist.conditions) || dossier.protagonist.conditions.length === 0) {
             dossier.protagonist.conditions = [...dossier.protagonist.negativeTags];
         }

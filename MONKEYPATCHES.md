@@ -36,7 +36,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 | :--- | :--- | :--- | :--- | :--- |
 | **ADR-MP-01** | `window.fetch` Interception | Network API | `pbta-companion-bridge.js:165` | 🔴 **HIGH**: Global network interceptor. |
 | **ADR-MP-02** | `/imagine` Slash Command Callback Wrapping | Command Parser | `index.js:1070` | 🟡 **MODERATE**: Wrapped object property. |
-| **ADR-MP-03** | PbtA 2d6 RNG Queue Injection (`generate_interceptor`) | LLM Prompt Pipeline | `index.js:1944` | 🟢 **LOW**: Official SillyTavern manifest hook. |
+| **ADR-MP-03** | PbtA 2d6 & FAE 4dF Single-Roll Queue & Tool Call Injection (`generate_interceptor`) | LLM Prompt Pipeline | `index.js:2737` | 🟢 **LOW**: Official SillyTavern manifest hook. |
 | **ADR-MP-04** | DOM `stopImmediatePropagation` Hijacking | UI Event Bus | `namerag-hooks.js:426` | 🔴 **HIGH**: Silently suppresses upstream listeners. |
 | **ADR-MP-05** | In-Memory `stockPrompts` Mutation | Upstream Settings Object | `character-creator-sanitizer.js:25` | 🟡 **MODERATE**: In-place settings rewriting. |
 | **ADR-MP-06** | `window._mhcPendingFreshRestart` Global Flag | Window Global State | `adventure-chat.js:391` | 🟡 **MODERATE**: Cross-tick global semaphore. |
@@ -119,19 +119,19 @@ SillyTavern adds native support for contextual resolution hooks in slash command
 
 ---
 
-### ADR-MP-03: SillyTavern Pipeline Generation Interceptor (`generate_interceptor`) — PbtA 2d6 & FAE 4dF RNG Injection
+### ADR-MP-03: SillyTavern Pipeline Generation Interceptor (`generate_interceptor`) — PbtA 2d6 & FAE 4dF Single-Roll RNG Injection & Function Tool Mode
 <a id="adr-mp-03-sillytavern-pipeline-generation-interceptor-generate_interceptor--pbta-2d6-rng-injection"></a>
 
 * **Status:** Active / Clean
-* **Location:** [`index.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js#L1944-L1982) (`mhcGenerationInterceptor`)
+* **Location:** [`index.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js#L2737-L2890) (`mhcGenerationInterceptor`)
 * **Patch Type:** SillyTavern Pipeline Hook (Registered via `manifest.json` and `globalThis`)
 
 #### Context & Justification
 Upstream MultiHog registers a `generate_interceptor` (at `loading_order: 20`) to inject its RPG state prompt and a polyhedral RNG queue into the prompt context before generation. MultiHog's RNG queue injects lines containing D&D 5e dice (`d20/d4/d6/d8/d10/d12`).
 
-When running a Powered by the Apocalypse (PbtA) or Freeform Attrition Engine (FAE) cartridge ([`FEAT-01`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)), game mechanics rely exclusively on custom dice formulas: PbtA uses pre-paired 2d6 rolls, while FAE uses 4dF dice with a pre-computed turn resolution matrix. Upstream MultiHog hardcodes polyhedral lines and offers **no cartridge API, ruleset hook, or configuration for custom dice formats**. Without intervention, the narrator model either wastes tokens parsing irrelevant polyhedral dice, hallucinates rolls, or misinterprets d20 values.
+When running a Powered by the Apocalypse (PbtA) or Freeform Attrition Engine (FAE) cartridge ([`FEAT-01`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)), game mechanics rely exclusively on custom dice formulas: PbtA uses 2d6 rolls, while FAE uses 4dF dice with a pre-computed turn resolution matrix or function tool execution. Upstream MultiHog hardcodes polyhedral lines and offers **no cartridge API, ruleset hook, or configuration for custom dice formats**. Without intervention, the narrator model either wastes tokens parsing irrelevant polyhedral dice, hallucinates rolls, or misinterprets d20 values.
 
-Companion registers a secondary interceptor (at `loading_order: 30`) to inspect outgoing user messages and replace MultiHog's polyhedral RNG queue with either a clean, pre-paired 2d6 block or an FAE 4dF block.
+Companion registers a secondary interceptor (at `loading_order: 30`) to inspect outgoing user messages and replace MultiHog's polyhedral RNG queue with either a clean single 2d6 roll or an FAE 4dF block, or manage native tool calls depending on MultiHog's RNG mode (`s.diceFunctionTool`).
 
 *(Note: Earlier iterations also executed historical CYOA button scrubbing. That functionality was retired to respect upstream MultiHog's native `cyoaConfig.stripOldChoicesFromPrompt`, eliminate fragile natural language regexes from outgoing chat context, and strictly adhere to the principle of making only necessary changes to the host framework.)*
 
@@ -140,20 +140,27 @@ Companion registers a secondary interceptor (at `loading_order: 30`) to inspect 
 2. Exported to `globalThis.mhcGenerationInterceptor`.
 3. SillyTavern calls this function with the outgoing mutable `chat` array before prompt compilation.
 4. **Early Exit Guard:** If `!Array.isArray(chat) || (!isPbtAActive() && !isFaeActive())`, returns immediately in $O(1)$ without inspecting or mutating messages. Standard D&D 5e campaigns are completely unaffected.
-5. **RNG Replacement:**
-   - When FAE is active, searches the last 3 messages for upstream MultiHog's polyhedral `[RNG_QUEUE ...]` block and replaces it with `buildFaeRngBlock()`, providing 6 4dF lines and the Pre-Computed Turn Resolution Matrix.
-   - When PbtA is active, replaces it with `buildPbtA2d6Block()`, providing 12 pre-paired 2d6 rolls (`1: 2d6 → 3 + 5 = 8`).
+5. **RNG Modes (Pre-Seeded Only vs Pre-Seeded + Tool Calls):**
+   - **Pre-Seeded Only (`diceFunctionTool: false`):**
+     - When FAE is active, searches the last 3 messages for upstream MultiHog's polyhedral `[RNG_QUEUE ...]` block and replaces it with `buildFaeRngBlock()`. Defaults to a flattened single 4dF roll (`lineCount: 1`), providing the Pre-Computed Turn Resolution Matrix across all 4 Threat tiers and positive/negative tag branches, alongside dynamic pacing hints.
+     - On opening scene turns (`isOpeningTurn === true`), dice lines and the pre-computed matrix are suppressed, outputting only the Opening Scene Setup pacing directive block.
+     - When PbtA is active, replaces the polyhedral queue with `buildPbtA2d6Block()`, providing a single pre-paired 2d6 roll (`lineCount: 1`).
+   - **Tool Call Mode (`diceFunctionTool: true`):**
+     - When FAE is active, prepends ONLY the pacing hint block in `[RNG_QUEUE]`, completely omitting pre-computed dice lines and matrix. Unregisters MultiHog's D&D tools (`RollTheDice`, `RollTheDiceD100`) and registers the native SillyTavern tool `resolve_fae_action`. When called, `executeFaeActionTool(state, args)` rolls 4dF, evaluates attrition, applies breaking point clamping or terminal overflow, returns structured directives with inline rolls and updated pool footers, and stores pending state for automatic post-turn reconciliation.
+     - When PbtA is active, strips `[RNG_QUEUE]` from the prompt and registers `roll_pbta_move`. When called, `executePbtaMoveTool(args)` rolls 2d6 + mod, returns Move tier and inline roll, and instructs the MC.
+     - When switching back to D&D 5e, restores MultiHog's native dice function tool.
 
 #### Blast Radius (What Breaks If Removed)
-* PbtA campaigns receive MultiHog's default polyhedral RNG queue (`d20/d4/d6/d8/d10/d12`) instead of paired 2d6 rolls.
-* Zero-touch dice resolution breaks in PbtA, wasting tokens and forcing the LLM to either consume multiple lines per roll or hallucinate dice results.
+* PbtA and FAE campaigns receive MultiHog's default polyhedral RNG queue (`d20/d4/d6/d8/d10/d12`) instead of 2d6 or 4dF.
+* Dice resolution breaks, wasting context tokens on multi-line queues and forcing the LLM to either consume irrelevant dice or hallucinate results.
+* Function tool calling in SillyTavern calls MultiHog's D&D `RollTheDice` tool instead of evaluating FAE pool attrition or PbtA move tiers.
 
 #### Fragility & Code Smell Analysis
-* Uses SillyTavern's official extension contract (`generate_interceptor` + `loading_order`). Very low fragility.
-* Only executes when `isPbtAActive()` is true; strictly touches the `[RNG_QUEUE ...]` tag in the latest user message and never alters narrative story prose.
+* Uses SillyTavern's official extension contract (`generate_interceptor` + `loading_order`) and tool registration APIs (`registerFunctionTool` / `unregisterFunctionTool`). Very low fragility.
+* Only executes when `isPbtAActive()` or `isFaeActive()` is true; strictly touches the `[RNG_QUEUE ...]` tag in the latest user message and never alters narrative story prose.
 
 #### Retirement Criteria
-Upstream MultiHog provides a pluggable RNG queue provider or native cartridge-based dice format configuration (e.g. 2d6).
+Upstream MultiHog provides a pluggable RNG queue provider or native cartridge-based dice format and function tool configuration.
 
 ---
 

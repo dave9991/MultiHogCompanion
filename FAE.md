@@ -115,6 +115,20 @@ The engine tracks `state.state_flags.turns_since_last_test` across turns. When `
   - If `turns >= window.max`: GM resolves proactive actions at Threat 1+ or introduces an external complication.
   - Otherwise: On rhythm status.
 
+### 7. RNG Modes: Single-Roll Queue vs Function Tool Mode
+FAE supports both zero-touch pre-computation and native function tool calling, wired directly to MultiHog's native RNG radio toggle (`s.diceFunctionTool`):
+
+* **Pre-Seeded Only (`diceFunctionTool: false`):**
+  - **Flattened Single-Roll Queue:** FAE outputs exactly 1 4dF roll (`lineCount: 1`), followed by the **Pre-Computed Turn Resolution Matrix** mapping all 4 Threat tiers and positive/negative tag variations to exact Attrition and Outcome Tiers.
+  - **Zero Token Waste:** Eliminates multi-roll queues and hallucinations; the GM simply matches the resolved branch in the matrix and prints the formatted inline roll.
+  - **Opening Scene Setup:** When `isOpeningTurn === true`, dice lines and the pre-computed matrix are suppressed, outputting only the Opening Scene Setup pacing directive block.
+* **Function Tool Mode (`Pre-Seeded + Tool Calls`, `diceFunctionTool: true`):**
+  - **Tool Registration:** Companion registers `resolve_fae_action` with SillyTavern's function tool registry and disables MultiHog's D&D polyhedral tools (`RollTheDice`, `RollTheDiceD100`).
+  - **Prompt Streamlining:** The pre-computed matrix and dice rolls are stripped from the prompt; only the compact `[RNG_QUEUE]` pacing directive block is provided.
+  - **Dynamic Tool Execution (`executeFaeActionTool`):** When the GM evaluates the fiction and commits to a Threat 1–4 action, it calls `resolve_fae_action` with `pool_at_risk`, `threat_level`, `progress_scale`, `matched_positive_tags`, `matched_negative_tags`, and `is_retreating`.
+  - **Immediate Response & Directive:** The tool rolls 4dF, calculates attrition, applies Breaking Point or Terminal Overflow, records pending state, and returns structured instructions including `INLINE ROLL`, `OUTCOME TIER`, `NARRATIVE DIRECTIVE`, and `UPDATED FOOTER POOLS`.
+  - **State Reconciliation:** Upon turn completion, `reconcileFaeMemoAfterTurn` stamps the tool-resolved pool states, zero debuffs, and tempo counters onto the memo to prevent any LLM drift.
+
 ---
 
 ## ⚔️ Native FAE Encounter Blocks

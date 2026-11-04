@@ -1130,7 +1130,7 @@ export function triggerEventOrRest(state, eventType) {
  * @param {number|null} [options.fixedDiceRoll=null] Optional fixed roll for deterministic testing
  * @returns {object} Action resolution result
  */
-export function resolveAction(state, options = {}) {
+export function resolveAction(state, options = {}, fixedRollArg = null) {
     const pool_name = options.pool_name || options.pool_at_risk || options.pool;
     const threat_level = options.threat_level ?? options.threat ?? 1;
     const progress_scale = options.progress_scale || options.scale || 'full';
@@ -1138,7 +1138,7 @@ export function resolveAction(state, options = {}) {
     const matched_negative_tags = options.matched_negative_tags || options.negative_tags || [];
     const is_retreating = Boolean(options.is_retreating || options.isRetreating);
     const grant_advantage_name = options.grant_advantage_name || options.created_advantage_tag || options.advantage_tag || options.grantAdvantageName || null;
-    const fixedDiceRoll = options.fixedDiceRoll ?? null;
+    const fixedDiceRoll = options.fixedDiceRoll ?? (fixedRollArg !== null && fixedRollArg !== undefined ? fixedRollArg : null);
 
     if (!state.state_flags) {
         state.state_flags = { breather_available: true, turns_since_last_test: 0 };
@@ -1266,21 +1266,116 @@ export function resolveAction(state, options = {}) {
 }
 
 /**
+ * Deterministically executes the resolve_fae_action function tool call.
+ * Pure/cloned: deep-clones state so caller's object is not mutated in-place.
+ *
+ * @param {object} state Active FAE state
+ * @param {object} [args={}] Tool arguments
+ * @returns {{ result: object, roll: object, updatedState: object, inline_roll: string, updated_pools_footer: string, directive: string, toolResponseText: string }}
+ */
+export function executeFaeActionTool(state, args = {}) {
+    const clonedState = JSON.parse(JSON.stringify(state || {}));
+    if (!clonedState.pools) clonedState.pools = {};
+    if (!clonedState.character) clonedState.character = {};
+    if (!Array.isArray(clonedState.character.negative_tags)) clonedState.character.negative_tags = [];
+
+    const poolKeys = Object.keys(clonedState.pools);
+    const targetPoolInput = String(args.pool_at_risk || args.pool_name || '').trim().toLowerCase();
+    let poolKey = poolKeys[0] || 'health';
+
+    if (targetPoolInput && poolKeys.length > 0) {
+        for (const [k, p] of Object.entries(clonedState.pools)) {
+            if (k.toLowerCase() === targetPoolInput || (p?.label && p.label.toLowerCase() === targetPoolInput)) {
+                poolKey = k;
+                break;
+            }
+        }
+    }
+
+    const threatLevel = Math.max(1, Math.min(4, parseInt(args.threat_level, 10) || 2));
+    const progressScale = ['full', 'stepping_stone', 'pivot'].includes(args.progress_scale) ? args.progress_scale : 'full';
+    const posTags = Array.isArray(args.matched_positive_tags)
+        ? args.matched_positive_tags
+        : (typeof args.matched_positive_tags === 'string' ? splitTopLevelTagItems(args.matched_positive_tags) : []);
+    const negTags = Array.isArray(args.matched_negative_tags)
+        ? args.matched_negative_tags
+        : (typeof args.matched_negative_tags === 'string' ? splitTopLevelTagItems(args.matched_negative_tags) : []);
+    const isRetreating = Boolean(args.is_retreating);
+    const grantAdvantageName = args.grant_advantage_name || null;
+
+    const rollObj = (args.fixedDiceRoll !== null && args.fixedDiceRoll !== undefined)
+        ? (typeof args.fixedDiceRoll === 'object' ? args.fixedDiceRoll : { total: args.fixedDiceRoll, dice: [args.fixedDiceRoll, 0, 0, 0] })
+        : roll4dF();
+
+    const res = resolveAction(clonedState, {
+        pool_at_risk: poolKey,
+        threat_level: threatLevel,
+        progress_scale: progressScale,
+        matched_positive_tags: posTags,
+        matched_negative_tags: negTags,
+        is_retreating: isRetreating,
+        grant_advantage_name: grantAdvantageName,
+        fixedDiceRoll: rollObj.total,
+    }, rollObj.total);
+
+    const pool = clonedState.pools[poolKey] || { label: poolKey, current: 0, max: 0 };
+    const diceFmt = rollObj.dice.map(d => (d > 0 ? `+${d}` : `${d}`)).join(', ');
+    const signTotal = rollObj.total > 0 ? `+${rollObj.total}` : `${rollObj.total}`;
+    const effectiveThreat = Math.min(5, Math.max(1, threatLevel + (progressScale === 'pivot' ? 1 : 0)));
+
+    const posCredit = res.matched_positive_tags?.length || 0;
+    const posCreditStr = posCredit > 0 ? ` - ${posCredit} (${res.matched_positive_tags.join(', ')})` : '';
+    const negPenalty = res.matched_negative_tags?.length || 0;
+    const negPenaltyStr = negPenalty > 0 ? ` + ${negPenalty} (${res.matched_negative_tags.join(', ')})` : '';
+    const shift = clonedState.knobs?.base_attrition_shift || 0;
+    const shiftModStr = shift !== 0 ? (shift > 0 ? ` + Shift ${shift}` : ` - Shift ${Math.abs(shift)}`) : '';
+
+    const inline_roll = `*(FAE Action [${pool.label}]: 4dF [Roll: ${diceFmt} = ${signTotal}] + Threat ${effectiveThreat}${posCreditStr}${negPenaltyStr}${shiftModStr} = Attrition ${res.attrition} → ${res.outcome} (${res.pool_remaining}/${pool.max}))*`;
+    const updated_pools_footer = Object.values(clonedState.pools).map(p => `(${p.label}: ${p.current}/${p.max})`).join(' | ');
+
+    const toolResponseText = [
+        `INLINE ROLL (print verbatim in prose before narrating consequence): ${inline_roll}`,
+        `OUTCOME TIER: ${res.outcome}`,
+        `NARRATIVE DIRECTIVE: ${res.directive}`,
+        `UPDATED FOOTER POOLS (use in your 2-line end-of-message status footer): ${updated_pools_footer}`,
+    ].join('\n');
+
+    return {
+        result: res,
+        roll: rollObj,
+        updatedState: clonedState,
+        inline_roll,
+        updated_pools_footer,
+        directive: res.directive,
+        toolResponseText,
+    };
+}
+
+/**
  * Builds the pre-computed RNG Queue block with 4dF lines and a zero-math
  * lookup matrix for Roll #1.
  *
  * @param {object} [options={}]
  * @param {object|null} [options.state=null]
  * @param {string} [options.genreKey='cosmic_horror']
- * @param {number} [options.lineCount=6]
+ * @param {number} [options.lineCount=1]
  * @param {boolean} [options.activeEncounter=false]
  * @param {boolean} [options.isOpeningTurn=false]
+ * @param {boolean} [options.toolMode=false]
  * @returns {string} Formatted [RNG_QUEUE] block
  */
-export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lineCount = 6, activeEncounter = false, isOpeningTurn = false } = {}) {
+export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lineCount = 1, activeEncounter = false, isOpeningTurn = false, toolMode = false } = {}) {
     const activeState = state || createInitialFaeState(genreKey);
+    const pacingHint = getPacingSuggestion(activeState, activeEncounter, { isOpeningTurn });
+    const header = `[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]`;
+
+    if (isOpeningTurn === true || toolMode === true) {
+        return `${header}\n${pacingHint}\n[/RNG_QUEUE]`;
+    }
+
+    const count = Math.max(1, lineCount);
     const rolls = [];
-    for (let i = 0; i < lineCount; i++) {
+    for (let i = 0; i < count; i++) {
         const roll = roll4dF();
         const diceFmt = roll.dice.map(d => (d > 0 ? `+${d}` : `${d}`)).join(', ');
         const signTotal = roll.total > 0 ? `+${roll.total}` : `${roll.total}`;
@@ -1328,10 +1423,8 @@ export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lin
         }
     }
 
-    const header = `[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]`;
     const queueText = rolls.map(r => r.line).join('\n');
     const matrixText = matrixLines.join('\n');
-    const pacingHint = getPacingSuggestion(activeState, activeEncounter, { isOpeningTurn });
 
     return `${header}\n${queueText}\n\n${matrixText}\n\n${pacingHint}\n[/RNG_QUEUE]`;
 }
@@ -1349,6 +1442,7 @@ export function buildFaeRoleContent(isFreeform = false, options = {}) {
         isFreeform = Boolean(options.isFreeform);
     }
     const isHeroic = Boolean(options?.heroicTier ?? options?.heroic_tier ?? false);
+    const toolMode = Boolean(options?.toolMode ?? options?.diceFunctionTool ?? false);
 
     const coreLoopStep1 = isFreeform
         ? `1. Describe the situation honestly and establish immediate stakes, then ask what {{user}} does.`
@@ -1379,6 +1473,14 @@ export function buildFaeRoleContent(isFreeform = false, options = {}) {
         ? '(environment, Companion, or Heroic Domain)'
         : '(environment or Companion)';
 
+    const resolutionMethod = toolMode
+        ? 'call resolve_fae_action()'
+        : 'check the Pre-Computed Turn Resolution Matrix';
+
+    const loopStep3 = toolMode
+        ? '3. Call the resolve_fae_action() tool per <rng_system>. Print the returned INLINE ROLL verbatim in narrative prose right before narrating consequences: *(FAE Action [Pool]: 4dF [...] = Attrition X → Outcome)*.'
+        : '3. Consult the pre-computed resolution matrix per <rng_system>. Print the roll inline: *(FAE Action [Pool]: 4dF [...] = Attrition X → Outcome)*.';
+
     return `<role>
 You are the Game Master (GM) running the Freeform Attrition Engine (FAE). FAE replaces binary pass/fail checks with single-pass forward momentum measured by resource attrition.
 
@@ -1388,7 +1490,7 @@ YOUR AGENDA:
 - Play to find out what happens: respect player Intent and let the fiction evolve honestly.
 
 CORE LAWS OF FAE RESOLUTION:
-1. SINGLE-PASS RESOLUTION: {{user}} declares Task and Intent. You evaluate the fiction, check the Pre-Computed Turn Resolution Matrix or call resolve_action(), and narrate the complete outcome in the same turn. NEVER halt the turn for meta-currency haggling or menu choices.
+1. SINGLE-PASS RESOLUTION: {{user}} declares Task and Intent. You evaluate the fiction, ${resolutionMethod}, and narrate the complete outcome in the same turn. NEVER halt the turn for meta-currency haggling or menu choices.
 2. ENCOUNTER-WIDE RESOLUTION (NO ACTION ECONOMY): FAE has no initiative, combat rounds, or individual creature turns. The Threat describes the ENTIRE encounter as a whole, resolved in a single player turn.
 3. ATTRITION OVER FAILURE: Actions succeed or advance. The dice (4dF from -4 to +4, tight bell curve on 0) determine how much wear-and-tear the character absorbs along the way.
 ${twoTierNarration}
@@ -1405,7 +1507,7 @@ ${twoTierNarration}
 CORE LOOP (every turn):
 ${coreLoopStep1}
 2. {{user}} acts in the fiction with declared Task and Intent.
-3. Consult the pre-computed resolution matrix or resolve_action() per <rng_system>. Print the roll inline: *(FAE Action [Pool]: 4dF [...] = Attrition X → Outcome)*.
+${loopStep3}
 4. Follow the Outcome honestly, reflect updated pool values in the two-line status footer, and hand the spotlight back.
 </role>`;
 }
@@ -1413,9 +1515,43 @@ ${coreLoopStep1}
 /**
  * Builds the FAE RNG system section instructions for consuming 4dF from SillyTavern.
  *
+ * @param {object} [options={}]
  * @returns {string} XML rng_system prompt block
  */
-export function buildFaeRngContent() {
+export function buildFaeRngContent(options = {}) {
+    const toolMode = Boolean(options?.toolMode ?? options?.diceFunctionTool ?? false);
+
+    if (toolMode) {
+        return `<rng_system>
+The player NEVER rolls dice. This section is the single authority for how FAE Actions resolve.
+
+FUNCTION TOOL CALL RESOLUTION (resolve_fae_action):
+When an action requires a Threat 1–4 pool test, you MUST call the "resolve_fae_action" tool.
+Before calling the tool, evaluate the fiction and commit to:
+- pool_at_risk: The resource pool placed at risk (e.g. Health, Sanity, Resolve, Supplies).
+- threat_level: 1 to 4 baseline encounter danger (+/-1 for unmitigated pressure vs clever neutralization).
+- progress_scale: "full" (resolves intent), "stepping_stone" (strips 1 encounter HP barrier and grants advantage), or "pivot" (wrong tools, +1 threat).
+- matched_positive_tags: Up to 2 relevant personal, gear, or companion tags from [CHARACTER] (e.g. ["Ex-Military", "Calm [under gunfire and shock]"]).
+- matched_negative_tags: Active Scars or Debuffs hindering the action.
+- is_retreating: true if fleeing or disengaging from the danger.
+- grant_advantage_name: Optional name for advantage tag granted if progress_scale is stepping_stone.
+
+TOOL RESPONSE INTEGRATION:
+The tool executes 4dF resolution deterministically and returns:
+- INLINE ROLL: Print this verbatim in narrative prose right before narrating consequences!
+- OUTCOME TIER: UNFAZED_PROGRESS, POOL_STRAIN, BREAKING_POINT_CLAMP, GRACE_RETREAT_WITH_SCAR, or OVERFLOW.
+- NARRATIVE DIRECTIVE: Follow this consequence directive strictly.
+- UPDATED FOOTER POOLS: Reflect these exact pool values in your two-line status footer.
+
+FRICTIONLESS ACTIONS & OPENING SCENE SETUP:
+On Threat 0 (effortless brush-aside, routine conversation, or downtime) or Opening Scene Setup turns, do NOT call resolve_fae_action. Resolve narratively without pool tests.
+
+ROLL FORMAT (Strict SillyTavern Colorization):
+Always wrap the roll line in single asterisks and parentheses right before narrating its consequence:
+*(FAE Action [Pool]: 4dF [Roll: d1, d2, d3, d4 = Sum] + Threat N - PosTags + NegTags = Attrition X → Outcome)*
+</rng_system>`;
+    }
+
     return `<rng_system>
 The player NEVER rolls dice. SillyTavern supplies pre-rolled 4dF values in [RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE].
 Each line provides 4 Fudge dice (-1, 0, or +1 each), summing to a total from -4 to +4 on a tight bell curve centered on 0.
@@ -1781,11 +1917,13 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         false
     );
 
+    const useToolMode = Boolean(config.diceFunctionTool ?? overrides.diceFunctionTool ?? false);
+
     const customSyspromptLibrary = [
         {
             id: 'fae_base_override_role',
             tag: 'role',
-            content: buildFaeRoleContent(isFreeform, { heroicTier: isHeroic }),
+            content: buildFaeRoleContent(isFreeform, { heroicTier: isHeroic, toolMode: useToolMode }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-feather-pointed',
@@ -1796,7 +1934,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         {
             id: 'fae_base_override_rng',
             tag: 'rng_system',
-            content: buildFaeRngContent(),
+            content: buildFaeRngContent({ toolMode: useToolMode }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-dice-d6',
@@ -1913,7 +2051,9 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         rngQueueD20: true,
         rngQueueD100: false,
         diceD100Mode: false,
-        diceFunctionTool: false,
+        diceFunctionTool: useToolMode,
+        rngToolD20: false,
+        rngToolD100: false,
         blockOrder: baseBlockOrder,
         modules: {
             combat: true,

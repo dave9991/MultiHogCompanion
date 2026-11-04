@@ -4,21 +4,28 @@ import assert from 'node:assert/strict';
 import {
     mhcGenerationInterceptor,
     applyFaeCartridge,
+    applyPbtACartridge,
     restoreStockDnd,
     isFaeActive,
     isPbtAActive,
     rectifyPostQuickStartState,
+    syncCompanionDiceFunctionTools,
+    syncActiveRulesetRngMode,
+    getPendingFaeToolResolution,
+    clearPendingFaeToolResolution,
 } from '../index.js';
 import {
     FAE_GENRES,
     triggerEventOrRest,
     buildFaeRngBlock,
     createInitialFaeState,
+    executeFaeActionTool,
 } from '../fae-ruleset.js';
 import {
     parseFaeStateFromMemo,
     formatFaeCharacterMemoBlock,
     formatInitialFaeMemo,
+    reconcileFaeMemoAfterTurn,
 } from '../fae-state-sync.js';
 import {
     setCompanionActiveCartridge,
@@ -318,5 +325,261 @@ Edward (The Hedge Cleric): 10/10 HP | Pool: Health (10/10)
         assert.strictEqual(mockPowerUser.personas.avatar_2, 'Lou');
         assert.strictEqual(mockPowerUser.default_persona, 'Lou');
         assert.strictEqual(mockContext.name1, 'Lou');
+    });
+
+    // ── Test 5: reconcileFaeMemoAfterTurn with toolResolvedState ────────────
+    await t.test('reconcileFaeMemoAfterTurn accurately stamps toolResolvedState onto memo', () => {
+        const initialMemo = `[CHARACTER]
+Thomas Blackwood (The Antiquarian): 8/8 HP | Pool: Health (8/8)
+((BAR:purple)) Sanity: 8/8
+FAE Knobs: Flee Grace: ON | Shift: 0 | Overflow: lethal | Tempo: slow_burn | Idle: 3t | Breather: READY
+((PILLS)) Positive Tags: Ex-Military, Calm [under gunfire and shock]
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]`;
+
+        // The LLM generated a turn, but hallucinated the pools or left them at 8/8 with Idle: 4t
+        const llmGeneratedMemo = `[CHARACTER]
+Thomas Blackwood (The Antiquarian): 8/8 HP | Pool: Health (8/8)
+((BAR:purple)) Sanity: 8/8
+FAE Knobs: Flee Grace: ON | Shift: 0 | Overflow: lethal | Tempo: slow_burn | Idle: 4t | Breather: READY
+((PILLS)) Positive Tags: Ex-Military, Calm [under gunfire and shock]
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]`;
+
+        // But during the turn, the LLM had called resolve_fae_action, which resolved Sanity dropping to 0 (Clamp)
+        const toolResolvedState = parseFaeStateFromMemo(initialMemo, 'cosmic_horror');
+        toolResolvedState.pools.sanity.current = 0;
+        toolResolvedState.character.negative_tags = ['Manic Dissociation'];
+        toolResolvedState.character.temp_advantage = 'Tactical Opening';
+        toolResolvedState.state_flags.turns_since_last_test = 0;
+
+        const res = reconcileFaeMemoAfterTurn(initialMemo, llmGeneratedMemo, 'cosmic_horror', toolResolvedState);
+
+        assert.strictEqual(res.changed, true, 'reconcileFaeMemoAfterTurn must mark changed when tool state differed');
+        assert.ok(res.memo.includes('Sanity: 0/8'), 'Sanity must be stamped to 0/8');
+        assert.ok(res.memo.includes('Idle: 0t'), 'Idle tempo counter must be stamped to 0t');
+        assert.ok(res.memo.includes('Manic Dissociation'), 'Zero debuff from tool must be stamped onto memo');
+        assert.ok(res.memo.includes('Advantage: Tactical Opening'), 'Temp advantage from stepping-stone tool call must be present');
+        assert.strictEqual(res.state.pools.sanity.current, 0);
+        assert.strictEqual(res.state.state_flags.turns_since_last_test, 0);
+    });
+
+    // ── Test 6: syncCompanionDiceFunctionTools Function Tool Call Registration ──
+    await t.test('syncCompanionDiceFunctionTools manages resolve_fae_action and roll_pbta_move registration cleanly', async () => {
+        const registeredTools = new Map();
+        const testChatId = 'test_tool_reg_chat';
+        const mockContext = {
+            extensionSettings: {
+                rpg_tracker: {
+                    rngEnabled: true,
+                    diceFunctionTool: true,
+                    currentMemo: `[CHARACTER]
+Thomas (The Antiquarian): 8/8 HP | Pool: Health (8/8)
+((BAR:purple)) Sanity: 6/8
+FAE Knobs: Flee Grace: ON | Shift: 0 | Overflow: lethal
+((PILLS)) Positive Tags: Calm [under gunfire and shock]
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]`,
+                    customSyspromptLibrary: [{ id: 'fae_core_rules', enabled: true }],
+                    chatStates: {},
+                },
+                multihog_companion: { lastFaeGenre: 'cosmic_horror' },
+            },
+            chatId: testChatId,
+            getCurrentChatId: () => testChatId,
+            registerFunctionTool: (tool) => {
+                registeredTools.set(tool.name, tool);
+            },
+            unregisterFunctionTool: (name) => {
+                registeredTools.delete(name);
+            },
+        };
+
+        globalThis.SillyTavern = { getContext: () => mockContext };
+        globalThis.extension_settings = mockContext.extensionSettings;
+
+        // 1. Activate FAE with diceFunctionTool = true
+        await setCompanionActiveCartridge(testChatId, {
+            cartridgeId: 'fae',
+            genre: 'cosmic_horror',
+            systemLabel: 'Cosmic Horror Investigation',
+        }, mockContext.extensionSettings.rpg_tracker, mockContext.extensionSettings.multihog_companion);
+
+        syncCompanionDiceFunctionTools();
+
+        assert.ok(registeredTools.has('resolve_fae_action'), 'resolve_fae_action must be registered when FAE is active and diceFunctionTool is true');
+        assert.ok(!registeredTools.has('roll_pbta_move'), 'roll_pbta_move must not be registered in FAE');
+
+        // Execute the tool action
+        clearPendingFaeToolResolution(testChatId);
+        const faeTool = registeredTools.get('resolve_fae_action');
+        const replyText = await faeTool.action({
+            pool_at_risk: 'sanity',
+            threat_level: 2,
+            progress_scale: 'full',
+            matched_positive_tags: ['Calm [under gunfire and shock]'],
+            fixedDiceRoll: 0,
+        });
+
+        assert.ok(replyText.includes('INLINE ROLL'), 'Tool response must include INLINE ROLL directive');
+        assert.ok(replyText.includes('OUTCOME TIER: POOL_STRAIN'), 'Tool response must reflect POOL_STRAIN');
+        const pending = getPendingFaeToolResolution(testChatId);
+        assert.ok(pending, 'Pending resolution must be stored in _pendingFaeToolResolutionByChat');
+        assert.strictEqual(pending.state.pools.sanity.current, 5, 'Sanity should be 5/8 (6 - 1 attrition)');
+
+        // 2. Switch to PbtA with diceFunctionTool = true
+        await setCompanionActiveCartridge(testChatId, {
+            cartridgeId: 'pbta',
+            genre: 'fantasy',
+            systemLabel: 'Fantasy PbtA',
+        }, mockContext.extensionSettings.rpg_tracker, mockContext.extensionSettings.multihog_companion);
+        mockContext.extensionSettings.rpg_tracker.customSyspromptLibrary = [{ id: 'pbta_core_rules', enabled: true }];
+
+        syncCompanionDiceFunctionTools();
+
+        assert.ok(!registeredTools.has('resolve_fae_action'), 'resolve_fae_action must be unregistered in PbtA');
+        assert.ok(registeredTools.has('roll_pbta_move'), 'roll_pbta_move must be registered when PbtA is active and diceFunctionTool is true');
+
+        const pbtaTool = registeredTools.get('roll_pbta_move');
+        const pbtaReply = await pbtaTool.action({
+            move_name: 'Hack & Slash',
+            stat_name: 'Might',
+            stat_mod: 2,
+            forward_bonus: 0,
+            fixed_d1: 5,
+            fixed_d2: 4,
+        });
+        assert.ok(pbtaReply.includes('Strong Hit'), 'PbtA tool response must return Strong Hit (9 + 2 = 11)');
+
+        // 3. Toggle diceFunctionTool = false
+        mockContext.extensionSettings.rpg_tracker.diceFunctionTool = false;
+        syncCompanionDiceFunctionTools();
+        assert.ok(!registeredTools.has('resolve_fae_action'), 'resolve_fae_action must be unregistered when toolMode is false');
+        assert.ok(!registeredTools.has('roll_pbta_move'), 'roll_pbta_move must be unregistered when toolMode is false');
+    });
+
+    // ── Test 7: mhcGenerationInterceptor in Tool Mode ───────────────────────
+    await t.test('mhcGenerationInterceptor prepends pacing block in FAE toolMode and strips queue in PbtA toolMode', async () => {
+        const testChatId = 'test_interceptor_tool_chat';
+        const mockContext = {
+            extensionSettings: {
+                rpg_tracker: {
+                    rngEnabled: true,
+                    diceFunctionTool: true,
+                    currentMemo: `[CHARACTER]
+Thomas (The Antiquarian): 8/8 HP | Pool: Health (8/8)
+((BAR:purple)) Sanity: 6/8
+FAE Knobs: Flee Grace: ON | Shift: 0 | Overflow: lethal | Tempo: slow_burn | Idle: 1t
+((PILLS)) Positive Tags: Calm
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]`,
+                    customSyspromptLibrary: [{ id: 'fae_core_rules', enabled: true }],
+                    chatStates: {},
+                },
+                multihog_companion: { lastFaeGenre: 'cosmic_horror' },
+            },
+            chatId: testChatId,
+            getCurrentChatId: () => testChatId,
+        };
+
+        globalThis.SillyTavern = { getContext: () => mockContext };
+        globalThis.extension_settings = mockContext.extensionSettings;
+
+        await setCompanionActiveCartridge(testChatId, {
+            cartridgeId: 'fae',
+            genre: 'cosmic_horror',
+            systemLabel: 'Cosmic Horror Investigation',
+        }, mockContext.extensionSettings.rpg_tracker, mockContext.extensionSettings.multihog_companion);
+
+        // FAE Turn: user message outside combat without [RNG_QUEUE] (with prior narrative turn)
+        const faeChat = [
+            { role: 'user', is_user: true, mes: 'Begin the adventure.' },
+            { role: 'assistant', is_user: false, mes: 'You enter the dusty archive.' },
+            { role: 'user', is_user: true, mes: 'I search the bookshelf carefully.' },
+        ];
+        mhcGenerationInterceptor(faeChat);
+
+        const targetFaeMsg = faeChat[2];
+        assert.ok(targetFaeMsg.mes.includes('[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]'), 'FAE pacing block must be prepended');
+        assert.ok(targetFaeMsg.mes.includes('[Pacing Suggestion (slow_burn): Last pool test was 1 turn(s) ago.'), 'Pacing suggestion must be present');
+        assert.ok(!targetFaeMsg.mes.includes('1: 4dF →'), 'Dice lines must be omitted in toolMode');
+        assert.ok(!targetFaeMsg.mes.includes('PRE-COMPUTED TURN RESOLUTION MATRIX'), 'Matrix must be omitted in toolMode');
+        assert.ok(targetFaeMsg.mes.includes('I search the bookshelf carefully.'), 'User message prose must be preserved');
+
+        // PbtA Turn: user message with upstream [RNG_QUEUE]
+        await setCompanionActiveCartridge(testChatId, {
+            cartridgeId: 'pbta',
+            genre: 'fantasy',
+            systemLabel: 'Fantasy PbtA',
+        }, mockContext.extensionSettings.rpg_tracker, mockContext.extensionSettings.multihog_companion);
+        mockContext.extensionSettings.rpg_tracker.customSyspromptLibrary = [{ id: 'pbta_core_rules', enabled: true }];
+
+        const pbtaChat = [
+            {
+                role: 'user',
+                is_user: true,
+                mes: `[RNG_QUEUE v6.3]\nturn_id=111\n1: d20=10 d4=1 d6=2 d8=3 d10=4 d12=5\n[/RNG_QUEUE]\n\nI strike with my sword!`,
+            },
+        ];
+        mhcGenerationInterceptor(pbtaChat);
+
+        assert.ok(!pbtaChat[0].mes.includes('[RNG_QUEUE'), 'RNG queue must be completely stripped in PbtA toolMode');
+        assert.strictEqual(pbtaChat[0].mes.trim(), 'I strike with my sword!', 'User message prose preserved cleanly');
+    });
+
+    // ── Test 8: syncActiveRulesetRngMode library update ─────────────────────
+    await t.test('syncActiveRulesetRngMode updates customSyspromptLibrary when toggling diceFunctionTool', () => {
+        const testChatId = 'test_rng_mode_sync_chat';
+        const settings = {
+            rngEnabled: true,
+            diceFunctionTool: false,
+            currentMemo: `[CHARACTER]
+Thomas (The Antiquarian): 8/8 HP | Pool: Health (8/8)
+((BAR:purple)) Sanity: 8/8
+FAE Knobs: Flee Grace: ON | Shift: 0 | Overflow: lethal | Tempo: slow_burn
+((PILLS)) Positive Tags: Calm
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]`,
+            customSyspromptLibrary: [
+                { id: 'fae_base_override_rng', content: 'OLD RNG' },
+                { id: 'fae_base_override_role', content: 'OLD ROLE' },
+            ],
+            syspromptSnippetDatabase: [
+                { id: 'fae_base_override_rng', content: 'OLD RNG' },
+                { id: 'fae_base_override_role', content: 'OLD ROLE' },
+            ],
+            chatStates: {},
+        };
+
+        const mockContext = {
+            extensionSettings: {
+                rpg_tracker: settings,
+                multihog_companion: { lastFaeGenre: 'cosmic_horror' },
+            },
+            chatId: testChatId,
+            getCurrentChatId: () => testChatId,
+        };
+        globalThis.SillyTavern = { getContext: () => mockContext };
+        globalThis.extension_settings = mockContext.extensionSettings;
+
+        // Toggle to true
+        settings.diceFunctionTool = true;
+        syncActiveRulesetRngMode(settings);
+
+        const rngItem = settings.customSyspromptLibrary.find(p => p.id === 'fae_base_override_rng');
+        const roleItem = settings.customSyspromptLibrary.find(p => p.id === 'fae_base_override_role');
+        assert.ok(rngItem.content.includes('FUNCTION TOOL CALL RESOLUTION (resolve_fae_action)'));
+        assert.ok(roleItem.content.includes('call resolve_fae_action()'));
+
+        // Toggle to false
+        settings.diceFunctionTool = false;
+        syncActiveRulesetRngMode(settings);
+        assert.ok(rngItem.content.includes('ZERO-MATH PRE-COMPUTED MATRIX'));
+        assert.ok(roleItem.content.includes('check the Pre-Computed Turn Resolution Matrix'));
     });
 });

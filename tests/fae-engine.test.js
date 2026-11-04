@@ -26,7 +26,12 @@ import {
     buildFaeStockPrompts,
     buildFaeQuickStartInstructions,
     buildFaeRngContent,
+    executeFaeActionTool,
 } from '../fae-ruleset.js';
+import {
+    executePbtaMoveTool,
+    buildPbtARngContent,
+} from '../pbta-ruleset.js';
 import {
     formatFaeCharacterMemoBlock,
     parseFaeStateFromMemo,
@@ -548,6 +553,125 @@ describe('Freeform Attrition Engine (FAE) — Cartridge, RNG Block & Documentati
         const blockNormal = buildFaeRngBlock({ state, lineCount: 6, isOpeningTurn: false });
         assert.ok(blockNormal.includes('[Pacing Suggestion (slow_burn): Last pool test was 0 turn(s) ago.'));
         assert.ok(!blockNormal.includes('OPENING SCENE SETUP'));
+    });
+
+    test('buildFaeRngBlock defaults to 1 roll line, and omits rolls/matrix in opening turn or tool mode', () => {
+        const state = createInitialFaeState('cosmic_horror');
+        // Default options: 1 line
+        const defaultBlock = buildFaeRngBlock({ state });
+        assert.ok(defaultBlock.includes('1: 4dF →'));
+        assert.ok(!defaultBlock.includes('2: 4dF →'));
+        assert.ok(defaultBlock.includes('PRE-COMPUTED TURN RESOLUTION MATRIX'));
+
+        // isOpeningTurn === true: NO dice lines, NO matrix
+        const openingBlock = buildFaeRngBlock({ state, isOpeningTurn: true });
+        assert.ok(!openingBlock.includes('1: 4dF →'));
+        assert.ok(!openingBlock.includes('PRE-COMPUTED TURN RESOLUTION MATRIX'));
+        assert.ok(openingBlock.includes('[Pacing Directive (OPENING SCENE SETUP)'));
+
+        // toolMode === true: NO dice lines, NO matrix
+        const toolBlock = buildFaeRngBlock({ state, toolMode: true });
+        assert.ok(!toolBlock.includes('1: 4dF →'));
+        assert.ok(!toolBlock.includes('PRE-COMPUTED TURN RESOLUTION MATRIX'));
+        assert.ok(toolBlock.includes('[Pacing Suggestion (slow_burn)'));
+    });
+
+    test('executeFaeActionTool resolves action deterministically without mutating input state', () => {
+        const state = createInitialFaeState('cosmic_horror');
+        state.pools.health.current = 8;
+        state.pools.sanity.current = 6;
+        state.character.positive_tags = ['Ex-Military', 'Calm [under gunfire and shock]'];
+        state.character.negative_tags = [];
+        state.character.temp_advantage = null;
+
+        const frozenState = JSON.parse(JSON.stringify(state));
+
+        const out = executeFaeActionTool(state, {
+            pool_at_risk: 'sanity',
+            threat_level: 2,
+            progress_scale: 'stepping_stone',
+            matched_positive_tags: ['Calm [under gunfire and shock]'],
+            fixedDiceRoll: 1, // 4dF = +1
+            grant_advantage_name: 'Opening Focus',
+        });
+
+        // 1. Verify input state was NOT mutated
+        assert.deepStrictEqual(state, frozenState, 'executeFaeActionTool must not mutate input state');
+
+        // 2. Verify calculation:
+        // Threat 2 + 4dF(+1) - 1(posTag) = Attrition 2.
+        // Sanity: 6 -> 4.
+        assert.strictEqual(out.result.attrition, 2);
+        assert.strictEqual(out.result.outcome, 'POOL_STRAIN');
+        assert.strictEqual(out.updatedState.pools.sanity.current, 4);
+        assert.strictEqual(out.updatedState.character.temp_advantage, 'Opening Focus');
+
+        // 3. Verify inline_roll and response text
+        assert.ok(out.inline_roll.includes('*(FAE Action [Sanity]: 4dF'));
+        assert.ok(out.inline_roll.includes('Attrition 2 → POOL_STRAIN (4/8)'));
+        assert.ok(out.updated_pools_footer.includes('(Sanity: 4/8)'));
+        assert.ok(out.toolResponseText.includes('INLINE ROLL (print verbatim in prose before narrating consequence):'));
+        assert.ok(out.toolResponseText.includes('OUTCOME TIER: POOL_STRAIN'));
+        assert.ok(out.toolResponseText.includes('UPDATED FOOTER POOLS'));
+    });
+
+    test('executePbtaMoveTool resolves moves and outcome tiers accurately', () => {
+        // Strong hit: 4 + 5 + 1 = 10
+        const strongOut = executePbtaMoveTool({
+            move_name: 'Hack & Slash',
+            stat_name: 'Might',
+            stat_mod: 1,
+            forward_bonus: 0,
+            fixed_d1: 4,
+            fixed_d2: 5,
+        });
+        assert.strictEqual(strongOut.sum, 9);
+        assert.strictEqual(strongOut.total, 10);
+        assert.strictEqual(strongOut.tier, 'Strong Hit');
+        assert.ok(strongOut.inline_roll.includes('*(Hack & Slash [Might]: 2d6 [Roll: 4 + 5 = 9] + 1 = 10 → Strong Hit)*'));
+
+        // Weak hit: 2 + 4 + 1 = 7
+        const weakOut = executePbtaMoveTool({
+            move_name: 'Defy Danger',
+            stat_name: 'Agility',
+            stat_mod: 1,
+            fixed_d1: 2,
+            fixed_d2: 4,
+        });
+        assert.strictEqual(weakOut.total, 7);
+        assert.strictEqual(weakOut.tier, 'Weak Hit');
+        assert.ok(weakOut.inline_roll.includes('Weak Hit'));
+
+        // Miss: 1 + 2 + 1 = 4
+        const missOut = executePbtaMoveTool({
+            move_name: 'Act Under Fire',
+            stat_name: 'Cool',
+            stat_mod: 1,
+            fixed_d1: 1,
+            fixed_d2: 2,
+        });
+        assert.strictEqual(missOut.total, 4);
+        assert.strictEqual(missOut.tier, 'Miss');
+        assert.ok(missOut.directive.includes('+1 XP — Miss'));
+        assert.ok(missOut.toolResponseText.includes('OUTCOME TIER: Miss'));
+    });
+
+    test('buildFaeRngContent and buildPbtARngContent reflect toolMode accurately', () => {
+        const faeQueue = buildFaeRngContent({ toolMode: false });
+        assert.ok(faeQueue.includes('ZERO-MATH PRE-COMPUTED MATRIX'));
+        assert.ok(!faeQueue.includes('FUNCTION TOOL CALL RESOLUTION'));
+
+        const faeTool = buildFaeRngContent({ toolMode: true });
+        assert.ok(!faeTool.includes('ZERO-MATH PRE-COMPUTED MATRIX'));
+        assert.ok(faeTool.includes('FUNCTION TOOL CALL RESOLUTION (resolve_fae_action)'));
+
+        const pbtaQueue = buildPbtARngContent({ toolMode: false });
+        assert.ok(pbtaQueue.includes('[RNG_QUEUE v7.0]'));
+        assert.ok(!pbtaQueue.includes('FUNCTION TOOL CALL RESOLUTION'));
+
+        const pbtaTool = buildPbtARngContent({ toolMode: true });
+        assert.ok(!pbtaTool.includes('[RNG_QUEUE v7.0]'));
+        assert.ok(pbtaTool.includes('FUNCTION TOOL CALL RESOLUTION (roll_pbta_move)'));
     });
 
     test('buildFaeCartridge compiles valid cartridge object', () => {

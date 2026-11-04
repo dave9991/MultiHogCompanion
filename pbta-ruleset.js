@@ -356,9 +356,115 @@ WORLD PRESSURE & PROGRESSION:
 }
 
 /**
- * Builds the PbtA RNG system section instructions for consuming 2d6 from SillyTavern.
+ * Cryptographic rejection-sampled d6 roll (1 to 6).
+ *
+ * @returns {number} 1 to 6
  */
-export function buildPbtARngContent() {
+export function rollD6() {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const buf = new Uint8Array(1);
+        while (true) {
+            crypto.getRandomValues(buf);
+            const val = buf[0];
+            if (val < 252) {
+                return (val % 6) + 1;
+            }
+        }
+    }
+    return Math.floor(Math.random() * 6) + 1;
+}
+
+/**
+ * Executes a PbtA Move roll tool call (roll_pbta_move).
+ *
+ * @param {object} [args={}]
+ * @param {string} [args.move_name='Act Under Fire']
+ * @param {string} [args.stat_name='Stat']
+ * @param {number} [args.stat_mod=0]
+ * @param {number} [args.forward_bonus=0]
+ * @param {number} [args.fixed_d1] Optional fixed die 1 for tests
+ * @param {number} [args.fixed_d2] Optional fixed die 2 for tests
+ * @returns {{ d1: number, d2: number, sum: number, total: number, tier: string, inline_roll: string, directive: string, toolResponseText: string }}
+ */
+export function executePbtaMoveTool(args = {}) {
+    const d1 = (args.fixed_d1 !== null && args.fixed_d1 !== undefined) ? args.fixed_d1 : rollD6();
+    const d2 = (args.fixed_d2 !== null && args.fixed_d2 !== undefined) ? args.fixed_d2 : rollD6();
+    const sum = d1 + d2;
+
+    const moveName = String(args.move_name || 'Act Under Fire').trim();
+    const statName = String(args.stat_name || 'Stat').trim();
+    const statMod = parseInt(args.stat_mod, 10) || 0;
+    const forwardBonus = parseInt(args.forward_bonus, 10) || 0;
+    const totalMod = statMod + forwardBonus;
+    const total = sum + totalMod;
+
+    const tier = total >= 10 ? 'Strong Hit' : (total >= 7 ? 'Weak Hit' : 'Miss');
+    const modStr = totalMod >= 0 ? `+ ${totalMod}` : `- ${Math.abs(totalMod)}`;
+    const inline_roll = `*(${moveName} [${statName}]: 2d6 [Roll: ${d1} + ${d2} = ${sum}] ${modStr} = ${total} → ${tier})*`;
+
+    let directive = '';
+    if (tier === 'Strong Hit') {
+        directive = 'STRONG HIT (Clean Success): The protagonist achieves their intent cleanly without compromise. Award any move benefits or tactical opening directly based on declared stance.';
+    } else if (tier === 'Weak Hit') {
+        directive = 'WEAK HIT (Mixed Success): The protagonist achieves their objective, but with a serious complication, trade-off, cost, counter-attack, or ugly choice. Frame the dilemma immediately.';
+    } else {
+        directive = 'MISS (6- Hard Move): The move goes badly. Make an immediate GM Hard Move with tangible fallout (deal Harm, deplete gear, separate them, or advance a Front), and instruct {{user}} to mark +1 XP: *(+1 XP — Miss)*.';
+    }
+
+    const toolResponseText = [
+        `INLINE ROLL (print verbatim in prose before narrating consequence): ${inline_roll}`,
+        `OUTCOME TIER: ${tier}`,
+        `NARRATIVE DIRECTIVE: ${directive}`,
+    ].join('\n');
+
+    return {
+        d1,
+        d2,
+        sum,
+        total,
+        tier,
+        inline_roll,
+        directive,
+        toolResponseText,
+    };
+}
+
+/**
+ * Builds the PbtA RNG system section instructions for consuming 2d6 from SillyTavern.
+ *
+ * @param {object} [options={}]
+ * @returns {string} XML rng_system prompt block
+ */
+export function buildPbtARngContent(options = {}) {
+    const toolMode = Boolean(options?.toolMode ?? options?.diceFunctionTool ?? false);
+
+    if (toolMode) {
+        return `<rng_system>
+The player NEVER rolls dice. This section is the single authority for how Moves resolve.
+
+FUNCTION TOOL CALL RESOLUTION (roll_pbta_move):
+When {{user}}'s action triggers a Move ("when you X, roll +Stat"), you MUST call the "roll_pbta_move" tool.
+Before calling the tool, evaluate the fiction and identify:
+- move_name: The name of the triggered Move (e.g. "Hack & Slash", "Act Under Fire", "Cast a Spell").
+- stat_name: The governing Stat from [CHARACTER] (e.g. "Might", "Cool", "Arcana").
+- stat_mod: The stat modifier (-1 to +3).
+- forward_bonus: Any active situational forward or hold bonus applied to this roll (default 0).
+
+TOOL RESPONSE INTEGRATION:
+The tool rolls 2d6 and returns:
+- INLINE ROLL: Print this verbatim in narrative prose right before narrating consequences!
+- OUTCOME TIER: Strong Hit (10+), Weak Hit (7–9), or Miss (6-).
+- NARRATIVE DIRECTIVE: Follow this consequence directive strictly. (On Miss, execute a Hard Move and award +1 XP: *(+1 XP — Miss)*).
+
+ROUTINE ACTIONS & ORDINARY CONVERSATION:
+Ordinary conversation, routine tasks, and safe dialogue NEVER trigger a Move or dice roll. Do NOT call roll_pbta_move unless a Move is triggered.
+
+ROLL FORMAT (Strict SillyTavern Colorization):
+Always wrap the entire roll line in single asterisks and parentheses:
+*(Move Name [Stat]: 2d6 [Roll: Die1 + Die2 = Sum] + Mod = Total → Strong Hit | Weak Hit | Miss)*
+</rng_system>`;
+    }
+
     return `<rng_system>
 The player NEVER rolls dice. This section is the single authority for how Moves resolve.
 SillyTavern injects pre-rolled 2d6 in [RNG_QUEUE v7.0]. Each line is one complete roll, e.g. "1: 2d6 → 3 + 5 = 8".
@@ -1017,6 +1123,8 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         )
     );
 
+    const useToolMode = Boolean(config.diceFunctionTool ?? overrides.diceFunctionTool ?? false);
+
     const customSyspromptLibrary = [
         {
             id: 'pbta_base_override_role',
@@ -1032,7 +1140,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_rng',
             tag: 'rng_system',
-            content: buildPbtARngContent(),
+            content: buildPbtARngContent({ toolMode: useToolMode }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',
@@ -1213,7 +1321,9 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         rngQueueD20: true,
         rngQueueD100: false,
         diceD100Mode: false,
-        diceFunctionTool: false, // Disable AI function-call dice to avoid player interruptions
+        diceFunctionTool: useToolMode,
+        rngToolD20: false,
+        rngToolD100: false,
         blockOrder: baseBlockOrder,
         modules: {
             combat: true,

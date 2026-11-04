@@ -505,9 +505,10 @@ export function normalizeFaePillsLine(line) {
  * @param {object|string} prevMemoOrState
  * @param {string} nextMemo
  * @param {string} [genreKey='cosmic_horror']
+ * @param {object|null} [toolResolvedState=null] Authoritative state from resolve_fae_action tool call
  * @returns {{ memo: string, changed: boolean, state: object, events: string[] }}
  */
-export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 'cosmic_horror') {
+export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 'cosmic_horror', toolResolvedState = null) {
     if (!nextMemo || typeof nextMemo !== 'string') {
         return { memo: nextMemo, changed: false, state: null, events: [] };
     }
@@ -518,68 +519,115 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
 
     const nextState = parseFaeStateFromMemo(nextMemo, genreKey);
     const events = [];
+    let needsRewrite = false;
 
-    // Compare pools between prevState and nextState
-    for (const [pKey, nextPool] of Object.entries(nextState.pools)) {
-        const prevPool = prevState?.pools?.[pKey];
+    if (toolResolvedState) {
+        // Authoritative Tool Call Mode: stamp ground-truth tool resolution onto nextState
+        if (!nextState.state_flags) {
+            nextState.state_flags = { breather_available: true, turns_since_last_test: 0 };
+        }
+        if (nextState.state_flags.turns_since_last_test !== 0) {
+            nextState.state_flags.turns_since_last_test = 0;
+            needsRewrite = true;
+            events.push('TOOL_SYNC: Reset turns_since_last_test to 0');
+        }
 
-        // 1. Stage 1: Pool was > 0 and dropped to <= 0 -> Clamp at 0 and ensure zero_debuff
-        if (prevPool && prevPool.current > 0 && nextPool.current <= 0) {
-            if (nextPool.current < 0) {
-                events.push(`BREAKING_POINT_CLAMP: ${pKey} (${nextPool.current}) clamped to 0`);
-                nextPool.current = 0;
-            } else {
-                events.push(`BREAKING_POINT_CLAMP: ${pKey} clamped at 0`);
-            }
-
-            // Ensure zero_debuff is recorded
-            const debuffName = nextPool.zero_debuff;
-            const hasDebuff = nextState.character.negative_tags.some(t => t.toLowerCase().includes(debuffName.toLowerCase()));
-            if (!hasDebuff) {
-                nextState.character.negative_tags.push(debuffName);
-                events.push(`ADDED_ZERO_DEBUFF: ${debuffName}`);
+        if (toolResolvedState.pools) {
+            for (const [pKey, tPool] of Object.entries(toolResolvedState.pools)) {
+                if (!nextState.pools[pKey]) {
+                    nextState.pools[pKey] = { ...tPool };
+                    needsRewrite = true;
+                    events.push(`TOOL_SYNC: Added missing pool ${pKey}`);
+                } else {
+                    if (nextState.pools[pKey].current !== tPool.current || nextState.pools[pKey].max !== tPool.max) {
+                        events.push(`TOOL_SYNC: Pool ${pKey} stamped from (${nextState.pools[pKey].current}/${nextState.pools[pKey].max}) -> (${tPool.current}/${tPool.max})`);
+                        nextState.pools[pKey].current = tPool.current;
+                        nextState.pools[pKey].max = tPool.max;
+                        needsRewrite = true;
+                    }
+                }
             }
         }
 
-        // 2. Stage 2: Pool was ALREADY at 0 and took additional loss -> Trigger Overflow
-        else if (prevPool && prevPool.current === 0) {
-            if (nextPool.current < 0) {
-                const lossAmount = Math.max(1, Math.abs(nextPool.current));
-                nextPool.current = 0; // Pool stays at 0
+        if (Array.isArray(toolResolvedState.character?.negative_tags)) {
+            for (const tag of toolResolvedState.character.negative_tags) {
+                if (!nextState.character.negative_tags.some(t => t.toLowerCase() === tag.toLowerCase())) {
+                    nextState.character.negative_tags.push(tag);
+                    needsRewrite = true;
+                    events.push(`TOOL_SYNC: Added tool-resolved negative tag '${tag}'`);
+                }
+            }
+        }
 
-                const rule = nextPool.on_overflow || nextState.knobs?.overflow_default || 'scar_and_ko';
+        const toolAdv = toolResolvedState.character?.temp_advantage || null;
+        if (nextState.character.temp_advantage !== toolAdv) {
+            nextState.character.temp_advantage = toolAdv;
+            needsRewrite = true;
+            events.push(`TOOL_SYNC: Set temp_advantage to '${toolAdv}'`);
+        }
+    } else {
+        // Pre-computed matrix / LLM prompt mode: Compare pools between prevState and nextState
+        for (const [pKey, nextPool] of Object.entries(nextState.pools)) {
+            const prevPool = prevState?.pools?.[pKey];
 
-                if (rule.startsWith('redirect:')) {
-                    const targetKey = poolLabelToKey(rule.split(':')[1].trim());
-                    const targetPool = nextState.pools[targetKey];
-                    if (targetPool) {
-                        events.push(`OVERFLOW_REDIRECT: ${pKey} at 0 redirected ${lossAmount} attrition to ${targetKey}`);
-                        if (targetPool.current > 0 && targetPool.current - lossAmount <= 0) {
-                            targetPool.current = 0;
-                            const targetDebuff = targetPool.zero_debuff;
-                            if (!nextState.character.negative_tags.some(t => t.toLowerCase().includes(targetDebuff.toLowerCase()))) {
-                                nextState.character.negative_tags.push(targetDebuff);
-                                events.push(`ADDED_ZERO_DEBUFF: ${targetDebuff}`);
+            // 1. Stage 1: Pool was > 0 and dropped to <= 0 -> Clamp at 0 and ensure zero_debuff
+            if (prevPool && prevPool.current > 0 && nextPool.current <= 0) {
+                if (nextPool.current < 0) {
+                    events.push(`BREAKING_POINT_CLAMP: ${pKey} (${nextPool.current}) clamped to 0`);
+                    nextPool.current = 0;
+                } else {
+                    events.push(`BREAKING_POINT_CLAMP: ${pKey} clamped at 0`);
+                }
+
+                // Ensure zero_debuff is recorded
+                const debuffName = nextPool.zero_debuff;
+                const hasDebuff = nextState.character.negative_tags.some(t => t.toLowerCase().includes(debuffName.toLowerCase()));
+                if (!hasDebuff) {
+                    nextState.character.negative_tags.push(debuffName);
+                    events.push(`ADDED_ZERO_DEBUFF: ${debuffName}`);
+                }
+            }
+
+            // 2. Stage 2: Pool was ALREADY at 0 and took additional loss -> Trigger Overflow
+            else if (prevPool && prevPool.current === 0) {
+                if (nextPool.current < 0) {
+                    const lossAmount = Math.max(1, Math.abs(nextPool.current));
+                    nextPool.current = 0; // Pool stays at 0
+
+                    const rule = nextPool.on_overflow || nextState.knobs?.overflow_default || 'scar_and_ko';
+
+                    if (rule.startsWith('redirect:')) {
+                        const targetKey = poolLabelToKey(rule.split(':')[1].trim());
+                        const targetPool = nextState.pools[targetKey];
+                        if (targetPool) {
+                            events.push(`OVERFLOW_REDIRECT: ${pKey} at 0 redirected ${lossAmount} attrition to ${targetKey}`);
+                            if (targetPool.current > 0 && targetPool.current - lossAmount <= 0) {
+                                targetPool.current = 0;
+                                const targetDebuff = targetPool.zero_debuff;
+                                if (!nextState.character.negative_tags.some(t => t.toLowerCase().includes(targetDebuff.toLowerCase()))) {
+                                    nextState.character.negative_tags.push(targetDebuff);
+                                    events.push(`ADDED_ZERO_DEBUFF: ${targetDebuff}`);
+                                }
+                                events.push(`BREAKING_POINT_CLAMP: Target ${targetKey} clamped at 0`);
+                            } else if (targetPool.current > 0) {
+                                targetPool.current -= lossAmount;
+                                events.push(`TARGET_STRAIN: ${targetKey} reduced to ${targetPool.current}/${targetPool.max}`);
+                            } else {
+                                // Target was also at 0! Cascade to scar_and_ko
+                                targetPool.max = Math.max(1, targetPool.max - 1);
+                                targetPool.current = 1;
+                                events.push(`CASCADE_OVERFLOW_SCAR_AND_KO: ${targetKey} max reduced to ${targetPool.max}, set to 1`);
                             }
-                            events.push(`BREAKING_POINT_CLAMP: Target ${targetKey} clamped at 0`);
-                        } else if (targetPool.current > 0) {
-                            targetPool.current -= lossAmount;
-                            events.push(`TARGET_STRAIN: ${targetKey} reduced to ${targetPool.current}/${targetPool.max}`);
-                        } else {
-                            // Target was also at 0! Cascade to scar_and_ko
-                            targetPool.max = Math.max(1, targetPool.max - 1);
-                            targetPool.current = 1;
-                            events.push(`CASCADE_OVERFLOW_SCAR_AND_KO: ${targetKey} max reduced to ${targetPool.max}, set to 1`);
                         }
+                    } else if (rule === 'scar_and_ko') {
+                        nextPool.max = Math.max(1, nextPool.max - 1);
+                        nextPool.current = 1;
+                        const scarName = `Trauma Scar (${nextPool.label} Rupture)`;
+                        if (!nextState.character.negative_tags.includes(scarName)) {
+                            nextState.character.negative_tags.push(scarName);
+                        }
+                        events.push(`OVERFLOW_SCAR_AND_KO: ${pKey} max reduced to ${nextPool.max}, set to 1`);
                     }
-                } else if (rule === 'scar_and_ko') {
-                    nextPool.max = Math.max(1, nextPool.max - 1);
-                    nextPool.current = 1;
-                    const scarName = `Trauma Scar (${nextPool.label} Rupture)`;
-                    if (!nextState.character.negative_tags.includes(scarName)) {
-                        nextState.character.negative_tags.push(scarName);
-                    }
-                    events.push(`OVERFLOW_SCAR_AND_KO: ${pKey} max reduced to ${nextPool.max}, set to 1`);
                 }
             }
         }
@@ -631,7 +679,7 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
         });
     }
 
-    const changed = (reconciledMemo !== nextMemo);
+    const changed = needsRewrite || (reconciledMemo !== nextMemo);
 
     return {
         memo: reconciledMemo,

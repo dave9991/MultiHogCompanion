@@ -879,6 +879,8 @@ positive_tags: Gunsmith (Pistol maintenance)
         assert.ok(faeCritic.includes('zero_debuff'));
         assert.ok(faeCritic.includes('Trait [context]'));
         assert.ok(faeCritic.includes('Companion: Name (Role)'));
+        assert.ok(faeCritic.includes('Zero-Bookkeeping Companions & NPC Scoping Directive'), 'FAE critic rubric #4 must include NPC Scoping Directive');
+        assert.ok(faeCritic.includes('Do NOT order an `[NPC]` card for companions/recruits'), 'FAE critic rubric #4 must explicitly forbid ordering NPC card for companions/recruits');
         assert.ok(faeCritic.includes('[DOSSIER_CRITIQUE]'));
 
         // PbtA purge check forbids PbtA moves/dice
@@ -968,6 +970,22 @@ positive_tags: Gunsmith (Pistol maintenance)
             'Must use pure FAE fictional leverage phrasing'
         );
         assert.ok(!builderPrompt.includes('Grants [+] Advantage when assisting'), 'Must eliminate mechanical advantage leak');
+
+        // [KICK] block in syntax template
+        assert.ok(builderPrompt.includes('[KICK]'), 'FAE builder prompt must include [KICK] block in syntax template');
+        assert.ok(builderPrompt.includes('starting_location: Starting Location Name'), 'FAE builder prompt must include starting_location in [KICK] template');
+        assert.ok(builderPrompt.includes('crisis: Imminent crisis or pressure confronting the protagonist'), 'FAE builder prompt must include crisis in [KICK] template');
+        assert.ok(builderPrompt.includes('opening_prompt: In media res opening scene dropping the protagonist into the crucible'), 'FAE builder prompt must include opening_prompt in [KICK] template');
+
+        // Proactive Scaffolding & Delta Rules
+        assert.ok(builderPrompt.includes('### 🏗️ Proactive Scaffolding & Delta Rules:'), 'FAE builder prompt must include Proactive Scaffolding & Delta Rules');
+        assert.ok(builderPrompt.includes('On Turn 1 initial scaffold: proactively generate [CONTEMPLATION], [CONFIG], [PROTAGONIST], 1 [FACTION], 1 [MONSTER], 1 [MAP], and [KICK]'), 'FAE builder prompt must include Turn 1 scaffolding mandate');
+        assert.ok(/NEVER re-emit `\[\[NAME:protagonist\]\]` or entity name placeholders if the entity already exists in \[CURRENT_LIVE_BLUEPRINT\]/i.test(builderPrompt), 'FAE builder prompt must forbid re-emitting name placeholders on follow-up turns');
+
+        // Monster anatomy guidelines & template
+        assert.ok(builderPrompt.includes('leverage_barriers MUST use individual bracket formatting: `[1. ...] [2. ...]`'), 'FAE builder prompt must instruct bracket formatting for leverage_barriers');
+        assert.ok(builderPrompt.includes('full_finish_triggers is MANDATORY for every adversary and defines the Bypass vs Total finish tradeoff'), 'FAE builder prompt must instruct full_finish_triggers requirement');
+        assert.ok(builderPrompt.includes('Bypass: Barricade the ward door (1 turn) | Total: Crack both armor layers and destroy its core'), 'FAE builder prompt template must showcase Bypass vs Total tradeoff syntax');
     });
 
     test('FAE Concierge: NameRAG placeholder resolution for [[NAME:companion]] in positive_tags and look', async () => {
@@ -1028,6 +1046,70 @@ pools_at_risk: Health, Sanity
         assert.ok(compTag, 'Dossier protagonist positiveTags must contain resolved Companion tag');
         assert.ok(!compTag.includes('[[NAME:'), 'Companion tag must have placeholder resolved');
         assert.ok(compTag.includes('(Field Medic)'), 'Companion tag must preserve the (Field Medic) role');
+    });
+
+    test('FAE Concierge: NameRAG placeholder preservation on edit turns preserves existing protagonist and companion names', async () => {
+        const existingDossier = {
+            meta: { systemKey: 'cosmic_horror', ruleset: 'fae' },
+            protagonist: {
+                name: 'Rigden Ward',
+                positiveTags: ['Companion: Silas (Field Medic)', 'Steady Hand (Pistol)'],
+            },
+            npcs: [],
+            monsters: [],
+        };
+
+        const editTurnBlueprint = `[UPDATE_DOSSIER]
+summary: Added an adversary encounter
+[PROTAGONIST]
+name: [[NAME:protagonist]]
+positive_tags: Companion: [[NAME:companion]] (Field Medic), Steady Hand (Pistol)
+[/PROTAGONIST]
+[MONSTER]
+name: [[NAME:adversary]]
+threat_level: 2
+[/MONSTER]
+[/UPDATE_DOSSIER]`;
+
+        const res = await resolveDossierNamePlaceholders(editTurnBlueprint, existingDossier, { returnDetails: true });
+
+        // Must preserve established protagonist name
+        assert.ok(res.text.includes('name: Rigden Ward'), 'Must preserve existing protagonist name "Rigden Ward" instead of re-rolling');
+        assert.ok(!res.text.includes('[[NAME:protagonist]]'), 'Placeholder [[NAME:protagonist]] must be resolved');
+
+        // Must preserve established companion name
+        assert.ok(res.text.includes('Companion: Silas (Field Medic)'), 'Must preserve existing companion name "Silas" instead of re-rolling');
+        assert.ok(!res.text.includes('[[NAME:companion]]'), 'Placeholder [[NAME:companion]] must be resolved');
+
+        // Must resolve adversary to a new non-colliding name
+        assert.ok(/\[MONSTER\]\s*\n\s*name:\s+[A-Za-z\s'-]+/.test(res.text), 'Adversary must resolve to a valid name');
+        assert.ok(!res.text.includes('[[NAME:adversary]]'), 'Adversary placeholder must be resolved');
+
+        // Resolution metadata sources
+        const protoRes = res.resolutions.find(r => r.placeholder === '[[NAME:protagonist]]');
+        assert.equal(protoRes?.source, 'Existing Dossier (Preserved)', 'Protagonist resolution source must be Existing Dossier (Preserved)');
+        assert.equal(protoRes?.selectedName, 'Rigden Ward');
+
+        const compRes = res.resolutions.find(r => r.placeholder === '[[NAME:companion]]');
+        assert.equal(compRes?.source, 'Existing Dossier (Preserved)', 'Companion resolution source must be Existing Dossier (Preserved)');
+        assert.equal(compRes?.selectedName, 'Silas');
+
+        // Unstarted / initial turns with "Unnamed Adventurer" must resolve to a new name
+        const initialDossier = {
+            meta: { systemKey: 'cosmic_horror', ruleset: 'fae' },
+            protagonist: {
+                name: 'Unnamed Adventurer',
+                positiveTags: [],
+            },
+        };
+        const initialTurnBlueprint = `[UPDATE_DOSSIER]
+[PROTAGONIST]
+name: [[NAME:protagonist]]
+[/PROTAGONIST]
+[/UPDATE_DOSSIER]`;
+        const initialRes = await resolveDossierNamePlaceholders(initialTurnBlueprint, initialDossier, { returnDetails: true });
+        assert.notEqual(initialRes.resolutions[0]?.selectedName, 'Unnamed Adventurer', 'Initial turn must resolve new name rather than keeping Unnamed Adventurer');
+        assert.notEqual(initialRes.resolutions[0]?.source, 'Existing Dossier (Preserved)');
     });
 
     test('FAE Concierge: Refiner context & draft storage key isolation', () => {

@@ -2877,13 +2877,17 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         }
     }
 
+    const defaultGear = isFae
+        ? ['Essential explorer kit', 'Signature tool or weapon']
+        : ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'];
+
     if (dossier.protagonist.equipment && isPlaceholderGearList(dossier.protagonist.gear)) {
         const fromEquip = splitEquipmentIntoGearList(dossier.protagonist.equipment);
         dossier.protagonist.gear = fromEquip.length > 0
             ? fromEquip
-            : ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'];
+            : defaultGear;
     } else if (!Array.isArray(dossier.protagonist.gear) || dossier.protagonist.gear.length === 0) {
-        dossier.protagonist.gear = ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'];
+        dossier.protagonist.gear = defaultGear;
     } else if (!dossier.protagonist.equipment && !isPlaceholderGearList(dossier.protagonist.gear)) {
         dossier.protagonist.equipment = dossier.protagonist.gear.join(', ');
     }
@@ -2906,13 +2910,25 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.monsters = Array.isArray(dossier.monsters) ? dossier.monsters : [];
     dossier.monsters.forEach(m => {
         m.name = (m.name || 'Threat').trim();
-        m.harm = parseInt(m.harm, 10) || 3;
-        m.currentHarm = parseInt(m.currentHarm, 10) || 0;
-        m.armor = parseInt(m.armor, 10) || 0;
-        m.attacks = Array.isArray(m.attacks) && m.attacks.length > 0
-            ? m.attacks
-            : (m.attacks && typeof m.attacks === 'string' ? splitTopLevelItems(m.attacks) : ['Claw/Strike (2 Harm)']);
-        m.impendingDoom = Array.isArray(m.impendingDoom) ? m.impendingDoom : [];
+        if (isFae) {
+            const rawLayers = parseInt(m.layers ?? m.harm?.max ?? m.harm, 10) || 2;
+            const rawCur = parseInt(m.currentLayers ?? m.currentHarm ?? m.harm?.current, 10) || 0;
+            m.layers = rawLayers;
+            m.currentLayers = rawCur;
+            m.threatLevel = Math.max(1, Math.min(4, parseInt(m.threatLevel ?? m.threat, 10) || 2));
+            m.pressures = Array.isArray(m.pressures) ? m.pressures : (m.pressures ? splitTopLevelItems(m.pressures) : []);
+            m.poolsAtRisk = Array.isArray(m.poolsAtRisk) ? m.poolsAtRisk : (m.poolsAtRisk ? splitTopLevelItems(m.poolsAtRisk) : null);
+            m.instinct = (m.instinct || '').trim();
+            m.leverageBarriers = Array.isArray(m.leverageBarriers) ? m.leverageBarriers : (m.leverageBarriers ? splitTopLevelItems(m.leverageBarriers) : []);
+        } else {
+            m.harm = parseInt(m.harm, 10) || 3;
+            m.currentHarm = parseInt(m.currentHarm, 10) || 0;
+            m.armor = parseInt(m.armor, 10) || 0;
+            m.attacks = Array.isArray(m.attacks) && m.attacks.length > 0
+                ? m.attacks
+                : (m.attacks && typeof m.attacks === 'string' ? splitTopLevelItems(m.attacks) : ['Claw/Strike (2 Harm)']);
+            m.impendingDoom = Array.isArray(m.impendingDoom) ? m.impendingDoom : [];
+        }
     });
 
     dossier.factions = Array.isArray(dossier.factions) ? dossier.factions : [];

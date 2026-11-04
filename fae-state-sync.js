@@ -988,3 +988,195 @@ export function advanceFaeTurnTempo(memoText, assistantNarrativeText = '', fallb
         turnsSinceLastTest: state.state_flags.turns_since_last_test,
     };
 }
+
+/**
+ * Non-destructively merges a modified Campaign Dossier into an in-flight FAE state memo.
+ * Preserves volatile in-game attributes:
+ * - Current pool attrition levels (unless new max shrank below current, clamped to max)
+ * - Scenes completed, turn tempo, and state flags
+ * - Active trauma, conditions, and scars gained during play
+ * - Existing [TIME], [LOCATION], and active [COMBAT] encounter blocks
+ *
+ * Updates:
+ * - Protagonist name, archetype/playbook, heroic domain
+ * - Newly configured or edited Positive Tags
+ * - Newly added pools or pool labels/colors/zero_debuffs/strain_flavors
+ * - Pacing scene target
+ * - [FACTIONS] block if present in dossier
+ *
+ * @param {string} liveMemo The current running game state memo
+ * @param {object} dossier The updated PbtaCampaignDossier / FAE dossier
+ * @param {string} [charName=null] Optional explicit character name override
+ * @returns {string} Merged state memo
+ */
+export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) {
+    if (!liveMemo || typeof liveMemo !== 'string' || !liveMemo.trim()) {
+        return formatInitialFaeMemo(dossier, { location: dossier?.theKick?.startingLocation });
+    }
+
+    const genreKey = dossier?.meta?.systemKey || dossier?.config?.faeGenre || 'cosmic_horror';
+    const activeState = parseFaeStateFromMemo(liveMemo, genreKey);
+    if (!activeState || !activeState.pools || Object.keys(activeState.pools).length === 0) {
+        return formatInitialFaeMemo(dossier, { location: dossier?.theKick?.startingLocation });
+    }
+
+    // Clone active state for non-destructive updates
+    const nextState = {
+        ...activeState,
+        pools: { ...activeState.pools },
+        character: { ...(activeState.character || {}) },
+        knobs: { ...(activeState.knobs || {}) },
+        state_flags: { ...(activeState.state_flags || {}) },
+    };
+
+    const p = dossier?.protagonist || {};
+    const effectiveName = (charName || p.name || nextState.character.name || 'Protagonist').trim();
+    nextState.character.name = effectiveName;
+
+    if (p.playbook || p.archetype) {
+        nextState.character.archetype = (p.playbook || p.archetype).trim();
+    }
+
+    const isHeroic = Boolean(
+        dossier?.config?.heroicTier ??
+        dossier?.config?.heroic_tier ??
+        dossier?.heroicTier ??
+        dossier?.heroic_tier ??
+        dossier?.config?.knobs?.heroic_tier ??
+        (FAE_GENRES[genreKey]?.knobs?.heroic_tier ?? false)
+    );
+    nextState.knobs.heroic_tier = isHeroic;
+
+    const resolvedDomain = p.heroicDomain || p.heroic_domain || dossier?.character?.heroic_domain || null;
+    if (resolvedDomain) {
+        nextState.character.heroic_domain = resolvedDomain;
+    } else if (!isHeroic) {
+        nextState.character.heroic_domain = null;
+    }
+
+    // Merge Positive Tags: if dossier has positiveTags, update them while ensuring formatting
+    const rawPosTags = p.positiveTags || p.positive_tags || p.tags;
+    if (Array.isArray(rawPosTags) && rawPosTags.length > 0) {
+        nextState.character.positive_tags = sanitizeFaePositiveTags(rawPosTags);
+    }
+
+    // Merge Negative Tags: preserve existing active scars/conditions, and merge newly specified ones
+    const rawNegTags = p.negativeTags || p.negative_tags || p.scars;
+    if (Array.isArray(rawNegTags) && rawNegTags.length > 0) {
+        const mergedNeg = [...(nextState.character.negative_tags || [])];
+        for (const t of rawNegTags) {
+            const cleanT = String(t).trim();
+            if (cleanT && !mergedNeg.some(existing => existing.toLowerCase().includes(cleanT.toLowerCase()))) {
+                mergedNeg.push(cleanT);
+            }
+        }
+        nextState.character.negative_tags = mergedNeg;
+    }
+
+    // Update scenes target if specified in dossier config
+    const targetScenes = dossier?.config?.pacingScenes || dossier?.config?.knobs?.scenes_target;
+    if (targetScenes) {
+        nextState.character.scenes_target = parseInt(targetScenes, 10) || nextState.character.scenes_target || 4;
+    }
+
+    // Update pool definitions without losing current depletion
+    const dossierPools = p.pools || dossier?.pools || FAE_GENRES[genreKey]?.pools || {};
+    for (const [key, dPool] of Object.entries(dossierPools)) {
+        if (!dPool) continue;
+        if (nextState.pools[key]) {
+            const activePool = nextState.pools[key];
+            const newMax = typeof dPool.max === 'number' ? dPool.max : activePool.max;
+            nextState.pools[key] = {
+                ...activePool,
+                label: dPool.label || activePool.label,
+                barColor: dPool.barColor || activePool.barColor,
+                max: newMax,
+                current: Math.min(activePool.current, newMax), // Clamp if max shrank
+                recovery: dPool.recovery !== undefined ? dPool.recovery : activePool.recovery,
+                strain_flavor: dPool.strain_flavor || activePool.strain_flavor,
+                zero_debuff: dPool.zero_debuff || activePool.zero_debuff,
+                on_overflow: dPool.on_overflow || activePool.on_overflow,
+            };
+        } else {
+            // New pool added in dossier
+            nextState.pools[key] = {
+                key: dPool.key || key,
+                label: dPool.label || key,
+                barColor: dPool.barColor || 'green',
+                current: typeof dPool.current === 'number' ? dPool.current : (dPool.max || 8),
+                max: dPool.max || 8,
+                recovery: dPool.recovery,
+                strain_flavor: dPool.strain_flavor,
+                zero_debuff: dPool.zero_debuff,
+                on_overflow: dPool.on_overflow,
+            };
+        }
+    }
+
+    // Fold companions into [CHARACTER] positive tags per Zero-Bookkeeping Model if partyMode !== 'solo'
+    if (dossier?.config?.partyMode !== 'solo' && Array.isArray(dossier?.npcs)) {
+        const companions = dossier.npcs.filter(n =>
+            n && n.name && /companion|party|sidekick|follower|partner|ally|friend|crew|squad/i.test(n.role || 'companion')
+        );
+        if (companions.length > 0) {
+            nextState.character.positive_tags = nextState.character.positive_tags || [];
+            for (const comp of companions) {
+                const cName = (comp.name || 'Companion').trim();
+                let cArchetype = comp.archetype || comp.playbook || '';
+                if (!cArchetype) {
+                    const rawRole = (comp.role || 'Companion').replace(/\s*\([^)]*\)/g, '').trim();
+                    cArchetype = rawRole || 'Companion';
+                }
+                cArchetype = cArchetype.replace(/[()]/g, '').trim() || 'Companion';
+
+                const alreadyMentioned = nextState.character.positive_tags.some(tag =>
+                    String(tag).toLowerCase().includes(cName.toLowerCase())
+                );
+                if (!alreadyMentioned) {
+                    nextState.character.positive_tags.push(`Companion: ${cName} (${cArchetype})`);
+                }
+            }
+        }
+    }
+
+    // Generate updated [CHARACTER] block
+    const updatedCharBlock = formatFaeCharacterMemoBlock(nextState);
+
+    let updatedMemo = liveMemo;
+    if (/\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i.test(updatedMemo)) {
+        updatedMemo = updatedMemo.replace(/\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i, updatedCharBlock);
+    } else {
+        updatedMemo = `${updatedMemo.trim()}\n\n${updatedCharBlock}`;
+    }
+
+    // Also non-destructively update [FACTIONS] if dossier has factions
+    if (Array.isArray(dossier?.factions) && dossier.factions.length > 0) {
+        const fLines = ['[FACTIONS]'];
+        for (const f of dossier.factions) {
+            const rawStanding = (f.standing || 'Neutral').trim();
+            let standingFormatted = rawStanding;
+            const lower = rawStanding.toLowerCase();
+            if (!rawStanding.startsWith('(+)') && !rawStanding.startsWith('(-)') && !rawStanding.startsWith('(+) ') && !rawStanding.startsWith('(-) ')) {
+                if (lower.includes('ally') || lower.includes('allied') || lower.includes('friend') || lower.includes('sympathetic') || lower.includes('honored')) {
+                    standingFormatted = `(+) ${rawStanding}`;
+                } else if (lower.includes('hostile') || lower.includes('rival') || lower.includes('enemy') || lower.includes('hated') || lower.includes('unfriendly')) {
+                    standingFormatted = `(-) ${rawStanding}`;
+                }
+            }
+            const pills = [`${standingFormatted} (Standing)`];
+            if (f.agenda) pills.push(`Agenda (${f.agenda.replace(/[()]/g, '').trim()})`);
+            if (f.notes) pills.push(`Notes (${f.notes.replace(/[()]/g, '').trim()})`);
+            fLines.push(`((PILLS)) ${f.name}: ${pills.join(', ')}`);
+        }
+        fLines.push('[/FACTIONS]');
+        const factionsBlock = fLines.join('\n');
+
+        if (/\[FACTIONS\][\s\S]*?\[\/FACTIONS\]/i.test(updatedMemo)) {
+            updatedMemo = updatedMemo.replace(/\[FACTIONS\][\s\S]*?\[\/FACTIONS\]/i, factionsBlock);
+        } else {
+            updatedMemo = `${updatedMemo.trim()}\n\n${factionsBlock}`;
+        }
+    }
+
+    return updatedMemo;
+}

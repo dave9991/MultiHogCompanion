@@ -356,9 +356,38 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
         activeServerName = discovery?.serverName || null;
     } catch (_) {}
 
+    // Established protagonist name preservation check
+    const existingProtoName = (typeof activeDossier?.protagonist?.name === 'string') ? activeDossier.protagonist.name.trim() : '';
+    const hasEstablishedProtagonist = Boolean(
+        existingProtoName &&
+        existingProtoName.toLowerCase() !== 'unnamed adventurer' &&
+        existingProtoName.toLowerCase() !== 'unnamed' &&
+        !existingProtoName.includes('[[NAME')
+    );
+
+    // Established companion name preservation check from positiveTags (or positive_tags)
+    let establishedCompanionName = null;
+    const rawPosTags = activeDossier?.protagonist?.positiveTags || activeDossier?.protagonist?.positive_tags;
+    const posTagList = Array.isArray(rawPosTags)
+        ? rawPosTags
+        : (typeof rawPosTags === 'string' ? rawPosTags.split(/[\r\n,]+/) : []);
+    for (const tag of posTagList) {
+        if (typeof tag === 'string') {
+            const compMatch = tag.match(/^\s*(?:Companion|Retainer):\s*([^[(\n\r,]+)/i);
+            if (compMatch && compMatch[1]) {
+                const cand = compMatch[1].trim();
+                if (cand && !/^name$/i.test(cand) && !cand.includes('[[NAME') && !/^unnamed/i.test(cand)) {
+                    establishedCompanionName = cand;
+                    break;
+                }
+            }
+        }
+    }
+
     // Track names already used in this dossier to guarantee zero intra-campaign duplicates
     const usedNames = new Set();
-    if (activeDossier?.protagonist?.name) usedNames.add(activeDossier.protagonist.name.toLowerCase());
+    if (hasEstablishedProtagonist) usedNames.add(existingProtoName.toLowerCase());
+    if (establishedCompanionName) usedNames.add(establishedCompanionName.toLowerCase());
     (activeDossier?.npcs || []).forEach(n => n.name && usedNames.add(n.name.toLowerCase()));
     (activeDossier?.monsters || []).forEach(m => m.name && usedNames.add(m.name.toLowerCase()));
 
@@ -378,7 +407,26 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
         let candidatePool = [];
         let source = nameRagAvailable ? `NameRAG (${activeServerName || 'MCP'})` : 'Offline Fallback Pool';
 
-        if (nameRagAvailable) {
+        // Guard against accidental protagonist / companion renames on subsequent edit turns
+        const isProtagonistToken = ph.tag?.toLowerCase() === 'protagonist' ||
+            /^\[\[NAME:\s*protagonist\s*\]\]$/i.test(ph.token) ||
+            (blockType === 'PROTAGONIST' && /^\[\[NAME\]\]$/i.test(ph.token));
+
+        const isCompanionToken = ph.tag?.toLowerCase() === 'companion' ||
+            /^\[\[NAME:\s*companion\s*\]\]$/i.test(ph.token) ||
+            (blockType === 'COMPANION' && /^\[\[NAME\]\]$/i.test(ph.token));
+
+        if (isProtagonistToken && hasEstablishedProtagonist) {
+            chosenName = existingProtoName;
+            source = 'Existing Dossier (Preserved)';
+            candidatePool = [chosenName];
+        } else if (isCompanionToken && establishedCompanionName) {
+            chosenName = establishedCompanionName;
+            source = 'Existing Dossier (Preserved)';
+            candidatePool = [chosenName];
+        }
+
+        if (!chosenName && nameRagAvailable) {
             try {
                 const results = await searchNames({ query, limit: 6 });
                 if (Array.isArray(results) && results.length > 0) {

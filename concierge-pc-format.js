@@ -91,11 +91,16 @@ function extractExistingSections(text) {
  *
  * @param {object} p Protagonist object from PbtaCampaignDossier
  * @param {Record<string, string>} [names] Section names keyed by section ID
+ * @param {object|string} [options={}] Options object or ruleset string ('pbta' | 'fae')
  * @returns {string} Fully structured PC bio string
  */
-export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES) {
+export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES, options = {}) {
     if (!p || typeof p !== 'object') return '';
     const n = names || FALLBACK_PC_SECTION_NAMES;
+    const ruleset = (typeof options === 'string' ? options : options?.ruleset)
+        || p?.ruleset
+        || ((p?.positiveTags || p?.positive_tags || p?.heroicDomain || p?.heroic_domain) ? 'fae' : 'pbta');
+    const isFae = ruleset === 'fae';
 
     // Check if protagonist.bio is already pre-structured with section headers
     const existing = extractExistingSections(p.bio || '');
@@ -108,12 +113,15 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES) {
 
     // 2. Body / Appearance
     const bodyLabel = n.sec_body || 'Body';
+    const bodyFallback = isFae
+        ? `A focused presence adapting to the demands of the ${p.playbook || p.archetype || 'survivor'}.`
+        : `A focused and observant presence matching the ${p.playbook || 'wanderer'} playbook.`;
     const bodyVal = existing['body']
         || existing['appearance']
         || existing['appearance/species']
         || p.appearance
         || p.body
-        || `A focused and observant presence matching the ${p.playbook || 'wanderer'} playbook.`;
+        || bodyFallback;
 
     // 3. Worn Equipment
     const equipLabel = n.sec_equipment || 'Worn Equipment';
@@ -123,7 +131,11 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES) {
         || p.equipment
         || p.gear;
     if (Array.isArray(rawEquip)) rawEquip = rawEquip.join(', ');
-    const equipVal = rawEquip || 'Standard traveling gear and personal essentials.';
+    let equipVal = rawEquip || 'Standard traveling gear and personal essentials.';
+    if (isFae && typeof equipVal === 'string') {
+        // Cleanse accidental PbtA harm annotations from FAE equipment
+        equipVal = equipVal.replace(/\s*\(\s*\d+\s*Harm\s*\)/gi, '');
+    }
 
     // 4. Personality
     const persLabel = n.sec_personality || 'Personality';
@@ -139,7 +151,7 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES) {
         || existing['brief background']
         || p.background
         || (p.bio && !Object.keys(existing).length ? p.bio : null)
-        || `A seasoned ${p.playbook || 'adventurer'} navigating dangerous terrain.`;
+        || `A seasoned ${p.playbook || p.archetype || 'adventurer'} navigating dangerous terrain.`;
 
     // 6. Habits & Behaviors
     const habitsLabel = n.sec_habits || 'Habits & Behaviors';
@@ -150,33 +162,69 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES) {
         || p.habits
         || 'Measured and alert, keeping a close eye on the surroundings.';
 
-    // 7. Strengths (Moves)
+    // 7. Strengths (Moves for PbtA, Positive Tags & Heroic Domain for FAE)
     const strLabel = n.sec_strengths || 'Strengths';
     let strVal = existing['strengths'];
     if (!strVal) {
-        const moves = Array.isArray(p.startingMoves) && p.startingMoves.length
-            ? p.startingMoves
-            : (Array.isArray(p.moves) ? p.moves : []);
-        if (moves.length) {
-            strVal = `\n${bullets(moves)}`;
+        if (isFae) {
+            const posTags = Array.isArray(p.positiveTags) && p.positiveTags.length
+                ? p.positiveTags
+                : (Array.isArray(p.positive_tags) ? p.positive_tags : []);
+            const strengthsItems = [];
+            if (p.heroicDomain || p.heroic_domain) {
+                strengthsItems.push(`Heroic Domain: ${p.heroicDomain || p.heroic_domain}`);
+            }
+            for (const t of posTags) {
+                strengthsItems.push(`+ Tag: ${t}`);
+            }
+            if (strengthsItems.length) {
+                strVal = `\n${bullets(strengthsItems)}`;
+            } else {
+                strVal = '\n- Resilient and adaptable under pressure.';
+            }
         } else {
-            strVal = '\n- Resilient and adaptable under pressure.';
+            const moves = Array.isArray(p.startingMoves) && p.startingMoves.length
+                ? p.startingMoves
+                : (Array.isArray(p.moves) ? p.moves : []);
+            if (moves.length) {
+                strVal = `\n${bullets(moves)}`;
+            } else {
+                strVal = '\n- Resilient and adaptable under pressure.';
+            }
         }
     } else if (!strVal.startsWith('\n')) {
         strVal = `\n${strVal}`;
     }
 
-    // 8. Flaws (Conditions / Weaknesses)
+    // 8. Flaws (Conditions for PbtA, Negative Tags for FAE)
     const flawsLabel = n.sec_flaws || 'Flaws';
     let flawsVal = existing['flaws'];
     if (!flawsVal) {
-        const conds = Array.isArray(p.conditions) && p.conditions.length
-            ? p.conditions
-            : (p.conditions ? [p.conditions] : (p.flaws ? (Array.isArray(p.flaws) ? p.flaws : [p.flaws]) : []));
-        if (conds.length) {
-            flawsVal = `\n${bullets(conds)}`;
+        if (isFae) {
+            const negTags = Array.isArray(p.negativeTags) && p.negativeTags.length
+                ? p.negativeTags
+                : (Array.isArray(p.negative_tags) ? p.negative_tags : []);
+            const conds = Array.isArray(p.conditions) && p.conditions.length
+                ? p.conditions
+                : (p.conditions ? [p.conditions] : (p.flaws ? (Array.isArray(p.flaws) ? p.flaws : [p.flaws]) : []));
+            const flawsItems = [
+                ...negTags.map(t => `- Tag: ${t}`),
+                ...conds,
+            ];
+            if (flawsItems.length) {
+                flawsVal = `\n${bullets(flawsItems)}`;
+            } else {
+                flawsVal = '\n- Bound by obligations that leave little room for error.';
+            }
         } else {
-            flawsVal = '\n- Bound by obligations that leave little room for error.';
+            const conds = Array.isArray(p.conditions) && p.conditions.length
+                ? p.conditions
+                : (p.conditions ? [p.conditions] : (p.flaws ? (Array.isArray(p.flaws) ? p.flaws : [p.flaws]) : []));
+            if (conds.length) {
+                flawsVal = `\n${bullets(conds)}`;
+            } else {
+                flawsVal = '\n- Bound by obligations that leave little room for error.';
+            }
         }
     } else if (!flawsVal.startsWith('\n')) {
         flawsVal = `\n${flawsVal}`;

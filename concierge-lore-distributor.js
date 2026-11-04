@@ -401,7 +401,7 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
     const monsters = (dossier.monsters || []).map(m => ({
         name: m.name,
         keys: buildNpcKeys(m.name),
-        ...buildMonsterEntryContent(m, sectionNames),
+        ...buildMonsterEntryContent(m, sectionNames, { ruleset: dossier?.meta?.ruleset }),
     })).filter(e => e.name && e.core);
 
     const factions = (dossier.factions || [])

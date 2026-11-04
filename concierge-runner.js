@@ -563,7 +563,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 // Add to Lorebook Agent with structured sections matching DEFAULT_PC_SECTIONS
                 if (typeof charCreator.addPlayerCardToLorebookAgent === 'function') {
                     const pcSectionNames = await loadMainPcSectionNames();
-                    const bio = buildPlayerCardBio(dossier.protagonist, pcSectionNames);
+                    const bio = buildPlayerCardBio(dossier.protagonist, pcSectionNames, { ruleset: dossier.meta?.ruleset });
                     await charCreator.addPlayerCardToLorebookAgent(charName, bio, 150, { chatId });
                 }
 
@@ -663,7 +663,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                     // Main's saveNpcToLibrary(settings, record) upserts by name and persists settings.
                     const libEntries = [
                         ...npcs.map(n => ({ name: n.name, content: buildNpcEntryContent(n, sectionNames).core, notes: n.notes || '' })),
-                        ...monsters.map(m => ({ name: m.name, content: buildMonsterEntryContent(m, sectionNames).core, notes: m.notes || '' })),
+                        ...monsters.map(m => ({ name: m.name, content: buildMonsterEntryContent(m, sectionNames, { ruleset: dossier.meta?.ruleset }).core, notes: m.notes || '' })),
                     ];
                     for (const e of libEntries) {
                         if (!e.name || !e.content) continue;
@@ -1051,7 +1051,8 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
 
             if (memo && memo.trim()) {
                 if (isFae) {
-                    rpgSettings.currentMemo = formatInitialFaeMemo(dossier, { location: dossier.theKick?.startingLocation });
+                    const { mergeDossierIntoLiveFaeMemo } = await import('./fae-state-sync.js');
+                    rpgSettings.currentMemo = mergeDossierIntoLiveFaeMemo(memo, dossier, charName);
                 } else {
                     // Non-destructively merge updated protagonist harm capacity and rules into active game
                     const { mergeDossierIntoLiveMemo } = await import('./pbta-vitality-sync.js');
@@ -1106,7 +1107,9 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                     if (rpgSettings.customFields) {
                         rpgSettings.chatStates[key].customFields = [...rpgSettings.customFields];
                     }
-                    syncLivePbtaMemoVitality(rpgSettings, key);
+                    if (!isFae) {
+                        syncLivePbtaMemoVitality(rpgSettings, key);
+                    }
                 }
             }
 

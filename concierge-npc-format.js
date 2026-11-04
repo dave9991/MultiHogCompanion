@@ -122,10 +122,67 @@ export function buildNpcEntryContent(npc, names = FALLBACK_SECTION_NAMES) {
 }
 
 /**
- * Build the lorebook / library content for a PbtA monster (adversary).
- * Harm/Armor/attacks/countdown go into Combat Profile; weakness → Flaws.
+ * Build the lorebook / library content for an adversary (PbtA monster or FAE threat entity).
+ * Handles both PbtA adversaries and FAE threat entities based on ruleset or monster attributes.
+ *
+ * @param {object} monster Dossier adversary / monster
+ * @param {Record<string,string>} [names] From {@link loadMainNpcSectionNames}
+ * @param {object|string} [options={}] Options object or ruleset string ('pbta' | 'fae')
+ * @returns {{ core: string, full: string }}
  */
-export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES) {
+export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES, options = {}) {
+    const ruleset = (typeof options === 'string' ? options : options?.ruleset)
+        || monster?.ruleset
+        || ((monster?.threatLevel !== undefined || monster?.threat !== undefined || monster?.instinct || monster?.pressures || monster?.poolsAtRisk) ? 'fae' : 'pbta');
+
+    if (ruleset === 'fae') {
+        const rawLayers = Math.max(1, parseInt(monster.layers ?? monster.barriers ?? monster.harm?.max ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[1] : monster.harm), 10) || 2);
+        const curLayers = Math.max(0, parseInt(monster.currentLayers ?? monster.currentHarm ?? monster.harm?.current ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[0] : 0), 10) || 0);
+        const curHp = Math.max(0, rawLayers - curLayers);
+        const threatLevel = Math.max(1, Math.min(4, parseInt(monster.threatLevel ?? monster.threat, 10) || 2));
+        const threatLabels = { 1: 'Minor', 2: 'Moderate', 3: 'Formidable', 4: 'Extreme' };
+        const threatLabel = threatLabels[threatLevel] || 'Moderate';
+
+        const pools = Array.isArray(monster.poolsAtRisk) && monster.poolsAtRisk.length > 0
+            ? monster.poolsAtRisk.join(', ')
+            : (monster.pools || 'Body, Mind');
+
+        const pressures = Array.isArray(monster.pressures) ? monster.pressures : (monster.pressures ? splitTopLevelCommas(monster.pressures) : []);
+        const instinct = monster.instinct ? monster.instinct.trim() : '';
+        const weakness = monster.weakness && monster.weakness !== 'Unknown' ? monster.weakness.trim() : '';
+        const barriers = Array.isArray(monster.leverageBarriers) ? monster.leverageBarriers : (monster.leverageBarriers ? splitTopLevelCommas(monster.leverageBarriers) : []);
+        const status = monster.status ? monster.status.trim() : (curLayers > 0 ? '(-) Wounded' : 'Healthy');
+
+        const combatLines = [
+            `${monster.name}: ${curHp}/${rawLayers} HP | Threat: ${threatLevel} (${threatLabel}) | Pools: ${pools}`,
+            pressures.length ? `((PILLS)) Pressures: ${pressures.join(', ')}` : '',
+            instinct ? `Instinct: ${instinct}` : '',
+            weakness ? `((PILLS)) Leverage: ${weakness}` : '',
+            barriers.length ? `((PILLS)) Barriers: ${barriers.join('; ')}` : '',
+            `Status: ${status}`,
+        ].filter(Boolean);
+
+        const strengthsList = [
+            ...pressures.map(p => `Pressure — ${p}`),
+            ...(instinct ? [`Instinct — ${instinct}`] : []),
+        ];
+
+        const flawsList = [
+            ...(weakness ? [weakness] : []),
+            ...(barriers.map(b => `Barrier — ${b}`)),
+        ];
+
+        const core = assembleCore({
+            sec_background: monster.notes ? `FAE threat entity. ${monster.notes}` : 'FAE threat entity.',
+            sec_strengths: strengthsList.length ? `\n${bullets(strengthsList)}` : '',
+            sec_flaws: flawsList.length ? `\n${bullets(flawsList)}` : '',
+            sec_combat_profile: `\n${combatLines.join('\n')}`,
+        }, names);
+
+        return { core, full: core };
+    }
+
+    // Default: PbtA adversary
     const attacks = Array.isArray(monster.attacks) ? monster.attacks : [];
     const doom = Array.isArray(monster.impendingDoom) ? monster.impendingDoom : [];
     const harmMax = Math.max(1, parseInt(monster.harm?.max ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[1] : monster.harm), 10) || 4);

@@ -549,6 +549,8 @@ ${genreSummaries}
 * Knobs: flee_grace_toggle (true/false), base_attrition_shift (-1/0/+1), action_tempo (action_serial/gritty_default/slow_burn/slice_of_life), overflow_default (scar_and_ko/lethal/scene_fail), heroic_tier (true/false).
 * Heroic Domains (Pre-Math Leverage Permissions): When heroic_tier is true (e.g. osr_dungeon or user toggle), assign \`heroic_domain: Archetype [specific domains]\` to [PROTAGONIST]. This provides pre-math leverage (expands Threat 0, overcomes barriers, neutralizes pressures) and NEVER counts as a -1 Positive Tag. When heroic_tier is false, omit heroic_domain entirely.
 * Adversaries / Encounters (4-Line Block): threat_level (1-4), layers (e.g. 2/2), pools_at_risk, pressures, instinct, status, leverage_barriers, full_finish_triggers. Bypass vs Total Intent tradeoff. $\pm 1$ Threat cap.
+  - leverage_barriers MUST use individual bracket formatting: \`[1. ...] [2. ...]\`.
+  - full_finish_triggers is MANDATORY for every adversary and defines the Bypass vs Total finish tradeoff: \`Bypass: <action> (1 turn) | Total: <action>\`.
 * STRICT PROHIBITION OF D&D AND PBTA 2d6 MECHANICS: Never output DCs, AC, attack rolls, saving throws, advantage/disadvantage, or 2d6 moves.
 
 ### 📋 Directives & Syntax:
@@ -598,7 +600,7 @@ pressures: Tentacle lashes (Health), Psychic shriek (Sanity)
 instinct: To ambush intruders from shadow and drag them into ventilation shafts
 status: Entrenched
 leverage_barriers: [1. Armored Chitin Husk] [2. Blind Flailing Claws]
-full_finish_triggers: Barricade the ward door (1 turn) OR crack both layers
+full_finish_triggers: Bypass: Barricade the ward door (1 turn) | Total: Crack both armor layers and destroy its core
 [/MONSTER]
 
 [MAP]
@@ -609,6 +611,12 @@ entrance: Heavy iron door
 prompt: Dimly lit asylum corridor with flickering gas lamps
 brief_description: The quarantined basement ward
 [/MAP]
+
+[KICK]
+starting_location: Starting Location Name
+crisis: Imminent crisis or pressure confronting the protagonist
+opening_prompt: In media res opening scene dropping the protagonist into the crucible
+[/KICK]
 [/UPDATE_DOSSIER]
 \`\`\`
 
@@ -622,6 +630,15 @@ brief_description: The quarantined basement ward
   - Require \`[[NAME:ally]]\` or \`[[NAME:mentor]]\` for any generated external NPCs: \`name: [[NAME:ally]]\` or \`name: [[NAME:mentor]]\`.
   - Require \`[[NAME:adversary]]\` for any generated adversaries/monsters: \`name: [[NAME:adversary]]\`.
   The downstream Name Diversity Engine (NameRAG) will automatically resolve each placeholder into an authentic, culturally evocative name tailored to that character's specific demeanor and backstory before updating the live campaign.
+
+### 🏗️ Proactive Scaffolding & Delta Rules:
+1. **Turn 1 / Initial Scaffolding (Contemplative Architecture):** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:
+   First emit \`[CONTEMPLATION]\` inside \`[UPDATE_DOSSIER]\` to map out the central tension, world consequences, character entanglement, and starting crucible. Then proactively scaffold a complete, coherent starting draft into \`[UPDATE_DOSSIER]\`: \`summary: ...\`, \`ruleset: fae\`, \`system\`, \`tone\`, \`premise\`, \`[CONFIG]\` dials, \`[PROTAGONIST]\`, 1 \`[FACTION]\`, 1 \`[MONSTER]\`, 1 starting \`[MAP]\`, and \`[KICK]\`.
+   * On Turn 1 initial scaffold: proactively generate [CONTEMPLATION], [CONFIG], [PROTAGONIST], 1 [FACTION], 1 [MONSTER], 1 [MAP], and [KICK].
+   * Ensure the Protagonist, Faction, and Monster are **entangled** (shared history, debts, conflicting agendas) rather than isolated tropes.
+2. **Follow-Up Edits (Partial Patches):** On follow-up turns / delta edits: emit ONLY changed entities/fields. Unchanged entities and fields are preserved automatically. NEVER re-emit \`[[NAME:protagonist]]\` or entity name placeholders if the entity already exists in [CURRENT_LIVE_BLUEPRINT]; preserve established character/entity names.
+3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
+4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.
 `;
 }
 
@@ -863,7 +880,7 @@ Your ONLY job is to audit the candidate **[CURRENT_LIVE_BLUEPRINT]** against the
    - If \`heroic_tier\` is true, the protagonist has a valid \`heroic_domain\` providing pre-math leverage; if false, \`heroic_domain\` is omitted.
 4. **Positive Tags, Scars & Mechanical Purity (0–20):**
    - **Protagonist Tags:** 3–4 specific Positive Tags (Trait Qualification Protocol: ~25–30% situational applicability, using \`Trait [context]\` for broad adjectives) and 0–1 starting Scar in \`negative_tags\`.
-   - **Zero-Bookkeeping Companions:** Travelling companions and party allies MUST be recorded as \`Companion: Name (Role)\` entries in the Protagonist's \`positive_tags\`, NOT as separate \`[NPC]\` cards with moves, hit points, or party roles. \`[NPC]\` cards are reserved for external contacts, mentors, or faction figures with \`moves_or_boons\` specifying fictional leverage.
+   - **Zero-Bookkeeping Companions & NPC Scoping Directive:** Travelling companions, recruits, or spunky sidekicks approaching or accompanying the PC belong strictly in \`[PROTAGONIST] positive_tags\` as \`Companion: Name (Role)\`. Do NOT order an \`[NPC]\` card for companions/recruits unless the player explicitly requests stationary external contacts, patrons, or merchants. \`[NPC]\` cards are reserved strictly for external contacts, mentors, or faction figures with \`moves_or_boons\` specifying fictional leverage.
    - **MANDATORY PURGE CHECK (NO PBTA / NO D&D):** The blueprint MUST NEVER contain PbtA moves ("When you... roll 2d6", 10+/7-9/6- hit outcomes, hold/forward, countdown doom tracks) or D&D terminology (DCs, AC, attack rolls, saving throws, advantage/disadvantage, spell slots). All mechanics strictly rely on the 4dF attrition ladder and resource pools.
 5. **The Kick's Immediate Crucible (0–20):** Does \`[KICK]\` place the protagonist directly at the starting \`[MAP]\` site *in media res* with an urgent crisis that connects to the staged cast/threats on Turn 1 without forcing an immediate dice roll?
 

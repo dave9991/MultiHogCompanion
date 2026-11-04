@@ -83,6 +83,16 @@ describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => 
         state.state_flags.turns_since_last_test = 0;
         const suggEnc = getPacingSuggestion(state, true);
         assert.ok(suggEnc.includes('On rhythm'));
+
+        // Opening Scene Setup directive on Turn 1 / opening turn
+        const openingDirective = '[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]';
+        assert.strictEqual(getPacingSuggestion(state, false, true), openingDirective);
+        assert.strictEqual(getPacingSuggestion(state, false, { isOpeningTurn: true }), openingDirective);
+        assert.strictEqual(getPacingSuggestion(state, { isOpeningTurn: true }), openingDirective);
+
+        const openingState = createInitialFaeState('osr_dungeon');
+        openingState.state_flags.is_opening_turn = true;
+        assert.strictEqual(getPacingSuggestion(openingState, false), openingDirective);
     });
 
     test('isCompanionTag correctly identifies companion/retainer tags and zero-pool exemptions', () => {
@@ -528,6 +538,16 @@ describe('Freeform Attrition Engine (FAE) — Cartridge, RNG Block & Documentati
         const blockZero = buildFaeRngBlock({ state, lineCount: 6 });
         assert.ok(blockZero.includes('Sanity (0/8): Innate Personal Tags: DISABLED (Pool at 0!)'));
         assert.ok(blockZero.includes('Uninjured Companion: tags and earned [Advantage] still apply'));
+    });
+
+    test('buildFaeRngBlock injects OPENING SCENE SETUP directive when isOpeningTurn is true', () => {
+        const state = createInitialFaeState('cosmic_horror');
+        const blockOpening = buildFaeRngBlock({ state, lineCount: 6, isOpeningTurn: true });
+        assert.ok(blockOpening.includes('[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]'));
+
+        const blockNormal = buildFaeRngBlock({ state, lineCount: 6, isOpeningTurn: false });
+        assert.ok(blockNormal.includes('[Pacing Suggestion (slow_burn): Last pool test was 0 turn(s) ago.'));
+        assert.ok(!blockNormal.includes('OPENING SCENE SETUP'));
     });
 
     test('buildFaeCartridge compiles valid cartridge object', () => {

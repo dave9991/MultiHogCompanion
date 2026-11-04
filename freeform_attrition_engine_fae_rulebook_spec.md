@@ -198,6 +198,7 @@ To prevent LLMs from either rolling on every breath ("Relentless Escalation") or
   * `slow_burn`: `3 to 7` turns between tests.
   * `slice_of_life`: `6 to 12` turns between tests.
 * **Soft Pacing Prompts (Never Forced):**
+  * **When `is_opening_turn == True` (Turn 1 / Adventure Start):** Injects a hard opening setup directive: *"[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]"*
   * **When `turns_since_last_test < min` (and no multi-layer Encounter is active):** Injects a cool-down note: *"Last pool test was {N} turn(s) ago. Favor Threat 0 (no roll) and narrative breathing room unless the player forces immediate danger."*
   * **When `turns_since_last_test >= max`:** Injects an escalation note: *"{N} turns since last pool test. If the player is taking risky or proactive action, resolve it as Threat 1+; if they are in safe conversation/downtime, introduce an external hook or complication they can choose to engage with."*
 
@@ -354,8 +355,14 @@ def is_companion_tag(tag: str) -> bool:
     return tag.startswith(("Companion:", "Retainer:"))
 
 
-def get_pacing_suggestion(state: dict, active_encounter: bool = False) -> str:
+def get_pacing_suggestion(state: dict, active_encounter: bool = False, is_opening_turn: bool = False) -> str:
     """Returns a soft pacing hint based on turns_since_last_test vs. action_tempo."""
+    if is_opening_turn or state.get("state_flags", {}).get("is_opening_turn", False):
+        return (
+            "[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. "
+            "Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, "
+            "establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]"
+        )
     tempo = state["knobs"].get("action_tempo", "gritty_default")
     window = TEMPO_WINDOWS[tempo]
     n = state.get("state_flags", {}).get("turns_since_last_test", 0)

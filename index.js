@@ -2464,6 +2464,36 @@ function buildPbtA2d6Block(lineCount = 12) {
     return `[RNG_QUEUE v7.0 — PbtA 2d6]\nturn_id=${turnId}\nscope=this_response\n${lines.join('\n')}\n[/RNG_QUEUE]\n\n`;
 }
 
+function getMsgRawText(msg) {
+    if (!msg) return '';
+    if (typeof msg.mes === 'string') return msg.mes;
+    if (typeof msg.content === 'string') return msg.content;
+    if (Array.isArray(msg.content)) {
+        return msg.content
+            .filter(p => p?.type === 'text' && typeof p.text === 'string')
+            .map(p => p.text)
+            .join('\n');
+    }
+    return '';
+}
+
+function isUserChatMessage(msg) {
+    if (!msg) return false;
+    if (msg.is_user === true || msg.role === 'user' || msg.role === 'human' || msg.role === 'player') return true;
+    const txt = getMsgRawText(msg);
+    if (txt.includes('[RNG_QUEUE')) return true;
+    return false;
+}
+
+function isAssistantNarrativeMessage(msg) {
+    if (!msg) return false;
+    if (msg.is_user === true || msg.role === 'user' || msg.role === 'human' || msg.role === 'player') return false;
+    if (msg.is_system === true || msg.role === 'system') return false;
+    if (msg.extra?.isSmallSys) return false;
+    const txt = getMsgRawText(msg).trim();
+    return txt.length > 0;
+}
+
 /**
  * SillyTavern generate_interceptor — runs AFTER MultiHog's interceptor
  * (loading_order 30 > 20). When PbtA or FAE is active for the current chat,
@@ -2482,6 +2512,53 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
 
     let replacementBlock = '';
     if (faeActive) {
+        // Inspect chat: find the latest user message (the one containing [RNG_QUEUE...], or the last m.is_user message).
+        let latestUserIdx = -1;
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const msg = chat[i];
+            if (!msg) continue;
+            const txt = getMsgRawText(msg);
+            if (txt.includes('[RNG_QUEUE')) {
+                latestUserIdx = i;
+                break;
+            }
+        }
+        if (latestUserIdx === -1) {
+            for (let i = chat.length - 1; i >= 0; i--) {
+                if (isUserChatMessage(chat[i])) {
+                    latestUserIdx = i;
+                    break;
+                }
+            }
+        }
+
+        let isOpeningTurn = false;
+        if (latestUserIdx !== -1) {
+            const rawUserText = getMsgRawText(chat[latestUserIdx]);
+            const strippedText = rawUserText.replace(/\[RNG_QUEUE[\s\S]*?\[\/RNG_QUEUE\]\s*/gi, '').trim();
+            const isBeginAdventure = /^\s*Begin the adventure\b/i.test(strippedText);
+
+            let firstUserIdx = -1;
+            for (let i = 0; i < chat.length; i++) {
+                if (isUserChatMessage(chat[i])) {
+                    firstUserIdx = i;
+                    break;
+                }
+            }
+
+            let hasPriorAssistantTurn = false;
+            if (firstUserIdx !== -1 && latestUserIdx > firstUserIdx) {
+                for (let i = firstUserIdx + 1; i < latestUserIdx; i++) {
+                    if (isAssistantNarrativeMessage(chat[i])) {
+                        hasPriorAssistantTurn = true;
+                        break;
+                    }
+                }
+            }
+
+            isOpeningTurn = isBeginAdventure || !hasPriorAssistantTurn;
+        }
+
         const memo = getRpgSettings()?.currentMemo || '';
         const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
         const faeState = parseFaeStateFromMemo(memo, genreKey);
@@ -2491,6 +2568,7 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
             state: faeState,
             genreKey: faeState.genreKey || genreKey,
             activeEncounter: hasActiveEncounter,
+            isOpeningTurn,
         });
         if (!replacementBlock.endsWith('\n\n')) {
             replacementBlock = `${replacementBlock}\n\n`;
@@ -2499,19 +2577,17 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
         replacementBlock = buildPbtA2d6Block();
     }
 
-    for (let i = chat.length - 1; i >= Math.max(0, chat.length - 3); i--) {
+    for (let i = chat.length - 1; i >= 0; i--) {
         const msg = chat[i];
         if (!msg) continue;
 
-        if (typeof msg.mes === 'string' && rngPattern.test(msg.mes)) {
-            rngPattern.lastIndex = 0;
+        if (typeof msg.mes === 'string' && msg.mes.includes('[RNG_QUEUE')) {
             msg.mes = msg.mes.replace(rngPattern, replacementBlock);
             console.log(faeActive ? '[MultiHog Companion] Replaced polyhedral RNG queue with FAE 4dF block.' : '[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
             return;
         }
 
-        if (typeof msg.content === 'string' && rngPattern.test(msg.content)) {
-            rngPattern.lastIndex = 0;
+        if (typeof msg.content === 'string' && msg.content.includes('[RNG_QUEUE')) {
             msg.content = msg.content.replace(rngPattern, replacementBlock);
             console.log(faeActive ? '[MultiHog Companion] Replaced polyhedral RNG queue with FAE 4dF block.' : '[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
             return;
@@ -2519,8 +2595,7 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
 
         if (Array.isArray(msg.content)) {
             for (const part of msg.content) {
-                if (part?.type === 'text' && typeof part.text === 'string' && rngPattern.test(part.text)) {
-                    rngPattern.lastIndex = 0;
+                if (part?.type === 'text' && typeof part.text === 'string' && part.text.includes('[RNG_QUEUE')) {
                     part.text = part.text.replace(rngPattern, replacementBlock);
                     console.log(faeActive ? '[MultiHog Companion] Replaced polyhedral RNG queue with FAE 4dF block.' : '[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 block.');
                     return;

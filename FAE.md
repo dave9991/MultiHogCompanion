@@ -109,9 +109,11 @@ Campaign pacing is calibrated along three interdependent axes:
 The engine tracks `state.state_flags.turns_since_last_test` across turns. When `CHARACTER_MESSAGE_RENDERED` fires:
 - If an action roll occurred (`/*(FAE Action`), `turns_since_last_test` resets to `0`.
 - If no roll occurred (Threat 0 narrative turn), `turns_since_last_test` increments by $+1$.
-- `getPacingSuggestion(state, activeEncounter)` dynamically feeds the GM narrative guidance inside the RNG Queue block:
+- `getPacingSuggestion(state, activeEncounter, options)` dynamically feeds the GM narrative guidance inside the RNG Queue block:
+  - **Turn 1 / Opening Scene Setup (`isOpeningTurn == true`):** Injects the Opening Scene Setup directive: `[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]`. Triggered when the user begins the adventure (`/^\s*Begin the adventure\b/i`) or when sending the very first user message in an adventure chat.
   - If `!activeEncounter && turns < window.min`: GM favors Threat 0 (narrative breathing room).
   - If `turns >= window.max`: GM resolves proactive actions at Threat 1+ or introduces an external complication.
+  - Otherwise: On rhythm status.
 
 ---
 

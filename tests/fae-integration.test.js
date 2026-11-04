@@ -90,22 +90,52 @@ Status: Healthy
 
         assert.strictEqual(isFaeActive(faeChatId), true, 'FAE must be detected as active');
 
+        // Turn 1: Adventure Start ("Begin the adventure.") -> Injects OPENING SCENE SETUP directive
+        const openingChatMessages = [
+            {
+                role: 'user',
+                is_user: true,
+                mes: `[RNG_QUEUE v6.3]\nturn_id=789100\n1: d20=12 d4=3 d6=1 d8=6 d10=5 d12=8\n[/RNG_QUEUE]\n\nBegin the adventure. Character: Thomas Blackwood`,
+            },
+        ];
+
+        mhcGenerationInterceptor(openingChatMessages);
+
+        assert.ok(!openingChatMessages[0].mes.includes('[RNG_QUEUE v6.3]'), 'Upstream polyhedral queue must be stripped on Turn 1');
+        assert.ok(openingChatMessages[0].mes.includes('[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]'), 'FAE 4dF queue header must be injected on Turn 1');
+        assert.ok(openingChatMessages[0].mes.includes('[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup.'), 'Opening Scene Setup pacing directive must be injected on Turn 1');
+        assert.ok(openingChatMessages[0].mes.includes('Begin the adventure. Character: Thomas Blackwood'), 'User message prose must be preserved cleanly');
+
+        // Turn 2+: Ongoing adventure with prior assistant narrative turn -> Switches to normal tempo pacing
         const faeChatMessages = [
             {
                 role: 'user',
+                is_user: true,
+                mes: 'Begin the adventure. Character: Thomas Blackwood',
+            },
+            {
+                role: 'assistant',
+                is_user: false,
+                mes: 'The fog rolls across the Boston harbor docks as cold rain begins to fall.',
+            },
+            {
+                role: 'user',
+                is_user: true,
                 mes: `[RNG_QUEUE v6.3]\nturn_id=789101\n1: d20=12 d4=3 d6=1 d8=6 d10=5 d12=8\n2: d20=19 d4=4 d6=6 d8=2 d10=1 d12=4\n[/RNG_QUEUE]\n\nI shine my flashlight toward the dark corridor.`,
             },
         ];
 
         mhcGenerationInterceptor(faeChatMessages);
 
-        assert.ok(!faeChatMessages[0].mes.includes('[RNG_QUEUE v6.3]'), 'Upstream polyhedral queue must be stripped');
-        assert.ok(faeChatMessages[0].mes.includes('[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]'), 'FAE 4dF queue header must be injected');
-        assert.ok(faeChatMessages[0].mes.includes('PRE-COMPUTED TURN RESOLUTION MATRIX'), 'Pre-computed matrix must be injected');
-        assert.ok(faeChatMessages[0].mes.includes('Threat 1:'), 'Threat resolution lines must be present');
-        assert.ok(faeChatMessages[0].mes.includes('Sanity (5/8): Positive Tags: ENABLED'), 'Active pools status must be evaluated in matrix');
-        assert.ok(faeChatMessages[0].mes.includes('[Pacing Suggestion (slow_burn): Last pool test was 0 turn(s) ago.'), 'Live pacing suggestion must be included in RNG queue block');
-        assert.ok(faeChatMessages[0].mes.includes('I shine my flashlight toward the dark corridor.'), 'User message prose must be preserved cleanly');
+        const currentTurnMsg = faeChatMessages[2];
+        assert.ok(!currentTurnMsg.mes.includes('[RNG_QUEUE v6.3]'), 'Upstream polyhedral queue must be stripped');
+        assert.ok(currentTurnMsg.mes.includes('[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]'), 'FAE 4dF queue header must be injected');
+        assert.ok(currentTurnMsg.mes.includes('PRE-COMPUTED TURN RESOLUTION MATRIX'), 'Pre-computed matrix must be injected');
+        assert.ok(currentTurnMsg.mes.includes('Threat 1:'), 'Threat resolution lines must be present');
+        assert.ok(currentTurnMsg.mes.includes('Sanity (5/8): Positive Tags: ENABLED'), 'Active pools status must be evaluated in matrix');
+        assert.ok(currentTurnMsg.mes.includes('[Pacing Suggestion (slow_burn): Last pool test was 0 turn(s) ago.'), 'Live pacing suggestion must be included in RNG queue block on Turn 2+');
+        assert.ok(!currentTurnMsg.mes.includes('OPENING SCENE SETUP'), 'Opening directive must not appear on Turn 2+');
+        assert.ok(currentTurnMsg.mes.includes('I shine my flashlight toward the dark corridor.'), 'User message prose must be preserved cleanly');
     });
 
     // ── Test 2: applyFaeCartridge and restoreStockDnd Round-Trip ─────────────

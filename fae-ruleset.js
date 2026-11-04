@@ -671,18 +671,34 @@ export function isCompanionTag(tag) {
 }
 
 /**
- * Returns a soft pacing hint based on turns_since_last_test vs. action_tempo (Section 5.2 & Section 7).
+ * Returns a soft pacing hint based on turns_since_last_test vs. action_tempo (Section 5.2 & Section 7)
+ * or Opening Scene Setup directive.
  *
  * @param {object} state
- * @param {boolean} [activeEncounter=false]
+ * @param {boolean|object} [activeEncounter=false]
+ * @param {object|boolean} [options={}]
  * @returns {string}
  */
-export function getPacingSuggestion(state, activeEncounter = false) {
+export function getPacingSuggestion(state, activeEncounter = false, options = {}) {
+    let encounter = activeEncounter;
+    if (typeof activeEncounter === 'object' && activeEncounter !== null) {
+        options = activeEncounter;
+        encounter = false;
+    }
+
+    const isOpeningTurn = typeof options === 'boolean'
+        ? options
+        : Boolean(options?.isOpeningTurn || state?.state_flags?.is_opening_turn);
+
+    if (isOpeningTurn) {
+        return '[Pacing Directive (OPENING SCENE SETUP): This is the opening scene setup. Do NOT roll dice or test any resource pools this turn — ignore the RNG queue above, establish the starting situation and immediate stakes, and hand the spotlight to {{user}}.]';
+    }
+
     const tempo = state?.knobs?.action_tempo || 'gritty_default';
     const window = TEMPO_WINDOWS[tempo] || TEMPO_WINDOWS.gritty_default;
     const n = state?.state_flags?.turns_since_last_test ?? 0;
 
-    if (!activeEncounter && n < window.min) {
+    if (!encounter && n < window.min) {
         return `[Pacing Suggestion (${tempo}): Last pool test was ${n} turn(s) ago. Favor Threat 0 (no roll) and narrative breathing room unless the player forces immediate danger.]`;
     }
     if (n >= window.max) {
@@ -1257,9 +1273,11 @@ export function resolveAction(state, options = {}) {
  * @param {object|null} [options.state=null]
  * @param {string} [options.genreKey='cosmic_horror']
  * @param {number} [options.lineCount=6]
+ * @param {boolean} [options.activeEncounter=false]
+ * @param {boolean} [options.isOpeningTurn=false]
  * @returns {string} Formatted [RNG_QUEUE] block
  */
-export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lineCount = 6, activeEncounter = false } = {}) {
+export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lineCount = 6, activeEncounter = false, isOpeningTurn = false } = {}) {
     const activeState = state || createInitialFaeState(genreKey);
     const rolls = [];
     for (let i = 0; i < lineCount; i++) {
@@ -1313,7 +1331,7 @@ export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lin
     const header = `[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]`;
     const queueText = rolls.map(r => r.line).join('\n');
     const matrixText = matrixLines.join('\n');
-    const pacingHint = getPacingSuggestion(activeState, activeEncounter);
+    const pacingHint = getPacingSuggestion(activeState, activeEncounter, { isOpeningTurn });
 
     return `${header}\n${queueText}\n\n${matrixText}\n\n${pacingHint}\n[/RNG_QUEUE]`;
 }

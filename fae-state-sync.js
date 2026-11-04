@@ -145,8 +145,12 @@ export function formatFaeCharacterMemoBlock(faeState) {
     const shiftStr = knobs.base_attrition_shift >= 0 ? `+${knobs.base_attrition_shift}` : `${knobs.base_attrition_shift}`;
     const advSnippet = char.temp_advantage ? ` | [Advantage: ${char.temp_advantage}]` : '';
     const heroicSnippet = isHeroic ? ' | Heroic: ON' : '';
+    const flags = faeState.state_flags || { breather_available: true, turns_since_last_test: 0 };
+    const tempoStr = knobs.action_tempo || 'gritty_default';
+    const idleStr = `${flags.turns_since_last_test ?? 0}t`;
+    const breatherStr = flags.breather_available !== false ? 'READY' : 'USED';
     lines.push(
-        `FAE Knobs: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${shiftStr} | Overflow: ${knobs.overflow_default}${heroicSnippet}${advSnippet}`
+        `FAE Knobs: Flee Grace: ${knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${shiftStr} | Overflow: ${knobs.overflow_default} | Tempo: ${tempoStr} | Idle: ${idleStr} | Breather: ${breatherStr}${heroicSnippet}${advSnippet}`
     );
 
     if (isHeroic) {
@@ -237,6 +241,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
             primaryCur = parseInt(headMatch[3], 10);
             primaryMax = parseInt(headMatch[4], 10);
         }
+        let foundScenes = false;
         for (let i = 1; i < clauses.length; i++) {
             const c = clauses[i];
             const pMatch = c.match(/^Pool:\s*([^(\n]+?)(?:\s*\(([+-]?\d+)\/(\d+)\))?$/i);
@@ -249,18 +254,20 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
             if (sMatch) {
                 scenesCur = parseInt(sMatch[1], 10);
                 scenesMax = parseInt(sMatch[2], 10);
+                foundScenes = true;
             }
             const xMatch = c.match(/^XP:\s*(\d+)\/(\d+)$/i);
-            if (xMatch && !sMatch) {
+            if (xMatch && !foundScenes) {
                 scenesCur = parseInt(xMatch[1], 10);
                 scenesMax = parseInt(xMatch[2], 10);
             }
         }
     }
 
-    // 2. FAE Knobs Line: FAE Knobs: [Heroic: ON | ]Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko[ | Heroic: ON][ | [Advantage: ...]]
+    // 2. FAE Knobs Line: FAE Knobs: [Heroic: ON | ]Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko[ | Tempo: ...] [ | Idle: ...] [ | Breather: ...] [ | Heroic: ON][ | [Advantage: ...]]
     const knobsLineMatch = charText.match(/FAE Knobs:\s*([^\n\r]+)/i);
     const knobs = { ...baseState.knobs };
+    const state_flags = { ...baseState.state_flags };
     let tempAdvantage = null;
 
     if (knobsLineMatch) {
@@ -273,6 +280,15 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
 
         const overM = kLine.match(/Overflow:\s*([a-zA-Z0-9_:]+)/i);
         if (overM) knobs.overflow_default = overM[1].trim();
+
+        const tempoM = kLine.match(/Tempo:\s*([a-zA-Z0-9_]+)/i);
+        if (tempoM) knobs.action_tempo = tempoM[1].trim();
+
+        const idleM = kLine.match(/Idle:\s*(\d+)t?/i);
+        if (idleM) state_flags.turns_since_last_test = parseInt(idleM[1], 10);
+
+        const breatherM = kLine.match(/Breather:\s*([a-zA-Z0-9_]+)/i);
+        if (breatherM) state_flags.breather_available = !/^(?:USED|OFF|false)$/i.test(breatherM[1].trim());
 
         const heroicM = kLine.match(/\bHeroic:\s*(ON|OFF|true|false)\b/i);
         if (heroicM) knobs.heroic_tier = /^(?:ON|true)$/i.test(heroicM[1]);
@@ -413,6 +429,11 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         const encRegex = /^\s*([^:\n]+?):\s*(\d+)\/(\d+)\s*HP\s*\|\s*Threat:\s*(\d+)(?:\s*\(([^)]+)\))?\s*\|\s*Pools:\s*([^\n]+)/m;
         const encMatch = combatText.match(encRegex);
         if (encMatch) {
+            const statusMatch = combatText.match(/^Status:\s*([^[\n\r]+?)(?:\s*\[Barriers:\s*([^\]]+)\])?$/mi);
+            const statusVal = statusMatch ? statusMatch[1].trim() : (combatText.match(/^Status:\s*(.+)$/m)?.[1]?.trim() || 'Active');
+            const barriersVal = statusMatch?.[2]?.trim() || combatText.match(/Leverage Barriers(?:\s*\([^)]*\))?:\s*(.+)$/m)?.[1]?.trim() || '';
+            const instinctVal = combatText.match(/^Instinct:\s*(.+)$/m)?.[1]?.trim() || '';
+
             activeEncounter = {
                 name: encMatch[1].trim(),
                 currentHp: parseInt(encMatch[2], 10),
@@ -421,9 +442,10 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
                 threatLabel: encMatch[5] ? encMatch[5].trim() : '',
                 pools: encMatch[6].trim(),
                 pressures: combatText.match(/(?:\(\(PILLS\)\)\s*)?Pressures:\s*(.+)$/m)?.[1]?.trim() || '',
-                barriers: combatText.match(/Leverage Barriers(?:\s*\([^)]*\))?:\s*(.+)$/m)?.[1]?.trim() || '',
+                instinct: instinctVal,
+                barriers: barriersVal,
                 triggers: combatText.match(/Full-Finish Triggers:\s*(.+)$/m)?.[1]?.trim() || '',
-                status: combatText.match(/Status:\s*(.+)$/m)?.[1]?.trim() || 'Active',
+                status: statusVal,
             };
         }
     }
@@ -432,6 +454,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         genre: fallbackGenre.label,
         genreKey: fallbackGenre.id,
         knobs,
+        state_flags,
         character: {
             name,
             archetype,
@@ -574,14 +597,14 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
             events.push(`SCENE_INCREMENTED: Encounter resolved; scenes completed is now ${nextState.character.scenes_completed}`);
         }
         if (isResolvedNow) {
-            if (!nextState.knobs) nextState.knobs = {};
-            nextState.knobs.breather_available = true;
+            if (!nextState.state_flags) nextState.state_flags = { breather_available: true, turns_since_last_test: 0 };
+            nextState.state_flags.breather_available = true;
         }
     }
 
     if (nextState.character.scenes_completed > prevScenes) {
-        if (!nextState.knobs) nextState.knobs = {};
-        nextState.knobs.breather_available = true;
+        if (!nextState.state_flags) nextState.state_flags = { breather_available: true, turns_since_last_test: 0 };
+        nextState.state_flags.breather_available = true;
     }
 
     // 4. Generate Reconciled [CHARACTER] Block
@@ -827,7 +850,7 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
 }
 
 /**
- * Formats an encounter object into a native FAE Encounter Block string.
+ * Formats an encounter object into a native 4-line FAE Encounter Block string (Section 5.1).
  *
  * @param {object} encounter
  * @returns {string}
@@ -837,21 +860,60 @@ export function formatFaeEncounterBlock(encounter) {
     const name = encounter.name || 'Hazard';
     const curHp = encounter.currentHp ?? encounter.hp ?? 2;
     const maxHp = encounter.maxHp ?? 2;
-    const threat = encounter.threat ?? 2;
-    const threatLabel = encounter.threatLabel || (threat === 1 ? 'Minor' : threat === 2 ? 'Standard' : threat === 3 ? 'Elite' : 'Apex');
+    const threat = encounter.threat ?? encounter.threatLevel ?? 2;
+    const threatLabel = encounter.threatLabel ? ` (${encounter.threatLabel})` : '';
     const pools = Array.isArray(encounter.pools) ? encounter.pools.join(', ') : (encounter.pools || 'Health');
     const pressures = Array.isArray(encounter.pressures) ? encounter.pressures.join(', ') : (encounter.pressures || 'None');
-    const barriers = Array.isArray(encounter.barriers)
-        ? encounter.barriers.map((b, i) => `[${i + 1}. ${b}]`).join(' ')
-        : (encounter.barriers || '[1. Obstacle]');
-    const triggers = encounter.triggers || 'Overcome the obstacles (1 Turn)';
-    const status = encounter.status || 'Active';
+    const instinct = encounter.instinct || 'To hold ground and challenge intruders';
+    const status = encounter.status || 'Entrenched';
+
+    let barriersStr = '';
+    if (Array.isArray(encounter.barriers) && encounter.barriers.length > 0) {
+        barriersStr = encounter.barriers.map((b, i) => `${i + 1}. ${b}`).join(' -> ');
+    } else if (encounter.barriers) {
+        barriersStr = String(encounter.barriers).replace(/^\[|\]$/g, '').replace(/\]\s*\[/g, ' -> ');
+    } else {
+        barriersStr = '1. Defensive Line';
+    }
 
     return [
-        `${name}: ${curHp}/${maxHp} HP | Threat: ${threat} (${threatLabel}) | Pools: ${pools}`,
+        `${name}: ${curHp}/${maxHp} HP | Threat: ${threat}${threatLabel} | Pools: ${pools}`,
         `((PILLS)) Pressures: ${pressures}`,
-        `Leverage Barriers (${maxHp} Layers): ${barriers}`,
-        `Full-Finish Triggers: ${triggers}`,
-        `Status: ${status}`,
+        `Instinct: ${instinct}`,
+        `Status: ${status} [Barriers: ${barriersStr}]`,
     ].join('\n');
+}
+
+/**
+ * Advances the dynamic tempo counter based on whether the assistant message contained a 4dF roll (Section 5.2).
+ * Threat 0 turns without rolls increment turns_since_last_test; turns with 4dF rolls reset it to 0.
+ *
+ * @param {string} memoText Full state memo or [CHARACTER] block
+ * @param {string} [assistantNarrativeText=''] Assistant response text
+ * @param {string} [fallbackGenre='cosmic_horror']
+ * @returns {{ memo: string, state: object, turnsSinceLastTest: number }}
+ */
+export function advanceFaeTurnTempo(memoText, assistantNarrativeText = '', fallbackGenre = 'cosmic_horror') {
+    const state = parseFaeStateFromMemo(memoText, fallbackGenre);
+    if (!state.state_flags) {
+        state.state_flags = { breather_available: true, turns_since_last_test: 0 };
+    }
+    const hasRoll = /\*\(FAE Action\b/i.test(assistantNarrativeText) || /4dF\s*\[/i.test(assistantNarrativeText);
+    if (hasRoll) {
+        state.state_flags.turns_since_last_test = 0;
+    } else {
+        state.state_flags.turns_since_last_test = (state.state_flags.turns_since_last_test ?? 0) + 1;
+    }
+    const updatedCharBlock = formatFaeCharacterMemoBlock(state);
+    let updatedMemo = memoText || '';
+    if (/\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i.test(updatedMemo)) {
+        updatedMemo = updatedMemo.replace(/\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i, updatedCharBlock);
+    } else {
+        updatedMemo = `${updatedMemo.trim()}\n\n${updatedCharBlock}`;
+    }
+    return {
+        memo: updatedMemo,
+        state,
+        turnsSinceLastTest: state.state_flags.turns_since_last_test,
+    };
 }

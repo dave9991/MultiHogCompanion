@@ -88,7 +88,7 @@ import {
     findNextAdventureVersionName,
 } from './adventure-chat.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
-import { FAE_GENRES } from './fae-ruleset.js';
+import { FAE_GENRES, TEMPO_WINDOWS } from './fae-ruleset.js';
 import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders } from './namerag-hooks.js';
 import {
     getCompanionActiveCartridge,
@@ -462,8 +462,15 @@ function updateBlueprintDeck() {
             .text(`⚡ Heroic: ${isHeroic ? 'ON' : 'OFF'}`)
             .css('opacity', isHeroic ? '1' : '0.65')
             .show();
+
+        const curTempo = cfg.actionTempo || knobs.action_tempo || 'gritty_default';
+        const tempoLabel = TEMPO_WINDOWS[curTempo]?.label || TEMPO_WINDOWS.gritty_default.label;
+        $('#mhc_dial_tempo_btn')
+            .text(`⏱️ Tempo: ${tempoLabel}`)
+            .show();
     } else {
         $('#mhc_dial_heroic_btn').hide();
+        $('#mhc_dial_tempo_btn').hide();
         const harmMax = cfg.harmMax || 5;
         let harmTag = '(Standard)';
         if (harmMax === 3) harmTag = '(Gritty)';
@@ -2284,6 +2291,28 @@ function bindModalEvents() {
             }
         }
         changelog.push(`Toggled Heroic Tier to ${nextHeroic ? 'ON' : 'OFF'}`);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    $('#mhc_dial_tempo_btn').on('click', () => {
+        const isFae = activeDossier.meta?.ruleset === 'fae';
+        if (!isFae) return;
+        activeDossier.config = activeDossier.config || {};
+        activeDossier.config.knobs = activeDossier.config.knobs || activeDossier.knobs || {};
+        const curTempo = activeDossier.config.actionTempo || activeDossier.config.knobs.action_tempo || 'gritty_default';
+        const cycle = {
+            'action_serial': 'gritty_default',
+            'gritty_default': 'slow_burn',
+            'slow_burn': 'slice_of_life',
+            'slice_of_life': 'action_serial'
+        };
+        const nextTempo = cycle[curTempo] || 'gritty_default';
+        activeDossier.config.actionTempo = nextTempo;
+        activeDossier.config.knobs.action_tempo = nextTempo;
+        if (activeDossier.knobs) activeDossier.knobs.action_tempo = nextTempo;
+
+        changelog.push(`Cycled Action Tempo to ${nextTempo}`);
         updateBlueprintDeck();
         saveDraft();
     });

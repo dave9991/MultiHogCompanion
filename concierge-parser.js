@@ -105,8 +105,9 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
                     statusToken: '(-) Incapacitated',
                     cyoaStyle: 'crisis',
                 },
+                actionTempo: genreObj.knobs?.action_tempo || 'gritty_default',
                 heroicTier: isHeroicDefault,
-                knobs: { ...genreObj.knobs, heroic_tier: isHeroicDefault },
+                knobs: { ...genreObj.knobs, heroic_tier: isHeroicDefault, action_tempo: genreObj.knobs?.action_tempo || 'gritty_default' },
                 pacingScenes: 4,
             },
         };
@@ -192,6 +193,7 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
                 statusToken: '(-) Incapacitated',
                 cyoaStyle: 'crisis',
             },
+            actionTempo: 'gritty_default',
             heroicTier: false,
         },
     };
@@ -722,9 +724,10 @@ The Kick: Unset
     // model can copy names/keys exactly and emit precise partial edits.
     const cfg = dossier.config || {};
     const isHeroicTier = Boolean(cfg.heroicTier ?? cfg.knobs?.heroic_tier ?? false);
+    const actionTempoStr = cfg.actionTempo || cfg.knobs?.action_tempo || 'gritty_default';
     const fatePart = cfg.maxHarmFate?.rule ? `, max_harm_fate=${cfg.maxHarmFate.rule}` : '';
     const knobsPart = (isFae && cfg.knobs)
-        ? `, heroic_tier=${isHeroicTier ? 'on' : 'off'}, flee_grace=${cfg.knobs.flee_grace_toggle ? 'on' : 'off'}, base_attrition_shift=${cfg.knobs.base_attrition_shift ?? 0}, overflow_default=${cfg.knobs.overflow_default || 'scar_and_ko'}, pacing_scenes=${cfg.pacingScenes ?? 4}`
+        ? `, action_tempo=${actionTempoStr}, heroic_tier=${isHeroicTier ? 'on' : 'off'}, flee_grace=${cfg.knobs.flee_grace_toggle ? 'on' : 'off'}, base_attrition_shift=${cfg.knobs.base_attrition_shift ?? 0}, overflow_default=${cfg.knobs.overflow_default || 'scar_and_ko'}, pacing_scenes=${cfg.pacingScenes ?? 4}`
         : '';
     lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}${fatePart}${knobsPart}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
@@ -825,6 +828,8 @@ The Kick: Unset
                 lines.push(`layers: ${curHarm > 0 ? `${curHarm}/${maxHarm}` : `${maxHarm}`}`);
                 if (m.poolsAtRisk) lines.push(`pools_at_risk: ${Array.isArray(m.poolsAtRisk) ? m.poolsAtRisk.join(', ') : m.poolsAtRisk}`);
                 if (m.pressures && m.pressures.length) lines.push(`pressures: ${Array.isArray(m.pressures) ? m.pressures.join(', ') : m.pressures}`);
+                if (m.instinct) lines.push(`instinct: ${m.instinct}`);
+                if (m.status) lines.push(`status: ${m.status}`);
                 if (m.leverageBarriers && m.leverageBarriers.length) lines.push(`leverage_barriers: ${Array.isArray(m.leverageBarriers) ? m.leverageBarriers.join(', ') : m.leverageBarriers}`);
                 if (m.fullFinishTriggers) lines.push(`full_finish_triggers: ${m.fullFinishTriggers}`);
             } else {
@@ -1188,6 +1193,10 @@ export function applyDossierUpdates(text, dossier) {
                 updated.protagonist.pools = clonedPools;
                 updated.config = updated.config || {};
                 updated.config.knobs = { ...FAE_GENRES[key].knobs };
+                const genreTempo = FAE_GENRES[key].knobs?.action_tempo || 'gritty_default';
+                if (updated.config.actionTempo === undefined || updated.meta.systemKey !== key) {
+                    updated.config.actionTempo = genreTempo;
+                }
                 const genreHeroic = Boolean(FAE_GENRES[key].knobs?.heroic_tier);
                 if (updated.config.heroicTier === undefined || updated.meta.systemKey !== key) {
                     updated.config.heroicTier = genreHeroic;
@@ -1777,6 +1786,7 @@ export function applyDossierUpdates(text, dossier) {
             impendingDoom: parseBulletOrListItems(mBlock, 'countdown', { splitCommas: false }),
             notes: kv.notes || '',
             status: kv.status ? kv.status.trim() : (mCurHarm > 0 ? '(-) Wounded' : ''),
+            instinct: kv.instinct ? kv.instinct.trim() : '',
             conditions: parsedMonConds.length ? sanitizeConditionsList(parsedMonConds) : [],
             threatLevel: threatLevelNum,
             layers: mMaxHarm,
@@ -1807,6 +1817,7 @@ export function applyDossierUpdates(text, dossier) {
             if (monsterObj.impendingDoom.length) patch.impendingDoom = monsterObj.impendingDoom;
             if (kv.notes) patch.notes = monsterObj.notes;
             if (kv.status) patch.status = monsterObj.status;
+            if (kv.instinct) patch.instinct = monsterObj.instinct;
             if (parsedMonConds.length) patch.conditions = monsterObj.conditions;
             updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], patch);
             Object.assign(monsterObj, updated.monsters[existingIdx]);
@@ -2297,6 +2308,17 @@ export function applyDossierUpdates(text, dossier) {
                 changes.push(`Overflow default dial set to ${val}`);
             }
         }
+        const tempoRaw = kv.action_tempo !== undefined ? kv.action_tempo : (kv.tempo !== undefined ? kv.tempo : kv.pacing_tempo);
+        if (tempoRaw !== undefined) {
+            const val = String(tempoRaw).trim().toLowerCase();
+            if (['action_serial', 'gritty_default', 'slow_burn', 'slice_of_life'].includes(val)) {
+                if (updated.config.actionTempo !== val) {
+                    updated.config.actionTempo = val;
+                    updated.config.knobs.action_tempo = val;
+                    changes.push(`Action Tempo dial set to ${val}`);
+                }
+            }
+        }
     }
 
     // Top-level or outside-CONFIG FAE Knobs
@@ -2438,10 +2460,12 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
                 const barriersStr = Array.isArray(m.leverageBarriers) ? m.leverageBarriers.join('; ') : (m.leverageBarriers || 'None');
                 const finishStr = m.fullFinishTriggers ? `\n* **Full-Finish Triggers:** ${m.fullFinishTriggers}` : '';
                 const notesStr = m.notes ? `\n* **Notes:** ${m.notes}` : '';
+                const instinctStr = m.instinct ? `\n* **Instinct:** ${m.instinct}` : '';
+                const statusStr = m.status ? `\n* **Status:** ${m.status}` : '';
                 return `### 👹 ${m.name}
 * **${threatStr}** | **Leverage Layers:** ${layersStr}
 * **Pools at Risk:** ${poolsStr}
-* **Pressures:** ${pressuresStr}
+* **Pressures:** ${pressuresStr}${instinctStr}${statusStr}
 * **Leverage Barriers:** ${barriersStr}${finishStr}${notesStr}`;
             }
             let attacks = (m.attacks && m.attacks.length) ? m.attacks.join(', ') : 'Natural attacks';
@@ -2595,7 +2619,7 @@ ${mapsMd}${worldRulesMd}${customModuleMd}
 * **Playstyle:** ${dossier.config.playstyle || 'cyoa_5'}
 * **Harm Capacity:** ${dossier.config.harmMax || 5}
 * **Party Mode:** ${dossier.config.partyMode || 'squad'}
-* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}${dossier.config.maxHarmFate ? `\n* **Max Harm Fate:** ${dossier.config.maxHarmFate.rule || dossier.config.maxHarmFate}${dossier.config.maxHarmFate.statusToken ? ` | **Status Token:** ${dossier.config.maxHarmFate.statusToken}` : ''}` : ''}${isFae && dossier.config.knobs ? `\n* **Flee Grace:** ${dossier.config.knobs.flee_grace_toggle ? 'ON' : 'OFF'}\n* **Base Attrition Shift:** ${dossier.config.knobs.base_attrition_shift >= 0 ? '+' + dossier.config.knobs.base_attrition_shift : dossier.config.knobs.base_attrition_shift}\n* **Overflow Default:** ${dossier.config.knobs.overflow_default || 'scar_and_ko'}` : ''}${isFae && dossier.config.pacingScenes ? `\n* **Pacing Scenes:** ${dossier.config.pacingScenes}` : ''}` : ''}`;
+* **CYOA Emojis:** ${dossier.config.cyoaEmojis !== false ? 'Enabled' : 'Disabled'}${dossier.config.simulationDepth ? `\n* **Simulation Depth:** ${dossier.config.simulationDepth}` : ''}${dossier.config.artStyle ? `\n* **Art Direction:** ${dossier.config.artStyle}` : ''}${dossier.config.pacingXp ? `\n* **XP Pacing:** ${dossier.config.pacingXp}` : ''}${dossier.config.relationships !== undefined ? `\n* **Relationships:** ${dossier.config.relationships !== false ? 'Enabled' : 'Disabled'}` : ''}${dossier.config.maxHarmFate ? `\n* **Max Harm Fate:** ${dossier.config.maxHarmFate.rule || dossier.config.maxHarmFate}${dossier.config.maxHarmFate.statusToken ? ` | **Status Token:** ${dossier.config.maxHarmFate.statusToken}` : ''}` : ''}${(dossier.config.actionTempo || dossier.config.knobs?.action_tempo) ? `\n* **Action Tempo:** ${dossier.config.actionTempo || dossier.config.knobs?.action_tempo}` : ''}${isFae && dossier.config.knobs ? `\n* **Flee Grace:** ${dossier.config.knobs.flee_grace_toggle ? 'ON' : 'OFF'}\n* **Base Attrition Shift:** ${dossier.config.knobs.base_attrition_shift >= 0 ? '+' + dossier.config.knobs.base_attrition_shift : dossier.config.knobs.base_attrition_shift}\n* **Overflow Default:** ${dossier.config.knobs.overflow_default || 'scar_and_ko'}` : ''}${isFae && dossier.config.pacingScenes ? `\n* **Pacing Scenes:** ${dossier.config.pacingScenes}` : ''}` : ''}`;
 }
 
 /**
@@ -2689,6 +2713,11 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     let sd = (dossier.config.simulationDepth || 'active_fronts').toLowerCase();
     if (!['active_fronts', 'living_world', 'static'].includes(sd)) sd = 'active_fronts';
     dossier.config.simulationDepth = sd;
+
+    let tempo = (dossier.config.actionTempo || dossier.config.knobs?.action_tempo || 'gritty_default').toLowerCase();
+    if (!['action_serial', 'gritty_default', 'slow_burn', 'slice_of_life'].includes(tempo)) tempo = 'gritty_default';
+    dossier.config.actionTempo = tempo;
+    if (dossier.config.knobs) dossier.config.knobs.action_tempo = tempo;
 
     let xp = parseInt(dossier.config.pacingXp, 10);
     if (isNaN(xp) || xp < 1 || xp > 10) xp = 5;
@@ -3144,6 +3173,13 @@ export function parseMarkdownToDossier(markdown) {
             if (!name || name.startsWith('_No')) continue;
 
             const harmArmorM = block.match(/\*\s*\*\*Harm:\*\*\s*(?:(\d+)\s*\/\s*(\d+)(?:\s*\([^)]*\))?|(\d+))(?:\s*\|\s*\*\*Armor:\*\*\s*(\d+))?/i);
+            const faeThreatM = block.match(/\*\s*\*\*(?:Threat Level (\d+)|([^|*]+))\*\*\s*\|\s*\*\*Leverage Layers:\*\*\s*(?:(\d+)\s*\/\s*(\d+)|(\d+))/i);
+            const poolsM = block.match(/\*\s*\*\*Pools at Risk:\*\*\s*([^\n\r]+)/i);
+            const pressuresM = block.match(/\*\s*\*\*Pressures:\*\*\s*([^\n\r]+)/i);
+            const instinctM = block.match(/\*\s*\*\*Instinct:\*\*\s*([^\n\r]+)/i);
+            const statusM = block.match(/\*\s*\*\*Status:\*\*\s*([^\n\r]+)/i);
+            const barriersM = block.match(/\*\s*\*\*Leverage Barriers:\*\*\s*([^\n\r]+)/i);
+            const finishM = block.match(/\*\s*\*\*Full-Finish Triggers:\*\*\s*([^\n\r]+)/i);
             const attacksM = block.match(/\*\s*\*\*Attacks:\*\*\s*([^\n\r]+)/i);
             const weaknessM = block.match(/\*\s*\*\*Weakness:\*\*\s*([^\n\r]+)/i);
             const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
@@ -3157,10 +3193,11 @@ export function parseMarkdownToDossier(markdown) {
                 impendingDoom.push(...dLines);
             }
 
-            const curHarm = harmArmorM && harmArmorM[1] !== undefined ? (parseInt(harmArmorM[1], 10) || 0) : 0;
+            const threatLevelNum = faeThreatM ? (parseInt(faeThreatM[1], 10) || null) : null;
+            const curHarm = harmArmorM && harmArmorM[1] !== undefined ? (parseInt(harmArmorM[1], 10) || 0) : (faeThreatM && faeThreatM[3] !== undefined ? (parseInt(faeThreatM[3], 10) || 0) : 0);
             const maxHarm = harmArmorM
                 ? (harmArmorM[2] !== undefined ? (parseInt(harmArmorM[2], 10) || 3) : (parseInt(harmArmorM[3], 10) || 3))
-                : 3;
+                : (faeThreatM ? (faeThreatM[4] !== undefined ? (parseInt(faeThreatM[4], 10) || 2) : (parseInt(faeThreatM[5], 10) || 2)) : 3);
 
             dossier.monsters.push({
                 name,
@@ -3171,6 +3208,15 @@ export function parseMarkdownToDossier(markdown) {
                 weakness: weaknessM ? weaknessM[1].trim() : '',
                 notes: notesM ? notesM[1].trim() : '',
                 impendingDoom,
+                threatLevel: threatLevelNum,
+                layers: maxHarm,
+                currentLayers: curHarm,
+                poolsAtRisk: poolsM ? poolsM[1].split(',').map(s => s.trim()) : null,
+                pressures: pressuresM ? pressuresM[1].split(',').map(s => s.trim()) : [],
+                instinct: instinctM ? instinctM[1].trim() : '',
+                status: statusM ? statusM[1].trim() : '',
+                leverageBarriers: barriersM ? barriersM[1].split(';').map(s => s.trim()) : [],
+                fullFinishTriggers: finishM ? finishM[1].trim() : '',
             });
         }
     }
@@ -3270,6 +3316,36 @@ export function parseMarkdownToDossier(markdown) {
                 statusToken,
                 cyoaStyle: /respawn|graveyard|shrine/i.test(rule) ? 'respawn' : /burnout|exhaust|faint/i.test(rule) ? 'burnout' : 'crisis',
             };
+        }
+
+        const tempoM = configSection[1].match(/\*\s*\*\*Action Tempo:\*\*\s*([^\n\r]+)/i);
+        if (tempoM) {
+            const rawTempo = tempoM[1].trim().toLowerCase().replace(/[\s-]+/g, '_');
+            const valid = ['action_serial', 'gritty_default', 'slow_burn', 'slice_of_life'].find(t => rawTempo.includes(t));
+            if (valid) {
+                dossier.config.actionTempo = valid;
+                dossier.config.knobs = dossier.config.knobs || {};
+                dossier.config.knobs.action_tempo = valid;
+            }
+        }
+        const fleeGraceM = configSection[1].match(/\*\s*\*\*Flee Grace:\*\*\s*([^\n\r]+)/i);
+        if (fleeGraceM) {
+            dossier.config.knobs = dossier.config.knobs || {};
+            dossier.config.knobs.flee_grace_toggle = /on|enabled|true/i.test(fleeGraceM[1]);
+        }
+        const shiftM = configSection[1].match(/\*\s*\*\*Base Attrition Shift:\*\*\s*([+-]?\d+)/i);
+        if (shiftM) {
+            dossier.config.knobs = dossier.config.knobs || {};
+            dossier.config.knobs.base_attrition_shift = parseInt(shiftM[1], 10);
+        }
+        const overflowM = configSection[1].match(/\*\s*\*\*Overflow Default:\*\*\s*([^\n\r]+)/i);
+        if (overflowM) {
+            dossier.config.knobs = dossier.config.knobs || {};
+            dossier.config.knobs.overflow_default = overflowM[1].trim();
+        }
+        const pacingScenesM = configSection[1].match(/\*\s*\*\*Pacing Scenes:\*\*\s*(\d+)/i);
+        if (pacingScenesM) {
+            dossier.config.pacingScenes = parseInt(pacingScenesM[1], 10);
         }
     }
 

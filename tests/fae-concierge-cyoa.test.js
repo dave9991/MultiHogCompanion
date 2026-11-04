@@ -741,12 +741,65 @@ positive_tags: Ward Crafter (protective runes), Fast Reflexes (dodging)
         assert.equal(parsedNonHeroic.protagonist.heroicDomain, null);
     });
 
-    test('4. concierge-modal.html contains heroic dial button and protagonist heroic domain elements', () => {
+    test('4. concierge-modal.html contains heroic dial button, tempo dial button, and protagonist heroic domain elements', () => {
         const modalHtmlPath = path.resolve(__dirname, '../concierge-modal.html');
         const modalHtml = fs.readFileSync(modalHtmlPath, 'utf8');
 
         assert.ok(modalHtml.includes('id="mhc_dial_heroic_btn"'), 'Modal must contain #mhc_dial_heroic_btn');
+        assert.ok(modalHtml.includes('id="mhc_dial_tempo_btn"'), 'Modal must contain #mhc_dial_tempo_btn');
         assert.ok(modalHtml.includes('id="mhc_deck_char_heroic_domain"'), 'Modal must contain #mhc_deck_char_heroic_domain');
         assert.ok(modalHtml.includes('id="mhc_deck_char_heroic_domain_text"'), 'Modal must contain #mhc_deck_char_heroic_domain_text');
+    });
+
+    test('5. FAE Pacing Triad Action Tempo & 4-Line Encounter roundtrip in Dossier and Markdown', () => {
+        const dossier = createEmptyDossier('fae', 'osr_dungeon');
+        assert.equal(dossier.config.actionTempo, 'gritty_default');
+        assert.equal(dossier.config.knobs.action_tempo, 'gritty_default');
+
+        // Apply update with custom tempo and 4-line encounter
+        const updateText = `
+[UPDATE_DOSSIER]
+[CONFIG]
+action_tempo: slow_burn
+flee_grace_toggle: false
+base_attrition_shift: 0
+overflow_default: lethal
+[/CONFIG]
+
+[MONSTER]
+name: Goblin Cliff-Ambush
+threat_level: 2
+layers: 2/2
+pools_at_risk: Health, Resolve
+pressures: Crossbow Volleys (Health), Mocking War-Chants (Resolve)
+instinct: To pin intruders in the canyon bottleneck and wear them down from high ground
+status: Entrenched
+leverage_barriers: [1. High Ground Crossbows] [2. Boss Shield-Wall]
+full_finish_triggers: Scale the cliff or push through with heavy shields
+[/MONSTER]
+[/UPDATE_DOSSIER]
+`;
+        const res = applyDossierUpdates(updateText, dossier);
+        const updated = res.updatedDossier;
+        assert.equal(updated.config.actionTempo, 'slow_burn');
+        assert.equal(updated.config.knobs.action_tempo, 'slow_burn');
+        assert.equal(updated.monsters.length, 1);
+        const m = updated.monsters[0];
+        assert.equal(m.name, 'Goblin Cliff-Ambush');
+        assert.equal(m.instinct, 'To pin intruders in the canyon bottleneck and wear them down from high ground');
+        assert.equal(m.status, 'Entrenched');
+
+        // Markdown roundtrip
+        const md = serializeDossierToMarkdown(updated);
+        assert.ok(md.includes('* **Action Tempo:** slow_burn'));
+        assert.ok(md.includes('* **Instinct:** To pin intruders in the canyon bottleneck'));
+        assert.ok(md.includes('* **Status:** Entrenched'));
+
+        const parsed = parseMarkdownToDossier(md);
+        assert.equal(parsed.config.actionTempo, 'slow_burn');
+        assert.equal(parsed.config.knobs?.action_tempo, 'slow_burn');
+        assert.equal(parsed.monsters.length, 1);
+        assert.equal(parsed.monsters[0].instinct, 'To pin intruders in the canyon bottleneck and wear them down from high ground');
+        assert.equal(parsed.monsters[0].status, 'Entrenched');
     });
 });

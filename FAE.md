@@ -28,12 +28,17 @@ $$\text{Attrition} = \max(0, \text{Threat} + 4\text{dF} - \text{PosTags} + \text
 ### 3. Intent Scoping & Proportional Leverage
 Before rolling, the Referee scopes the player's declared action against the active encounter's Leverage Barriers:
 * **Full Resolution (`full`):** Narrow tasks or single-layer obstacles (Threat 1–2). The obstacle is completely overcome in one turn.
-* **Stepping-Stone (`stepping_stone`):** Multi-layered or elite obstacles (Threat 3–4). The player chips away one barrier layer, secures leverage, and gains a temporary `(+) Advantage` tag reducing attrition by $-1$ on the next turn.
+* **Stepping-Stone (`stepping_stone`):** Multi-layered or elite obstacles (Threat 3–4). The player chips away one barrier layer, secures leverage, and gains a temporary `[Advantage: Tactical Opening]` tag reducing attrition by $-1$ on the next turn.
 * **Pivot (`pivot`):** Ineffective tactics or using the wrong tools for the obstacle. Threat escalates by $+1$ for this turn, but the failure reveals the adversary's true weakness or opening.
+* **Bypass vs. Total Intent Tradeoff (Section 4.1):** Bypassing an obstacle resolves in 1 turn (`"full"`), *but leaves the threat active behind you (blocking safe retreat, preventing `scene_breather` or `camp_or_sleep` in the area) and forfeits guarded loot, secondary clues, or room control*. Total Intent permanently clears the threat, secures the room for recovery/camping, and claims whatever it guarded.
+* **Pressure Dictates Pool:** The Referee selects `pool_at_risk` based on which active `Pressure` the character is primarily braving or triggering that turn.
+* **$\pm 1$ Threat Cap:** $-1$ Threat if neutralizing a listed `Pressure` (via environment, Companion, or `Heroic Domain`); $+1$ Threat if acting recklessly into the Encounter's `Instinct` or forcing a `pivot`.
 
 ### 4. Two-Stage Zero & Overflow Rules
 Characters track finite Resource Pools (e.g., *Health*, *Sanity*, *Supplies*). FAE strictly enforces a two-stage death and crisis boundary:
-* **Stage 1 — Breaking Point Clamp:** When a pool drops from $>0$ to $\le 0$, it clamps strictly at **0**. It inflicts the pool's designated **Zero Debuff** (e.g. *Crippled & Bleeding*, *Manic Dissociation*) and disables all positive tags that rely on that resource. The character is NOT dead or unconscious yet.
+* **Stage 1 — Breaking Point Clamp:** When a pool drops from $>0$ to $\le 0$, it clamps strictly at **0**. It inflicts the pool's designated **Zero Debuff** (e.g. *Crippled & Bleeding*, *Manic Dissociation*) and disables all personal positive tags that rely on that resource. The character is NOT dead or unconscious yet.
+  - **Companion & Advantage Zero-Pool Exemption:** Innate personal tags are disabled at 0 pool, but uninjured `Companion:` / `Retainer:` tags and earned `[Advantage]` (from a prior `stepping_stone` turn) **survive the zero-pool penalty**!
+  - **Advantage Preservation on Retreat:** An earned `[Advantage]` tag is only consumed when taking an active, non-retreat action; retreating preserves it.
 * **Stage 2 — Terminal Overflow:** If a pool is **already at 0** and suffers additional attrition on a subsequent turn, the pool cannot absorb the loss and triggers its designated terminal overflow rule:
   - `scar_and_ko`: Protagonist is knocked unconscious or incapacitated. Pool maximum is permanently reduced by $-1$ and a permanent Trauma Scar is branded onto the character sheet.
   - `redirect:<pool>`: Loss overflows into a secondary pool (e.g., losing Armor redirects excess attrition directly into Health).
@@ -90,29 +95,42 @@ In CYOA mode, interactive `<button>` choices in FAE follow **Style B** bracket f
 * **No Mechanical Scope Jargon:** Never display `Stepping-Stone:`, `Full Resolution:`, `Tactical Caution:`, or `Narrow Escape` inside button brackets. Intent scope is evaluated internally by the GM when resolving the turn, keeping buttons clean and immersive.
 * **Pool Slot Integrity:** The first item before `|` inside brackets MUST always be an active Resource Pool name (never a Tag).
 
+### 10. The Pacing Triad & Dynamic Tempo Counter
+Campaign pacing is calibrated along three interdependent axes:
+1. **Endurance (Pool Capacities):** Baseline resource pool sizes (6–12) dictate how many tests {{user}} can absorb before reaching the Breaking Point.
+2. **Intensity (Attrition Shift):** `base_attrition_shift` ($-1$ Pulp/Lenient, $0$ Standard, $+1$ Brutal) shifts the 4dF curve up or down.
+3. **Tempo (Action Tempo):** `action_tempo` sets the target narrative idle turns between pool tests:
+   - `action_serial`: 0–2 turns (fast-paced serial action, frequent tests)
+   - `gritty_default`: 1–4 turns (standard balanced rhythm)
+   - `slow_burn`: 3–7 turns (methodical suspense and investigative legwork)
+   - `slice_of_life`: 6–12 turns (extended conversation, travel, and downtime)
+
+The engine tracks `state.state_flags.turns_since_last_test` across turns. When `CHARACTER_MESSAGE_RENDERED` fires:
+- If an action roll occurred (`/*(FAE Action`), `turns_since_last_test` resets to `0`.
+- If no roll occurred (Threat 0 narrative turn), `turns_since_last_test` increments by $+1$.
+- `getPacingSuggestion(state, activeEncounter)` dynamically feeds the GM narrative guidance inside the RNG Queue block:
+  - If `!activeEncounter && turns < window.min`: GM favors Threat 0 (narrative breathing room).
+  - If `turns >= window.max`: GM resolves proactive actions at Threat 1+ or introduces an external complication.
+
 ---
 
 ## ⚔️ Native FAE Encounter Blocks
 
-Encounter blocks represent whole situations and environmental hazards rather than turn-by-turn combat rounds:
+Encounter blocks represent whole situations and environmental hazards across a compact 4-line format:
 
 ```text
 [COMBAT]
-The Whispering Study: 2/2 HP | Threat: 3 (Elite) | Pools: Sanity, Time
-((PILLS)) Pressures: Shifting Geometric Diagrams (Sanity), Approaching Patrol (Time)
-Leverage Barriers (2 Layers): [1. Ciphered Ritual Ledger] [2. Locked Iron Safe]
-Full-Finish Triggers: Grab the ledger and run (1 Turn), OR crack both layers to uncover ritual's weakness
-Status: Unsearched
+Goblin Cliff-Ambush: 2/2 HP | Threat: 2 | Pools: Health, Resolve
+((PILLS)) Pressures: Crossbow Volleys (Health), Mocking War-Chants (Resolve)
+Instinct: To pin intruders in the canyon bottleneck and wear them down from high ground
+Status: Entrenched [Barriers: 1. High Ground Crossbows -> 2. Boss Shield-Wall]
 [/COMBAT]
 ```
 
-* **Threat Level (1 to 4):**
-  - `Threat 1 (Minor / Skirmish)`: Routine obstacles, isolated thugs, locked standard doors.
-  - `Threat 2 (Standard / Perilous)`: Dangerous predators, rival investigators, collapsing floors.
-  - `Threat 3 (Elite / Nemesis)`: Supernatural entities, mastermind traps, multiple armed guards.
-  - `Threat 4 (Epic / Apex)`: Cosmic horrors, dragon avatars, reactor meltdown sequences.
-* **Pressures:** Environmental hazards that drain specific pools if ignored.
-* **Leverage Barriers:** The sequential steps required to defeat complex encounters.
+* **Line 1 (Name & Metrics):** Name, Leverage Layers (`X/Y HP`), Threat Level (1 to 4), and Pools at risk.
+* **Line 2 (Pressures):** Active hazards mapped to specific pools (`Pressure Name (Pool)`). The pressure braved dictates which pool is tested that turn.
+* **Line 3 (Instinct):** What the adversary or hazard wants in the scene. Acting recklessly into Instinct increases Threat by $+1$.
+* **Line 4 (Status & Leverage Barriers):** Tactical status and sequence of barriers required to dismantle multi-layer encounters.
 
 ---
 
@@ -148,22 +166,22 @@ FAE characters evolve through fictional experience rather than numeric stat infl
 
 FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery profiles, and positive tags:
 
-| Genre | Tone & Themes | Primary Resource Pools | Default Starting Positive Tags |
-| :--- | :--- | :--- | :--- |
-| **🐙 Cosmic Horror Investigation** (`cosmic_horror`) | 1920s Lovecraftian Investigation | `Health (8)`, `Sanity (8)` | `Ex-Military`, `Calm [under gunfire and shock]`, `Quiet`, `Service Revolver` |
-| **🗝️ OSR Dungeon Crawl** (`osr_dungeon`) | Dark Fantasy Dungeon Delve | `Health (10)`, `Resolve (6)`, `Torch & Supplies (6)` | `Veteran Mercenary`, `Heavy Shield`, `Trap-Wise`, `Companion: Brother Marcus (Cleric)` |
-| **🪓 Survival Horror** (`survival_horror`) | Isolated Slasher / Biohazard | `Grit (8)`, `Panic (6)`, `Ammunition (4)` | `Survivor`, `Fast Reflexes`, `First Aid Kit`, `Pump Shotgun` |
-| **☣️ Post-Apocalyptic** (`post_apocalyptic`) | Wasteland Scavenger | `Health (8)`, `Rads (6)`, `Scrap (6)` | `Scavenger`, `Wasteland Survival`, `Geiger Counter`, `Scrap Rifle` |
-| **🕶️ Cyberpunk Noir** (`cyberpunk_noir`) | Neon Corporate Dystopia | `Edge (8)`, `Chrome (8)`, `Cred (6)` | `Street Samurai`, `Subdermal Plating`, `Cyberdeck`, `Heavy Pistol` |
-| **🚀 Deep Space Survival** (`deep_space`) | Derelict Sci-Fi Horror | `Hull (8)`, `Oxygen (6)`, `Power (6)` | `Systems Engineer`, `EVA Specialist`, `Plasma Cutter`, `Heavy Loader Rig` |
-| **🤠 Weird West** (`weird_west`) | Occult Frontier Delve | `Grit (8)`, `Iron (6)`, `Hex (6)` | `Gunslinger`, `Quick Draw`, `Winchester Repeater`, `Deadeye` |
+| Genre | Tone & Themes | Primary Resource Pools | Action Tempo | Default Starting Positive Tags |
+| :--- | :--- | :--- | :--- | :--- |
+| **🐙 Cosmic Horror Investigation** (`cosmic_horror`) | 1920s Lovecraftian Investigation | `Health (8)`, `Sanity (8)` | `slow_burn` (3-7t) | `Ex-Military`, `Calm [under gunfire and shock]`, `Quiet`, `Service Revolver` |
+| **🗝️ OSR Dungeon Crawl** (`osr_dungeon`) | Dark Fantasy Dungeon Delve | `Health (10)`, `Resolve (6)`, `Torch & Supplies (6)` | `gritty_default` (1-4t) | `Veteran Mercenary`, `Heavy Shield`, `Trap-Wise`, `Companion: Brother Marcus (Cleric)` |
+| **🪓 Survival Horror** (`survival_horror`) | Isolated Slasher / Biohazard | `Grit (8)`, `Panic (6)`, `Ammunition (4)` | `slow_burn` (3-7t) | `Survivor`, `Fast Reflexes`, `First Aid Kit`, `Pump Shotgun` |
+| **☣️ Post-Apocalyptic** (`post_apocalyptic`) | Wasteland Scavenger | `Health (8)`, `Rads (6)`, `Scrap (6)` | `gritty_default` (1-4t) | `Scavenger`, `Wasteland Survival`, `Geiger Counter`, `Scrap Rifle` |
+| **🕶️ Cyberpunk Noir** (`cyberpunk_noir`) | Neon Corporate Dystopia | `Edge (8)`, `Chrome (8)`, `Cred (6)` | `action_serial` (0-2t) | `Street Samurai`, `Subdermal Plating`, `Cyberdeck`, `Heavy Pistol` |
+| **🚀 Deep Space Survival** (`deep_space`) | Derelict Sci-Fi Horror | `Hull (8)`, `Oxygen (6)`, `Power (6)` | `gritty_default` (1-4t) | `Systems Engineer`, `EVA Specialist`, `Plasma Cutter`, `Heavy Loader Rig` |
+| **🤠 Weird West** (`weird_west`) | Occult Frontier Delve | `Grit (8)`, `Iron (6)`, `Hex (6)` | `action_serial` (0-2t) | `Gunslinger`, `Quick Draw`, `Winchester Repeater`, `Deadeye` |
 
 ### 1. 🐙 Cosmic Horror Investigation (`cosmic_horror`)
 * **Tone:** 1920s Call of Cthulhu / Caves of Madness.
 * **Resource Pools:**
   - `Health (8/8)`: Physical fortitude, recovery via `camp_or_sleep`.
   - `Sanity (8/8)`: Mental resilience against cosmic truth, recovery via `haven_or_specialist`. Passive drain: $-1$ on `day_pass`.
-* **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`.
+* **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `lethal`, Tempo: `slow_burn`.
 * **Archetypes:** The Antiquarian, The Alienist, The Private Investigator, The Occult Scholar, The Reluctant Heir.
 * **Positive Tags:** `Ex-Military`, `Calm [under gunfire and shock]`, `Quiet`, `Service Revolver`.
 
@@ -173,7 +191,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Health (10/10)`: Physical fortitude and parrying shock, recovery via `camp_or_sleep`.
   - `Resolve (6/6)`: Frayed nerves and morale, recovery via `scene_breather`. Overflow redirects to `Health`.
   - `Torch & Supplies (6/6)`: Illumination and rations, recovery via `haven_or_specialist`. Passive drain: $-1$ on `camp_or_sleep`. Overflow redirects to `Resolve`.
-* **Knobs:** Flee Grace: `OFF`, Shift: `0`, Overflow: `lethal`, Heroic Tier: `ON`.
+* **Knobs:** Flee Grace: `OFF`, Shift: `0`, Overflow: `lethal`, Heroic Tier: `ON`, Tempo: `gritty_default`.
 * **Default Heroic Domain:** `Spellblade [short-range blink and arcane ward-breaking]`.
 * **Archetypes:** The Sellsword, The Grave Robber, The Torchbearer, The Hedge Cleric, The Outcast Mage.
 * **Positive Tags:** `Veteran Mercenary (Frontline battle tactics and armor comfort)`, `Heavy Shield (Sturdy oak shield for parrying)`, `Trap-Wise (Keen eye for floor plates and tripwires)`, `Companion: Brother Marcus (Cleric — blesses blades and wards off undead)`.
@@ -184,7 +202,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Grit (8/8)`: Physical toughness, recovery via `camp_or_sleep`.
   - `Panic (6/6)`: Composure under terror, recovery via `scene_breather`.
   - `Ammunition (4/4)`: Munitions and shells, recovery via `haven_or_specialist`.
-* **Knobs:** Flee Grace: `ON`, Shift: `+1` (Brutal), Overflow: `scar_and_ko`.
+* **Knobs:** Flee Grace: `ON`, Shift: `+1` (Brutal), Overflow: `scar_and_ko`, Tempo: `slow_burn`.
 * **Archetypes:** The Survivor, The Deputy, The Field Medic, The Drifter, The Outcast.
 
 ### 4. ☣️ Post-Apocalyptic Wasteland (`post_apocalyptic`)
@@ -193,7 +211,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Health (8/8)`: Physical condition, recovery via `camp_or_sleep`.
   - `Rads (6/6)`: Radiation tolerance, recovery via `haven_or_specialist`.
   - `Scrap (6/6)`: Spare parts and barter currency, recovery via `camp_or_sleep`.
-* **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`.
+* **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`, Tempo: `gritty_default`.
 * **Archetypes:** The Scavenger, The Road Warrior, The Mutated Nomad, The Tinkerer, The Vault Outcast.
 
 ### 5. 🕶️ Cyberpunk Noir (`cyberpunk_noir`)
@@ -202,7 +220,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Edge (8/8)`: Combat reaction and reflexes, recovery via `scene_breather`.
   - `Chrome (8/8)`: Cyberware stability and neural tolerance, recovery via `haven_or_specialist`.
   - `Cred (6/6)`: Corporate scrip and street favors, recovery via `haven_or_specialist`.
-* **Knobs:** Flee Grace: `OFF`, Shift: `0`, Overflow: `scar_and_ko`.
+* **Knobs:** Flee Grace: `OFF`, Shift: `0`, Overflow: `scar_and_ko`, Tempo: `action_serial`.
 * **Archetypes:** The Street Samurai, The Netrunner, The Fixer, The Techie, The Disgraced Corp.
 
 ### 6. 🚀 Deep Space Survival (`deep_space`)
@@ -211,7 +229,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Oxygen (6/6)`: Life support reserves, recovery via `haven_or_specialist`. Passive drain: $-1$ on `scene_transition`.
   - `Hull (8/8)`: Suit integrity and physical shielding, recovery via `camp_or_sleep`.
   - `Power (6/6)`: Battery and generator cells, recovery via `camp_or_sleep`.
-* **Knobs:** Flee Grace: `ON`, Shift: `+1` (Brutal), Overflow: `lethal`.
+* **Knobs:** Flee Grace: `ON`, Shift: `+1` (Brutal), Overflow: `lethal`, Tempo: `gritty_default`.
 * **Archetypes:** The Systems Engineer, The Pilot, The Astrobiologist, The Heavy Loader, The Synthetic.
 
 ### 7. 🤠 Weird West / Occult Frontier (`weird_west`)
@@ -220,7 +238,7 @@ FAE features 7 fine-tuned genre skeletons with custom resource pools, recovery p
   - `Grit (8/8)`: Tenacity and gunfighting endurance, recovery via `camp_or_sleep`.
   - `Iron (6/6)`: Heavy munitions and cartridges, recovery via `haven_or_specialist`.
   - `Hex (6/6)`: Eldritch luck and card magic, recovery via `scene_breather`.
-* **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`.
+* **Knobs:** Flee Grace: `ON`, Shift: `0`, Overflow: `scar_and_ko`, Tempo: `action_serial`.
 * **Archetypes:** The Gunslinger, The Huckster, The Deserter, The Preacher, The Bounty Hunter.
 
 ---

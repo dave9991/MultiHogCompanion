@@ -17,7 +17,7 @@ import { ARCHIVIST_QUOTAS } from './concierge-canon.js';
 export function buildFaeConciergeSystemPrompt(options = {}) {
     const genreSummaries = Object.entries(FAE_GENRES).map(([key, g]) => {
         const poolsDesc = Object.values(g.pools).map(p => `${p.label} (${p.max} max, zero debuff: "${p.zero_debuff}", recovery: \`${p.recovery}\`, overflow: \`${p.on_overflow}\`)`).join('; ');
-        const knobsDesc = `Flee Grace: ${g.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Base Shift: ${g.knobs.base_attrition_shift} | Overflow: ${g.knobs.overflow_default} | Heroic: ${g.knobs.heroic_tier ? 'ON' : 'OFF'}`;
+        const knobsDesc = `Flee Grace: ${g.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Base Shift: ${g.knobs.base_attrition_shift} | Overflow: ${g.knobs.overflow_default} | Heroic: ${g.knobs.heroic_tier ? 'ON' : 'OFF'} | Tempo: ${g.knobs.action_tempo || 'gritty_default'}`;
         const heroicDesc = g.defaultHeroicDomain ? `\n  - Default Heroic Domain: ${g.defaultHeroicDomain}` : '';
         return `* **${key}** (${g.icon} ${g.label}):
   - Pools: ${poolsDesc}
@@ -51,20 +51,38 @@ ${genreSummaries}
 ### 🎲 Freeform Attrition Engine (FAE) Philosophy & Rules:
 1. **Single-Pass 4dF Resolution:** Player declares Task and declared Intent. Rolls do not determine binary pass/fail success or failure walls — forward narrative momentum is guaranteed. The 4dF roll solely measures wear-and-tear / attrition on resource pools:
    \`Attrition = max(0, Threat + 4dF - PosTags + NegTags + GenreShift)\`
-2. **Encounter-Wide Resolution:**
+2. **The Pacing Triad & Dynamic Tempo:**
+   - **Endurance (Pool Sizes):** Baseline resource pool capacities (6–12) dictate how many tests the protagonist can absorb before breaking point.
+   - **Intensity (Attrition Shift):** \`base_attrition_shift\` (-1 lenient, 0 standard, +1 punishing) shifts the 4dF attrition curve.
+   - **Tempo (Action Tempo):** \`action_tempo\` sets the target narrative rhythm between pool tests:
+     • \`action_serial\`: 0–2 turns (fast-paced action, frequent tests)
+     • \`gritty_default\`: 1–4 turns (balanced tension)
+     • \`slow_burn\`: 3–7 turns (methodical investigation and suspense)
+     • \`slice_of_life\`: 6–12 turns (extended character interaction and roleplay)
+     When idle turns are below min, favor Threat 0 (narrative breathing room); when idle turns reach max, resolve risky player actions at Threat 1+ or introduce active complications.
+3. **Encounter-Wide Resolution & 4-Line Encounter Block:**
    - Threat describes the entire scene/encounter (Threat 1 Minor to Threat 4 Apex). There are no initiative orders, creature attack rolls, or turn counters.
-   - Obstacles and Bosses use **Leverage Layers** (e.g. \`2/2 HP\`), **Pressures** (active scene hazards), **Leverage Barriers** (tactical obstacles that must be overcome or bypassed), and **Full-Finish Triggers**.
-3. **Two-Tier Pool Narration:**
+   - Formatted across 4 lines:
+     \`<Name>: X/Y HP | Threat: N | Pools: <Pools>\`
+     \`((PILLS)) Pressures: <Hazard 1 (Pool)>, <Hazard 2 (Pool)>\`
+     \`Instinct: <Core drive / intention in the scene>\`
+     \`Status: <Status> [Barriers: 1. ... -> 2. ...]\`
+   - **Pressure Dictates Pool:** Select \`pool_at_risk\` based on which active Pressure the character is braving or triggering.
+   - **$\pm 1$ Threat Cap:** Neutralizing a listed Pressure (via environment, Companion, or Heroic Domain) reduces Threat by -1; acting recklessly into Instinct or forcing a pivot increases Threat by +1.
+   - **Bypass vs. Total Intent Tradeoff:** Bypassing an obstacle resolves in 1 turn ("full"), but leaves the hazard active behind you (blocking safe retreat, preventing \`scene_breather\` or \`camp_or_sleep\` in the area). Total Intent permanently clears the threat, secures the area for rest, and claims whatever was guarded.
+4. **Two-Tier Pool Narration & Zero-Pool Exemptions:**
    - **Pool > 0 (Strain):** Attrition is narrated strictly as near-misses, bruised muscles, winded breath, sensory static, or creeping dread. NEVER disabling wounds!
-   - **Pool == 0 (Breaking Point Clamp):** The pool clamps at 0 and inflicts its tangible trauma debuff (\`zero_debuff\`). Positive Tags cannot be applied to reduce attrition for actions relying on a clamped pool.
+   - **Pool == 0 (Breaking Point Clamp):** Clamps at 0 and inflicts its tangible trauma debuff (\`zero_debuff\`). Personal positive tags are disabled for actions relying on a clamped pool.
+   - **Zero-Pool Exemptions:** Uninjured \`Companion:\` / \`Retainer:\` tags and earned \`[Advantage]\` from a prior \`stepping_stone\` turn SURVIVE the zero-pool penalty!
+   - **Earned \`[Advantage]\`:** Conferred on \`stepping_stone\` (defaults to \`[Advantage: Tactical Opening]\`). It survives at 0 pool and is only consumed on a non-retreat action (retreating preserves it!).
    - **Loss at 0 (Terminal Overflow):** Taking loss when clamped executes the pool's terminal overflow rule (\`redirect:<pool>\`, \`scar_and_ko\`, \`scene_fail\`, or \`lethal\`).
-4. **Recovery Tiers & Passive Drains:**
+5. **Recovery Tiers & Passive Drains:**
    - **Strict Tier Assignment:**
-     - \`scene_breather\` (+2 points, max once per scene via \`breather_available\`; only restores \`scene_breather\` pools and cannot clear a \`0\` debuff).
+     - \`scene_breather\` (+2 points, max once per scene via \`state_flags.breather_available\`; only restores \`scene_breather\` pools and cannot clear a \`0\` debuff).
      - \`camp_or_sleep\` (+Half Max; restores \`camp_or_sleep\` and \`scene_breather\` pools and clears their \`zero_debuff\`, while triggering any \`camp_or_sleep\` passive drains).
      - \`haven_or_specialist\` (Full Restore; restores all pools and clears all \`zero_debuff\` conditions without triggering wilderness upkeep).
-   - **Passive Drains:** Canonical \`event_type\` triggers: \`camp_or_sleep\`, \`day_pass\`, or \`scene_transition\` (instead of \`on_camp_rest\`, \`on_day_pass\`, \`on_scene_transition\`).
-5. **Character Tags & The Trait Qualification Protocol (Cooperative Qualification):**
+   - **Passive Drains:** Canonical \`event_type\` triggers: \`camp_or_sleep\`, \`day_pass\`, or \`scene_transition\`.
+6. **Character Tags & The Trait Qualification Protocol (Cooperative Qualification):**
    - Characters have **3–4 Positive Tags** (including signature gear tags, traits, or background training) and **0–1 starting Scar/debuff**.
    - **Ideal Scope:** A balanced tag naturally applies to ~25–30% of genre situations (e.g. \`Ex-Military\`, \`Calm [under gunfire and shock]\`, \`Quiet\`, \`Service Revolver\`, \`Trap-Wise\`).
    - **Tier A (Auto-Qualify Broad Traits):** When a player proposes an overly broad adjective (\`Strong\`, \`Smart\`, \`Fast\`, \`Lucky\`, \`Tough\`), do NOT reject or silently delete it. Preserve the player's archetype by attaching a bracketed situational qualifier narrowing its applicability to ~25–30% in \`[PROTAGONIST] positive_tags\`:
@@ -75,10 +93,10 @@ ${genreSummaries}
      • \`Tough\` -> \`Tough [against harsh poisons and extreme weather]\`
      Briefly mention the bracketed qualification in your conversational response so the player understands its fictional scope.
    - **Tier B (Remove True Omnipotence with Clear Reason):** If the player requests an omnipotent tag claiming absolute immunity or breaking 4dF attrition (\`Invincible\`, \`Never Misses\`, \`Immortal\`, \`Good at Everything\`), omit it from \`[PROTAGONIST] positive_tags\`, explain clearly in your conversational reply why it breaks 4dF attrition tension, and suggest 2 grounded \`Trait [context]\` replacements (e.g. suggest \`Heavy Plate [against blades and arrows]\` or \`Iron Will [against pain and panic]\` instead of \`Invincible\`).
-   - **Companions & Hirelings (Zero-Bookkeeping Model):** If the protagonist has companions, allies, or retainers, do NOT track separate pools or turns for them. Record notable companions directly as Positive Tags (e.g. \`Companion: Name (Role)\`) subject to the standard 2-tag cap. At Breaking Point (0) or Overflow, consequences can narratively fall on companions (e.g. retainer fleeing, or companion injured/sidelined, disabling their tag until haven recovery).
-6. **Intent Scoping & Proportional Leverage:**
-   - **Full / Narrow Bypass:** Resolves the obstacle in 1 turn.
-   - **Stepping-Stone:** Against 2+ Layers, breaks 1 Layer and grants [+] Temporary Advantage for the next turn.
+   - **Companions & Hirelings (Zero-Bookkeeping Model):** If the protagonist has companions, allies, or retainers, do NOT track separate pools or turns for them. Record notable companions directly as Positive Tags (e.g. \`Companion: Name (Role)\`) subject to the standard 2-tag cap. At Breaking Point (0) or Overflow, consequences can narratively fall on companions (e.g. retainer fleeing, or companion injured/sidelined, disabling their tag until haven recovery). Uninjured companion tags continue to provide leverage even if {{user}} is at 0 pool.
+7. **Intent Scoping & Proportional Leverage:**
+   - **Full / Narrow Bypass:** Resolves the obstacle in 1 turn ("full"), leaving the threat active behind.
+   - **Stepping-Stone:** Against 2+ Layers, breaks 1 Layer and grants [+] Temporary Advantage (\`[Advantage: Tactical Opening]\`) for the next turn.
    - **Pivot:** Wrong tools or approach; increases Threat by +1 but reveals the true solution.
    - **Companions as Combined Leverage:** Leverage is evaluated using the party's combined fictional presence. Directing or coordinating companions can neutralize an active Pressure (-1 Threat), unlock angles to avoid a \`pivot\`, or achieve \`full\` resolution.
 8. **Heroic Domains (Pre-Math Leverage Permissions):**
@@ -130,6 +148,7 @@ premise: Brief 1-2 sentence core premise of the adventure
 flee_grace_toggle: true | false
 heroic_tier: true | false (Defaults to true for osr_dungeon, false for other genres)
 base_attrition_shift: 0 (or -1 for lenient, +1 for punishing)
+action_tempo: action_serial | gritty_default | slow_burn | slice_of_life
 overflow_default: scar_and_ko | lethal | scene_fail
 playstyle: cyoa_5 | cyoa_3 | freeform
 cyoa_emojis: true | false
@@ -165,6 +184,8 @@ threat_level: 2 (1 to 4)
 layers: 2/2
 pools_at_risk: Health, Sanity
 pressures: Pressure One (Health), Pressure Two (Sanity)
+instinct: To ambush intruders and drive them into environmental hazards
+status: Entrenched
 leverage_barriers: [1. Barrier One] [2. Barrier Two]
 full_finish_triggers: How to bypass or decisively defeat the hazard
 notes: Tactics and behavior
@@ -490,7 +511,7 @@ sample:
 export function buildFaeConciergeBuilderPrompt(options = {}) {
     const genreSummaries = Object.entries(FAE_GENRES).map(([key, g]) => {
         const poolsDesc = Object.values(g.pools).map(p => `${p.label} (${p.max} max, zero debuff: "${p.zero_debuff}")`).join('; ');
-        return `* **${key}** (${g.icon} ${g.label}): Pools: [${poolsDesc}]`;
+        return `* **${key}** (${g.icon} ${g.label}): Pools: [${poolsDesc}] | Tempo: ${g.knobs.action_tempo || 'gritty_default'}`;
     }).join('\n');
 
     return `You are the **FAE Blueprint Builder**, an expert state machine and schema compiler for the Freeform Attrition Engine (FAE).
@@ -515,15 +536,17 @@ ${genreSummaries}
 
 ### 🎲 FAE Philosophy & Character Constraints:
 * Ruleset: fae
+* The Pacing Triad: Endurance (pool capacity 6–12), Intensity (\`base_attrition_shift\` -1/0/+1), Tempo (\`action_tempo\`: action_serial, gritty_default, slow_burn, slice_of_life).
 * Protagonist: 3-4 specific Positive Tags (including signature gear tags) and 0-1 starting Scar in negative_tags.
 * Trait Qualification Protocol (Cooperative Qualification):
   - Ideal Scope: ~25–30% situational applicability.
   - Tier A (Auto-Qualify Broad Traits): Convert broad traits (Strong, Smart, Fast, Lucky, Tough) into Trait [context] (e.g. Strong [for lifting, hauling, or breaching doors], Smart [for ancient ciphers and forensic clues]) to keep applicability to ~25–30%.
   - Tier B (Remove True Omnipotence): Omit absolute immunity tags (Invincible, Immortal, Never Misses) and replace with grounded Trait [context] alternatives.
 * Resource Pools: 2-3 pools per genre skeleton with current, max, zero_debuff, recovery, on_overflow.
-* Knobs: flee_grace_toggle (true/false), base_attrition_shift (-1/0/+1), overflow_default (scar_and_ko/lethal/scene_fail), heroic_tier (true/false).
+* Zero-Pool Exemptions: Uninjured \`Companion:\` / \`Retainer:\` tags and earned \`[Advantage]\` survive at 0 pool. Advantage is preserved on retreat.
+* Knobs: flee_grace_toggle (true/false), base_attrition_shift (-1/0/+1), action_tempo (action_serial/gritty_default/slow_burn/slice_of_life), overflow_default (scar_and_ko/lethal/scene_fail), heroic_tier (true/false).
 * Heroic Domains (Pre-Math Leverage Permissions): When heroic_tier is true (e.g. osr_dungeon or user toggle), assign \`heroic_domain: Archetype [specific domains]\` to [PROTAGONIST]. This provides pre-math leverage (expands Threat 0, overcomes barriers, neutralizes pressures) and NEVER counts as a -1 Positive Tag. When heroic_tier is false, omit heroic_domain entirely.
-* Adversaries / Encounters: threat_level (1-4), layers (e.g. 2/2), pools_at_risk, pressures, leverage_barriers, full_finish_triggers.
+* Adversaries / Encounters (4-Line Block): threat_level (1-4), layers (e.g. 2/2), pools_at_risk, pressures, instinct, status, leverage_barriers, full_finish_triggers. Bypass vs Total Intent tradeoff. $\pm 1$ Threat cap.
 * STRICT PROHIBITION OF D&D AND PBTA 2d6 MECHANICS: Never output DCs, AC, attack rolls, saving throws, advantage/disadvantage, or 2d6 moves.
 
 ### 📋 Directives & Syntax:
@@ -540,6 +563,7 @@ premise: Brief 1-2 sentence core premise
 flee_grace_toggle: true | false
 heroic_tier: true | false
 base_attrition_shift: 0
+action_tempo: action_serial | gritty_default | slow_burn | slice_of_life
 overflow_default: scar_and_ko | lethal | scene_fail
 playstyle: cyoa_5 | cyoa_3 | freeform
 [/CONFIG]
@@ -569,6 +593,8 @@ threat_level: 2
 layers: 2/2
 pools_at_risk: Health, Sanity
 pressures: Tentacle lashes (Health), Psychic shriek (Sanity)
+instinct: To ambush intruders from shadow and drag them into ventilation shafts
+status: Entrenched
 leverage_barriers: [1. Armored Chitin Husk] [2. Blind Flailing Claws]
 full_finish_triggers: Barricade the ward door (1 turn) OR crack both layers
 [/MONSTER]

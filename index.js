@@ -49,6 +49,7 @@ import {
 import {
     parseFaeStateFromMemo,
     reconcileFaeMemoAfterTurn,
+    advanceFaeTurnTempo,
     formatFaeCharacterMemoBlock,
     formatInitialFaeMemo,
 } from './fae-state-sync.js';
@@ -670,7 +671,17 @@ export async function runSync(reason = '') {
                     const compSettings = getSettings();
                     const genreKey = compSettings.lastFaeGenre || 'cosmic_horror';
                     const prevMemo = _lastFaeMemoByChat.get(chatId) || null;
-                    const reconciled = reconcileFaeMemoAfterTurn(prevMemo, rawMemo, genreKey);
+                    let memoToReconcile = rawMemo;
+                    if (reason === 'CHARACTER_MESSAGE_RENDERED') {
+                        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+                        const lastMsg = ctx?.chat?.[ctx.chat.length - 1];
+                        const lastText = lastMsg && !lastMsg.is_user ? (lastMsg.mes || '') : '';
+                        if (lastText) {
+                            const tempoAdv = advanceFaeTurnTempo(rawMemo, lastText, genreKey);
+                            memoToReconcile = tempoAdv.memo;
+                        }
+                    }
+                    const reconciled = reconcileFaeMemoAfterTurn(prevMemo, memoToReconcile, genreKey);
                     if (reconciled.changed) {
                         rpgSettings.currentMemo = reconciled.memo;
                         if (rpgSettings.chatStates?.[chatId]) {
@@ -683,7 +694,7 @@ export async function runSync(reason = '') {
                             if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
                         } catch (_) {}
                     }
-                    _lastFaeMemoByChat.set(chatId, rpgSettings.currentMemo || rawMemo);
+                    _lastFaeMemoByChat.set(chatId, rpgSettings.currentMemo || memoToReconcile);
                 }
             } else {
                 const vitalityUpdated = syncLivePbtaMemoVitality(rpgSettings, chatId);
@@ -2385,7 +2396,13 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
         const memo = getRpgSettings()?.currentMemo || '';
         const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
         const faeState = parseFaeStateFromMemo(memo, genreKey);
-        replacementBlock = buildFaeRngBlock({ state: faeState, genreKey: faeState.genreKey || genreKey });
+        const combatMatch = memo.match(/\[COMBAT\]([\s\S]*?)\[\/COMBAT\]/i);
+        const hasActiveEncounter = Boolean(combatMatch && /[1-9]\d*\s*\/\s*[1-9]\d*\s*HP/i.test(combatMatch[1]));
+        replacementBlock = buildFaeRngBlock({
+            state: faeState,
+            genreKey: faeState.genreKey || genreKey,
+            activeEncounter: hasActiveEncounter,
+        });
         if (!replacementBlock.endsWith('\n\n')) {
             replacementBlock = `${replacementBlock}\n\n`;
         }

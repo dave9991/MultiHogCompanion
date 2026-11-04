@@ -493,8 +493,12 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                     dossier.config?.knobs?.heroic_tier
                 ),
                 heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
+                actionTempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
                 config: dossier.config || {},
-                knobs: dossier.config?.knobs || {},
+                knobs: {
+                    ...(dossier.config?.knobs || {}),
+                    action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
+                },
             };
             if (typeof options.applyFaeCartridge === 'function') {
                 await options.applyFaeCartridge(systemKey, cartridgeOverrides);
@@ -991,8 +995,12 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                     dossier.config?.knobs?.heroic_tier
                 ),
                 heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
+                actionTempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
                 config: dossier.config || {},
-                knobs: dossier.config?.knobs || {},
+                knobs: {
+                    ...(dossier.config?.knobs || {}),
+                    action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
+                },
             };
             if (typeof options.applyFaeCartridge === 'function') {
                 await options.applyFaeCartridge(systemKey, cartridgeOverrides);

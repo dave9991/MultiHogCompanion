@@ -103,6 +103,7 @@ Status: Healthy
         assert.ok(faeChatMessages[0].mes.includes('PRE-COMPUTED TURN RESOLUTION MATRIX'), 'Pre-computed matrix must be injected');
         assert.ok(faeChatMessages[0].mes.includes('Threat 1:'), 'Threat resolution lines must be present');
         assert.ok(faeChatMessages[0].mes.includes('Sanity (5/8): Positive Tags: ENABLED'), 'Active pools status must be evaluated in matrix');
+        assert.ok(faeChatMessages[0].mes.includes('[Pacing Suggestion (slow_burn): Last pool test was 0 turn(s) ago.'), 'Live pacing suggestion must be included in RNG queue block');
         assert.ok(faeChatMessages[0].mes.includes('I shine my flashlight toward the dark corridor.'), 'User message prose must be preserved cleanly');
     });
 

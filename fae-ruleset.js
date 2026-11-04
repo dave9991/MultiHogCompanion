@@ -11,21 +11,14 @@ export const CARTRIDGE_FORMAT = 'multihog-game-cartridge';
 export const CARTRIDGE_VERSION = 1;
 
 /**
- * @deprecated Deprecated in favor of the LLM Trait Qualification Protocol (Section 2.3.1).
- * Universal blacklist of "God Tags" retained only for backwards compatibility.
+ * The 4 canonical FAE Tempo Windows measuring turns between pool tests (Section 5.2).
  */
-export const FAE_GOD_TAGS_BLACKLIST = [
-    'lucky',
-    'smart',
-    'competent',
-    'fast',
-    'heroic',
-    'strong',
-    'good at everything',
-    'invincible',
-    'master',
-    'omni',
-];
+export const TEMPO_WINDOWS = {
+    action_serial:  { min: 0, max: 2, label: 'Action Serial (0-2t)' },
+    gritty_default: { min: 1, max: 4, label: 'Gritty Default (1-4t)' },
+    slow_burn:      { min: 3, max: 7, label: 'Slow Burn (3-7t)' },
+    slice_of_life:  { min: 6, max: 12, label: 'Slice of Life (6-12t)' },
+};
 
 /**
  * Maps a pool bar color name to a valid CSS suffix token supported by MultiHog's ((BAR<COLOR>)) syntax.
@@ -71,8 +64,8 @@ export const FAE_GENRES = {
         knobs: {
             flee_grace_toggle: true,
             base_attrition_shift: 0,
-            overflow_default: 'scar_and_ko',
-            breather_available: true,
+            overflow_default: 'lethal',
+            action_tempo: 'slow_burn',
             heroic_tier: false,
         },
         defaultHeroicDomain: null,
@@ -120,11 +113,10 @@ export const FAE_GENRES = {
             'The Reluctant Heir',
             'The Escaped Patient',
         ],
-        sampleEncounter: `The Whispering Study: 2/2 HP | Threat: 3 (Elite) | Pools: Sanity, Time
-((PILLS)) Pressures: Shifting Geometric Diagrams (Sanity), Scratching Inside the Walls (Sanity), Approaching Cultist Patrol (Time)
-Leverage Barriers (2 Layers): [1. Ciphered Ritual Ledger] [2. Locked Iron Safe]
-Full-Finish Triggers: Grab the ledger and run (1 Turn), OR crack both layers to uncover the ritual's true weakness
-Status: Unsearched`,
+        sampleEncounter: `The Whispering Study: 2/2 HP | Threat: 3 | Pools: Sanity, Health
+((PILLS)) Pressures: Shifting Geometric Diagrams (Sanity), Unseen Claws in the Wainscoting (Health)
+Instinct: To fracture the investigator's mind before they can decode the ritual location
+Status: Locked & Oppressive [Barriers: 1. Ciphered Cult Ledger -> 2. Warded Wall Safe]`,
         cyoaExamples: [
             '1. 📜 Decipher the rituals in the ledger on the oak desk — [Sanity | +Occult Scholar]',
             '2. 🔦 Search the walls for hidden compartments or the safe — [Sanity]',
@@ -142,7 +134,7 @@ Status: Unsearched`,
             flee_grace_toggle: false,
             base_attrition_shift: 0,
             overflow_default: 'lethal',
-            breather_available: true,
+            action_tempo: 'gritty_default',
             heroic_tier: true,
         },
         defaultHeroicDomain: 'Spellblade [short-range blink and arcane ward-breaking]',
@@ -201,11 +193,10 @@ Status: Unsearched`,
             'The Hedge Cleric',
             'The Outcast Mage',
         ],
-        sampleEncounter: `Goblin Cliff-Ambush: 2/2 HP | Threat: 2 (Standard) | Pools: Health, Resolve
-((PILLS)) Pressures: Crossbow Volleys from the Ledge (Health), Warhammer Boss Blocking the Pass (Health), Mocking War-Chants (Resolve)
-Leverage Barriers (2 Layers): [1. High Ground Crossbows] [2. Boss's Heavy Shield Wall]
-Full-Finish Triggers: Slip past into the cave (1 Turn), OR break a Barrier first to rout the group
-Status: Entrenched`,
+        sampleEncounter: `Goblin Cliff-Ambush: 2/2 HP | Threat: 2 | Pools: Health, Resolve
+((PILLS)) Pressures: Crossbow Volleys (Health), Mocking War-Chants (Resolve)
+Instinct: To pin intruders in the canyon bottleneck and wear them down from high ground
+Status: Entrenched [Barriers: 1. High Ground Crossbows -> 2. Boss Shield-Wall]`,
         cyoaExamples: [
             '1. ⚔️ Raise your shield and charge the warhammer boss — [Health | +Heavy Shield]',
             '2. 🏹 Return fire at the crossbow snipers pinned on the high ledge — [Resolve]',
@@ -223,7 +214,7 @@ Status: Entrenched`,
             flee_grace_toggle: true,
             base_attrition_shift: 1,
             overflow_default: 'lethal',
-            breather_available: true,
+            action_tempo: 'slow_burn',
             heroic_tier: false,
         },
         defaultHeroicDomain: null,
@@ -282,11 +273,10 @@ Status: Entrenched`,
             'The Engineer',
             'The Desperate Survivor',
         ],
-        sampleEncounter: `Bio-Horror in Ward B: 2/2 HP | Threat: 3 (Elite) | Pools: Health, Nerve
+        sampleEncounter: `Bio-Horror in Ward B: 2/2 HP | Threat: 3 | Pools: Health, Nerve
 ((PILLS)) Pressures: Tendril Sweep from Ceiling (Health), Guttural Shriek Echoes (Nerve), Spreading Spore Mist (Health)
-Leverage Barriers (2 Layers): [1. Armored Chitin Husk] [2. Blind Flailing Claws]
-Full-Finish Triggers: Jam the fire door shut to trap it (1 Turn), OR sever the sensory tentacles to dispatch it
-Status: Stalking`,
+Instinct: To stalk prey in darkened corridors and sever escape routes
+Status: Stalking [Barriers: 1. Armored Chitin Husk -> 2. Blind Flailing Claws]`,
         cyoaExamples: [
             '1. 🪓 Swing the fire axe into the creature\'s exposed sensory tentacles — [Health | +Fire Axe]',
             '2. 🔦 Flash the high-beam strobe into its milky eyes to blind it — [Nerve]',
@@ -304,7 +294,7 @@ Status: Stalking`,
             flee_grace_toggle: true,
             base_attrition_shift: 0,
             overflow_default: 'scar_and_ko',
-            breather_available: true,
+            action_tempo: 'gritty_default',
             heroic_tier: false,
         },
         defaultHeroicDomain: null,
@@ -363,11 +353,10 @@ Status: Stalking`,
             'The Wasteland Shaman',
             'The Rad-Doctor',
         ],
-        sampleEncounter: `Raider Checkpoint Barricade: 2/2 HP | Threat: 2 (Standard) | Pools: Body, Grit
+        sampleEncounter: `Raider Checkpoint Barricade: 2/2 HP | Threat: 2 | Pools: Body, Grit
 ((PILLS)) Pressures: Scrap-Iron Machine Gun Nest (Body), Spiked Road Blocks (Body), Howling Marauder Harassment (Grit)
-Leverage Barriers (2 Layers): [1. Sandbag Bunker Gunner] [2. Welded Gate Chain]
-Full-Finish Triggers: Floor the buggy through the drainage ditch (1 Turn), OR suppress the gunner to seize the toll gate
-Status: Alerted`,
+Instinct: To extort travellers and kill anyone attempting a forced breakthrough
+Status: Alerted [Barriers: 1. Sandbag Bunker Gunner -> 2. Welded Gate Chain]`,
         cyoaExamples: [
             '1. 💥 Fire a slug into the gunner\'s observation slit — [Body | +Scrap Rifle]',
             '2. 🚗 Floor the accelerator toward the barricade gap — [Grit]',
@@ -385,7 +374,7 @@ Status: Alerted`,
             flee_grace_toggle: true,
             base_attrition_shift: 0,
             overflow_default: 'scene_fail',
-            breather_available: true,
+            action_tempo: 'action_serial',
             heroic_tier: false,
         },
         defaultHeroicDomain: null,
@@ -444,11 +433,10 @@ Status: Alerted`,
             'The Chrome Doctor',
             'The Fixer',
         ],
-        sampleEncounter: `CorpSec Penthouse Breach: 2/2 HP | Threat: 3 (Elite) | Pools: Body, Nerve, Heat & Trace
+        sampleEncounter: `CorpSec Penthouse Breach: 2/2 HP | Threat: 3 | Pools: Body, Nerve, Heat & Trace
 ((PILLS)) Pressures: Smart-Tracking Submachine Fire (Body), Black ICE Counter-Intrusion (Nerve), Automated Drone Sweep (Heat & Trace)
-Leverage Barriers (2 Layers): [1. Heavy Enforcer Body Armor] [2. Biometric Terminal Lockdown]
-Full-Finish Triggers: Grab the decrypted data shard and zip-line off the balcony (1 Turn), OR crack the mainframe
-Status: Lockdown`,
+Instinct: To isolate netrunners and lockdown the server core before data extraction
+Status: Lockdown [Barriers: 1. Heavy Enforcer Body Armor -> 2. Biometric Terminal Lockdown]`,
         cyoaExamples: [
             '1. 💻 Burn through the ICE gate with an overclocked virus spike — [Nerve | +Cyberdeck]',
             '2. 🔫 Empty the silenced pistol into the enforcer\'s optic cluster — [Body | +Silenced Pistol]',
@@ -466,7 +454,7 @@ Status: Lockdown`,
             flee_grace_toggle: false,
             base_attrition_shift: 1,
             overflow_default: 'lethal',
-            breather_available: true,
+            action_tempo: 'gritty_default',
             heroic_tier: false,
         },
         defaultHeroicDomain: null,
@@ -525,11 +513,10 @@ Status: Lockdown`,
             'The Corporate Inspector',
             'The Void Navigator',
         ],
-        sampleEncounter: `Derelict Hydroponics Hull Breach: 2/2 HP | Threat: 3 (Elite) | Pools: Body, Oxygen & Power
+        sampleEncounter: `Derelict Hydroponics Hull Breach: 2/2 HP | Threat: 3 | Pools: Body, Oxygen & Power
 ((PILLS)) Pressures: Explosive Vacuum Decompression (Body), Violent Shrapnel Swarm (Body), Rapid Oxygen Venting (Oxygen & Power)
-Leverage Barriers (2 Layers): [1. Jammed Pressure Bulkhead] [2. Severed Emergency Cable]
-Full-Finish Triggers: Manual seal of emergency hatch (1 Turn), OR secure tether and splice power
-Status: Decompressing`,
+Instinct: To vent atmosphere into space and compromise remaining bulkhead seals
+Status: Decompressing [Barriers: 1. Jammed Pressure Bulkhead -> 2. Severed Emergency Cable]`,
         cyoaExamples: [
             '1. ⚡ Fire thrusters against the vacuum pull to reach the manual crank — [Body | +Heavy Loader Rig]',
             '2. 🔧 Splice the severed emergency bulkhead cable with wire-clips — [Oxygen & Power | +Systems Engineer]',
@@ -547,7 +534,7 @@ Status: Decompressing`,
             flee_grace_toggle: true,
             base_attrition_shift: -1,
             overflow_default: 'scar_and_ko',
-            breather_available: true,
+            action_tempo: 'action_serial',
             heroic_tier: false,
         },
         defaultHeroicDomain: null,
@@ -606,11 +593,10 @@ Status: Decompressing`,
             'The Wandering Gambler',
             'The Desperate Marshal',
         ],
-        sampleEncounter: `Skinwalker Ghost-Town Standoff: 2/2 HP | Threat: 2 (Standard) | Pools: Grit, Resolve
+        sampleEncounter: `Skinwalker Ghost-Town Standoff: 2/2 HP | Threat: 2 | Pools: Grit, Resolve
 ((PILLS)) Pressures: Telekinetic Shingle Barrage (Grit), Inhuman Mimicry of Loved Ones (Resolve), Unnatural Dust Devil (Resolve)
-Leverage Barriers (2 Layers): [1. Unnatural Mist Veil] [2. Supernatural Armor of Animal Pelts]
-Full-Finish Triggers: Gallop past the church on horseback (1 Turn), OR pierce the heart with cold iron
-Status: Circling`,
+Instinct: To separate the posse in the dust and feast on their fear
+Status: Circling [Barriers: 1. Unnatural Mist Veil -> 2. Supernatural Armor of Animal Pelts]`,
         cyoaExamples: [
             '1. 🤠 Fan the hammer of the cold iron Colt through the dust — [Grit | +Cold Iron Colt]',
             '2. 📖 Recite the holy verses of protection aloud to dispel the voices — [Resolve]',
@@ -669,16 +655,36 @@ export function roll4dF() {
 }
 
 /**
- * @deprecated Deprecated in favor of the LLM Trait Qualification Protocol (Section 2.3.1).
- * Broad traits are governed semantically by the LLM (Cooperative Qualification:
- * Tier A auto-qualify into Trait [context]; Tier B omit true omnipotence with grounded alternative).
- * Always returns false so programmatic hard-rejection is eliminated.
+ * Companion and Retainer tags remain usable even when the protagonist's pool is at 0 (Section 2.4).
  *
- * @param {string} [_tagText]
+ * @param {string} tag
  * @returns {boolean}
  */
-export function isGodTag(_tagText) {
-    return false;
+export function isCompanionTag(tag) {
+    if (!tag || typeof tag !== 'string') return false;
+    const clean = tag.trim().toLowerCase();
+    return clean.startsWith('companion:') || clean.startsWith('retainer:');
+}
+
+/**
+ * Returns a soft pacing hint based on turns_since_last_test vs. action_tempo (Section 5.2 & Section 7).
+ *
+ * @param {object} state
+ * @param {boolean} [activeEncounter=false]
+ * @returns {string}
+ */
+export function getPacingSuggestion(state, activeEncounter = false) {
+    const tempo = state?.knobs?.action_tempo || 'gritty_default';
+    const window = TEMPO_WINDOWS[tempo] || TEMPO_WINDOWS.gritty_default;
+    const n = state?.state_flags?.turns_since_last_test ?? 0;
+
+    if (!activeEncounter && n < window.min) {
+        return `[Pacing Suggestion (${tempo}): Last pool test was ${n} turn(s) ago. Favor Threat 0 (no roll) and narrative breathing room unless the player forces immediate danger.]`;
+    }
+    if (n >= window.max) {
+        return `[Pacing Suggestion (${tempo}): ${n} turns since last pool test. If the player is taking risky or proactive action, resolve it as Threat 1+; if in safe conversation/downtime, introduce an external hook or complication they can engage with.]`;
+    }
+    return `[Pacing Status (${tempo}): On rhythm (${n} turns since last test).]`;
 }
 
 /**
@@ -796,6 +802,15 @@ export function createInitialFaeState(genreKey = 'cosmic_horror', overrides = {}
         ? (charOverrides.heroic_domain ?? charOverrides.heroicDomain ?? overrides.heroic_domain ?? overrides.heroicDomain ?? genre.defaultHeroicDomain ?? null)
         : null;
 
+    const tempo = overrides.knobs?.action_tempo ??
+        overrides.action_tempo ??
+        overrides.actionTempo ??
+        overrides.config?.actionTempo ??
+        overrides.config?.action_tempo ??
+        overrides.config?.knobs?.action_tempo ??
+        genre.knobs.action_tempo ??
+        'gritty_default';
+
     return {
         genre: genre.label,
         genreKey: genre.id,
@@ -803,8 +818,12 @@ export function createInitialFaeState(genreKey = 'cosmic_horror', overrides = {}
             flee_grace_toggle: overrides.knobs?.flee_grace_toggle ?? genre.knobs.flee_grace_toggle,
             base_attrition_shift: overrides.knobs?.base_attrition_shift ?? genre.knobs.base_attrition_shift,
             overflow_default: overrides.knobs?.overflow_default ?? genre.knobs.overflow_default,
-            breather_available: overrides.knobs?.breather_available ?? genre.knobs.breather_available ?? true,
+            action_tempo: tempo,
             heroic_tier: isHeroic,
+        },
+        state_flags: {
+            breather_available: overrides.state_flags?.breather_available ?? overrides.breather_available ?? overrides.knobs?.breather_available ?? true,
+            turns_since_last_test: overrides.state_flags?.turns_since_last_test ?? overrides.turns_since_last_test ?? 0,
         },
         character: {
             name: charOverrides.name || 'Protagonist',
@@ -994,41 +1013,39 @@ export function handleOverflow(state, poolName, attrition, sourceNote = '', visi
 
 /**
  * Handles recovery tiers AND passive drain triggers per Section 7 of the FAE spec.
- * Passive drains are processed first (e.g. consuming supplies or suffering daily madness),
- * followed by pool recovery tiers.
+ * Recoveries are processed first (e.g. resting at camp, healing at haven, or catching breath),
+ * followed by passive drains (e.g. consuming supplies or suffering daily madness).
  *
  * @param {object} state Active FAE state
  * @param {string} eventType 'scene_breather' | 'camp_or_sleep' | 'haven_or_specialist' | 'day_pass' | 'scene_transition'
  * @returns {{ event: string, summary: string, logs: string[] }}
  */
 export function triggerEventOrRest(state, eventType) {
-    if (!state.knobs) state.knobs = {};
+    if (!state.state_flags) {
+        state.state_flags = {
+            breather_available: state.knobs?.breather_available ?? true,
+            turns_since_last_test: 0,
+        };
+    }
+    const flags = state.state_flags;
+
     if (['scene_transition', 'camp_or_sleep', 'haven_or_specialist'].includes(eventType)) {
-        state.knobs.breather_available = true;
+        flags.breather_available = true;
     }
     if (eventType === 'scene_breather') {
-        if (state.knobs.breather_available === false) {
+        if (flags.breather_available === false) {
             return {
                 event: eventType,
                 summary: 'Breather already used this scene.',
                 logs: ['Breather already used this scene.'],
             };
         }
-        state.knobs.breather_available = false;
+        flags.breather_available = false;
     }
 
     const logs = [];
 
-    // 1. Process Passive Drains First (e.g. eating rations at camp, or losing Sanity each day)
-    for (const [pName, pool] of Object.entries(state.pools)) {
-        const drain = pool.passive_drain;
-        if (drain && drain.trigger === eventType) {
-            const res = applyPoolLoss(state, pName, drain.amount, `[PASSIVE DRAIN: ${drain.reason}]`);
-            logs.push(res.directive);
-        }
-    }
-
-    // 2. Process Recoveries (if eventType is a rest tier)
+    // 1. Process Recoveries First (Section 7 Recovery-First Order)
     for (const [pName, pool] of Object.entries(state.pools)) {
         if (eventType === 'scene_breather' && pool.recovery === 'scene_breather') {
             if (pool.current > 0) { // Scene breather cannot clear a 0-state debuff
@@ -1054,6 +1071,15 @@ export function triggerEventOrRest(state, eventType) {
         }
     }
 
+    // 2. Process Passive Drains Second matching this eventType
+    for (const [pName, pool] of Object.entries(state.pools)) {
+        const drain = pool.passive_drain;
+        if (drain && drain.trigger === eventType) {
+            const res = applyPoolLoss(state, pName, drain.amount, `[PASSIVE DRAIN: ${drain.reason}]`);
+            logs.push(res.directive);
+        }
+    }
+
     return {
         event: eventType,
         summary: logs.join(' | '),
@@ -1076,15 +1102,21 @@ export function triggerEventOrRest(state, eventType) {
  * @param {number|null} [options.fixedDiceRoll=null] Optional fixed roll for deterministic testing
  * @returns {object} Action resolution result
  */
-export function resolveAction(state, {
-    pool_name,
-    threat_level,
-    progress_scale = 'full',
-    matched_positive_tags = [],
-    matched_negative_tags = [],
-    is_retreating = false,
-    fixedDiceRoll = null,
-} = {}) {
+export function resolveAction(state, options = {}) {
+    const pool_name = options.pool_name || options.pool_at_risk || options.pool;
+    const threat_level = options.threat_level ?? options.threat ?? 1;
+    const progress_scale = options.progress_scale || options.scale || 'full';
+    const matched_positive_tags = options.matched_positive_tags || options.positive_tags || [];
+    const matched_negative_tags = options.matched_negative_tags || options.negative_tags || [];
+    const is_retreating = Boolean(options.is_retreating || options.isRetreating);
+    const grant_advantage_name = options.grant_advantage_name || options.created_advantage_tag || options.advantage_tag || options.grantAdvantageName || null;
+    const fixedDiceRoll = options.fixedDiceRoll ?? null;
+
+    if (!state.state_flags) {
+        state.state_flags = { breather_available: true, turns_since_last_test: 0 };
+    }
+    state.state_flags.turns_since_last_test = 0;
+
     const pool = state.pools[pool_name];
     if (!pool) {
         throw new Error(`FAE Error: Pool "${pool_name}" not found in state`);
@@ -1108,16 +1140,22 @@ export function resolveAction(state, {
     });
 
     if (was_at_zero) {
-        effective_pos_tags = []; // Positive tags disabled when pool is at 0
+        // Uninjured Companion / Retainer tags survive Zero-Pool penalty!
+        effective_pos_tags = filteredPosTags.slice(0, 2).filter(isCompanionTag);
         if (!effective_neg_tags.includes(pool.zero_debuff)) {
             effective_neg_tags.push(pool.zero_debuff);
         }
     } else {
         effective_pos_tags = filteredPosTags.slice(0, 2); // Hard cap at 2 character tags
-        if (state.character.temp_advantage) {
-            effective_pos_tags.push(state.character.temp_advantage);
-            state.character.temp_advantage = null;
-        }
+    }
+
+    // Earned [Advantage] survives Zero! Preserved on retreat; consumed on non-retreat action
+    if (state.character.temp_advantage && !is_retreating) {
+        const advStr = String(state.character.temp_advantage).startsWith('[Advantage')
+            ? state.character.temp_advantage
+            : `[Advantage: ${state.character.temp_advantage}]`;
+        effective_pos_tags.push(advStr);
+        state.character.temp_advantage = null;
     }
 
     // 2. Calculate Attrition: Threat + 4dF - PosTags + NegTags + GenreShift
@@ -1136,30 +1174,33 @@ export function resolveAction(state, {
     );
     const attrition = Math.max(0, raw_cost);
 
-    // 3. Build Proportional Scale Directive (Updates Cartridge Layers)
+    // 3. Grant temporary [Advantage] if stepping_stone
+    if (progress_scale === 'stepping_stone') {
+        state.character.temp_advantage = grant_advantage_name || 'Tactical Opening';
+    }
+
+    // 4. Build Proportional Scale Directive (Updates Cartridge Layers)
     const scale_directives = {
-        full: "FULL RESOLUTION: Grant the player's complete Intent and reduce Encounter HP/Layers to 0.",
+        full: "FULL RESOLUTION: Player's stated Intent is completely achieved (Encounter Layers -> 0).",
         stepping_stone: (
-            "STEPPING-STONE PROGRESS: Reduce Encounter HP/Layers by 1, cross off one Leverage Barrier, " +
-            "and grant a temporary '[Advantage]' tag for the next turn."
+            `STEPPING-STONE (-1 Encounter HP Layer): Stripped 1 barrier and granted ` +
+            `[Advantage: ${state.character.temp_advantage}] (-1 attrition on next action).`
         ),
         pivot: (
-            "FORCED PIVOT: Current leverage cannot finish this target. The action connects, proves why " +
-            "this approach won't work, and reveals the required leverage while keeping the scene moving."
+            "FORCED PIVOT: Current approach lacks leverage to finish the target. " +
+            "Narrate the action connecting, reveal why it cannot finish the job, and shift position."
         ),
     };
     const scale_note = scale_directives[progress_scale] || scale_directives.full;
 
-    if (progress_scale === 'stepping_stone' && !state.character.temp_advantage) {
-        state.character.temp_advantage = 'Advantage: Tactical Setup';
-    }
-
-    // 4. Handle Zero-Cost or Grace Retreat before standard pool loss
+    // 5. Handle Zero-Cost or Grace Retreat before standard pool loss
     if (attrition === 0) {
         return {
             outcome: 'UNFAZED_PROGRESS',
+            progress_scale,
             dice: dice_roll,
             attrition: 0,
+            pool_impacted: pool_name,
             pool_remaining: pool.current,
             remaining: pool.current,
             matched_positive_tags: effective_pos_tags,
@@ -1171,22 +1212,26 @@ export function resolveAction(state, {
     if (was_at_zero && is_retreating && state.knobs?.flee_grace_toggle) {
         return {
             outcome: 'GRACE_RETREAT_WITH_SCAR',
+            progress_scale,
             dice: dice_roll,
             attrition,
+            pool_impacted: pool_name,
             pool_remaining: 0,
             remaining: 0,
             matched_positive_tags: effective_pos_tags,
             matched_negative_tags: effective_neg_tags,
             directive: (
-                "Player retreated at 0 pool with Flee Grace active and took overflow attrition. Escape succeeds! " +
-                "Do NOT trigger lethal overflow; instead, Narrator selects a fitting gear tag to lose, companion to sideline, or permanent Scar."
+                "FULL RESOLUTION: Player's stated Intent is completely achieved (Encounter Layers -> 0). | " +
+                "Flee Grace active at 0 pool: Escape succeeds without death (Do NOT trigger lethal overflow). Inflict 1 permanent Scar, destroy 1 gear tag, or companion to sideline."
             ),
         };
     }
 
-    // 5. Apply Pool Loss (Strain vs. Trauma), Zero Clamp, or Overflow
+    // 6. Apply Pool Loss (Strain vs. Trauma), Zero Clamp, or Overflow
     const loss_result = applyPoolLoss(state, pool_name, attrition, scale_note);
+    loss_result.progress_scale = progress_scale;
     loss_result.dice = dice_roll;
+    loss_result.pool_impacted = pool_name;
     loss_result.matched_positive_tags = effective_pos_tags;
     loss_result.matched_negative_tags = effective_neg_tags;
     return loss_result;
@@ -1202,7 +1247,7 @@ export function resolveAction(state, {
  * @param {number} [options.lineCount=6]
  * @returns {string} Formatted [RNG_QUEUE] block
  */
-export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lineCount = 6 } = {}) {
+export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lineCount = 6, activeEncounter = false } = {}) {
     const activeState = state || createInitialFaeState(genreKey);
     const rolls = [];
     for (let i = 0; i < lineCount; i++) {
@@ -1237,7 +1282,7 @@ export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lin
         const isAtZero = (pool.current === 0);
         if (isAtZero) {
             matrixLines.push(
-                `• ${pool.label} (0/${pool.max}): Positive Tags: DISABLED (Pool at 0!).` +
+                `• ${pool.label} (0/${pool.max}): Innate Personal Tags: DISABLED (Pool at 0!). Uninjured Companion: tags and earned [Advantage] still apply.` +
                 `\n  - Attrition 0: UNFAZED_PROGRESS (0 loss)` +
                 `\n  - Attrition >= 1: OVERFLOW (${pool.on_overflow})${fleeGrace ? ' / GRACE_RETREAT_WITH_SCAR if retreating' : ''}`
             );
@@ -1256,8 +1301,9 @@ export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lin
     const header = `[RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE]`;
     const queueText = rolls.map(r => r.line).join('\n');
     const matrixText = matrixLines.join('\n');
+    const pacingHint = getPacingSuggestion(activeState, activeEncounter);
 
-    return `${header}\n${queueText}\n\n${matrixText}\n[/RNG_QUEUE]`;
+    return `${header}\n${queueText}\n\n${matrixText}\n\n${pacingHint}\n[/RNG_QUEUE]`;
 }
 
 /**
@@ -1299,6 +1345,10 @@ export function buildFaeRoleContent(isFreeform = false, options = {}) {
    - Pool Routing: Against Threat 1–4 obstacles, route Heroic strain into Resolve in party/shared-pool play (or into the bespoke class pool like Mana, Daring, or Conviction in solo specialist play).`
         : '';
 
+    const threatCapNeutralize = isHeroic
+        ? '(environment, Companion, or Heroic Domain)'
+        : '(environment or Companion)';
+
     return `<role>
 You are the Game Master (GM) running the Freeform Attrition Engine (FAE). FAE replaces binary pass/fail checks with single-pass forward momentum measured by resource attrition.
 
@@ -1315,8 +1365,11 @@ ${twoTierNarration}
 5. INTENT SCOPING & PROPORTIONAL LEVERAGE (TAGS + GEAR + PARTY):
    - Leverage is evaluated using personal tags, tools, terrain, and active companions/party members.
    - Threat 0 (Trivial/Mook): Do NOT roll. Narrate effortless brush-aside with 0 attrition.
-   - Narrow / Bypass Intent (Flee, slip past, grab clue): Resolves encounter in 1 turn ("full").
-   - Total Intent vs 2+/Y Layers Left: Resolves as "stepping_stone" (-1 Layer, cross off a Barrier, grant [+] Advantage: Setup for next turn). Coordinating companions or a decisive silver bullet can achieve "full" resolution or neutralize a listed Pressure (-1 Threat).
+   - Bypass vs. Total Intent Tradeoff (Section 4.1):
+     • Bypassing resolves in 1 turn ("full"), but leaves the threat active behind you (blocking safe retreat, preventing scene_breather or camp_or_sleep in the area) and forfeits guarded loot, secondary clues, or room control.
+     • Total Intent permanently clears the threat, secures the room for recovery/camping, and claims whatever it guarded. Resolves as "full" when 1 layer remains (1/Y HP) OR when leveraging a decisive environmental/party silver bullet. Against 2+/Y HP, defaults to "stepping_stone": strips 1 Layer (-1 HP), crosses off a Barrier, and grants temporary [Advantage] for the next turn.
+   - Pool Selection Rule (Pressure Dictates Pool): Select pool_at_risk based on which active Pressure the character is primarily braving or triggering that turn.
+   - Strict +/-1 Threat Cap: -1 Threat if neutralizing a listed Pressure ${threatCapNeutralize}; +1 Threat if acting recklessly into the Encounter's Instinct or forcing a pivot.
    - Wrong Tools / Zero Leverage: Resolves as "pivot" (+1 Threat, action connects, reveals necessary angle). Directing a relevant companion unlocks angles to avoid a "pivot".${heroicDomainLaw}
 
 CORE LOOP (every turn):
@@ -1340,8 +1393,8 @@ Each line provides 4 Fudge dice (-1, 0, or +1 each), summing to a total from -4 
 ATTRITION FORMULA:
 Attrition = max(0, Threat + 4dF - MatchedPosTags + MatchedNegTags + GenreShift)
 - Threat (1 to 4): Baseline encounter threat. Adjusted by +1 if entering a Pressure without prep, or -1 if neutralizing a Pressure via environment or coordinated companion maneuver.
-- Positive Tags (max 2): Each matched character, gear, or companion tag subtracts -1 from Attrition. Respect bracketed situational qualifiers (Trait [context], e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). (Plus 1 extra if an active [Advantage] tag is consumed).
-  CRITICAL: If the target Pool is at 0, POSITIVE TAGS ARE DISABLED (0 tags apply)!
+- Positive Tags (max 2): Each matched character, gear, or companion tag subtracts -1 from Attrition. Respect bracketed situational qualifiers (Trait [context], e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). (Plus 1 extra if an active [Advantage] tag is consumed; [Advantage] is only consumed on a non-retreat action).
+  CRITICAL ZERO-STATE RULE: When a pool is at 0, innate personal tags are DISABLED. However, uninjured Companion: and Retainer: tags and earned [Advantage] STILL APPLY at 0!
 - Negative Tags: Each active Scar or debuff hindering the action adds +1 to Attrition.
 - Genre Shift: -1 (Pulp), 0 (Gritty), +1 (Brutal/Horror).
 
@@ -1395,27 +1448,23 @@ NO INITIATIVE TURNS. NO ACTION ECONOMY.
 Combat is an encounter-wide cinematic resolution, not a grid-based turn exchange.
 
 NATIVE FAE ENCOUNTER BLOCK FORMAT:
-In the [COMBAT] memo block, track the entire situation as a unified Encounter Block:
+In the [COMBAT] memo block, track the entire situation as a unified 4-line Encounter Block:
 Name: X/Y HP | Threat: N (Label) | Pools: Pool1, Pool2
 ((PILLS)) Pressures: Pressure 1 (Pool), Pressure 2 (Pool)
-Leverage Barriers (Y Layers): [1. First Defense] [2. Second Defense]
-Full-Finish Triggers: Shortcut/Bypass (1 Turn), OR break Barriers
-Status: Alerted / Entrenched / Stalking
+Instinct: To ...
+Status: Entrenched [Barriers: 1. ... -> 2. ...]
 
 ENCOUNTER HP TRACKS LEVERAGE LAYERS (NOT CREATURE HIT POINTS):
 - A 2/2 HP encounter has 2 Leverage Barriers protecting it from total defeat.
-- Narrow / Bypass Intent (slip past, escape, grab relic) resolves in 1 turn regardless of layers remaining.
-- Total Intent achieves "full" resolution when 1 layer remains (1/Y HP) OR when leveraging a decisive environmental/party silver bullet. Total Intent against 2+/Y HP defaults to stepping_stone: strips 1 Layer (2/2 -> 1/2 HP), crosses off a Barrier, and grants [+] Advantage: Setup for the next turn.
+- Bypass vs. Total Intent Tradeoff (Section 4.1):
+  • Bypass / Narrow Intent (slip past, escape, grab relic): Resolves in 1 turn ("full"), but leaves the threat active behind you (blocking safe retreat, preventing scene_breather or camp_or_sleep in the area) and forfeits guarded loot, secondary clues, or room control.
+  • Total Intent: Permanently clears the threat, secures the room for recovery/camping, and claims whatever it guarded. Resolves as "full" when 1 layer remains (1/Y HP) OR when leveraging a decisive environmental/party silver bullet. Against 2+/Y HP, defaults to stepping_stone: strips 1 Layer (2/2 -> 1/2 HP), crosses off a Barrier, and grants [+] Advantage: Tactical Opening for the next turn.
 
-ENCOUNTER THREAT SCALE (1 to 4):
-- Threat 1 (Minor): Light hazard, mook squad (1/1 HP).
-- Threat 2 (Standard): Armed patrol, capable beast (1/1 or 2/2 HP).
-- Threat 3 (Elite): Heavy squad, horrifying monstrosity (2/2 or 3/3 HP).
-- Threat 4 (Apex): Overwhelming entity, apex predator (3/3 HP).
-
-STRICT THREAT MODIFIERS (max +/- 1):
-- +1 Threat: Player charges directly into an active Pressure without prep, OR attempts a pivot action.
-${threatReductionLine}
+POOL SELECTION & THREAT GUARDRAILS:
+- Pool Selection Rule (Pressure Dictates Pool): Select pool_at_risk based on which active Pressure the character is primarily braving or triggering that turn.
+- Strict Threat Modifiers (max +/- 1):
+  • +1 Threat: Player acts recklessly into the Encounter's Instinct, enters an unmitigated Pressure without prep, or attempts a pivot action.
+  ${threatReductionLine}
 
 TWO-TIER STRAIN VS TRAUMA RULE:
 - Never narrate broken limbs or permanent damage when HP/Pool > 0.
@@ -1494,7 +1543,7 @@ COMPANIONS, HIRELINGS & ADVENTURING PARTIES (ZERO-BOOKKEEPING MODEL):
 Rather than tracking separate pools or turns for companions, companions are folded directly into Leverage and Tags:
 1. Protagonist-Anchored Pools: Track ONLY {{user}}'s 2–3 core resource pools (representing the collective stamina, morale, and supplies of the group).
 2. Companions as Fictional Leverage: Evaluate Proportional Leverage using the party's combined fictional presence. Coordinating companions can achieve "full" resolution, neutralize a listed Pressure (-1 Threat), or provide specialized capability so an action is not forced into a "pivot".
-3. Companions as Positive Tags (2-Tag Cap): Record notable companions or hirelings as Positive Tags in [CHARACTER] (e.g., "Companion: Sister Valeria (Cleric)" or "Retainer: Torchbearer"). When they assist in the declared action, they count as 1 of the max 2 Positive Tags (-1 Attrition).
+3. Companions as Positive Tags (2-Tag Cap & Exempt at Zero): Record notable companions or hirelings as Positive Tags in [CHARACTER] with "Companion:" or "Retainer:" prefix (e.g., "Companion: Sister Valeria (Cleric)" or "Retainer: Torchbearer"). When they assist in the declared action, they count as 1 of the max 2 Positive Tags (-1 Attrition). Crucially, uninjured Companion: and Retainer: tags remain usable even when the protagonist's pool is at 0!
 4. Companions as Narrative Buffer: At Breaking Point (0), scar_and_ko, or GRACE_RETREAT_WITH_SCAR, consequences can manifest narratively on a companion (e.g., retainer fleeing, or "(-) Companion Wounded: Valeria" disabling their tag until haven_or_specialist recovery).
 </[PARTY]_mechanics>`;
 }
@@ -1523,7 +1572,7 @@ Single-pass resolution is mandatory. Never pause mid-turn to ask players for mec
 </resolution_constraints>
 <tag_and_zero_constraints>
 Hard stacking cap: At most 2 Positive Tags may be applied to an action (plus 1 active [Advantage] tag).
-Zero-State Rule: When a Pool is at 0, Positive Tags CANNOT be used to reduce attrition targeting that pool!
+Zero-State Rule: When a Pool is at 0, innate personal tags are disabled. However, uninjured Companion: / Retainer: tags and earned [Advantage] still apply at 0 (and [Advantage] is only consumed on a non-retreat action)!
 The Trait Qualification Protocol (Cooperative Qualification):
 - Ideal Scope: A balanced tag applies to ~25–30% of genre situations (e.g. Ex-Military, Calm [under gunfire and shock], Quiet, Service Revolver, Trap-Wise).
 - Tier A — Auto-Qualify Broad Traits (Trait [context]): When a player or card proposes an overly broad adjective (Strong, Smart, Fast, Lucky, Tough), do NOT reject or silently delete it. Preserve the player's archetype by attaching a bracketed situational qualifier narrowing its applicability to ~25–30%:

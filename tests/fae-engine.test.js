@@ -2,12 +2,13 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import {
     FAE_CARTRIDGE_ID,
-    FAE_GOD_TAGS_BLACKLIST,
     FAE_GENRES,
     FAE_GENRE_SKELETONS,
+    TEMPO_WINDOWS,
+    isCompanionTag,
+    getPacingSuggestion,
     rollFudgeDie,
     roll4dF,
-    isGodTag,
     sanitizeFaePositiveTags,
     createInitialFaeState,
     applyPoolLoss,
@@ -59,12 +60,73 @@ describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => 
         }
     });
 
-    test('isGodTag is deprecated and returns false for programmatic non-rejection', () => {
-        assert.ok(Array.isArray(FAE_GOD_TAGS_BLACKLIST), 'FAE_GOD_TAGS_BLACKLIST export preserved for backwards compatibility');
-        assert.strictEqual(isGodTag('Lucky'), false);
-        assert.strictEqual(isGodTag('Smart'), false);
-        assert.strictEqual(isGodTag('Strong'), false);
-        assert.strictEqual(isGodTag('Invincible'), false);
+    test('TEMPO_WINDOWS and getPacingSuggestion accurately reflect Section 7 Pacing Triad', () => {
+        assert.deepStrictEqual(TEMPO_WINDOWS.action_serial, { min: 0, max: 2, label: 'Action Serial (0-2t)' });
+        assert.deepStrictEqual(TEMPO_WINDOWS.gritty_default, { min: 1, max: 4, label: 'Gritty Default (1-4t)' });
+        assert.deepStrictEqual(TEMPO_WINDOWS.slow_burn, { min: 3, max: 7, label: 'Slow Burn (3-7t)' });
+        assert.deepStrictEqual(TEMPO_WINDOWS.slice_of_life, { min: 6, max: 12, label: 'Slice of Life (6-12t)' });
+
+        const state = createInitialFaeState('osr_dungeon'); // gritty_default: min 1, max 4
+        state.state_flags.turns_since_last_test = 0;
+        const sugg0 = getPacingSuggestion(state, false);
+        assert.ok(sugg0.includes('Favor Threat 0 (no roll) and narrative breathing room'));
+
+        state.state_flags.turns_since_last_test = 2;
+        const sugg2 = getPacingSuggestion(state, false);
+        assert.ok(sugg2.includes('On rhythm (2 turns since last test)'));
+
+        state.state_flags.turns_since_last_test = 4;
+        const sugg4 = getPacingSuggestion(state, false);
+        assert.ok(sugg4.includes('introduce an external hook or complication'));
+
+        // During active encounter, Threat 0 is NOT favored even when turns_since_last_test < min
+        state.state_flags.turns_since_last_test = 0;
+        const suggEnc = getPacingSuggestion(state, true);
+        assert.ok(suggEnc.includes('On rhythm'));
+    });
+
+    test('isCompanionTag correctly identifies companion/retainer tags and zero-pool exemptions', () => {
+        assert.strictEqual(isCompanionTag('Companion: Brother Marcus (Cleric)'), true);
+        assert.strictEqual(isCompanionTag('retainer: Goblin Guide'), true);
+        assert.strictEqual(isCompanionTag('Calm [under gunfire]'), false);
+        assert.strictEqual(isCompanionTag('Heavy Shield'), false);
+        assert.strictEqual(isCompanionTag(''), false);
+        assert.strictEqual(isCompanionTag(null), false);
+    });
+
+    test('Companion tags and earned [Advantage] survive zero-pool penalty and advantage is preserved on retreat', () => {
+        const state = createInitialFaeState('osr_dungeon');
+        state.pools.health.current = 0;
+        state.character.temp_advantage = 'High Ground';
+
+        // 1. Retreating preserves temp_advantage and applies zero-pool debuff
+        const retreatRes = resolveAction(state, {
+            pool_name: 'health',
+            threat_level: 2,
+            progress_scale: 'full',
+            matched_positive_tags: ['Companion: Brother Marcus', 'Heavy Shield'],
+            is_retreating: true,
+            fixedDiceRoll: 0,
+        });
+        assert.strictEqual(state.character.temp_advantage, 'High Ground', 'Advantage preserved on retreat');
+        // Companion tag survives (1 effective tag), Heavy Shield ignored (personal tag at 0)
+        assert.strictEqual(retreatRes.matched_positive_tags.length, 1);
+        assert.strictEqual(retreatRes.matched_positive_tags[0], 'Companion: Brother Marcus');
+
+        // 2. Active non-retreat action consumes temp_advantage even at 0 pool
+        const attackRes = resolveAction(state, {
+            pool_name: 'health',
+            threat_level: 2,
+            progress_scale: 'stepping_stone',
+            matched_positive_tags: ['Companion: Brother Marcus', 'Heavy Shield'],
+            is_retreating: false,
+            fixedDiceRoll: 0,
+        });
+        assert.strictEqual(state.character.temp_advantage, 'Tactical Opening', 'stepping_stone grants new advantage');
+        // Both companion tag AND earned advantage applied at zero pool!
+        assert.ok(attackRes.matched_positive_tags.includes('Companion: Brother Marcus'));
+        assert.ok(attackRes.matched_positive_tags.includes('[Advantage: High Ground]'));
+        assert.ok(!attackRes.matched_positive_tags.includes('Heavy Shield'));
     });
 
     test('FAE_GENRES.cosmic_horror.defaultPositiveTags matches Section 4.1 Trait Qualification', () => {
@@ -344,7 +406,7 @@ describe('Freeform Attrition Engine (FAE) — Recovery Tiers & Passive Upkeep', 
         // At 0, breather cannot clear debuff or heal
         state.pools.resolve.current = 0;
         state.character.negative_tags = ['Rattled & Hesitant'];
-        state.knobs.breather_available = true; // reset breather for zero-state isolation
+        state.state_flags.breather_available = true; // reset breather for zero-state isolation
         triggerEventOrRest(state, 'scene_breather');
         assert.strictEqual(state.pools.resolve.current, 0, 'Does not heal when at 0');
         assert.ok(state.character.negative_tags.includes('Rattled & Hesitant'), 'Does not clear debuff');
@@ -354,37 +416,37 @@ describe('Freeform Attrition Engine (FAE) — Recovery Tiers & Passive Upkeep', 
         const state = createInitialFaeState('osr_dungeon');
         state.pools.resolve.current = 2;
         state.pools.resolve.max = 6;
-        assert.strictEqual(state.knobs.breather_available, true);
+        assert.strictEqual(state.state_flags.breather_available, true);
 
         // Calling scene_breather heals a scene_breather pool once and sets breather_available = false
         const res1 = triggerEventOrRest(state, 'scene_breather');
         assert.strictEqual(state.pools.resolve.current, 4);
-        assert.strictEqual(state.knobs.breather_available, false);
+        assert.strictEqual(state.state_flags.breather_available, false);
         assert.ok(res1.summary.includes('Recovered +2 resolve'));
 
         // Calling scene_breather a second time in the same scene returns 'Breather already used this scene.' without healing
         const res2 = triggerEventOrRest(state, 'scene_breather');
         assert.strictEqual(state.pools.resolve.current, 4, 'Resolve unaffected by second breather');
         assert.strictEqual(res2.summary, 'Breather already used this scene.');
-        assert.strictEqual(state.knobs.breather_available, false);
+        assert.strictEqual(state.state_flags.breather_available, false);
 
         // Calling scene_transition resets breather_available to true so subsequent breather works again
         triggerEventOrRest(state, 'scene_transition');
-        assert.strictEqual(state.knobs.breather_available, true);
+        assert.strictEqual(state.state_flags.breather_available, true);
 
         const res3 = triggerEventOrRest(state, 'scene_breather');
         assert.strictEqual(state.pools.resolve.current, 6);
-        assert.strictEqual(state.knobs.breather_available, false);
+        assert.strictEqual(state.state_flags.breather_available, false);
         assert.ok(res3.summary.includes('Recovered +2 resolve'));
 
         // camp_or_sleep also resets breather_available to true
         triggerEventOrRest(state, 'camp_or_sleep');
-        assert.strictEqual(state.knobs.breather_available, true);
+        assert.strictEqual(state.state_flags.breather_available, true);
 
         // haven_or_specialist also resets breather_available to true
-        state.knobs.breather_available = false;
+        state.state_flags.breather_available = false;
         triggerEventOrRest(state, 'haven_or_specialist');
-        assert.strictEqual(state.knobs.breather_available, true);
+        assert.strictEqual(state.state_flags.breather_available, true);
     });
 
     test('camp_or_sleep processes passive drain first, heals half max, and clears zero_debuff', () => {
@@ -444,10 +506,11 @@ describe('Freeform Attrition Engine (FAE) — Cartridge, RNG Block & Documentati
         assert.ok(block.includes('Health (8/8): Positive Tags: ENABLED'));
         assert.ok(block.includes('Sanity (3/8): Positive Tags: ENABLED'));
 
-        // When a pool is at 0, tags should be marked DISABLED
+        // When a pool is at 0, innate personal tags should be marked DISABLED
         state.pools.sanity.current = 0;
         const blockZero = buildFaeRngBlock({ state, lineCount: 6 });
-        assert.ok(blockZero.includes('Sanity (0/8): Positive Tags: DISABLED (Pool at 0!)'));
+        assert.ok(blockZero.includes('Sanity (0/8): Innate Personal Tags: DISABLED (Pool at 0!)'));
+        assert.ok(blockZero.includes('Uninjured Companion: tags and earned [Advantage] still apply'));
     });
 
     test('buildFaeCartridge compiles valid cartridge object', () => {
@@ -485,7 +548,7 @@ describe('Freeform Attrition Engine (FAE) — State Sync & Post-Turn Reconciliat
         assert.ok(memoBlock.includes('8/8 HP | Pool: Health (8/8) | Scenes: 0/4 | XP: 0/4'));
         assert.ok(memoBlock.includes('((BARPURPLE)) Sanity: 8/8'));
         assert.ok(!memoBlock.includes('Zero Debuff'), 'Secondary bar line must not include Zero Debuff');
-        assert.ok(memoBlock.includes('FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko | [Advantage: Safe Combo]'));
+        assert.ok(memoBlock.includes('FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: lethal | Tempo: slow_burn | Idle: 0t | Breather: READY | [Advantage: Safe Combo]'));
         assert.ok(memoBlock.includes('((PILLS)) Positive Tags:'));
         assert.ok(memoBlock.includes('((PILLS)) Scars & Debuffs: (+) Advantage: Safe Combo (-1 Attrition on next action)'));
         assert.ok(memoBlock.includes('Status: Healthy'));
@@ -707,17 +770,17 @@ Status: Healthy
 
     test('reconcileFaeMemoAfterTurn ensures breather_available = true when scenes_completed increases or encounter resolves', () => {
         const prevState = createInitialFaeState('osr_dungeon');
-        prevState.knobs.breather_available = false;
+        prevState.state_flags.breather_available = false;
         prevState.character.scenes_completed = 1;
 
         // Case A: scenes_completed increases in next memo
         const nextMemo = formatInitialFaeMemo(prevState).replace('Scenes: 1/4', 'Scenes: 2/4');
         const reconciled = reconcileFaeMemoAfterTurn(prevState, nextMemo, 'osr_dungeon');
-        assert.strictEqual(reconciled.state.knobs.breather_available, true);
+        assert.strictEqual(reconciled.state.state_flags.breather_available, true);
 
         // Case B: encounter resolves
         const prevStateWithEnc = createInitialFaeState('osr_dungeon');
-        prevStateWithEnc.knobs.breather_available = false;
+        prevStateWithEnc.state_flags.breather_available = false;
         prevStateWithEnc.character.scenes_completed = 1;
         prevStateWithEnc.activeEncounter = {
             name: 'Goblin Patrol',
@@ -727,7 +790,7 @@ Status: Healthy
         };
         const nextMemoNoEnc = formatInitialFaeMemo(prevStateWithEnc);
         const reconciledEnc = reconcileFaeMemoAfterTurn(prevStateWithEnc, nextMemoNoEnc, 'osr_dungeon');
-        assert.strictEqual(reconciledEnc.state.knobs.breather_available, true);
+        assert.strictEqual(reconciledEnc.state.state_flags.breather_available, true);
     });
 
     test('buildFaePartyContent describes ZERO-BOOKKEEPING MODEL and folded mechanics', () => {

@@ -6,6 +6,11 @@
  * for single-pass narrative roleplay without action economy or binary pass/fail rolls.
  */
 
+import {
+    isValidCharacterName,
+    stripMarkdownNameArtifacts,
+} from './character-creator-sanitizer.js';
+
 export const FAE_CARTRIDGE_ID = 'fae_attrition_engine_v1';
 export const CARTRIDGE_FORMAT = 'multihog-game-cartridge';
 export const CARTRIDGE_VERSION = 1;
@@ -662,8 +667,7 @@ export function roll4dF() {
  */
 export function isCompanionTag(tag) {
     if (!tag || typeof tag !== 'string') return false;
-    const clean = tag.trim().toLowerCase();
-    return clean.startsWith('companion:') || clean.startsWith('retainer:');
+    return /^(?:companion|retainer)\s*:/i.test(tag.trim().replace(/^[-*•+–—]\s*/, ''));
 }
 
 /**
@@ -718,7 +722,8 @@ export function splitTopLevelTagItems(str) {
 
 /**
  * Cleans formatting, strips bullets, deduplicates case-insensitively, and limits
- * an array of tags to a maximum count (default 5).
+ * an array of personal/gear tags to a maximum count (default 5).
+ * Companion and Retainer tags are exempt from the personal tag ceiling.
  * Broad trait scoping and omnipotence governance are delegated to the LLM via
  * the Trait Qualification Protocol (Section 2.3.1) without brittle programmatic filtering.
  *
@@ -736,15 +741,22 @@ export function sanitizeFaePositiveTags(tags, maxTags = 5) {
 
     const sanitized = [];
     const seen = new Set();
+    let personalCount = 0;
     for (const item of list) {
         if (typeof item !== 'string') continue;
         const clean = item.trim().replace(/^[-*•+–—]\s*/, '').trim();
         if (!clean) continue;
         const lower = clean.toLowerCase();
         if (seen.has(lower)) continue;
+        const isCompanion = isCompanionTag(clean);
+        if (!isCompanion && personalCount >= maxTags) {
+            continue;
+        }
         seen.add(lower);
         sanitized.push(clean);
-        if (sanitized.length >= maxTags) break;
+        if (!isCompanion) {
+            personalCount++;
+        }
     }
     return sanitized;
 }
@@ -1376,7 +1388,7 @@ CORE LOOP (every turn):
 ${coreLoopStep1}
 2. {{user}} acts in the fiction with declared Task and Intent.
 3. Consult the pre-computed resolution matrix or resolve_action() per <rng_system>. Print the roll inline: *(FAE Action [Pool]: 4dF [...] = Attrition X → Outcome)*.
-4. Follow the Outcome honestly, update State Memo pools, and hand the spotlight back.
+4. Follow the Outcome honestly, reflect updated pool values in the two-line status footer, and hand the spotlight back.
 </role>`;
 }
 
@@ -1447,8 +1459,8 @@ export function buildFaeCombatContent(genreKey = 'cosmic_horror', options = {}) 
 NO INITIATIVE TURNS. NO ACTION ECONOMY.
 Combat is an encounter-wide cinematic resolution, not a grid-based turn exchange.
 
-NATIVE FAE ENCOUNTER BLOCK FORMAT:
-In the [COMBAT] memo block, track the entire situation as a unified 4-line Encounter Block:
+ACTIVE ENCOUNTER STATE ([COMBAT]):
+When an encounter is active in [COMBAT], it is represented as a unified 4-line Encounter Block:
 Name: X/Y HP | Threat: N (Label) | Pools: Pool1, Pool2
 ((PILLS)) Pressures: Pressure 1 (Pool), Pressure 2 (Pool)
 Instinct: To ...
@@ -1543,7 +1555,7 @@ COMPANIONS, HIRELINGS & ADVENTURING PARTIES (ZERO-BOOKKEEPING MODEL):
 Rather than tracking separate pools or turns for companions, companions are folded directly into Leverage and Tags:
 1. Protagonist-Anchored Pools: Track ONLY {{user}}'s 2–3 core resource pools (representing the collective stamina, morale, and supplies of the group).
 2. Companions as Fictional Leverage: Evaluate Proportional Leverage using the party's combined fictional presence. Coordinating companions can achieve "full" resolution, neutralize a listed Pressure (-1 Threat), or provide specialized capability so an action is not forced into a "pivot".
-3. Companions as Positive Tags (2-Tag Cap & Exempt at Zero): Record notable companions or hirelings as Positive Tags in [CHARACTER] with "Companion:" or "Retainer:" prefix (e.g., "Companion: Sister Valeria (Cleric)" or "Retainer: Torchbearer"). When they assist in the declared action, they count as 1 of the max 2 Positive Tags (-1 Attrition). Crucially, uninjured Companion: and Retainer: tags remain usable even when the protagonist's pool is at 0!
+3. Companions as Positive Tags (2-Tag Cap & Exempt at Zero): Notable companions or hirelings on the [CHARACTER] sheet carry a "Companion:" or "Retainer:" prefix (e.g., "Companion: Sister Valeria [Cleric]" or "Retainer: Torchbearer"). When they assist in the declared action, they count as 1 of the max 2 Positive Tags (-1 Attrition). Crucially, uninjured Companion: and Retainer: tags remain usable even when the protagonist's pool is at 0!
 4. Companions as Narrative Buffer: At Breaking Point (0), scar_and_ko, or GRACE_RETREAT_WITH_SCAR, consequences can manifest narratively on a companion (e.g., retainer fleeing, or "(-) Companion Wounded: Valeria" disabling their tag until haven_or_specialist recovery).
 </[PARTY]_mechanics>`;
 }
@@ -1669,6 +1681,10 @@ export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {})
 
     const sampleTags = genre.defaultPositiveTags.join(', ');
 
+    const rawTarget = overrides?.charName || overrides?.character?.name || '';
+    const cleanTarget = stripMarkdownNameArtifacts(rawTarget);
+    const targetName = isValidCharacterName(cleanTarget) ? cleanTarget : 'Character Name';
+
     const knobsLine = isHeroic
         ? `FAE Knobs: Heroic: ON | Flee Grace: ${genre.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${genre.knobs.base_attrition_shift >= 0 ? '+' + genre.knobs.base_attrition_shift : genre.knobs.base_attrition_shift} | Overflow: ${genre.knobs.overflow_default}`
         : `FAE Knobs: Flee Grace: ${genre.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${genre.knobs.base_attrition_shift >= 0 ? '+' + genre.knobs.base_attrition_shift : genre.knobs.base_attrition_shift} | Overflow: ${genre.knobs.overflow_default}`;
@@ -1686,7 +1702,7 @@ export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {})
 NO D&D MECHANICS: Use FAE Archetypes and Resource Pools. Never write "1d8 damage", "AC", "spell slots", or "saving throws".
 Format:
 [CHARACTER]
-{{user}} (${genre.archetypes[0]}): ${primary.current}/${primary.max} HP | Pool: ${primary.label} (${primary.current}/${primary.max}) | Scenes: 0/4 | XP: 0/4
+${targetName} (${genre.archetypes[0]}): ${primary.current}/${primary.max} HP | Pool: ${primary.label} (${primary.current}/${primary.max}) | Scenes: 0/4 | XP: 0/4
 ${secondaryBars}
 ${knobsLine}
 ${heroicDomainLine}((PILLS)) Positive Tags: ${sampleTags}
@@ -1696,7 +1712,10 @@ Status: Healthy
 
 PILL FORMATTING:
 - Positive Tags: Name (descriptive detail) or Trait [context qualifier] (~25–30% situational scope, e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). Can include personal traits, signature gear, or companions, e.g. Companion: Name (Role — detail). Auto-qualify broad traits via Tier A Trait Qualification Protocol.
-- Scars & Debuffs: Prefix harmful debuffs with (-) for red pills, e.g. (-) ${primary.zero_debuff} (Trauma). Active temporary advantage tags prefix with (+) for green pills, e.g. (+) Advantage: Setup (-1 Attrition).${heroicPillInstruction}`,
+- Companions & Party (Zero-Bookkeeping Model): FAE never uses a [PARTY] block or individual companion HP/pools. Record active companions, friends, or hirelings directly inside [CHARACTER]'s ((PILLS)) Positive Tags as "Companion: Name [role/specialty]" or "Retainer: Name [role/specialty]". If a companion is wounded or sidelined at a Breaking Point, record "(-) Companion Wounded: Name" in Scars & Debuffs.
+- Scars & Debuffs: Prefix harmful debuffs with (-) for red pills, e.g. (-) ${primary.zero_debuff} (Trauma). Active temporary advantage tags prefix with (+) for green pills, e.g. (+) Advantage: Setup (-1 Attrition).${heroicPillInstruction}
+
+CRITICAL: Always output the character's actual proper name on the first line — NEVER output literal "{{user}}", "Character Name", or "User", and NEVER wrap the character name or first line in markdown bold (**).`,
 
         combat: `Active encounter and situational obstacles in FAE.
 Format:
@@ -1713,15 +1732,7 @@ Supplies:
 - 🎒 Basic travel pack (rations, flashlight/torch, bandages)
 [/INVENTORY]`,
 
-        party: `Companions and allies in FAE.
-Format:
-[PARTY]
-Companion Name (${genre.archetypes[1] || 'Ally'}): 8/8 HP | Pool: Health (8/8)
-((PILLS)) Positive Tags: Steady (Calm under pressure), Sidearm (Close defense)
-((PILLS)) Boons: Tactical Support (Grants [+] Advantage when assisting)
-((PILLS)) Scars & Debuffs: None
-Status: Healthy
-[/PARTY]`,
+        party: `Companions in FAE use the Zero-Bookkeeping Model and are tracked directly as "Companion: Name [role/specialty]" or "Retainer: Name [role/specialty]" inside [CHARACTER]'s Positive Tags (never as separate [PARTY] stat blocks or individual HP pools). Do NOT output a [PARTY] block.`,
     };
 }
 
@@ -1826,7 +1837,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
             enabled: config.partyMode !== 'solo',
             scope: 'chat',
             icon: 'fa-users',
-            description: 'FAE Companion tracking with pools and boons',
+            description: 'FAE Zero-Bookkeeping Companion & Party Leverage Rules',
             origin: 'unlocked_base',
             baseTag: '[PARTY]_mechanics',
         },
@@ -1865,9 +1876,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         world_rules: false,
     };
 
-    const baseBlockOrder = config.partyMode === 'solo'
-        ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME']
-        : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
+    const baseBlockOrder = ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
 
     const payload = {
         customSyspromptLibrary,
@@ -1891,7 +1900,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         modules: {
             combat: true,
             character: true,
-            party: config.partyMode !== 'solo',
+            party: false,
             inventory: true,
             abilities: false,
             spells: false,
@@ -2046,6 +2055,7 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
         heroicDomainInstruction,
         `RESOURCE POOLS: ${poolsStr}. Primary pool mirrors HP.`,
         `POSITIVE TAGS: Pick 4 distinct descriptive tags (~25–30% situational scope: personal traits, bracketed qualifiers like Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock], signature gear, or "Companion: Name (Role — detail)" if the scenario includes friends/companions/party): ${tagsSnippet}. Follow Trait Qualification Protocol (Tier A: auto-qualify broad traits into Trait [context]; Tier B: omit true omnipotence with grounded Trait [context] replacement).`,
+        `COMPANIONS & PARTY: Do NOT output a [PARTY] block or separate companion stat sheets. If the scenario includes companions or friends, include them as "Companion: Name [role/specialty]" or "Retainer: Name [role/specialty]" in [CHARACTER] Positive Tags.`,
         knobsLineFmt,
         `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or polyhedral damage dice. Use 4dF Attrition, Positive Tags, and Scars/Debuffs in [CHARACTER].`,
         formatMandateFmt,

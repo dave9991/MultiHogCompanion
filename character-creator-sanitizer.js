@@ -68,7 +68,7 @@ export function isValidCharacterName(name) {
 
     // Strip bracket/brace artifacts and examine core word
     const cleaned = trimmed.replace(/[{}]/g, '').trim();
-    if (/^(character|unknown|user|name|player|my character|unnamed|pc)$/i.test(cleaned)) {
+    if (/^(character|character name|protagonist|protagonist name|unknown|user|name|player|my character|unnamed|pc)$/i.test(cleaned)) {
         return false;
     }
 
@@ -121,8 +121,15 @@ export function sanitizeCharacterStockPrompt(stockPrompts, targetName = '') {
     const replacement = (isValidCharacterName(cleanTarget) ? cleanTarget : 'Character Name');
 
     if (stockPrompts.character && typeof stockPrompts.character === 'string') {
-        if (/\{\{user\}\}/i.test(stockPrompts.character)) {
+        if (/\{\{user\}\}(\s*[\(:])/i.test(stockPrompts.character)) {
+            stockPrompts.character = stockPrompts.character.replace(/\{\{user\}\}(\s*[\(:])/gi, `${replacement}$1`);
+            modified = true;
+        } else if (/\{\{user\}\}/i.test(stockPrompts.character) && !/literal\s*["']\{\{user\}\}["']/i.test(stockPrompts.character)) {
             stockPrompts.character = stockPrompts.character.replace(/\{\{user\}\}/gi, replacement);
+            modified = true;
+        }
+        if (replacement !== 'Character Name' && /\bCharacter Name\b(\s*[\(:])/i.test(stockPrompts.character)) {
+            stockPrompts.character = stockPrompts.character.replace(/\bCharacter Name\b(\s*[\(:])/gi, `${replacement}$1`);
             modified = true;
         }
         const antiBoldRule = ' NEVER wrap the character name or first line in markdown bold (**).';
@@ -151,7 +158,7 @@ export function sanitizeCharacterHeaderInMemo(memo, fallbackName = '') {
     const cleanFallback = stripMarkdownNameArtifacts(fallbackName);
     if (isValidCharacterName(cleanFallback)) {
         updatedMemo = updatedMemo.replace(
-            /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player)(\s*[\(:])/gi,
+            /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player|Character Name|Protagonist Name|Protagonist)(\s*[\(:])/gi,
             `$1${cleanFallback}$2`
         );
     }
@@ -222,7 +229,7 @@ export function rectifyMemoCharacterName(memo, realName) {
     if (!isValidCharacterName(cleanName)) return sanitizeCharacterHeaderInMemo(memo);
 
     const replaced = memo.replace(
-        /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player)(\s*[\(:])/gi,
+        /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player|Character Name|Protagonist Name|Protagonist)(\s*[\(:])/gi,
         `$1${cleanName}$2`
     );
     return sanitizeCharacterHeaderInMemo(replaced, cleanName);

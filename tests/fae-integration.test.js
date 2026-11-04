@@ -7,6 +7,7 @@ import {
     restoreStockDnd,
     isFaeActive,
     isPbtAActive,
+    rectifyPostQuickStartState,
 } from '../index.js';
 import {
     FAE_GENRES,
@@ -208,5 +209,84 @@ Status: Fatigued
         const memoAfterHaven = formatFaeCharacterMemoBlock(state);
         assert.ok(memoAfterHaven.includes('8/8 HP | Pool: Health (8/8)'));
         assert.ok(memoAfterHaven.includes('Sanity: 8/8'));
+    });
+
+    // ── Test 4: Quick Start Character Sanitization & Persona Rectification ────
+    await t.test('rectifyPostQuickStartState repairs macro leakage, persona bio, and invalid persona bindings', async () => {
+        const testSettings = {
+            currentMemo: `[CHARACTER]
+Character Name (The Hedge Cleric): 10/10 HP | Pool: Health (10/10) | Scenes: 0/4 | XP: 0/4
+((BARBLUE)) Resolve: 6/6
+FAE Knobs: Flee Grace: ON | Shift: 0 | Overflow: redirect:Health
+((PILLS)) Positive Tags: Herb Lore (Healing), Staff (Defense)
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]`,
+            playerCharacter: {
+                name: '{{user}}',
+                bio: 'Species:\nEdward is a human hedge cleric.\n\nBackground:\nEdward serves the woodland folk.',
+            },
+            chatStates: {
+                test_chat_quickstart: {
+                    currentMemo: `[CHARACTER]
+Edward (The Hedge Cleric): 10/10 HP | Pool: Health (10/10)
+[/CHARACTER]`,
+                    playerCharacter: {
+                        name: 'Edward',
+                        bio: 'Species: Edward is a human.',
+                    },
+                },
+            },
+        };
+
+        const mockPowerUser = {
+            personas: {
+                avatar_1: '{{user}}',
+                avatar_2: '**Lou**',
+            },
+            persona_descriptions: {
+                '{{user}}': 'Old user bio',
+                '**Lou**': 'Lou bio',
+            },
+            default_persona: '{{user}}',
+        };
+
+        const mockContext = {
+            name1: '{{user}}',
+            powerUser: mockPowerUser,
+            extensionSettings: {
+                rpg_tracker: testSettings,
+            },
+            chatId: 'test_chat_quickstart',
+            getCurrentChatId: () => 'test_chat_quickstart',
+        };
+
+        globalThis.SillyTavern = {
+            getContext: () => mockContext,
+        };
+
+        const resultName = await rectifyPostQuickStartState('Lou', testSettings);
+        assert.strictEqual(resultName, 'Lou', 'Authoritative fallback name Lou preferred');
+
+        // Verify currentMemo was repaired from "Character Name" to "Lou"
+        assert.ok(testSettings.currentMemo.includes('Lou (The Hedge Cleric): 10/10 HP'));
+        assert.ok(!testSettings.currentMemo.includes('Character Name'));
+
+        // Verify playerCharacter name & bio repaired
+        assert.strictEqual(testSettings.playerCharacter.name, 'Lou');
+        assert.ok(testSettings.playerCharacter.bio.includes('Lou is a human hedge cleric'));
+        assert.ok(!testSettings.playerCharacter.bio.includes('Edward is a human'));
+
+        // Verify chatStates repaired
+        const cs = testSettings.chatStates.test_chat_quickstart;
+        assert.strictEqual(cs.playerCharacter.name, 'Lou');
+        assert.ok(cs.currentMemo.includes('Lou (The Hedge Cleric): 10/10 HP'));
+        assert.ok(!cs.currentMemo.includes('Edward (The Hedge Cleric)'));
+
+        // Verify powerUser personas & default_persona repaired from {{user}}
+        assert.strictEqual(mockPowerUser.personas.avatar_1, 'Lou');
+        assert.strictEqual(mockPowerUser.personas.avatar_2, 'Lou');
+        assert.strictEqual(mockPowerUser.default_persona, 'Lou');
+        assert.strictEqual(mockContext.name1, 'Lou');
     });
 });

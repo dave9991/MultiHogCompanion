@@ -59,6 +59,7 @@ FAE is protagonist-centered, but genres like OSR dungeon crawls or squad sci-fi 
    - *Unlocking Angles:* Directing a relevant companion to handle or assist with a task (e.g. cleric banishing undead, rogue picking locks) grants valid Leverage so an action is not forced into a `pivot`.
 3. **Companions as Positive Tags (Subject to the 2-Tag Cap):** Notable companions or hirelings can be recorded as Positive Tags in `[CHARACTER]` (e.g., `Companion: Sister Valeria (Cleric)` or `Companion: Brother Marcus (Cleric)`). When they assist in the declared action, they count as 1 of the max 2 Positive Tags ($-1$ Attrition). Because the 2-tag ceiling never changes, adding companions never breaks the attrition math.
 4. **Companions as Narrative Buffer (At Breaking Point / Overflow):** When a pool clamps at `0`, triggers `scar_and_ko`, or resolves a `GRACE_RETREAT_WITH_SCAR`, consequences can manifest narratively on a companion—such as a retainer panicking and fleeing, or taking an injury (`(-) Companion Wounded: Marcus`) that disables their tag until `haven_or_specialist` recovery.
+5. **No `[PARTY]` Block or Companion HP:** Unlike standard MultiHog D&D, FAE disables the `[PARTY]` module (`modules.party: false`) and omits `'PARTY'` from `blockOrder`. Companions never have separate stat blocks or individual HP pools; they live purely in `[CHARACTER]` Positive Tags.
 
 ### 7. Character Tags & The Trait Qualification Protocol (Section 2.3.1)
 Characters begin with **3 to 4 Positive Tags** and **0 to 1 Negative Tag (Scar)**.

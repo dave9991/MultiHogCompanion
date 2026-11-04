@@ -28,6 +28,12 @@ assert.strictEqual(isValidCharacterName('user'), false, 'Rejects user');
 assert.strictEqual(isValidCharacterName('User'), false, 'Rejects User');
 assert.strictEqual(isValidCharacterName('name'), false, 'Rejects name');
 assert.strictEqual(isValidCharacterName('Character'), false, 'Rejects Character');
+assert.strictEqual(isValidCharacterName('Character Name'), false, 'Rejects Character Name');
+assert.strictEqual(isValidCharacterName('character name'), false, 'Rejects character name');
+assert.strictEqual(isValidCharacterName('Protagonist'), false, 'Rejects Protagonist');
+assert.strictEqual(isValidCharacterName('protagonist'), false, 'Rejects protagonist');
+assert.strictEqual(isValidCharacterName('Protagonist Name'), false, 'Rejects Protagonist Name');
+assert.strictEqual(isValidCharacterName('protagonist name'), false, 'Rejects protagonist name');
 assert.strictEqual(isValidCharacterName('player'), false, 'Rejects player');
 assert.strictEqual(isValidCharacterName('My Character'), false, 'Rejects My Character');
 assert.strictEqual(isValidCharacterName(''), false, 'Rejects empty');
@@ -79,6 +85,11 @@ const prompts2 = {
 };
 sanitizeCharacterStockPrompt(prompts2, '');
 assert.ok(prompts2.character.includes('Character Name (Class): current/max HP'), 'Falls back to Character Name placeholder');
+
+const mod2 = sanitizeCharacterStockPrompt(prompts2, 'Lou');
+assert.strictEqual(mod2, true, 'Returns true when Character Name replaced');
+assert.ok(prompts2.character.includes('Lou (Class): current/max HP'), 'Replaced Character Name with Lou');
+assert.ok(!prompts2.character.includes('Character Name'), 'No Character Name remaining');
 console.log('✓ sanitizeCharacterStockPrompt cleanses stock prompts without leaving macros');
 
 // 4. rectifyMemoCharacterName tests
@@ -96,6 +107,18 @@ User (Warrior): 10/10 HP
 [/CHARACTER]`;
 const rectifiedUser = rectifyMemoCharacterName(genericMemo, 'Conan');
 assert.ok(rectifiedUser.includes('[CHARACTER]\nConan (Warrior): 10/10 HP'), 'Rectifies User to Conan');
+
+const placeholderMemo = `[CHARACTER]
+Character Name (The Hedge Cleric): 10/10 HP
+[/CHARACTER]`;
+const rectifiedPlaceholder = rectifyMemoCharacterName(placeholderMemo, 'Lou');
+assert.ok(rectifiedPlaceholder.includes('[CHARACTER]\nLou (The Hedge Cleric): 10/10 HP'), 'Rectifies Character Name to Lou');
+
+const protagonistMemo = `[CHARACTER]
+Protagonist Name (The Hedge Cleric): 10/10 HP
+[/CHARACTER]`;
+const rectifiedProtagonist = rectifyMemoCharacterName(protagonistMemo, 'Lou');
+assert.ok(rectifiedProtagonist.includes('[CHARACTER]\nLou (The Hedge Cleric): 10/10 HP'), 'Rectifies Protagonist Name to Lou');
 console.log('✓ rectifyMemoCharacterName repairs corrupted memos');
 
 // 4b. sanitizeCharacterHeaderInMemo & markdown header tests

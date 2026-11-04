@@ -163,6 +163,8 @@ import {
     installMacroSyntaxSanitizer,
     stripMarkdownNameArtifacts,
     sanitizeCharacterHeaderInMemo,
+    rectifyMemoCharacterName,
+    extractNameFromBio,
 } from './character-creator-sanitizer.js';
 import {
     isDndSubfooterAlignmentApplied,
@@ -818,6 +820,7 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     // 4. Update stock prompts (character, party, combat)
     s.stockPrompts = s.stockPrompts || {};
     Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
+    sanitizeCharacterStockPrompt(s.stockPrompts, overrides?.charName || overrides?.character?.name || '');
 
     // 4b. Update CYOA config if defined in cartridge payload
     if (cartridge.payload.cyoaConfig) {
@@ -929,6 +932,7 @@ export async function applyFaeCartridge(genreKey = 'cosmic_horror', overrides = 
     // 4. Update stock prompts (character, party, combat)
     s.stockPrompts = s.stockPrompts || {};
     Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
+    sanitizeCharacterStockPrompt(s.stockPrompts, overrides?.charName || overrides?.character?.name || '');
 
     // 4b. Update CYOA config if defined in cartridge payload
     if (cartridge.payload.cyoaConfig) {
@@ -1046,19 +1050,48 @@ export async function rectifyPostQuickStartState(fallbackCharName = '', provided
     }
 
     const cleanFallback = stripMarkdownNameArtifacts(fallbackCharName);
+    const isFallbackValid = isValidCharacterName(cleanFallback);
+
+    let memoName = rpgSettings?.currentMemo ? extractNameFromMemo(rpgSettings.currentMemo) : null;
+    if (memoName && !isValidCharacterName(memoName)) {
+        memoName = null;
+    }
+
+    // If the user explicitly provided a valid fallback name (e.g. "Lou"), it is authoritative!
+    const cleanName = isFallbackValid ? cleanFallback : (memoName || cleanFallback);
 
     if (rpgSettings?.currentMemo) {
-        const sanitized = sanitizeCharacterHeaderInMemo(rpgSettings.currentMemo, cleanFallback);
-        if (sanitized !== rpgSettings.currentMemo) {
-            rpgSettings.currentMemo = sanitized;
+        if (isFallbackValid) {
+            if (!memoName || memoName !== cleanFallback) {
+                rpgSettings.currentMemo = rectifyMemoCharacterName(rpgSettings.currentMemo, cleanFallback);
+                if (memoName && memoName !== cleanFallback) {
+                    rpgSettings.currentMemo = rpgSettings.currentMemo.replace(
+                        new RegExp(`(\\[CHARACTER\\][\\s\\S]*?)\\b${memoName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}(\\s*[\\(:])`, 'i'),
+                        `$1${cleanFallback}$2`
+                    );
+                }
+            } else {
+                rpgSettings.currentMemo = sanitizeCharacterHeaderInMemo(rpgSettings.currentMemo, cleanFallback);
+            }
+        } else {
+            rpgSettings.currentMemo = sanitizeCharacterHeaderInMemo(rpgSettings.currentMemo);
         }
     }
 
-    const cleanName = (rpgSettings?.currentMemo ? extractNameFromMemo(rpgSettings.currentMemo) : null) || cleanFallback;
-
     if (cleanName) {
-        if (rpgSettings?.playerCharacter && rpgSettings.playerCharacter.name !== cleanName) {
-            rpgSettings.playerCharacter.name = cleanName;
+        if (rpgSettings?.playerCharacter) {
+            if (rpgSettings.playerCharacter.name !== cleanName) {
+                rpgSettings.playerCharacter.name = cleanName;
+            }
+            if (typeof rpgSettings.playerCharacter.bio === 'string' && rpgSettings.playerCharacter.bio) {
+                let bio = rpgSettings.playerCharacter.bio;
+                const bioName = extractNameFromBio(bio);
+                if (bioName && bioName !== cleanName && (!isValidCharacterName(bioName) || (isFallbackValid && cleanFallback === cleanName))) {
+                    bio = bio.replaceAll(bioName, cleanName);
+                }
+                bio = bio.replace(/\{\{user\}\}|\{user\}/gi, cleanName);
+                rpgSettings.playerCharacter.bio = bio;
+            }
         }
 
         const candidateIds = getCandidateChatIds();
@@ -1066,13 +1099,36 @@ export async function rectifyPostQuickStartState(fallbackCharName = '', provided
             for (const cid of candidateIds) {
                 const cs = rpgSettings.chatStates[cid];
                 if (cs) {
-                    if (cs.playerCharacter && cs.playerCharacter.name !== cleanName) {
-                        cs.playerCharacter.name = cleanName;
+                    if (cs.playerCharacter) {
+                        if (cs.playerCharacter.name !== cleanName) {
+                            cs.playerCharacter.name = cleanName;
+                        }
+                        if (typeof cs.playerCharacter.bio === 'string' && cs.playerCharacter.bio) {
+                            let bio = cs.playerCharacter.bio;
+                            const bioName = extractNameFromBio(bio);
+                            if (bioName && bioName !== cleanName && (!isValidCharacterName(bioName) || (isFallbackValid && cleanFallback === cleanName))) {
+                                bio = bio.replaceAll(bioName, cleanName);
+                            }
+                            bio = bio.replace(/\{\{user\}\}|\{user\}/gi, cleanName);
+                            cs.playerCharacter.bio = bio;
+                        }
                     }
                     if (cs.currentMemo) {
-                        const sanitizedCs = sanitizeCharacterHeaderInMemo(cs.currentMemo, cleanName);
-                        if (sanitizedCs !== cs.currentMemo) {
-                            cs.currentMemo = sanitizedCs;
+                        if (isFallbackValid) {
+                            const csMemoName = extractNameFromMemo(cs.currentMemo);
+                            if (!csMemoName || csMemoName !== cleanFallback) {
+                                cs.currentMemo = rectifyMemoCharacterName(cs.currentMemo, cleanFallback);
+                                if (csMemoName && csMemoName !== cleanFallback) {
+                                    cs.currentMemo = cs.currentMemo.replace(
+                                        new RegExp(`(\\[CHARACTER\\][\\s\\S]*?)\\b${csMemoName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}(\\s*[\\(:])`, 'i'),
+                                        `$1${cleanFallback}$2`
+                                    );
+                                }
+                            } else {
+                                cs.currentMemo = sanitizeCharacterHeaderInMemo(cs.currentMemo, cleanFallback);
+                            }
+                        } else {
+                            cs.currentMemo = sanitizeCharacterHeaderInMemo(cs.currentMemo, cleanName);
                         }
                     }
                 }
@@ -1091,8 +1147,10 @@ export async function rectifyPostQuickStartState(fallbackCharName = '', provided
 
         if (powerUser?.personas && typeof powerUser.personas === 'object') {
             for (const [avatarKey, personaVal] of Object.entries(powerUser.personas)) {
-                if (typeof personaVal === 'string' && (personaVal.startsWith('*') || personaVal.endsWith('*') || /[*`]/.test(personaVal))) {
-                    if (stripMarkdownNameArtifacts(personaVal) === cleanName) {
+                if (typeof personaVal === 'string') {
+                    const hasArtifacts = (personaVal.startsWith('*') || personaVal.endsWith('*') || /[*`]/.test(personaVal)) && stripMarkdownNameArtifacts(personaVal) === cleanName;
+                    const isInvalid = !isValidCharacterName(personaVal);
+                    if (hasArtifacts || isInvalid) {
                         powerUser.personas[avatarKey] = cleanName;
                         if (powerUser.persona_descriptions && powerUser.persona_descriptions[personaVal]) {
                             powerUser.persona_descriptions[cleanName] = powerUser.persona_descriptions[personaVal];
@@ -1102,24 +1160,46 @@ export async function rectifyPostQuickStartState(fallbackCharName = '', provided
             }
         }
 
+        let personaNeedsActivation = false;
+
         if (ctx && typeof ctx.name1 === 'string') {
-            if (stripMarkdownNameArtifacts(ctx.name1) === cleanName && ctx.name1 !== cleanName) {
+            const hasArtifacts = stripMarkdownNameArtifacts(ctx.name1) === cleanName;
+            const isInvalid = !isValidCharacterName(ctx.name1);
+            if ((hasArtifacts || isInvalid) && ctx.name1 !== cleanName) {
                 ctx.name1 = cleanName;
+                personaNeedsActivation = true;
             }
         }
 
         if (powerUser && typeof powerUser.default_persona === 'string') {
-            if (stripMarkdownNameArtifacts(powerUser.default_persona) === cleanName && powerUser.default_persona !== cleanName) {
+            const hasArtifacts = stripMarkdownNameArtifacts(powerUser.default_persona) === cleanName;
+            const isInvalid = !isValidCharacterName(powerUser.default_persona);
+            if ((hasArtifacts || isInvalid) && powerUser.default_persona !== cleanName) {
                 powerUser.default_persona = cleanName;
+                personaNeedsActivation = true;
             }
         }
 
         if (typeof document !== 'undefined') {
             const yourNameInput = /** @type {HTMLInputElement|null} */ (document.getElementById('your_name'));
-            if (yourNameInput && stripMarkdownNameArtifacts(yourNameInput.value) === cleanName && yourNameInput.value !== cleanName) {
-                yourNameInput.value = cleanName;
-                yourNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            if (yourNameInput) {
+                const hasArtifacts = stripMarkdownNameArtifacts(yourNameInput.value) === cleanName;
+                const isInvalid = !isValidCharacterName(yourNameInput.value);
+                if ((hasArtifacts || isInvalid) && yourNameInput.value !== cleanName) {
+                    yourNameInput.value = cleanName;
+                    yourNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
             }
+        }
+
+        // If persona was invalid or not set to cleanName, re-activate persona in SillyTavern
+        if (personaNeedsActivation || (ctx && ctx.name1 !== cleanName)) {
+            try {
+                const cc = await import('../SillyTavern-MultihogDnDFramework/character-creator.js');
+                if (typeof cc?.activateSillyTavernPersona === 'function') {
+                    await cc.activateSillyTavernPersona(cleanName);
+                }
+            } catch (_) {}
         }
     }
 
@@ -1150,7 +1230,7 @@ export async function quickStartPbtA(genreKey = 'fantasy', charName = '', scenar
         console.warn('[MultiHog Companion] Auto-chat preparation failed, proceeding:', chatErr);
     }
 
-    const ok = await applyPbtACartridge(genreKey);
+    const ok = await applyPbtACartridge(genreKey, { charName: cleanCharName });
     if (!ok) return;
 
     const instructions = buildPbtAQuickStartInstructions(genreKey, cleanCharName, scenarioDesc);
@@ -1178,6 +1258,9 @@ export async function quickStartPbtA(genreKey = 'fantasy', charName = '', scenar
             } catch (_) {}
 
             try {
+                if (rpgSettings?.stockPrompts) {
+                    sanitizeCharacterStockPrompt(rpgSettings.stockPrompts, cleanCharName);
+                }
                 await qs.runQuickStart(genre.multihogGenre, null, cleanCharName, instructions);
             } finally {
                 if (rpgSettings) {
@@ -1236,7 +1319,10 @@ export async function quickStartFae(genreKey = 'cosmic_horror', charName = '', s
         console.warn('[MultiHog Companion] Auto-chat preparation failed, proceeding:', chatErr);
     }
 
-    const ok = await applyFaeCartridge(genreKey, customKnobs ? { knobs: customKnobs } : {});
+    const ok = await applyFaeCartridge(genreKey, {
+        charName: cleanCharName,
+        ...(customKnobs ? { knobs: customKnobs } : {}),
+    });
     if (!ok) return;
 
     const instructions = buildFaeQuickStartInstructions(genreKey, cleanCharName, scenarioDesc, customKnobs);
@@ -1264,6 +1350,9 @@ export async function quickStartFae(genreKey = 'cosmic_horror', charName = '', s
             } catch (_) {}
 
             try {
+                if (rpgSettings?.stockPrompts) {
+                    sanitizeCharacterStockPrompt(rpgSettings.stockPrompts, cleanCharName);
+                }
                 await qs.runQuickStart(genre.multihogGenre, null, cleanCharName, instructions);
             } finally {
                 if (rpgSettings) {

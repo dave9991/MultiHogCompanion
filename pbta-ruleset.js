@@ -5,6 +5,11 @@
  * genre stat presets, and seamless integration with Multihog's Quick Start.
  */
 
+import {
+    isValidCharacterName,
+    stripMarkdownNameArtifacts,
+} from './character-creator-sanitizer.js';
+
 export const PBTA_CARTRIDGE_ID = 'pbta_narrative_engine_v1';
 export const CARTRIDGE_FORMAT = 'multihog-game-cartridge';
 export const CARTRIDGE_VERSION = 1;
@@ -832,6 +837,11 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
     const pacingXp = config.pacingXp || overrides.pacingXp || 5;
     const fate = config.maxHarmFate || overrides.maxHarmFate;
     const isCustomFate = Boolean(fate && fate.statusToken && !/^(-|\(\-\))\s*incapacitated/i.test(fate.statusToken.trim()));
+
+    const rawTarget = overrides?.charName || overrides?.character?.name || '';
+    const cleanTarget = stripMarkdownNameArtifacts(rawTarget);
+    const targetName = isValidCharacterName(cleanTarget) ? cleanTarget : 'Character Name';
+
     const statusInstruction = isCustomFate
         ? `When {{user}} is at Max Harm / 0 HP (${harmMax}/${harmMax} Harm, 0/${harmMax} HP), status MUST reflect condition: Status: ${fate.statusToken}, (-) Incapacitated, (-) Dying, or Defeated. Use plain "Healthy" when unaffected.`
         : `When {{user}} is at Max Harm / 0 HP (${harmMax}/${harmMax} Harm, 0/${harmMax} HP), status MUST reflect incapacitation: Status: (-) Incapacitated, (-) Dying, or Defeated. Use plain "Healthy" when unaffected.`;
@@ -846,7 +856,7 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
 NO D&D MECHANICS: Use PbtA Playbooks (e.g. The Fighter, The Ranger). Never use D&D 5e subclasses (e.g. Arcane Archer, Battle Master). Never write "1d8 damage", "attack rolls", "disadvantage", "5 ft", or "turns". Use PbtA concepts: Harm (+1 Harm), positioning, and modifiers (+1 forward, +1 hold).
 Format:
 [CHARACTER]
-{{user}} (Playbook): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
+${targetName} (Playbook): ${harmMax}/${harmMax} HP | Harm: 0/${harmMax} | Armor: 0
 Stats: ${statsExample}
 ((PILLS)) Moves: Move 1 [+Stat] (Trigger and narrative effect), Move 2 [+Stat] (Trigger and narrative effect)
 ((PILLS)) Gear: Signature weapon (Tags, 2 Harm), Protective gear ((+) Armor 1)
@@ -862,7 +872,9 @@ PILL FORMATTING (renders as interactive badges with mouse-over tooltips):
 - Gear: Separate equipped items with commas, placing weapon tags, armor values, or uses inside trailing parentheses: Item Name (Tags, harm/armor). Use (+) for armor or protective bonuses, e.g. Static Shroud ((+) +1 Armor).
 - Conditions & Status: Prefix harmful conditions with (-) for red pills, beneficial with (+) for green pills, e.g. ((PILLS)) Conditions: (-) Shaken (-1 forward to Wits), (+) Inspired (+1 forward).
   NO D&D DAMAGE-OVER-TIME OR ROUND/TURN COUNTERS: NEVER output "1 damage per round", "X turns remaining", or saving throw DC tickers. PbtA conditions are fictional debilities or narrative triggers (e.g. "(-) Bleeding (Risk taking +1 Harm on strenuous physical action without medical aid)").
-  ${statusInstruction}`,
+  ${statusInstruction}
+
+CRITICAL: Always output the character's actual proper name on the first line — NEVER output literal "{{user}}", "Character Name", or "User", and NEVER wrap the character name or first line in markdown bold (**).`,
 
         party: `Companion and party members. MECHANICS ONLY. Lean & boon-driven hirelings/allies (Dungeon World style) — no full stat arrays. Every member MUST begin with their own header line. Separate distinct members with an empty line:
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0

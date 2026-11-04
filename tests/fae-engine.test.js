@@ -169,6 +169,23 @@ describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => 
         const fromStr = sanitizeFaePositiveTags(strTags, 5);
         assert.strictEqual(fromStr.length, 3);
         assert.strictEqual(fromStr[1], 'Strong [for lifting, hauling, or breaching doors]');
+
+        // Companion and Retainer tags are exempt from the personal tag ceiling
+        const mixedWithCompanions = [
+            'Tag 1',
+            'Tag 2',
+            'Companion: Sister Valeria [Cleric]',
+            'Tag 3',
+            'Tag 4',
+            'Retainer: Torchbearer',
+            'Tag 5',
+            'Tag 6 (exceeds personal cap)',
+        ];
+        const sanitizedMixed = sanitizeFaePositiveTags(mixedWithCompanions, 5);
+        assert.strictEqual(sanitizedMixed.length, 7); // 5 personal tags + 2 companion tags
+        assert.ok(sanitizedMixed.includes('Companion: Sister Valeria [Cleric]'));
+        assert.ok(sanitizedMixed.includes('Retainer: Torchbearer'));
+        assert.ok(!sanitizedMixed.includes('Tag 6 (exceeds personal cap)'));
     });
 
     test('FAE Prompts include Trait Qualification Protocol instructions and bracketed examples', () => {
@@ -521,11 +538,51 @@ describe('Freeform Attrition Engine (FAE) — Cartridge, RNG Block & Documentati
         assert.strictEqual(cart.payload.rngQueueD20, true);
         assert.strictEqual(cart.payload.syspromptModules.saving_throws, false);
         assert.strictEqual(cart.payload.syspromptModules.attacks_per_round, false);
+        assert.strictEqual(cart.payload.modules.party, false, 'Party module must be unconditionally false in FAE');
+        assert.ok(!cart.payload.blockOrder.includes('PARTY'), 'blockOrder must not contain PARTY');
         assert.ok(cart.payload.customSyspromptLibrary.some(s => s.tag === 'role'));
         assert.ok(cart.payload.customSyspromptLibrary.some(s => s.tag === 'rng_system'));
         assert.ok(cart.payload.customSyspromptLibrary.some(s => s.tag === 'combat'));
         assert.ok(cart.payload.stockPrompts.character.includes('[CHARACTER]'));
+        assert.ok(!cart.payload.stockPrompts.character.includes('{{user}} ('), 'Stock prompt character template must never use {{user}}');
+        assert.ok(cart.payload.stockPrompts.character.includes('Character Name ('), 'Stock prompt defaults to Character Name');
+        assert.ok(cart.payload.stockPrompts.character.includes('CRITICAL: Always output the character\'s actual proper name'));
+        assert.ok(cart.payload.stockPrompts.party.includes('Do NOT output a [PARTY] block'));
         assert.ok(cart.payload.stockPrompts.combat.includes('[COMBAT]'));
+
+        // When partyMode is explicitly set, modules.party remains false and PARTY is omitted from blockOrder
+        const partyCart = buildFaeCartridge('osr_dungeon', { partyMode: 'party' });
+        assert.strictEqual(partyCart.payload.modules.party, false, 'Party module must be false even in partyMode');
+        assert.ok(!partyCart.payload.blockOrder.includes('PARTY'), 'blockOrder must not contain PARTY in partyMode');
+        const partyOverride = partyCart.payload.customSyspromptLibrary.find(s => s.tag === '[PARTY]_mechanics');
+        assert.ok(partyOverride && partyOverride.enabled, '[PARTY]_mechanics sysprompt override must be enabled');
+        assert.strictEqual(partyOverride.description, 'FAE Zero-Bookkeeping Companion & Party Leverage Rules');
+
+        // Target name resolution in stockPrompts
+        const namedCart = buildFaeCartridge('cosmic_horror', { charName: 'Lou' });
+        assert.ok(namedCart.payload.stockPrompts.character.includes('Lou (The Antiquarian)'), 'Uses resolved target name');
+        assert.ok(!namedCart.payload.stockPrompts.character.includes('Character Name ('), 'Replaces default Character Name header');
+    });
+
+    test('buildFaeQuickStartInstructions mandates Zero-Bookkeeping and forbids [PARTY] block', () => {
+        const instructions = buildFaeQuickStartInstructions('osr_dungeon', 'Lou');
+        assert.ok(instructions.includes('COMPANIONS & PARTY: Do NOT output a [PARTY] block'));
+        assert.ok(instructions.includes('"Companion: Name [role/specialty]"'));
+    });
+
+    test('Narrative GM prompt sections instruct status footer and active state without printing memo blocks', () => {
+        const role = buildFaeRoleContent();
+        assert.ok(role.includes('reflect updated pool values in the two-line status footer, and hand the spotlight back.'));
+        assert.ok(!role.includes('update State Memo pools'));
+
+        const combat = buildFaeCombatContent('osr_dungeon');
+        assert.ok(combat.includes('ACTIVE ENCOUNTER STATE ([COMBAT]):'));
+        assert.ok(combat.includes('When an encounter is active in [COMBAT], it is represented as a unified 4-line Encounter Block:'));
+        assert.ok(!combat.includes('In the [COMBAT] memo block, track the entire situation'));
+
+        const party = buildFaePartyContent();
+        assert.ok(party.includes('Notable companions or hirelings on the [CHARACTER] sheet carry a "Companion:" or "Retainer:" prefix'));
+        assert.ok(!party.includes('Record notable companions or hirelings as Positive Tags in [CHARACTER]'));
     });
 
     test('buildTailoredFaeDocumentation formats comprehensive markdown documentation', () => {

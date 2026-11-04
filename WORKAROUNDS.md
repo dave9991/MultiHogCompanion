@@ -102,9 +102,10 @@ Upstream MultiHog escapes its instruction literals or SillyTavern provides a `ra
 Upstream MultiHog stores all system prompts in a single shared object: `extensionSettings.rpg_tracker.stockPrompts`. When running a PbtA or FAE campaign, Companion writes custom system prompts into this object. When the user later switches to a standard D&D 5e chat or opens the QuickStart drawer, stale PbtA or FAE instructions remain in `stockPrompts` and contaminate D&D gameplay and character creation.
 
 #### Companion Mitigation
-Companion executes deterministic preflight cleansing:
+Companion executes deterministic preflight cleansing and modular system isolation:
 1. `EVT-04` (`runChatChangedCoordinator`) sanitizes `stockPrompts` on chat switch.
 2. `DOM-01a` and `DOM-01b` intercept QuickStart and Character Creator buttons to purge stale PbtA and FAE prompts before character generation commences.
+3. Modular `ConciergeSystemAdapter` (`concierge-system-base.js`, `systemRegistry`) isolates cartridge injection, draft storage (`mhc_concierge_draft_{ruleset}`), and live memo state merging per ruleset, preventing cross-engine bleeding.
 
 #### Blast Radius If Removed
 Standard D&D campaigns will intermittently receive PbtA or FAE directives, causing narrator hallucinations, broken character creation, and stat mismatches.

@@ -95,6 +95,9 @@ import {
     getCandidateChatIds,
     isFaeActive,
 } from './pbta-ruleset-persistence.js';
+import { systemRegistry } from './concierge-system-registry.js';
+import './concierge-system-pbta.js';
+import './concierge-system-fae.js';
 let extension_settings = globalThis.extension_settings || {};
 try {
     const extModule = await import('../../../extensions.js');
@@ -105,11 +108,12 @@ export const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
 
 /**
  * Returns the scoped localStorage draft key for the given ruleset.
+ * Format: mhc_concierge_draft_{ruleset}
  * @param {string} [ruleset='pbta']
  * @returns {string}
  */
 export function getDraftStorageKey(ruleset = 'pbta') {
-    return `mhc_concierge_draft_${ruleset === 'fae' ? 'fae' : 'pbta'}`;
+    return systemRegistry.get(ruleset)?.getDraftStorageKey() || `mhc_concierge_draft_${ruleset === 'fae' ? 'fae' : 'pbta'}`;
 }
 
 let modalInitialized = false;
@@ -169,13 +173,14 @@ async function ensureModalMounted() {
  */
 function saveDraft() {
     try {
-        const ruleset = activeDossier?.meta?.ruleset === 'fae' ? 'fae' : 'pbta';
-        const key = getDraftStorageKey(ruleset);
+        const ruleset = systemRegistry.detectRuleset(activeDossier);
+        const adapter = systemRegistry.get(ruleset);
+        const key = adapter.getDraftStorageKey();
         const hasChat = Array.isArray(chatHistory) && chatHistory.length > 0;
         const isUntouched = !hasChat && isDossierEmptyOrUntouched(activeDossier);
         if (isUntouched) {
             localStorage.removeItem(key);
-            if (ruleset === 'pbta') {
+            if (adapter.id === 'pbta') {
                 localStorage.removeItem(STORAGE_DRAFT_KEY);
             }
             return;
@@ -198,12 +203,13 @@ function saveDraft() {
  * @param {string|null} [targetRuleset=null]
  */
 export function loadValidatedDraft(targetRuleset = null) {
-    const ruleset = targetRuleset || (activeDossier?.meta?.ruleset === 'fae' || isFaeActive() ? 'fae' : 'pbta');
-    const key = getDraftStorageKey(ruleset);
+    const ruleset = targetRuleset || systemRegistry.detectRuleset(activeDossier) || (isFaeActive() ? 'fae' : 'pbta');
+    const adapter = systemRegistry.get(ruleset);
+    const key = adapter.getDraftStorageKey();
     try {
         let raw = localStorage.getItem(key);
         // Migration: read legacy 'mhc_pbta_concierge_draft' only for pbta
-        if (!raw && ruleset === 'pbta') {
+        if (!raw && adapter.id === 'pbta') {
             raw = localStorage.getItem(STORAGE_DRAFT_KEY);
             if (raw) {
                 try {
@@ -217,24 +223,24 @@ export function loadValidatedDraft(targetRuleset = null) {
         try {
             parsed = JSON.parse(raw);
         } catch (parseErr) {
-            console.warn(`[${ruleset === 'fae' ? 'FAE' : 'PbtA'} Concierge] Corrupted JSON in draft storage; purging:`, parseErr);
+            console.warn(`[${adapter.label} Concierge] Corrupted JSON in draft storage; purging:`, parseErr);
             localStorage.removeItem(key);
-            if (ruleset === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
+            if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
         const validated = validateDraft(parsed);
         if (!validated) {
-            console.warn(`[${ruleset === 'fae' ? 'FAE' : 'PbtA'} Concierge] Incomplete draft detected; purging for clean start.`);
+            console.warn(`[${adapter.label} Concierge] Incomplete draft detected; purging for clean start.`);
             localStorage.removeItem(key);
-            if (ruleset === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
+            if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
         return { draft: validated };
     } catch (err) {
-        console.warn(`[${ruleset === 'fae' ? 'FAE' : 'PbtA'} Concierge] Unexpected error reading draft; purging:`, err);
+        console.warn(`[${adapter.label} Concierge] Unexpected error reading draft; purging:`, err);
         try {
             localStorage.removeItem(key);
-            if (ruleset === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
+            if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
         } catch (_) {}
         return { corrupted: true };
     }
@@ -318,14 +324,15 @@ function showConciergeConfirm({
  */
 export function resetConciergeState({ showGreeting = true, ruleset = null, genreKey = null } = {}) {
     const effectiveRuleset = ruleset || (isFaeActive() ? 'fae' : 'pbta');
+    const adapter = systemRegistry.get(effectiveRuleset);
     try {
-        localStorage.removeItem(getDraftStorageKey(effectiveRuleset));
-        if (effectiveRuleset === 'pbta') {
+        localStorage.removeItem(adapter.getDraftStorageKey());
+        if (adapter.id === 'pbta') {
             localStorage.removeItem(STORAGE_DRAFT_KEY);
         }
     } catch (_) {}
 
-    activeDossier = createEmptyDossier(effectiveRuleset, genreKey);
+    activeDossier = createEmptyDossier(adapter.id, genreKey);
     loadedCampaignOriginChatId = null;
     loadedCampaignOriginTitle = null;
     chatHistory = [];
@@ -408,60 +415,73 @@ function updateBlueprintDeck() {
     const kick = activeDossier.theKick || {};
 
     // Header Badge & System Card
-    const isFae = activeDossier.meta?.ruleset === 'fae';
+    const rulesetId = systemRegistry.detectRuleset(activeDossier);
+    const adapter = systemRegistry.get(rulesetId);
+    const isFae = adapter.id === 'fae';
     const isUntouchedAndUnestablished = !meta.genreEstablished && isDossierEmptyOrUntouched(activeDossier);
 
-    $('#mhc_concierge_modal_title').text(isFae ? 'FAE Concierge' : 'PbtA Concierge');
-    $('#mhc_deck_engine_title').text(isFae ? '🕯️ FAE Engine' : '🎲 PbtA Engine');
+    const titlePrefix = adapter.id === 'fae' ? 'FAE' : adapter.id === 'pbta' ? 'PbtA' : adapter.id.toUpperCase();
+    $('#mhc_concierge_modal_title').text(`${titlePrefix} Concierge`);
+    $('#mhc_deck_engine_title').text(`${adapter.badgeIcon} ${titlePrefix} Engine`);
 
-    const rulesetToggleBtns = $('#mhc_header_ruleset_toggle .mhc-ruleset-btn');
-    if (typeof rulesetToggleBtns.each === 'function') {
-        rulesetToggleBtns.each(function () {
-            const btnRuleset = $(this).attr('data-ruleset');
-            const active = (btnRuleset === 'fae' && isFae) || (btnRuleset === 'pbta' && !isFae);
-            if (typeof $(this).toggleClass === 'function') {
-                $(this).toggleClass('active', active);
+    const toggleContainer = $('#mhc_header_ruleset_toggle');
+    if (toggleContainer.length && typeof toggleContainer.find === 'function') {
+        let existingBtns = toggleContainer.find('.mhc-ruleset-btn');
+        const registeredList = systemRegistry.list();
+        if (existingBtns && typeof existingBtns.each === 'function') {
+            if (existingBtns.length !== registeredList.length && typeof toggleContainer.empty === 'function') {
+                toggleContainer.empty();
+                for (const ad of registeredList) {
+                    if (typeof globalThis.$ === 'function') {
+                        const btn = $('<button type="button" class="mhc-ruleset-btn"></button>')
+                            .attr('data-ruleset', ad.id)
+                            .css({ border: 'none', 'font-size': '0.78em', 'font-weight': '600', padding: '4px 10px', 'border-radius': '4px', cursor: 'pointer' })
+                            .text(`${ad.badgeIcon} ${ad.id.toUpperCase()} (${ad.diceEngine.split(' ')[0]})`);
+                        if (typeof toggleContainer.append === 'function') toggleContainer.append(btn);
+                    }
+                }
+                existingBtns = toggleContainer.find('.mhc-ruleset-btn');
             }
-            if (active) {
-                $(this).css(isFae
-                    ? { background: 'rgba(245, 158, 11, 0.35)', color: '#fde68a' }
-                    : { background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' }
-                );
-            } else {
-                $(this).css({ background: 'transparent', color: '#9ca3af' });
+            if (existingBtns && typeof existingBtns.each === 'function') {
+                existingBtns.each(function () {
+                    const btnRuleset = $(this).attr('data-ruleset');
+                    const active = btnRuleset === adapter.id;
+                    if (typeof $(this).toggleClass === 'function') $(this).toggleClass('active', active);
+                    if (typeof $(this).css === 'function') {
+                        if (active) {
+                            $(this).css(adapter.id === 'fae'
+                                ? { background: 'rgba(245, 158, 11, 0.35)', color: '#fde68a' }
+                                : { background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' }
+                            );
+                        } else {
+                            $(this).css({ background: 'transparent', color: '#9ca3af' });
+                        }
+                    }
+                });
             }
-        });
+        }
     }
 
     if (isUntouchedAndUnestablished) {
         $('#mhc_header_system_badge')
             .text('✨ Any Genre / Custom')
-            .attr('title', isFae
-                ? 'Active Engine: Freeform Attrition Engine (4dF) — Use any preset or forge custom pools'
-                : 'Active Engine: Powered by the Apocalypse (2d6) — Use any preset or forge custom stats & moves'
-            );
+            .attr('title', `Active Engine: ${adapter.label} (${adapter.diceEngine}) — Use any preset or forge custom setting`);
         $('#mhc_deck_system_tag').text('ANY GENRE / CUSTOM');
         $('#mhc_deck_system_desc').text(meta.premise || (isFae
             ? 'Single-pass 4dF attrition engine — pick any preset or forge custom Resource Pools.'
             : 'Fiction-first 2d6 narrative engine — pick any preset or forge custom stats & moves.'
         ));
     } else {
-        const sysLabel = meta.systemLabel || (isFae ? (FAE_GENRES[meta.systemKey]?.label || 'Custom FAE Setting') : PBTA_GENRES.fantasy.label);
-        const badgeIcon = isFae ? (FAE_GENRES[meta.systemKey]?.icon || '🕯️') : '🎲';
+        const sysLabel = meta.systemLabel || adapter.getGenre(meta.systemKey)?.label || (isFae ? 'Custom FAE Setting' : PBTA_GENRES.fantasy.label);
+        const badgeIcon = adapter.badgeIcon || (isFae ? '🕯️' : '🎲');
         $('#mhc_header_system_badge')
             .text(`${badgeIcon} ${sysLabel}`)
-            .attr('title', isFae
-                ? `Active FAE Genre: ${sysLabel} (4dF Attrition Engine)`
-                : `Active PbtA Genre: ${sysLabel} (2d6 Narrative Engine)`
-            );
+            .attr('title', `Active ${adapter.id.toUpperCase()} Genre: ${sysLabel} (${adapter.diceEngine})`);
         $('#mhc_deck_system_tag').text((meta.systemKey || (isFae ? 'CUSTOM' : 'FANTASY')).toUpperCase());
-        $('#mhc_deck_system_desc').text(meta.premise || (isFae
-            ? `FAE ${sysLabel} 4dF attrition narrative engine.`
-            : `PbtA ${sysLabel} fiction-first narrative engine.`
-        ));
+        $('#mhc_deck_system_desc').text(meta.premise || `${titlePrefix} ${sysLabel} narrative engine.`);
     }
 
-    const defaultCampTitle = isFae ? 'Untitled FAE Campaign' : 'Untitled PbtA Campaign';
+    const defaultCampTitle = `Untitled ${titlePrefix} Campaign`;
     const campTitle = (meta.title || '').trim() || defaultCampTitle;
     $('#mhc_deck_campaign_title').text(campTitle);
     if (meta.tone) {
@@ -599,90 +619,12 @@ function updateBlueprintDeck() {
     $('#mhc_deck_char_playbook').text(proto.archetype || proto.playbook || 'In Development');
     $('#mhc_deck_char_name').text(proto.name || 'Unnamed Adventurer');
 
-    const heroicDomain = proto.heroicDomain || proto.heroic_domain || activeDossier.character?.heroic_domain;
-    const isHeroicTier = Boolean(cfg.heroicTier || cfg.heroic_tier || cfg.knobs?.heroic_tier);
-    if (isFae && (isHeroicTier || heroicDomain)) {
-        $('#mhc_deck_char_heroic_domain_text').text(heroicDomain || 'Heroic Permissions Active');
-        $('#mhc_deck_char_heroic_domain').show();
-    } else {
-        $('#mhc_deck_char_heroic_domain').hide();
-    }
-
-    if (isFae) {
-        if (isUntouchedAndUnestablished) {
-            $('#mhc_deck_char_vitals').html('<span class="mhc-empty-hint">2–3 Resource Pools (e.g. Health, Sanity, Supplies) will be tailored to your setting.</span>').show();
-            $('#mhc_deck_char_stats').html('<span class="mhc-empty-hint">3–4 Positive Tags & signature gear will be forged in the conversation.</span>');
-        } else {
-            const pools = proto.pools || activeDossier.pools || {};
-            const poolEntries = Object.entries(pools);
-            if (poolEntries.length) {
-                const html = poolEntries.map(([k, p]) => {
-                    const col = p.barColor === 'red' ? '#f87171' : p.barColor === 'blue' ? '#60a5fa' : p.barColor === 'purple' ? '#c084fc' : p.barColor === 'amber' ? '#fbbf24' : p.barColor === 'cyan' ? '#22d3ee' : '#4ade80';
-                    return `<span class="mhc-pill" style="border-color: ${col}66; color: ${col}; background: ${col}18;" title="Zero Debuff: ${escapeHtml(p.zero_debuff || '')}">
-                        ${escapeHtml(p.label)}: ${p.current}/${p.max}
-                    </span>`;
-                }).join(' ');
-                $('#mhc_deck_char_vitals').html(html).show();
-            } else {
-                $('#mhc_deck_char_vitals').empty().hide();
-            }
-
-            const statsEl = $('#mhc_deck_char_stats');
-            statsEl.empty();
-            const posTags = Array.isArray(proto.positiveTags) ? proto.positiveTags : (proto.positive_tags || []);
-            if (posTags.length) {
-                for (const t of posTags) {
-                    statsEl.append(`<span class="mhc-stat-pill" style="border-color: rgba(59, 130, 246, 0.5); color: #93c5fd;">🏷️ ${escapeHtml(t)}</span>`);
-                }
-            } else {
-                statsEl.append('<span class="mhc-empty-hint">No positive tags defined yet.</span>');
-            }
-        }
-
-        const movesEl = $('#mhc_deck_char_moves');
-        const negTags = Array.isArray(proto.negativeTags) ? proto.negativeTags : (proto.negative_tags || []);
-        if (negTags.length) {
-            movesEl.html(negTags.map(t => `<div style="color: #f87171;">• <b>⚠️ Scar:</b> ${escapeHtml(t)}</div>`).join(''));
-        } else {
-            movesEl.text('• No scars or lasting debuffs.');
-        }
-    } else {
-        if (isUntouchedAndUnestablished) {
-            $('#mhc_deck_char_vitals').empty().hide();
-            $('#mhc_deck_char_stats').html('<span class="mhc-empty-hint">5 Genre Stats (+2, +1, +1, 0, -1) will be tailored to your setting.</span>');
-        } else {
-            const curHarm = parseInt(proto.harm?.current, 10) || 0;
-            const maxHarm = parseInt(proto.harm?.max ?? activeDossier.config?.harmMax, 10) || 5;
-            const curHp = Math.max(0, maxHarm - curHarm);
-            if (curHarm > 0 || (proto.conditions && proto.conditions.length) || proto.status) {
-                const condList = Array.isArray(proto.conditions) ? proto.conditions : (proto.conditions ? [proto.conditions] : []);
-                const condText = condList.length ? ` · ${condList.join(', ')}` : '';
-                const statusLabel = proto.status || (curHarm > 0 ? 'Wounded' : 'Healthy');
-                $('#mhc_deck_char_vitals').html(`
-                    <span class="mhc-pill" style="border-color: rgba(239, 68, 68, 0.5); color: #f87171; background: rgba(239, 68, 68, 0.1);" title="Vitals & Injuries">
-                        🩸 ${curHp}/${maxHarm} HP (Harm: ${curHarm}/${maxHarm}) · ${escapeHtml(statusLabel)}${escapeHtml(condText)}
-                    </span>
-                `).show();
-            } else {
-                $('#mhc_deck_char_vitals').empty().hide();
-            }
-
-            const statsEl = $('#mhc_deck_char_stats');
-            statsEl.empty();
-            const statsObj = proto.stats && Object.keys(proto.stats).length ? proto.stats : { Might: 0, Agility: 0, Wits: 0, Heart: 0, Arcana: 0 };
-            for (const [sName, sVal] of Object.entries(statsObj)) {
-                const sign = sVal >= 0 ? '+' : '';
-                statsEl.append(`<span class="mhc-stat-pill">${sName} ${sign}${sVal}</span>`);
-            }
-        }
-
-        const movesEl = $('#mhc_deck_char_moves');
-        if (proto.startingMoves && proto.startingMoves.length) {
-            movesEl.html(proto.startingMoves.map(m => `<div>• <b>${m}</b></div>`).join(''));
-        } else {
-            movesEl.text('• Moves will be forged in the conversation.');
-        }
-    }
+    adapter.renderDeckStats({
+        vitalsEl: $('#mhc_deck_char_vitals'),
+        statsEl: $('#mhc_deck_char_stats'),
+        movesEl: $('#mhc_deck_char_moves'),
+        heroicEl: $('#mhc_deck_char_heroic_domain'),
+    }, proto, activeDossier, { isUntouchedAndUnestablished, escapeHtml });
 
     // Supporting Cast & Allies (NPCs) Card
     $('#mhc_deck_npc_count').text(npcs.length);
@@ -1395,9 +1337,10 @@ async function handleUserSend() {
             if (m.role === 'assistant') {
                 const cleanContent = stripConciergeStateBlocks(m.content) || m.content;
                 const reportPrefix = m.builderReport ? `[BUILDER_REPORT: ${m.builderReport}]\n\n` : '';
+                const activeAdapter = systemRegistry.get(systemRegistry.detectRuleset(activeDossier));
                 return {
                     role: 'assistant',
-                    name: activeDossier?.meta?.ruleset === 'fae' ? 'FAE_Concierge' : 'PbtA_Concierge',
+                    name: activeAdapter.getAssistantName(),
                     content: `${reportPrefix}${cleanContent}`,
                 };
             }
@@ -1548,9 +1491,7 @@ async function handleUserSend() {
                         {
                             role: 'user',
                             name: 'Player',
-                            content: activeDossier?.meta?.ruleset === 'fae'
-                                ? 'Audit the current Campaign Blueprint against the 5-point FAE design rubric and emit your [DOSSIER_CRITIQUE] block.'
-                                : 'Audit the current Campaign Blueprint against the 5-point PbtA design rubric and emit your [DOSSIER_CRITIQUE] block.',
+                            content: systemRegistry.get(systemRegistry.detectRuleset(activeDossier)).getCritiqueUserInstruction(),
                         },
                     ];
 
@@ -2285,16 +2226,18 @@ function bindModalEvents() {
     $('#mhc_concierge_modal').on('click', '.mhc-ruleset-btn', function (e) {
         e.stopPropagation();
         const targetRuleset = $(this).attr('data-ruleset');
-        if (targetRuleset === 'pbta' || targetRuleset === 'fae') {
+        if (targetRuleset && systemRegistry.has(targetRuleset)) {
             switchRulesetMode(targetRuleset);
         }
     });
 
-    // Ruleset Switch interaction on system badge click
+    // Ruleset Switch interaction on system badge click (cycles through all registered adapters)
     $('#mhc_header_system_badge').on('click', () => {
-        const isFae = activeDossier.meta?.ruleset === 'fae';
-        const nextRuleset = isFae ? 'pbta' : 'fae';
-        switchRulesetMode(nextRuleset);
+        const curRuleset = systemRegistry.detectRuleset(activeDossier);
+        const list = systemRegistry.list();
+        const curIdx = list.findIndex(a => a.id === curRuleset);
+        const next = list[(curIdx + 1) % list.length];
+        switchRulesetMode(next.id);
     });
 
     // Campaign Calibration Dial click interactions (manual cycling)

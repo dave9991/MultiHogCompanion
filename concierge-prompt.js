@@ -8,6 +8,7 @@ import { PBTA_GENRES } from './pbta-ruleset.js';
 import { FAE_GENRES } from './fae-ruleset.js';
 import { formatDossierForContext, formatChangelogForContext } from './concierge-parser.js';
 import { ARCHIVIST_QUOTAS } from './concierge-canon.js';
+import { systemRegistry } from './concierge-system-registry.js';
 
 /**
  * Builds the comprehensive system prompt for the FAE Concierge.
@@ -223,7 +224,11 @@ opening_prompt: Opening narration prompt framing Turn 1
  * @returns {string}
  */
 export function buildConciergeSystemPrompt(options = {}) {
-    if (options?.ruleset === 'fae' || options?.dossier?.meta?.ruleset === 'fae') {
+    const ruleset = options?.ruleset || options?.dossier?.meta?.ruleset;
+    if (ruleset && ruleset !== 'pbta' && systemRegistry.has(ruleset)) {
+        return systemRegistry.get(ruleset).getSystemPrompt(options);
+    }
+    if (ruleset === 'fae') {
         return buildFaeConciergeSystemPrompt(options);
     }
     const genreSummaries = Object.entries(PBTA_GENRES).map(([key, g]) => {
@@ -649,7 +654,11 @@ opening_prompt: In media res opening scene dropping the protagonist into the cru
  * @returns {string}
  */
 export function buildConciergeBuilderPrompt(options = {}) {
-    if (options?.ruleset === 'fae' || options?.dossier?.meta?.ruleset === 'fae') {
+    const ruleset = options?.ruleset || options?.dossier?.meta?.ruleset;
+    if (ruleset && ruleset !== 'pbta' && systemRegistry.has(ruleset)) {
+        return systemRegistry.get(ruleset).getBuilderPrompt(options);
+    }
+    if (ruleset === 'fae') {
         return buildFaeConciergeBuilderPrompt(options);
     }
     const genreSummaries = Object.entries(PBTA_GENRES).map(([key, g]) => {
@@ -913,7 +922,13 @@ directives:
  * Evaluates a drafted PbtA Campaign Dossier against a 5-point narrative & mechanical rubric.
  * @returns {string}
  */
-export function buildConciergeCriticPrompt() {
+export function buildConciergeCriticPrompt(ruleset = 'pbta') {
+    if (ruleset && ruleset !== 'pbta' && systemRegistry.has(ruleset)) {
+        return systemRegistry.get(ruleset).getJudgePrompt();
+    }
+    if (ruleset === 'fae') {
+        return buildFaeConciergeCriticPrompt();
+    }
     return `You are the **PbtA Blueprint Judge & Story Editor**, a senior Tabletop RPG designer who evaluates Powered by the Apocalypse (PbtA) campaign blueprints for narrative depth, entity interconnectivity, and mechanical bite.
 
 Your ONLY job is to audit the candidate **[CURRENT_LIVE_BLUEPRINT]** against the player's request and the 5-Point PbtA Campaign Rubric, and output a structured **[DOSSIER_CRITIQUE]** block.
@@ -967,8 +982,8 @@ directives:
  * @returns {string}
  */
 export function buildConciergeCriticContext(activeDossier, userPromptText = '', builderSummary = '', contemplation = null) {
-    const isFae = activeDossier?.meta?.ruleset === 'fae';
-    const basePrompt = isFae ? buildFaeConciergeCriticPrompt() : buildConciergeCriticPrompt();
+    const ruleset = systemRegistry.detectRuleset(activeDossier);
+    const basePrompt = buildConciergeCriticPrompt(ruleset);
     const formattedBlueprint = formatDossierForContext(activeDossier);
 
     const contLines = [];
@@ -1108,7 +1123,13 @@ ${genreSummaries}
  * Dedicated strictly to Session Zero GM guidance with zero directive/regex syntax.
  * @returns {string}
  */
-export function buildConciergeTalkerPrompt() {
+export function buildConciergeTalkerPrompt(ruleset = 'pbta') {
+    if (ruleset && ruleset !== 'pbta' && systemRegistry.has(ruleset)) {
+        return systemRegistry.get(ruleset).getTalkerPrompt();
+    }
+    if (ruleset === 'fae') {
+        return buildFaeConciergeTalkerPrompt();
+    }
     const genreSummaries = Object.entries(PBTA_GENRES).map(([key, g]) => {
         return `* **${key}** (${g.label}): Stats: [${g.stats.join(', ')}] | Moves: ${g.moves.slice(0, 3).map(m => m.split(' — ')[0]).join(', ')}`;
     }).join('\n');
@@ -1196,8 +1217,8 @@ ${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
  * @returns {string}
  */
 export function buildConciergeTalkerContext(activeDossier, changelog, activeNameRagSeeds = '') {
-    const isFae = activeDossier?.meta?.ruleset === 'fae';
-    const basePrompt = isFae ? buildFaeConciergeTalkerPrompt() : buildConciergeTalkerPrompt();
+    const ruleset = systemRegistry.detectRuleset(activeDossier);
+    const basePrompt = buildConciergeTalkerPrompt(ruleset);
     const formattedBlueprint = formatDossierForContext(activeDossier);
     const formattedChangelog = formatChangelogForContext(changelog);
 

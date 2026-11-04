@@ -16,6 +16,9 @@ import { formatInitialPbtaMemo } from './pbta-ruleset.js';
 import { formatInitialFaeMemo } from './fae-state-sync.js';
 import { buildFaeCartridge } from './fae-ruleset.js';
 import { getStagedCanonEntries, writeStagedCanon } from './concierge-canon.js';
+import { systemRegistry } from './concierge-system-registry.js';
+import './concierge-system-pbta.js';
+import './concierge-system-fae.js';
 import {
     loadMainNpcSectionNames,
     buildNpcEntryContent,
@@ -463,77 +466,49 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
 
         // ── 0b. Ensure Clean Chat & Auto-Rename ────────────────────────────────
         onProgress('🛡️ Preparing clean adventure session...', 5);
-        const isFae = dossier.meta?.ruleset === 'fae';
-        const fallbackLabel = isFae
-            ? `FAE ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`
-            : `PbtA ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`;
+        const rulesetId = systemRegistry.detectRuleset(dossier);
+        const adapter = systemRegistry.get(rulesetId);
+        const isFae = adapter.id === 'fae';
+        const fallbackLabel = `${adapter.label.includes('FAE') ? 'FAE' : adapter.id.toUpperCase()} ${systemKey.charAt(0).toUpperCase() + systemKey.slice(1)} Adventure`;
         const chatId = await ensureCleanAdventureChat({
             adventureTitle,
             fallbackLabel,
             wipeOldTitle,
         });
         // ── 1. Apply Ruleset Cartridge with Dynamic Overrides ───────────────────
-        if (isFae) {
-            onProgress('🎲 Installing FAE ruleset and 4dF attrition engine...', 15);
-            const cartridgeOverrides = {
-                id: chatId ? `fae_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
-                campaignTitle: adventureTitle,
-                name: adventureTitle ? `FAE: ${adventureTitle}` : null,
-                systemLabel: dossier.meta?.systemLabel,
-                description: dossier.meta?.premise,
-                tone: dossier.meta?.tone,
-                factions: dossier.factions,
-                worldRules: dossier.worldRules,
-                positive_tags: dossier.protagonist?.positiveTags,
-                negative_tags: dossier.protagonist?.negativeTags,
-                pools: dossier.protagonist?.pools,
-                heroicTier: Boolean(
-                    dossier.config?.heroicTier ??
-                    dossier.config?.heroic_tier ??
-                    dossier.config?.knobs?.heroic_tier
-                ),
-                heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
-                actionTempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
-                config: dossier.config || {},
-                knobs: {
-                    ...(dossier.config?.knobs || {}),
-                    action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
-                },
-            };
-            if (typeof options.applyFaeCartridge === 'function') {
-                await options.applyFaeCartridge(systemKey, cartridgeOverrides);
-            } else {
-                const cartridge = buildFaeCartridge(systemKey, cartridgeOverrides);
-                const effectiveCtxEarly = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
-                const rpg = effectiveCtxEarly?.extensionSettings?.rpg_tracker;
-                if (rpg && cartridge?.payload) {
-                    if (cartridge.payload.customSyspromptLibrary) rpg.customSyspromptLibrary = [...cartridge.payload.customSyspromptLibrary];
-                    if (cartridge.payload.syspromptModules) rpg.syspromptModules = { ...(rpg.syspromptModules || {}), ...cartridge.payload.syspromptModules };
-                    if (cartridge.payload.stockPrompts) rpg.stockPrompts = { ...(rpg.stockPrompts || {}), ...cartridge.payload.stockPrompts };
-                    if (cartridge.payload.cyoaConfig) rpg.cyoaConfig = { ...(rpg.cyoaConfig || {}), ...cartridge.payload.cyoaConfig };
-                }
-            }
-        } else {
-            onProgress('🎲 Installing PbtA ruleset and 2d6 engine...', 15);
-            const statsList = Object.keys(dossier.protagonist?.stats || {});
-            const cartridgeOverrides = {
-                id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
-                campaignTitle: adventureTitle,
-                name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
-                systemLabel: dossier.meta?.systemLabel,
-                description: dossier.meta?.premise,
-                tone: dossier.meta?.tone,
-                factions: dossier.factions,
-                worldRules: dossier.worldRules,
-                stats: statsList.length >= 3 ? statsList : null,
-                startingMoves: dossier.protagonist?.startingMoves,
-                cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
-                config: dossier.config || {},
-            };
-            const cartridgeOk = await applyPbtACartridge(systemKey, cartridgeOverrides);
-            if (!cartridgeOk) {
-                throw new Error('Failed to install PbtA ruleset cartridge.');
-            }
+        onProgress(`🎲 Installing ${adapter.label} (${adapter.diceEngine})...`, 15);
+        const statsList = Object.keys(dossier.protagonist?.stats || {});
+        const cartridgeOverrides = {
+            id: chatId ? `${adapter.id}_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+            campaignTitle: adventureTitle,
+            name: adventureTitle ? `${adapter.id.toUpperCase()}: ${adventureTitle}` : null,
+            systemLabel: dossier.meta?.systemLabel,
+            description: dossier.meta?.premise,
+            tone: dossier.meta?.tone,
+            factions: dossier.factions,
+            worldRules: dossier.worldRules,
+            positive_tags: dossier.protagonist?.positiveTags,
+            negative_tags: dossier.protagonist?.negativeTags,
+            pools: dossier.protagonist?.pools,
+            stats: statsList.length >= 3 ? statsList : null,
+            startingMoves: dossier.protagonist?.startingMoves,
+            cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
+            heroicTier: Boolean(
+                dossier.config?.heroicTier ??
+                dossier.config?.heroic_tier ??
+                dossier.config?.knobs?.heroic_tier
+            ),
+            heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
+            actionTempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
+            config: dossier.config || {},
+            knobs: {
+                ...(dossier.config?.knobs || {}),
+                action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
+            },
+        };
+        const cartridgeOk = await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx });
+        if (cartridgeOk === false) {
+            throw new Error(`Failed to install ${adapter.label} ruleset cartridge.`);
         }
 
         // Apply native MultiHog CYOA toggle based on playstyle dial
@@ -703,9 +678,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             // Store dossier and initialize game state memo in MultiHog for runtime panel access
             const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
             const rpgSettings = effectiveCtx?.extensionSettings?.rpg_tracker;
-            const initialMemo = isFae
-                ? formatInitialFaeMemo(dossier, { location: dossier.theKick?.startingLocation })
-                : formatInitialPbtaMemo(dossier);
+            const initialMemo = adapter.formatInitialMemo(dossier, { location: dossier.theKick?.startingLocation });
 
             if (rpgSettings) {
                 rpgSettings.currentMemo = initialMemo;
@@ -781,6 +754,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 if (chatId) {
                     rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
                     rpgSettings.chatStates[chatId].currentMemo = initialMemo;
+                    rpgSettings.chatStates[chatId].campaignDossier = dossier;
                     rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
                     rpgSettings.chatStates[chatId].simulationDepth = simDepth;
                     rpgSettings.chatStates[chatId].worldProgressionEnabled = rpgSettings.worldProgressionEnabled;
@@ -965,7 +939,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 const charCreator = await import('../SillyTavern-MultihogDnDFramework/character-creator.js');
                 if (typeof charCreator.addPlayerCardToLorebookAgent === 'function') {
                     const pcSectionNames = await loadMainPcSectionNames();
-                    const bio = buildPlayerCardBio(dossier.protagonist, pcSectionNames);
+                    const bio = buildPlayerCardBio(dossier.protagonist, pcSectionNames, { ruleset: dossier.meta?.ruleset });
                     await charCreator.addPlayerCardToLorebookAgent(charName, bio, 150, { chatId });
                 }
             } catch (pcErr) {
@@ -974,72 +948,44 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
         }
 
         // 3. Update Ruleset Cartridge with dynamic rules and Harm tiers
-        const isFae = dossier.meta?.ruleset === 'fae';
-        if (isFae) {
-            onProgress('🎲 Re-applying FAE ruleset cartridge...', 60);
-            const cartridgeOverrides = {
-                id: chatId ? `fae_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
-                campaignTitle: adventureTitle,
-                name: adventureTitle ? `FAE: ${adventureTitle}` : null,
-                systemLabel: dossier.meta?.systemLabel,
-                description: dossier.meta?.premise,
-                tone: dossier.meta?.tone,
-                factions: dossier.factions,
-                worldRules: dossier.worldRules,
-                positive_tags: dossier.protagonist?.positiveTags,
-                negative_tags: dossier.protagonist?.negativeTags,
-                pools: dossier.protagonist?.pools,
-                heroicTier: Boolean(
-                    dossier.config?.heroicTier ??
-                    dossier.config?.heroic_tier ??
-                    dossier.config?.knobs?.heroic_tier
-                ),
-                heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
-                actionTempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
-                config: dossier.config || {},
-                knobs: {
-                    ...(dossier.config?.knobs || {}),
-                    action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
-                },
-            };
-            if (typeof options.applyFaeCartridge === 'function') {
-                await options.applyFaeCartridge(systemKey, cartridgeOverrides);
-            } else {
-                const cartridge = buildFaeCartridge(systemKey, cartridgeOverrides);
-                const rpg = ctx?.extensionSettings?.rpg_tracker;
-                if (rpg && cartridge?.payload) {
-                    if (cartridge.payload.customSyspromptLibrary) rpg.customSyspromptLibrary = [...cartridge.payload.customSyspromptLibrary];
-                    if (cartridge.payload.syspromptModules) rpg.syspromptModules = { ...(rpg.syspromptModules || {}), ...cartridge.payload.syspromptModules };
-                    if (cartridge.payload.stockPrompts) rpg.stockPrompts = { ...(rpg.stockPrompts || {}), ...cartridge.payload.stockPrompts };
-                    if (cartridge.payload.cyoaConfig) rpg.cyoaConfig = { ...(rpg.cyoaConfig || {}), ...cartridge.payload.cyoaConfig };
-                }
-            }
-        } else {
-            onProgress('🎲 Re-applying PbtA ruleset cartridge...', 60);
-            const statsList = Object.keys(dossier.protagonist?.stats || {});
-            const cartridgeOverrides = {
-                id: chatId ? `pbta_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
-                campaignTitle: adventureTitle,
-                name: adventureTitle ? `PbtA: ${adventureTitle}` : null,
-                systemLabel: dossier.meta?.systemLabel,
-                description: dossier.meta?.premise,
-                tone: dossier.meta?.tone,
-                factions: dossier.factions,
-                worldRules: dossier.worldRules,
-                stats: statsList.length >= 3 ? statsList : null,
-                startingMoves: dossier.protagonist?.startingMoves,
-                cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
-                config: dossier.config || {},
-            };
-            await applyPbtACartridge(systemKey, cartridgeOverrides);
-        }
+        const rulesetId = systemRegistry.detectRuleset(dossier);
+        const adapter = systemRegistry.get(rulesetId);
+        onProgress(`🎲 Re-applying ${adapter.label} ruleset cartridge...`, 60);
+        const statsList = Object.keys(dossier.protagonist?.stats || {});
+        const cartridgeOverrides = {
+            id: chatId ? `${adapter.id}_${chatId.toLowerCase().replace(/[^a-z0-9]+/g, '_')}` : null,
+            campaignTitle: adventureTitle,
+            name: adventureTitle ? `${adapter.id.toUpperCase()}: ${adventureTitle}` : null,
+            systemLabel: dossier.meta?.systemLabel,
+            description: dossier.meta?.premise,
+            tone: dossier.meta?.tone,
+            factions: dossier.factions,
+            worldRules: dossier.worldRules,
+            positive_tags: dossier.protagonist?.positiveTags,
+            negative_tags: dossier.protagonist?.negativeTags,
+            pools: dossier.protagonist?.pools,
+            stats: statsList.length >= 3 ? statsList : null,
+            startingMoves: dossier.protagonist?.startingMoves,
+            cyoaExamples: (Array.isArray(dossier.cyoaExamples) && dossier.cyoaExamples.length > 0) ? dossier.cyoaExamples : null,
+            heroicTier: Boolean(
+                dossier.config?.heroicTier ??
+                dossier.config?.heroic_tier ??
+                dossier.config?.knobs?.heroic_tier
+            ),
+            heroicDomain: dossier.protagonist?.heroicDomain || dossier.character?.heroic_domain || null,
+            actionTempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
+            config: dossier.config || {},
+            knobs: {
+                ...(dossier.config?.knobs || {}),
+                action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
+            },
+        };
+        await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx });
 
         // 4. Update live state memo and MultiHog memory
         onProgress('⚙️ Synchronizing live state memo & character vitals...', 80);
         const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
         if (rpgSettings) {
-            const nextHarmMax = dossier.config?.harmMax || 5;
-
             // Find existing memo across settings, partition, or DOM textarea
             let memo = rpgSettings.currentMemo || (chatId && rpgSettings.chatStates?.[chatId]?.currentMemo) || '';
             if (!memo || !memo.trim()) {
@@ -1050,20 +996,10 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             }
 
             if (memo && memo.trim()) {
-                if (isFae) {
-                    const { mergeDossierIntoLiveFaeMemo } = await import('./fae-state-sync.js');
-                    rpgSettings.currentMemo = mergeDossierIntoLiveFaeMemo(memo, dossier, charName);
-                } else {
-                    // Non-destructively merge updated protagonist harm capacity and rules into active game
-                    const { mergeDossierIntoLiveMemo } = await import('./pbta-vitality-sync.js');
-                    rpgSettings.currentMemo = mergeDossierIntoLiveMemo(memo, dossier, charName);
-                    rpgSettings.currentMemo = normalizePbtaMemo(rpgSettings.currentMemo);
-                }
+                rpgSettings.currentMemo = adapter.mergeLiveMemo(memo, dossier, charName);
             } else {
                 // Only if the adventure was never started/memo was completely blank
-                rpgSettings.currentMemo = isFae
-                    ? formatInitialFaeMemo(dossier, { location: dossier.theKick?.startingLocation })
-                    : formatInitialPbtaMemo(dossier);
+                rpgSettings.currentMemo = adapter.formatInitialMemo(dossier, { location: dossier.theKick?.startingLocation });
             }
 
             // Register/update Custom HUD Tracker Module in MultiHog Settings if defined
@@ -1101,15 +1037,14 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 const keysToSync = [...new Set([chatId, `${cleanChatKey}.jsonl`, cleanChatKey].filter(k => k === chatId || rpgSettings.chatStates[k]))];
                 for (const key of keysToSync) {
                     rpgSettings.chatStates[key] = rpgSettings.chatStates[key] || {};
+                    rpgSettings.chatStates[key].campaignDossier = dossier;
                     rpgSettings.chatStates[key].pbtaCampaignDossier = dossier;
                     rpgSettings.chatStates[key].currentMemo = rpgSettings.currentMemo;
                     rpgSettings.chatStates[key].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
                     if (rpgSettings.customFields) {
                         rpgSettings.chatStates[key].customFields = [...rpgSettings.customFields];
                     }
-                    if (!isFae) {
-                        syncLivePbtaMemoVitality(rpgSettings, key);
-                    }
+                    adapter.syncVitality(rpgSettings, key);
                 }
             }
 

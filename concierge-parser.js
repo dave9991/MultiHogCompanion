@@ -8,157 +8,37 @@
 import { PBTA_GENRES } from './pbta-ruleset.js';
 import { FAE_GENRES, sanitizeFaePositiveTags } from './fae-ruleset.js';
 import { stripThinkingContent } from './concierge-connection.js';
+import { systemRegistry } from './concierge-system-registry.js';
+import './concierge-system-pbta.js';
+import './concierge-system-fae.js';
 
 /**
  * Creates a clean default Campaign Dossier object.
+ * Delegates ruleset-specific protagonist, config, and pool scaffolding to the active system adapter.
+ *
  * @param {string} [ruleset='pbta']
  * @param {string|null} [genreKey=null]
  * @returns {object}
  */
 export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
-    if (ruleset === 'fae') {
-        const systemKey = genreKey && FAE_GENRES[genreKey] ? genreKey : 'cosmic_horror';
-        const genreObj = FAE_GENRES[systemKey] || FAE_GENRES.cosmic_horror;
-        const clonedPools = {};
-        for (const [k, p] of Object.entries(genreObj.pools)) {
-            clonedPools[k] = {
-                key: p.key || k,
-                label: p.label,
-                barColor: p.barColor || 'green',
-                current: p.current,
-                max: p.max,
-                recovery: p.recovery,
-                passive_drain: p.passive_drain ? { ...p.passive_drain } : null,
-                strain_flavor: p.strain_flavor,
-                zero_debuff: p.zero_debuff,
-                on_overflow: p.on_overflow,
-            };
-        }
+    const adapter = systemRegistry.get(ruleset);
+    const effectiveRuleset = adapter.id;
+    const genres = adapter.getGenres();
+    const systemKey = genreKey && genres[genreKey] ? genreKey : adapter.getDefaultGenre();
+    const genreObj = adapter.getGenre(systemKey);
 
-        const isHeroicDefault = Boolean(genreObj.knobs?.heroic_tier ?? (systemKey === 'osr_dungeon'));
-        const defaultHeroicDomain = isHeroicDefault ? (genreObj.defaultHeroicDomain || '') : '';
-
-        const dossier = {
-            meta: {
-                title: 'Untitled FAE Campaign',
-                ruleset: 'fae',
-                systemKey,
-                systemLabel: genreObj.label,
-                genreEstablished: Boolean(genreKey && FAE_GENRES[genreKey]),
-                premise: '',
-                tone: '',
-                createdAt: Date.now(),
-            },
-            protagonist: {
-                name: '',
-                playbook: '',
-                species: '',
-                appearance: '',
-                equipment: '',
-                personality: '',
-                background: '',
-                habits: '',
-                heroicDomain: defaultHeroicDomain,
-                stats: {},
-                startingMoves: [],
-                positiveTags: [],
-                negativeTags: [],
-                pools: clonedPools,
-                harm: { max: 5, current: 0, armor: 0 },
-                conditions: [],
-                status: '',
-                gear: [],
-                bio: '',
-                portraitSrc: null,
-            },
-            npcs: [],
-            monsters: [],
-            maps: [],
-            factions: [],
-            theKick: {
-                startingLocation: '',
-                crisis: '',
-                openingPrompt: '',
-            },
-            cyoaExamples: [],
-            worldRules: {
-                axioms: [],
-                customModule: null,
-            },
-            contemplation: {
-                coreTension: '',
-                worldConsequences: '',
-                webOfEntanglement: '',
-                kickPressure: '',
-            },
-            config: {
-                playstyle: 'cyoa_5',
-                cyoaEmojis: true,
-                harmMax: 5,
-                partyMode: 'solo',
-                artStyle: '',
-                pacingXp: 5,
-                simulationDepth: 'active_fronts',
-                relationships: false,
-                maxHarmFate: {
-                    rule: 'Mortal Peril (Last Breath / Dying)',
-                    statusToken: '(-) Incapacitated',
-                    cyoaStyle: 'crisis',
-                },
-                actionTempo: genreObj.knobs?.action_tempo || 'gritty_default',
-                heroicTier: isHeroicDefault,
-                knobs: { ...genreObj.knobs, heroic_tier: isHeroicDefault, action_tempo: genreObj.knobs?.action_tempo || 'gritty_default' },
-                pacingScenes: 4,
-            },
-        };
-
-        dossier.pools = dossier.protagonist.pools;
-        dossier.knobs = dossier.config.knobs;
-        dossier.character = {
-            name: '',
-            archetype: genreObj.archetypes[0],
-            heroic_domain: isHeroicDefault ? (defaultHeroicDomain || null) : null,
-            positive_tags: dossier.protagonist.positiveTags,
-            negative_tags: dossier.protagonist.negativeTags,
-            scenes_completed: 0,
-            scenes_target: 4,
-        };
-
-        return dossier;
-    }
-
-    const pbtaKey = genreKey && PBTA_GENRES[genreKey] ? genreKey : 'fantasy';
-    const pbtaGenre = PBTA_GENRES[pbtaKey] || PBTA_GENRES.fantasy;
-    return {
+    const dossier = {
         meta: {
-            title: 'Untitled PbtA Campaign',
-            ruleset: 'pbta',
-            systemKey: pbtaKey,
-            systemLabel: pbtaGenre.label,
-            genreEstablished: Boolean(genreKey && PBTA_GENRES[genreKey]),
+            title: `Untitled ${effectiveRuleset === 'fae' ? 'FAE' : (effectiveRuleset === 'pbta' ? 'PbtA' : effectiveRuleset.toUpperCase())} Campaign`,
+            ruleset: effectiveRuleset,
+            systemKey,
+            systemLabel: genreObj.label || systemKey,
+            genreEstablished: Boolean(genreKey && genres[genreKey]),
             premise: '',
             tone: '',
             createdAt: Date.now(),
         },
-        protagonist: {
-            name: '',
-            playbook: '',
-            species: '',
-            appearance: '',
-            equipment: '',
-            personality: '',
-            background: '',
-            habits: '',
-            heroicDomain: '',
-            stats: {},
-            startingMoves: [],
-            harm: { max: 5, current: 0, armor: 0 },
-            conditions: [],
-            status: '',
-            gear: [],
-            bio: '',
-            portraitSrc: null,
-        },
+        protagonist: adapter.createEmptyProtagonist(systemKey),
         npcs: [],
         monsters: [],
         maps: [],
@@ -179,24 +59,14 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
             webOfEntanglement: '',
             kickPressure: '',
         },
-        config: {
-            playstyle: 'cyoa_5',
-            cyoaEmojis: true,
-            harmMax: 5,
-            partyMode: 'squad',
-            artStyle: '',
-            pacingXp: 5,
-            simulationDepth: 'active_fronts',
-            relationships: true,
-            maxHarmFate: {
-                rule: 'Mortal Peril (Last Breath / Dying)',
-                statusToken: '(-) Incapacitated',
-                cyoaStyle: 'crisis',
-            },
-            actionTempo: 'gritty_default',
-            heroicTier: false,
-        },
+        config: adapter.createEmptyConfig(systemKey),
     };
+
+    if (typeof adapter.postProcessEmptyDossier === 'function') {
+        adapter.postProcessEmptyDossier(dossier);
+    }
+
+    return dossier;
 }
 
 /**
@@ -218,8 +88,7 @@ export function isDossierEmptyOrUntouched(dossier) {
     const hasTitle = Boolean(
         meta.title &&
         meta.title.trim() !== '' &&
-        meta.title.trim() !== 'Untitled PbtA Campaign' &&
-        meta.title.trim() !== 'Untitled FAE Campaign'
+        !/^untitled\s+.*campaign$/i.test(meta.title.trim())
     );
     const hasPremise = Boolean(meta.premise && meta.premise.trim() !== '');
     const hasProto = Boolean(
@@ -2641,41 +2510,30 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
 
     // 1. Meta
     dossier.meta = dossier.meta || {};
-    const isFae = dossier.meta.ruleset === 'fae' || Boolean(FAE_GENRES[dossier.meta.systemKey]);
-    if (isFae) {
-        dossier.meta.ruleset = 'fae';
-        if (!dossier.meta.title || typeof dossier.meta.title !== 'string') {
-            dossier.meta.title = 'Untitled FAE Campaign';
-        }
-        const rawFaeKey = (dossier.meta.systemKey || '').toLowerCase();
-        if (rawFaeKey && FAE_GENRES[rawFaeKey]) {
-            dossier.meta.systemKey = rawFaeKey;
-            dossier.meta.systemLabel = dossier.meta.systemLabel && rawFaeKey === 'custom' ? dossier.meta.systemLabel : FAE_GENRES[rawFaeKey].label;
-        } else if (rawFaeKey) {
-            dossier.meta.systemKey = rawFaeKey;
-            dossier.meta.systemLabel = dossier.meta.systemLabel || (rawFaeKey === 'custom' ? 'Custom FAE Setting' : rawFaeKey);
-        } else {
-            dossier.meta.systemKey = 'cosmic_horror';
-            dossier.meta.systemLabel = FAE_GENRES.cosmic_horror.label;
-        }
+    const rulesetId = systemRegistry.detectRuleset(dossier);
+    const adapter = systemRegistry.get(rulesetId);
+    dossier.meta.ruleset = adapter.id;
+    const isFae = adapter.id === 'fae';
+
+    const genres = adapter.getGenres();
+    const rawKey = (dossier.meta.systemKey || '').toLowerCase();
+    if (rawKey && genres[rawKey]) {
+        dossier.meta.systemKey = rawKey;
+        dossier.meta.systemLabel = (dossier.meta.systemLabel && rawKey === 'custom') ? dossier.meta.systemLabel : (genres[rawKey].label || rawKey);
+    } else if (rawKey) {
+        dossier.meta.systemKey = rawKey;
+        dossier.meta.systemLabel = dossier.meta.systemLabel || (rawKey === 'custom' ? `Custom ${adapter.id.toUpperCase()} Setting` : rawKey);
     } else {
-        dossier.meta.ruleset = 'pbta';
-        if (!dossier.meta.title || typeof dossier.meta.title !== 'string') {
-            dossier.meta.title = empty.meta.title;
-        }
-        const rawKey = (dossier.meta.systemKey || '').toLowerCase();
-        if (rawKey && PBTA_GENRES[rawKey]) {
-            dossier.meta.systemKey = rawKey;
-            dossier.meta.systemLabel = PBTA_GENRES[rawKey].label;
-        } else {
-            const labelLower = (dossier.meta.systemLabel || '').toLowerCase();
-            const found = Object.values(PBTA_GENRES).find(g =>
-                (rawKey && g.id.toLowerCase() === rawKey) ||
-                (labelLower && (g.label.toLowerCase().includes(labelLower) || labelLower.includes(g.id.toLowerCase()) || labelLower.includes(g.label.split(' ')[0].toLowerCase())))
-            );
-            dossier.meta.systemKey = found ? found.id : 'fantasy';
-            dossier.meta.systemLabel = found ? found.label : PBTA_GENRES.fantasy.label;
-        }
+        const found = Object.values(genres).find(g =>
+            (rawKey && g.id?.toLowerCase() === rawKey) ||
+            (dossier.meta.systemLabel && g.label?.toLowerCase().includes(dossier.meta.systemLabel.toLowerCase()))
+        );
+        dossier.meta.systemKey = found ? (found.id || found.key) : adapter.getDefaultGenre();
+        dossier.meta.systemLabel = found ? found.label : (adapter.getGenre(dossier.meta.systemKey)?.label || dossier.meta.systemKey);
+    }
+
+    if (!dossier.meta.title || typeof dossier.meta.title !== 'string') {
+        dossier.meta.title = `Untitled ${adapter.id === 'fae' ? 'FAE' : (adapter.id === 'pbta' ? 'PbtA' : adapter.id.toUpperCase())} Campaign`;
     }
     dossier.meta.premise = dossier.meta.premise || '';
     dossier.meta.tone = dossier.meta.tone || '';
@@ -2799,87 +2657,9 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         dossier.protagonist.status = protoHarmObj.current > 0 ? '(-) Wounded' : '';
     }
 
-    if (isFae) {
-        const faeGenreObj = activeGenre;
-        dossier.config.knobs = { ...faeGenreObj.knobs, ...(dossier.config.knobs || {}) };
-        dossier.config.pacingScenes = dossier.config.pacingScenes || 4;
+    adapter.normalizeProtagonist(dossier.protagonist, dossier.meta.systemKey, dossier);
 
-        const isHeroic = Boolean(
-            dossier.config.heroicTier !== undefined
-                ? dossier.config.heroicTier
-                : (dossier.config.heroic_tier !== undefined
-                    ? dossier.config.heroic_tier
-                    : (dossier.config.knobs?.heroic_tier !== undefined
-                        ? dossier.config.knobs.heroic_tier
-                        : Boolean(faeGenreObj.knobs?.heroic_tier)))
-        );
-        dossier.config.heroicTier = isHeroic;
-        dossier.config.heroic_tier = isHeroic;
-        dossier.config.knobs.heroic_tier = isHeroic;
-
-        let heroicDomain = dossier.protagonist.heroicDomain ?? dossier.protagonist.heroic_domain ?? dossier.character?.heroic_domain;
-        if (heroicDomain === undefined || heroicDomain === null) {
-            heroicDomain = isHeroic ? (faeGenreObj.defaultHeroicDomain || null) : null;
-        } else if (!isHeroic) {
-            heroicDomain = null;
-        }
-        dossier.protagonist.heroicDomain = heroicDomain;
-
-        dossier.protagonist.positiveTags = Array.isArray(dossier.protagonist.positiveTags)
-            ? dossier.protagonist.positiveTags
-            : (Array.isArray(dossier.protagonist.tags) ? dossier.protagonist.tags : [...faeGenreObj.defaultPositiveTags]);
-        dossier.protagonist.negativeTags = Array.isArray(dossier.protagonist.negativeTags)
-            ? dossier.protagonist.negativeTags
-            : (Array.isArray(dossier.protagonist.scars) ? dossier.protagonist.scars : []);
-
-        dossier.protagonist.pools = dossier.protagonist.pools || {};
-        if (Object.keys(dossier.protagonist.pools).length === 0) {
-            for (const [k, p] of Object.entries(faeGenreObj.pools)) {
-                if (!dossier.protagonist.pools[k]) {
-                    dossier.protagonist.pools[k] = { ...p, key: p.key || k, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
-                }
-            }
-        }
-
-        // In FAE, startingMoves is never aliased from positive tags and moves are not accepted
-        dossier.protagonist.startingMoves = [];
-        delete dossier.protagonist.moves;
-        if (!Array.isArray(dossier.protagonist.conditions) || dossier.protagonist.conditions.length === 0) {
-            dossier.protagonist.conditions = [...dossier.protagonist.negativeTags];
-        }
-        dossier.pools = dossier.protagonist.pools;
-        dossier.knobs = dossier.config.knobs;
-        dossier.character = {
-            name: dossier.protagonist.name || 'Protagonist',
-            archetype: dossier.protagonist.playbook || faeGenreObj.archetypes[0],
-            heroic_domain: isHeroic ? (heroicDomain || null) : null,
-            positive_tags: dossier.protagonist.positiveTags,
-            negative_tags: dossier.protagonist.negativeTags,
-            scenes_completed: 0,
-            scenes_target: dossier.config.pacingScenes || 4,
-        };
-    } else {
-        if (!dossier.protagonist.stats || typeof dossier.protagonist.stats !== 'object' || Object.keys(dossier.protagonist.stats).length === 0) {
-            const stdMods = [+2, +1, +1, 0, -1];
-            const healedStats = {};
-            activeGenre.stats.forEach((s, idx) => {
-                healedStats[s] = stdMods[idx] ?? 0;
-            });
-            dossier.protagonist.stats = healedStats;
-        } else {
-            for (const [k, v] of Object.entries(dossier.protagonist.stats)) {
-                dossier.protagonist.stats[k] = parseInt(v, 10) || 0;
-            }
-        }
-
-        if (!Array.isArray(dossier.protagonist.startingMoves) || dossier.protagonist.startingMoves.length === 0) {
-            dossier.protagonist.startingMoves = activeGenre.moves.slice(0, 2);
-        }
-    }
-
-    const defaultGear = isFae
-        ? ['Essential explorer kit', 'Signature tool or weapon']
-        : ['Essential adventurer kit', 'Signature weapon (close, 2 Harm)'];
+    const defaultGear = adapter.getDefaultGear();
 
     if (dossier.protagonist.equipment && isPlaceholderGearList(dossier.protagonist.gear)) {
         const fromEquip = splitEquipmentIntoGearList(dossier.protagonist.equipment);
@@ -2908,28 +2688,7 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     });
 
     dossier.monsters = Array.isArray(dossier.monsters) ? dossier.monsters : [];
-    dossier.monsters.forEach(m => {
-        m.name = (m.name || 'Threat').trim();
-        if (isFae) {
-            const rawLayers = parseInt(m.layers ?? m.harm?.max ?? m.harm, 10) || 2;
-            const rawCur = parseInt(m.currentLayers ?? m.currentHarm ?? m.harm?.current, 10) || 0;
-            m.layers = rawLayers;
-            m.currentLayers = rawCur;
-            m.threatLevel = Math.max(1, Math.min(4, parseInt(m.threatLevel ?? m.threat, 10) || 2));
-            m.pressures = Array.isArray(m.pressures) ? m.pressures : (m.pressures ? splitTopLevelItems(m.pressures) : []);
-            m.poolsAtRisk = Array.isArray(m.poolsAtRisk) ? m.poolsAtRisk : (m.poolsAtRisk ? splitTopLevelItems(m.poolsAtRisk) : null);
-            m.instinct = (m.instinct || '').trim();
-            m.leverageBarriers = Array.isArray(m.leverageBarriers) ? m.leverageBarriers : (m.leverageBarriers ? splitTopLevelItems(m.leverageBarriers) : []);
-        } else {
-            m.harm = parseInt(m.harm, 10) || 3;
-            m.currentHarm = parseInt(m.currentHarm, 10) || 0;
-            m.armor = parseInt(m.armor, 10) || 0;
-            m.attacks = Array.isArray(m.attacks) && m.attacks.length > 0
-                ? m.attacks
-                : (m.attacks && typeof m.attacks === 'string' ? splitTopLevelItems(m.attacks) : ['Claw/Strike (2 Harm)']);
-            m.impendingDoom = Array.isArray(m.impendingDoom) ? m.impendingDoom : [];
-        }
-    });
+    adapter.normalizeMonsters(dossier.monsters, dossier.meta.systemKey, dossier);
 
     dossier.factions = Array.isArray(dossier.factions) ? dossier.factions : [];
     dossier.factions.forEach(f => {
@@ -2995,7 +2754,25 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
  */
 export function parseMarkdownToDossier(markdown) {
     if (!markdown || typeof markdown !== 'string') return null;
-    const dossier = createEmptyDossier();
+
+    // Detect ruleset and optional genre key from markdown before initializing base dossier
+    const isFae = /\bFreeform Attrition Engine\b/i.test(markdown)
+        || /\bFAE Knobs:\b/i.test(markdown)
+        || /\bResource Pools:\b/i.test(markdown)
+        || /\bPositive Tags\b/i.test(markdown)
+        || /\bLeverage Layers:\b/i.test(markdown);
+
+    const initialRuleset = isFae ? 'fae' : 'pbta';
+    let initialGenreKey = null;
+    const preSysLineMatch = markdown.match(/\*\s*\*\*System Engine:\*\*\s*([^\n\r]+)/i);
+    if (preSysLineMatch) {
+        const preKeyMatch = preSysLineMatch[1].match(/[`(]([a-z0-9_\-]+)[`)]/i);
+        if (preKeyMatch) {
+            initialGenreKey = preKeyMatch[1].toLowerCase();
+        }
+    }
+
+    const dossier = createEmptyDossier(initialRuleset, initialGenreKey);
 
     // 1. Title (flexible matching for legacy versions)
     const titleMatch = markdown.match(/(?:#\s*)?(?:📜\s*)?(?:CAMPAIGN DOSSIER|Campaign Blueprint|Campaign Overview|Campaign Dossier)[:\s]*([^\n\r]+)/i);

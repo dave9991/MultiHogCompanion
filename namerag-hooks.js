@@ -26,6 +26,11 @@ const GENRE_QUERY_MAP = {
     gothic_heist: 'victorian thief scoundrel smokestack operative assassin',
     slice_of_life: 'whimsical pastoral traveler artisan cozy',
     anime: 'shonen heroic stylized fantasy warrior prodigy',
+    osr_dungeon: 'gritty dungeon crawler old-school fantasy adventurer mercenary',
+    cyberpunk_noir: 'cyberpunk neon noir operative netrunner street samurai',
+    deep_space: 'deep space sci-fi astronaut explorer starfarer marine',
+    weird_west: 'weird west occult gunslinger supernatural drifter outlaw',
+    fae: 'heroic adventurer explorer specialist survivor',
 };
 
 /**
@@ -70,7 +75,7 @@ export function cleanContextKeywords(text, maxWords = 15) {
         'character', 'player', 'years', 'year', 'old', 'e.g', 'etc', 'like', 'some',
     ]);
     return text
-        .replace(/\b(playbook|role|species|demeanor|background|relationship|notes|attacks|weakness|gear|bio|appearance|traits|abilities|additional):\s*/gi, ' ')
+        .replace(/\b(name|playbook|role|species|demeanor|background|relationship|notes|attacks|weakness|gear|bio|appearance|look|archetype|positive_tags|negative_tags|traits|abilities|additional):\s*/gi, ' ')
         .replace(/[^a-zA-Z0-9\s-]/g, ' ')
         .split(/\s+/)
         .filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()))
@@ -201,6 +206,7 @@ export function extractNamePlaceholders(text) {
 /**
  * Extracts surrounding entity context (role, playbook, species, background, demeanor, notes)
  * from a raw [UPDATE_DOSSIER] block for a given placeholder token.
+ * Also handles companion tokens (e.g. [[NAME:companion]]) embedded in positive_tags or look: fields.
  * @param {string} rawText
  * @param {string} token
  * @returns {{ blockType: string, contextSummary: string }}
@@ -208,16 +214,64 @@ export function extractNamePlaceholders(text) {
 export function extractContextForPlaceholder(rawText, token) {
     if (!rawText || !token) return { blockType: 'general', contextSummary: '' };
 
+    const escape = s => s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const isCompanionToken = /\[\[NAME:\s*companion\s*\]\]/i.test(token);
+
     // Find the enclosing block containing this token
     const blockRegex = /\[(PROTAGONIST|NPC|MONSTER)(?::\s*[^\]]+)?\]([\s\S]*?)(?:\[\/\1\]|$)/gi;
     let bMatch;
     while ((bMatch = blockRegex.exec(rawText)) !== null) {
-        const blockType = bMatch[1].toUpperCase();
+        let blockType = bMatch[1].toUpperCase();
         const blockContent = bMatch[2];
         if (blockContent.includes(token)) {
+            // Check if this token represents a companion/retainer or is inside positive_tags/look
+            const compTagRegex = new RegExp(`(?:Companion|Retainer):\\s*[^,\\n\\r]*?${escape(token)}[^,\\n\\r]*`, 'i');
+            const compTagMatch = blockContent.match(compTagRegex);
+
+            if (isCompanionToken || compTagMatch) {
+                blockType = 'COMPANION';
+                let companionRole = '';
+                // 1. Try to extract explicit role from parentheses: e.g. [[NAME:companion]] (Field Medic)
+                const roleParenMatch = blockContent.match(new RegExp(`${escape(token)}\\s*\\(([^)]+)\\)`, 'i'));
+                if (roleParenMatch && roleParenMatch[1]) {
+                    companionRole = roleParenMatch[1].trim();
+                } else if (compTagMatch) {
+                    // Extract tag segment and remove prefix & token
+                    companionRole = compTagMatch[0]
+                        .replace(/(?:Companion|Retainer):\s*/i, '')
+                        .replace(token, '')
+                        .replace(/[()]/g, '')
+                        .trim();
+                }
+
+                const summaryParts = ['companion'];
+                if (companionRole && companionRole.toLowerCase() !== 'role') {
+                    summaryParts.push(companionRole);
+                }
+
+                return {
+                    blockType,
+                    contextSummary: summaryParts.join(' '),
+                };
+            }
+
+            // Normal entity placeholder context extraction
             const lines = blockContent.split(/\r?\n/)
                 .map(l => l.trim())
-                .filter(l => l && !l.includes(token) && !l.startsWith('moves:'));
+                .filter(l => l && !l.startsWith('moves:') && !l.startsWith('moves_or_boons:'))
+                .map(l => {
+                    if (l.includes(token)) {
+                        // If line is solely a name declaration (e.g. name: [[NAME:...]]), strip it
+                        if (/^name:\s*\[\[NAME[^\]]*\]\]\s*$/i.test(l)) {
+                            return '';
+                        }
+                        // If the token is inside look:, appearance:, positive_tags:, keep the rest of the line
+                        return l.replace(token, '').trim();
+                    }
+                    return l;
+                })
+                .filter(Boolean);
+
             return {
                 blockType,
                 contextSummary: lines.slice(0, 8).join(' '),
@@ -238,16 +292,19 @@ export function extractContextForPlaceholder(rawText, token) {
  * @returns {string}
  */
 export function buildQueryFromPlaceholderContext({ tag = '', genre = 'fantasy', blockType = '', contextSummary = '' } = {}) {
-    const genreBase = GENRE_QUERY_MAP[genre?.toLowerCase()] || GENRE_QUERY_MAP.fantasy;
+    const genreKey = genre?.toLowerCase()?.replace(/\s+/g, '_');
+    const genreBase = GENRE_QUERY_MAP[genreKey] || GENRE_QUERY_MAP[genre?.toLowerCase()] || (genre ? genre.replace(/_/g, ' ') : GENRE_QUERY_MAP.fantasy);
     const pieces = [genreBase];
 
     if (tag) pieces.push(tag.replace(/_/g, ' '));
-    if (blockType && blockType !== 'GENERAL') pieces.push(blockType.toLowerCase());
+    if (blockType && blockType !== 'GENERAL' && blockType.toLowerCase() !== tag.toLowerCase()) {
+        pieces.push(blockType.toLowerCase());
+    }
 
     if (contextSummary) {
         // Strip common field prefixes to keep pure evocative words
         const cleaned = contextSummary
-            .replace(/\b(playbook|role|species|demeanor|background|relationship|notes|attacks|weakness|gear|bio|appearance):\s*/gi, ' ')
+            .replace(/\b(name|playbook|role|species|demeanor|background|relationship|notes|attacks|weakness|gear|bio|appearance|look|archetype|positive_tags|negative_tags|traits|abilities|additional):\s*/gi, ' ')
             .replace(/[^a-zA-Z0-9\s-]/g, ' ')
             .split(/\s+/)
             .filter(w => w.length > 2 && !['and', 'the', 'for', 'with', 'from'].includes(w.toLowerCase()))
@@ -278,7 +335,17 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
 
     // Detect genre from output or active dossier
     const sysMatch = rawBuilderOutput.match(/system\s*:\s*([^\n\r]+)/i);
-    const genre = (sysMatch ? sysMatch[1].trim() : (activeDossier?.meta?.systemKey || activeDossier?.meta?.system || 'fantasy')).toLowerCase();
+    let genre = (sysMatch ? sysMatch[1].trim() : (activeDossier?.meta?.systemKey || activeDossier?.meta?.system || 'fantasy')).toLowerCase();
+    if (genre === 'custom') {
+        const labelMatch = rawBuilderOutput.match(/system_label\s*:\s*([^\n\r]+)/i);
+        if (labelMatch) {
+            genre = labelMatch[1].trim();
+        } else if (activeDossier?.meta?.systemLabel) {
+            genre = activeDossier.meta.systemLabel;
+        }
+    } else if (genre === 'fantasy' && /ruleset\s*:\s*fae/i.test(rawBuilderOutput)) {
+        genre = activeDossier?.meta?.systemKey || 'fae';
+    }
 
     // Check NameRAG availability
     let nameRagAvailable = false;

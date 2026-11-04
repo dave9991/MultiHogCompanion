@@ -69,6 +69,10 @@ import {
 } from '../fae-ruleset.js';
 import { buildPbtAQuickStartInstructions } from '../pbta-ruleset.js';
 import { formatInitialFaeMemo } from '../fae-state-sync.js';
+import {
+    resolveDossierNamePlaceholders,
+    extractContextForPlaceholder,
+} from '../namerag-hooks.js';
 
 test('FAE Session Zero Concierge: Dossier Initialization & Untouched Detection', () => {
     const dossier = createEmptyDossier('fae', 'osr_dungeon');
@@ -935,7 +939,7 @@ positive_tags: Gunsmith (Pistol maintenance)
         assert.ok(!pbtaTalkerCtx.includes('FAE Concierge'));
     });
 
-    test('FAE Concierge: Builder Prompt NPC role and Companion instructions', () => {
+    test('FAE Concierge: Builder Prompt Name Diversity, Cliché Ban, NPC Scoping & pure FAE phrasing', () => {
         const builderPrompt = buildFaeConciergeBuilderPrompt();
         assert.ok(builderPrompt.includes('role: Mentor | Contact | Ally'), 'FAE builder prompt example role must be Mentor | Contact | Ally');
         assert.ok(!builderPrompt.includes('role: Companion (Party)'), 'FAE builder prompt must not suggest Companion (Party) role');
@@ -943,6 +947,87 @@ positive_tags: Gunsmith (Pistol maintenance)
             /companions who travel with the PC are recorded as `Companion: Name \(Role\)` entries in the \[PROTAGONIST\] positive_tags/i.test(builderPrompt),
             'FAE builder prompt must include positive instruction for companion tags'
         );
+
+        // Name Diversity & Unique Placeholders Directive
+        assert.ok(builderPrompt.includes('### 📇 Name Diversity & Unique Placeholders Directive:'), 'Must include Name Diversity Directive');
+        assert.ok(/Silas,\s*Vance,\s*Elidor,\s*Lyra,\s*Aurelia,\s*Malachi,\s*Thorne/i.test(builderPrompt), 'Must forbid cliché default names');
+        assert.ok(builderPrompt.includes('name: [[NAME:protagonist]]'), 'Syntax example must require [[NAME:protagonist]]');
+        assert.ok(builderPrompt.includes('Companion: [[NAME:companion]] (Role)'), 'Syntax example must require Companion: [[NAME:companion]] (Role)');
+        assert.ok(builderPrompt.includes('name: [[NAME:ally]]'), 'Syntax example must require [[NAME:ally]]');
+        assert.ok(builderPrompt.includes('name: [[NAME:adversary]]'), 'Syntax example must require [[NAME:adversary]]');
+
+        // NPC Scoping Directive
+        assert.ok(
+            builderPrompt.includes('If the player\'s premise only involves the protagonist and a traveling companion, record the companion under [PROTAGONIST] positive_tags as `Companion: [[NAME:companion]] (Role)` and OMIT the [NPC] block entirely. Do not fabricate extraneous stationary contacts unless requested.'),
+            'Must include NPC Scoping Directive'
+        );
+
+        // Pure FAE phrasing in examples (no D&D advantage leak)
+        assert.ok(
+            builderPrompt.includes('moves_or_boons: Tactical Support (Provides Fictional Leverage to stabilize wounded allies or reduce recovery strain)'),
+            'Must use pure FAE fictional leverage phrasing'
+        );
+        assert.ok(!builderPrompt.includes('Grants [+] Advantage when assisting'), 'Must eliminate mechanical advantage leak');
+    });
+
+    test('FAE Concierge: NameRAG placeholder resolution for [[NAME:companion]] in positive_tags and look', async () => {
+        const faeBlueprint = `[UPDATE_DOSSIER]
+summary: Initial Arkham delve
+ruleset: fae
+system: cosmic_horror
+tone: Eldritch investigative noir
+premise: Tracking ritual murders in Arkham sanitarium
+
+[PROTAGONIST]
+name: [[NAME:protagonist]]
+playbook: The Alienist
+positive_tags: Steady Hand (Pistol training), Quiet (Moving silently), Companion: [[NAME:companion]] (Field Medic), Trenchcoat
+negative_tags: (-) Paranoia (Prone to seeing watchers in mirrors)
+pools: Health: 8/8 | Sanity: 8/8
+[/PROTAGONIST]
+
+[NPC]
+name: [[NAME:ally]]
+role: Contact
+look: Pragmatic doctor with bloodstained apron
+moves_or_boons: Tactical Support (Provides Fictional Leverage to stabilize wounded allies or reduce recovery strain)
+[/NPC]
+
+[MONSTER]
+name: [[NAME:adversary]]
+threat_level: 2
+layers: 2/2
+pools_at_risk: Health, Sanity
+[/MONSTER]
+[/UPDATE_DOSSIER]`;
+
+        // 1. Context extraction check
+        const compCtx = extractContextForPlaceholder(faeBlueprint, '[[NAME:companion]]');
+        assert.equal(compCtx.blockType, 'COMPANION', 'Companion placeholder in positive_tags must yield COMPANION blockType');
+        assert.ok(compCtx.contextSummary.includes('Field Medic'), 'Companion context summary must capture the (Field Medic) role');
+
+        const allyCtx = extractContextForPlaceholder(faeBlueprint, '[[NAME:ally]]');
+        assert.equal(allyCtx.blockType, 'NPC', 'Ally placeholder must yield NPC blockType');
+        assert.ok(allyCtx.contextSummary.includes('Pragmatic doctor'), 'Ally context summary must capture look description');
+
+        // 2. Full resolution round-trip (using fallback/offline or mock)
+        const res = await resolveDossierNamePlaceholders(faeBlueprint, {
+            meta: { systemKey: 'cosmic_horror', ruleset: 'fae' },
+        }, { returnDetails: true });
+
+        assert.ok(!res.text.includes('[[NAME:'), 'All [[NAME:...]] tokens must be replaced');
+        assert.ok(/Companion:\s+[A-Za-z\s'-]+\s+\(Field Medic\)/.test(res.text), 'Companion placeholder must be replaced with a concrete name');
+        assert.ok(/\[NPC\]\s*\n\s*name:\s+[A-Za-z\s'-]+/.test(res.text), 'Ally placeholder must be replaced with a concrete name');
+        assert.ok(/\[MONSTER\]\s*\n\s*name:\s+[A-Za-z\s'-]+/.test(res.text), 'Adversary placeholder must be replaced with a concrete name');
+
+        // 3. Dossier parsing round-trip
+        const dossier = createEmptyDossier('fae', 'cosmic_horror');
+        const { updatedDossier } = applyDossierUpdates(res.text, dossier);
+        assert.ok(updatedDossier.protagonist.name && !updatedDossier.protagonist.name.includes('[[NAME:'));
+        const compTag = updatedDossier.protagonist.positiveTags.find(t => t.startsWith('Companion:'));
+        assert.ok(compTag, 'Dossier protagonist positiveTags must contain resolved Companion tag');
+        assert.ok(!compTag.includes('[[NAME:'), 'Companion tag must have placeholder resolved');
+        assert.ok(compTag.includes('(Field Medic)'), 'Companion tag must preserve the (Field Medic) role');
     });
 
     test('FAE Concierge: Refiner context & draft storage key isolation', () => {

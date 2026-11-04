@@ -539,6 +539,7 @@ ${genreSummaries}
 * The Pacing Triad: Endurance (pool capacity 6–12), Intensity (\`base_attrition_shift\` -1/0/+1), Tempo (\`action_tempo\`: action_serial, gritty_default, slow_burn, slice_of_life).
 * Protagonist: 3-4 specific Positive Tags (including signature gear tags) and 0-1 starting Scar in negative_tags.
 * Zero-Bookkeeping Companions: Companions who travel with the PC are recorded as \`Companion: Name (Role)\` entries in the [PROTAGONIST] positive_tags, not as separate [NPC] cards with moves or party roles. NPCs are external mentors, contacts, or faction allies.
+* NPC Scoping Directive: If the player's premise only involves the protagonist and a traveling companion, record the companion under [PROTAGONIST] positive_tags as \`Companion: [[NAME:companion]] (Role)\` and OMIT the [NPC] block entirely. Do not fabricate extraneous stationary contacts unless requested.
 * Trait Qualification Protocol (Cooperative Qualification):
   - Ideal Scope: ~25–30% situational applicability.
   - Tier A (Auto-Qualify Broad Traits): Convert broad traits (Strong, Smart, Fast, Lucky, Tough) into Trait [context] (e.g. Strong [for lifting, hauling, or breaching doors], Smart [for ancient ciphers and forensic clues]) to keep applicability to ~25–30%.
@@ -570,26 +571,26 @@ playstyle: cyoa_5 | cyoa_3 | freeform
 [/CONFIG]
 
 [PROTAGONIST]
-name: Silas Vance
+name: [[NAME:protagonist]]
 playbook: The Alienist
 heroic_domain: Archetype [specific domains] (When heroic_tier is true; omitted when false)
 appearance: Exhausted detective with a rumpled trenchcoat
 background: Former asylum investigator
-positive_tags: Steady Hand (Pistol training), Quiet (Moving silently), Trenchcoat (Deep pockets for evidence)
+positive_tags: Steady Hand (Pistol training), Quiet (Moving silently), Companion: [[NAME:companion]] (Role), Trenchcoat (Deep pockets for evidence)
 negative_tags: (-) Paranoia (Prone to seeing watchers in mirrors)
 pools: Health: 8/8 (zero_debuff: Crippled & Bleeding, recovery: camp_or_sleep, overflow: scar_and_ko) | Sanity: 8/8 (zero_debuff: Manic Dissociation, recovery: haven_or_specialist, overflow: lethal)
 [/PROTAGONIST]
 
 [NPC]
-name: Evelyn Cross
+name: [[NAME:ally]]
 role: Mentor | Contact | Ally
 archetype: Field Medic
 appearance: Pragmatic doctor with bloodstained apron
-moves_or_boons: Tactical Support (Grants [+] Advantage when assisting)
+moves_or_boons: Tactical Support (Provides Fictional Leverage to stabilize wounded allies or reduce recovery strain)
 [/NPC]
 
 [MONSTER]
-name: Lurker in the Ward
+name: [[NAME:adversary]]
 threat_level: 2
 layers: 2/2
 pools_at_risk: Health, Sanity
@@ -610,6 +611,17 @@ brief_description: The quarantined basement ward
 [/MAP]
 [/UPDATE_DOSSIER]
 \`\`\`
+
+### 📇 Name Diversity & Unique Placeholders Directive:
+* **Never invent cliché or repetitive LLM default names** (e.g., Silas, Vance, Elidor, Lyra, Aurelia, Malachi, Thorne).
+* **If the player explicitly specifies or names a character** (e.g., "His name is John" or an imported character card): Use their exact specified name directly in \`name:\` or \`positive_tags\`.
+* **When inventing an un-named protagonist, companion, NPC, or adversary:**
+  Emit a unique tagged placeholder token:
+  - Explicitly require \`[[NAME:protagonist]]\` for protagonist name: \`name: [[NAME:protagonist]]\`.
+  - Require \`[[NAME:companion]]\` for traveling companions: \`Companion: [[NAME:companion]] (Role)\` in \`[PROTAGONIST]\` \`positive_tags\`.
+  - Require \`[[NAME:ally]]\` or \`[[NAME:mentor]]\` for any generated external NPCs: \`name: [[NAME:ally]]\` or \`name: [[NAME:mentor]]\`.
+  - Require \`[[NAME:adversary]]\` for any generated adversaries/monsters: \`name: [[NAME:adversary]]\`.
+  The downstream Name Diversity Engine (NameRAG) will automatically resolve each placeholder into an authentic, culturally evocative name tailored to that character's specific demeanor and backstory before updating the live campaign.
 `;
 }
 

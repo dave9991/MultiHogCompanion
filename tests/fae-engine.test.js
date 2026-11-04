@@ -39,6 +39,7 @@ import {
     formatInitialFaeMemo,
     splitTopLevelPillItems,
     normalizeFaePillsLine,
+    stripFaePartyBlockFromMemo,
 } from '../fae-state-sync.js';
 
 describe('Freeform Attrition Engine (FAE) — Core Mechanics & 4dF Dice', () => {
@@ -712,6 +713,10 @@ describe('Freeform Attrition Engine (FAE) — Cartridge, RNG Block & Documentati
         const instructions = buildFaeQuickStartInstructions('osr_dungeon', 'Lou');
         assert.ok(instructions.includes('COMPANIONS & PARTY: Do NOT output a [PARTY] block'));
         assert.ok(instructions.includes('"Companion: Name [role/specialty]"'));
+
+        const pluralInstructions = buildFaeQuickStartInstructions('osr_dungeon', 'Lou', 'Lou and his companions venture into the dark barrows');
+        assert.ok(pluralInstructions.includes('generate 2-3 "Companion: Name (Role — detail)" tags within the 4-tag budget'));
+        assert.ok(pluralInstructions.includes('Pick 4 distinct descriptive tags'));
     });
 
     test('Narrative GM prompt sections instruct status footer and active state without printing memo blocks', () => {
@@ -722,10 +727,12 @@ describe('Freeform Attrition Engine (FAE) — Cartridge, RNG Block & Documentati
         const combat = buildFaeCombatContent('osr_dungeon');
         assert.ok(combat.includes('ACTIVE ENCOUNTER STATE ([COMBAT]):'));
         assert.ok(combat.includes('When an encounter is active in [COMBAT], it is represented as a unified 4-line Encounter Block:'));
+        assert.ok(combat.includes('When an active Encounter block is present, its stated Threat is used for action rolls against those enemies.'));
         assert.ok(!combat.includes('In the [COMBAT] memo block, track the entire situation'));
 
         const party = buildFaePartyContent();
         assert.ok(party.includes('Notable companions or hirelings on the [CHARACTER] sheet carry a "Companion:" or "Retainer:" prefix'));
+        assert.ok(party.includes('When the player\'s setup mentions friends or party members, the [CHARACTER] Positive Tags entries starting with Companion: or Retainer: ARE the mechanical companions; any other unnamed members are background retinue covered by the protagonist\'s pools. Do not wait on a tracker party list.'));
         assert.ok(!party.includes('Record notable companions or hirelings as Positive Tags in [CHARACTER]'));
     });
 
@@ -736,6 +743,7 @@ describe('Freeform Attrition Engine (FAE) — Cartridge, RNG Block & Documentati
         assert.ok(doc.includes('Two-Tier Pool Narration'));
         assert.ok(doc.includes('Torch & Supplies'));
         assert.ok(doc.includes('Guidelines for MultiHog Adventure Companion'));
+        assert.ok(doc.includes('Zero-Bookkeeping Companions: FAE has modules.party disabled. NEVER instruct the State Tracker to create a [PARTY] block or per-companion pools. Add companions as `Companion: Name (Role)` entries under [CHARACTER] Positive Tags, and create their lore entries via command_lorebook_agent. Prefer ONE command per request where possible (the Companion action limit is small).'));
     });
 });
 
@@ -1003,6 +1011,58 @@ Status: Healthy
         assert.ok(partyXml.includes('Companions as Narrative Buffer'), 'Must mention Companions as Narrative Buffer');
         assert.ok(!partyXml.includes('Every companion tracks their own Primary Pool'), 'Must NOT have separate companion pool tracking');
         assert.ok(!partyXml.includes('Name (Archetype): 8/8 HP'), 'Must NOT declare individual creature HP stats');
+    });
+
+    test('reconcileFaeMemoAfterTurn and stripFaePartyBlockFromMemo strip unwanted [PARTY] blocks for FAE (WRK-09)', () => {
+        const memoWithParty = `[TIME]
+Day 1, 09:00 AM (Morning)
+[/TIME]
+
+[LOCATION]
+The Sunken Crypt
+[/LOCATION]
+
+[CHARACTER]
+Lou (The Sellsword): 10/10 HP | Pool: Health (10/10) | Scenes: 0/4 | XP: 0/4
+((BARBLUE)) Resolve: 6/6
+((BARGOLD)) Torch & Supplies: 6/6
+FAE Knobs: Flee Grace: OFF | Shift: 0 | Overflow: lethal
+((PILLS)) Positive Tags: Companion: Bran (Torchbearer), Iron Grip (grappling)
+((PILLS)) Scars & Debuffs: None
+Status: Healthy
+[/CHARACTER]
+
+[PARTY]
+- Bran (Torchbearer): 8/8 HP | Pool: Health (8/8)
+((PILLS)) Positive Tags: Keen Eyed
+Status: Healthy
+[/PARTY]
+
+[DUNGEON]
+Active Site: The Sunken Crypt
+Threat: MODERATE
+[/DUNGEON]`;
+
+        // 1. Direct strip function
+        const stripped = stripFaePartyBlockFromMemo(memoWithParty);
+        assert.ok(!stripped.includes('[PARTY]'), 'stripFaePartyBlockFromMemo must remove [PARTY] header');
+        assert.ok(!stripped.includes('Bran (Torchbearer): 8/8 HP'), 'stripFaePartyBlockFromMemo must remove companion lines');
+        assert.ok(!stripped.includes('[/PARTY]'), 'stripFaePartyBlockFromMemo must remove [/PARTY] footer');
+        assert.ok(stripped.includes('[CHARACTER]'), 'stripFaePartyBlockFromMemo must keep [CHARACTER]');
+        assert.ok(stripped.includes('[DUNGEON]'), 'stripFaePartyBlockFromMemo must keep [DUNGEON]');
+
+        // 2. reconcileFaeMemoAfterTurn integration
+        const prevState = parseFaeStateFromMemo(memoWithParty, 'osr_dungeon');
+        const reconciled = reconcileFaeMemoAfterTurn(prevState, memoWithParty, 'osr_dungeon');
+        assert.strictEqual(reconciled.changed, true, 'reconcileFaeMemoAfterTurn must mark changed when [PARTY] is stripped');
+        assert.ok(!reconciled.memo.includes('[PARTY]'), 'reconciled memo must not contain [PARTY]');
+        assert.ok(reconciled.events.some(e => e.includes('REMOVED_PARTY_BLOCK')), 'Must log REMOVED_PARTY_BLOCK event');
+
+        // 3. No-op when no [PARTY] block is present
+        const noPartyMemo = stripped;
+        const noopReconciled = reconcileFaeMemoAfterTurn(prevState, noPartyMemo, 'osr_dungeon');
+        assert.ok(!noopReconciled.memo.includes('[PARTY]'));
+        assert.strictEqual(stripFaePartyBlockFromMemo(noPartyMemo), noPartyMemo, 'Must be no-op when no [PARTY] block exists');
     });
 });
 

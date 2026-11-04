@@ -491,6 +491,22 @@ export function normalizeFaePillsLine(line) {
 }
 
 /**
+ * Strips any [PARTY]...[/PARTY] block from a state memo for the FAE ruleset
+ * (WRK-09: Upstream mergeMemo appends [PARTY] regardless of modules.party).
+ *
+ * @param {string} memo
+ * @returns {string} Memo with [PARTY] block completely removed
+ */
+export function stripFaePartyBlockFromMemo(memo) {
+    if (!memo || typeof memo !== 'string') return memo;
+    if (!/\[PARTY\][\s\S]*?\[\/PARTY\]/i.test(memo)) return memo;
+    return memo
+        .replace(/\s*\[PARTY\][\s\S]*?\[\/PARTY\]/gi, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+/**
  * Reconciles the state memo after an LLM turn, serving as a deterministic safety net.
  *
  * Enforces:
@@ -677,6 +693,13 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
             });
             return `[COMBAT]${normLines.join('\n')}[/COMBAT]`;
         });
+    }
+
+    // 6. Strip unwanted [PARTY] blocks for FAE ruleset (WRK-09: Upstream mergeMemo appends [PARTY] regardless of modules.party)
+    if (/\[PARTY\][\s\S]*?\[\/PARTY\]/i.test(reconciledMemo)) {
+        reconciledMemo = stripFaePartyBlockFromMemo(reconciledMemo);
+        needsRewrite = true;
+        events.push('REMOVED_PARTY_BLOCK: Stripped unwanted [PARTY] block for FAE ruleset');
     }
 
     const changed = needsRewrite || (reconciledMemo !== nextMemo);

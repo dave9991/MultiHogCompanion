@@ -41,6 +41,7 @@
 | **WRK-06** | **Historical CYOA Context Poisoning [RETIRED]** | ⚪ **RETIRED**: Defer to upstream MultiHog's native `stripOldChoicesFromPrompt`. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | Retired ([`EVT-12`](./LISTENERS.md#evt-12-chat_completion_prompt_ready-retired-formerly-outgoing-cyoa-prompt-sanitizer)) | Retired (Upstream native feature). |
 | **WRK-07** | **Truncated Message Stop Button Choice Injection** | 🟡 **MODERATE**: ST emits message rendered on user stop click. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-cyoa-stop-guard--aborted-message-shield)<br>[`DOM-06 (Capture Stop)`](./LISTENERS.md#dom-06) | Low (SillyTavern event design choice). |
 | **WRK-08** | **Level-Up, Permadeath & Paragraph Fusion Footer Shield** | 🟡 **MODERATE**: Protocol pause collision & 0px footer crushing on single newline. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`style.css`](./style.css)<br>[`cyoa-safety-net.js`](./cyoa-safety-net.js) | Medium (Upstream scopes button CSS rules). |
+| **WRK-09** | **FAE State Tracker Party Block Stripping** | 🟡 **MODERATE**: Upstream mergeMemo appends [PARTY] even when modules.party is disabled. | [`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine) | [`fae-state-sync.js`](./fae-state-sync.js) (`reconcileFaeMemoAfterTurn`)<br>[`EVT-08`](./LISTENERS.md#evt-08-settings_updated-ruleset--state-sync-coordinator) | High (Upstream guards `mergeMemo` by `settings.modules`). |
 
 ---
 
@@ -231,4 +232,34 @@ Upstream MultiHog applies `.mes_text p:has(> button:nth-of-type(2)) { font-size:
 
 #### Retirement Criteria
 Upstream MultiHog scopes its 0px font size rule strictly to choice button wrappers without targeting parent paragraphs, or SillyTavern provides explicit turn pause metadata in `chat[idx]`.
+
+---
+
+### WRK-09: FAE State Tracker Party Block Stripping (Upstream mergeMemo Party Append Defect)
+
+* **Target Surface:** Upstream MultiHog `mergeMemo` (`memo-processor.js#L444-L527`) and State Tracker Chunk Commit (`index.js#L3449-L3465`)
+* **Associated Feature:** [`FEAT-01 (PbtA Cartridge Engine)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine)
+* **Associated Mechanisms:** [`fae-state-sync.js`](./fae-state-sync.js) (`stripFaePartyBlockFromMemo`, `reconcileFaeMemoAfterTurn`), [`index.js`](./index.js) (`runSync`, `rectifyPostQuickStartState`), [`EVT-07 (CHARACTER_MESSAGE_RENDERED)`](./LISTENERS.md#evt-07-character_message_rendered-relationship--vitality-sync--pipeline-b), [`EVT-08 (SETTINGS_UPDATED)`](./LISTENERS.md#evt-08-settings_updated-ruleset--state-sync-coordinator)
+
+#### The Upstream Defect
+Upstream MultiHog's `mergeMemo` parses all `[TAG]...[/TAG]` blocks returned by LLM Game Master and State Tracker passes.
+When an LLM emits a `[PARTY]` block (e.g. following a mention of allies or due to model hallucination), `mergeMemo` blindly appends the block into `settings.currentMemo`:
+```javascript
+memo = memo.trimEnd() + '\n\n' + fullBlock;
+if (settings.debugMode) console.log(`[RPG Tracker] mergeMemo: [${tag}] APPENDED (new section)`);
+```
+Upstream MultiHog does **not** check whether `settings.modules.party === false` before merging or appending `[PARTY]` blocks. In Freeform Attrition Engine (FAE) campaigns, `modules.party` is explicitly disabled (`settings.modules.party: false`) in favor of the Zero-Bookkeeping Companion Model (where all allies and hirelings are tracked purely as `Companion: Name (Role)` entries under `[CHARACTER]` Positive Tags). When upstream appends an unwanted `[PARTY]` block, it reintroduces tactical D&D 5e companion bookkeeping, per-companion HP pools, and state memo bloat.
+
+#### Companion Mitigation
+1. **Memo Reconciliation Stripper (`stripFaePartyBlockFromMemo`)**: In `fae-state-sync.js`, detects and strips any `[PARTY]...[/PARTY]` block from the state memo when active ruleset is FAE.
+2. **Post-Turn Safety Net (`reconcileFaeMemoAfterTurn`)**: Runs during `runSync` on `CHARACTER_MESSAGE_RENDERED` (`EVT-07`) and background State Tracker chunk commits via `SETTINGS_UPDATED` (`EVT-08`), automatically stripping any hallucinated or appended `[PARTY]` blocks and syncing `rpgSettings.currentMemo`.
+3. **Quick Start Sanitization (`rectifyPostQuickStartState`)**: Ensures that any initial character creation or onboarding pass under FAE cleanses `[PARTY]` blocks from live memo and chat state partitions.
+
+#### Blast Radius If Removed
+* Upstream State Tracker passes will continually re-append `[PARTY]` blocks into `currentMemo` during FAE adventures.
+* MultiHog HUD will display unwanted companion stat cards and per-companion HP pools, breaking the FAE Zero-Bookkeeping design.
+* Context prompts will suffer token inflation from duplicate companion blocks.
+
+#### Retirement Criteria
+Upstream MultiHog's `mergeMemo` respects module enable toggles (e.g. `if (settings.modules && settings.modules[tag.toLowerCase()] === false) continue;`).
 

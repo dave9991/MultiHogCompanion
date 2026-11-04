@@ -107,7 +107,7 @@ console.log(`✓ All ${requiredFeatures.length} primary features verified in FEA
 console.log('Verifying Workaround catalog coverage in WORKAROUNDS.md...');
 const requiredWorkarounds = [
     'WRK-01', 'WRK-02', 'WRK-03', 'WRK-04',
-    'WRK-05', 'WRK-06', 'WRK-07', 'WRK-08',
+    'WRK-05', 'WRK-06', 'WRK-07', 'WRK-08', 'WRK-09',
 ];
 for (const wrk of requiredWorkarounds) {
     assert.ok(

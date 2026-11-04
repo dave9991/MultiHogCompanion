@@ -57,6 +57,7 @@ import {
     advanceFaeTurnTempo,
     formatFaeCharacterMemoBlock,
     formatInitialFaeMemo,
+    stripFaePartyBlockFromMemo,
 } from './fae-state-sync.js';
 import {
     openConciergeModal,
@@ -1102,6 +1103,9 @@ export async function rectifyPostQuickStartState(fallbackCharName = '', provided
         } else {
             rpgSettings.currentMemo = sanitizeCharacterHeaderInMemo(rpgSettings.currentMemo);
         }
+        if (isFaeActive()) {
+            rpgSettings.currentMemo = stripFaePartyBlockFromMemo(rpgSettings.currentMemo);
+        }
     }
 
     if (cleanName) {
@@ -1155,6 +1159,9 @@ export async function rectifyPostQuickStartState(fallbackCharName = '', provided
                             }
                         } else {
                             cs.currentMemo = sanitizeCharacterHeaderInMemo(cs.currentMemo, cleanName);
+                        }
+                        if (isFaeActive(cid)) {
+                            cs.currentMemo = stripFaePartyBlockFromMemo(cs.currentMemo);
                         }
                     }
                 }

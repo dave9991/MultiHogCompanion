@@ -1491,7 +1491,7 @@ YOUR AGENDA:
 
 CORE LAWS OF FAE RESOLUTION:
 1. SINGLE-PASS RESOLUTION: {{user}} declares Task and Intent. You evaluate the fiction, ${resolutionMethod}, and narrate the complete outcome in the same turn. NEVER halt the turn for meta-currency haggling or menu choices.
-2. ENCOUNTER-WIDE RESOLUTION (NO ACTION ECONOMY): FAE has no initiative, combat rounds, or individual creature turns. The Threat describes the ENTIRE encounter as a whole, resolved in a single player turn.
+2. ENCOUNTER-WIDE RESOLUTION (NO ACTION ECONOMY): FAE has no initiative, combat rounds, or individual creature turns. The Threat describes the ENTIRE encounter as a whole, resolved in a single player turn. When an active Encounter block is present, its stated Threat is used for action rolls against those enemies.
 3. ATTRITION OVER FAILURE: Actions succeed or advance. The dice (4dF from -4 to +4, tight bell curve on 0) determine how much wear-and-tear the character absorbs along the way.
 ${twoTierNarration}
 5. INTENT SCOPING & PROPORTIONAL LEVERAGE (TAGS + GEAR + PARTY):
@@ -1529,7 +1529,7 @@ FUNCTION TOOL CALL RESOLUTION (resolve_fae_action):
 When an action requires a Threat 1–4 pool test, you MUST call the "resolve_fae_action" tool.
 Before calling the tool, evaluate the fiction and commit to:
 - pool_at_risk: The resource pool placed at risk (e.g. Health, Sanity, Resolve, Supplies).
-- threat_level: 1 to 4 baseline encounter danger (+/-1 for unmitigated pressure vs clever neutralization).
+- threat_level: 1 to 4 baseline encounter danger (when an active Encounter block is present, its stated Threat is used for action rolls against those enemies; +/-1 for unmitigated pressure vs clever neutralization).
 - progress_scale: "full" (resolves intent), "stepping_stone" (strips 1 encounter HP barrier and grants advantage), or "pivot" (wrong tools, +1 threat).
 - matched_positive_tags: Up to 2 relevant personal, gear, or companion tags from [CHARACTER] (e.g. ["Ex-Military", "Calm [under gunfire and shock]"]).
 - matched_negative_tags: Active Scars or Debuffs hindering the action.
@@ -1558,7 +1558,7 @@ Each line provides 4 Fudge dice (-1, 0, or +1 each), summing to a total from -4 
 
 ATTRITION FORMULA:
 Attrition = max(0, Threat + 4dF - MatchedPosTags + MatchedNegTags + GenreShift)
-- Threat (1 to 4): Baseline encounter threat. Adjusted by +1 if entering a Pressure without prep, or -1 if neutralizing a Pressure via environment or coordinated companion maneuver.
+- Threat (1 to 4): Baseline encounter threat. When an active Encounter block is present, its stated Threat is used for action rolls against those enemies. Adjusted by +1 if entering a Pressure without prep, or -1 if neutralizing a Pressure via environment or coordinated companion maneuver.
 - Positive Tags (max 2): Each matched character, gear, or companion tag subtracts -1 from Attrition. Respect bracketed situational qualifiers (Trait [context], e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). (Plus 1 extra if an active [Advantage] tag is consumed; [Advantage] is only consumed on a non-retreat action).
   CRITICAL ZERO-STATE RULE: When a pool is at 0, innate personal tags are DISABLED. However, uninjured Companion: and Retainer: tags and earned [Advantage] STILL APPLY at 0!
 - Negative Tags: Each active Scar or debuff hindering the action adds +1 to Attrition.
@@ -1627,6 +1627,7 @@ ENCOUNTER HP TRACKS LEVERAGE LAYERS (NOT CREATURE HIT POINTS):
   • Total Intent: Permanently clears the threat, secures the room for recovery/camping, and claims whatever it guarded. Resolves as "full" when 1 layer remains (1/Y HP) OR when leveraging a decisive environmental/party silver bullet. Against 2+/Y HP, defaults to stepping_stone: strips 1 Layer (2/2 -> 1/2 HP), crosses off a Barrier, and grants [+] Advantage: Tactical Opening for the next turn.
 
 POOL SELECTION & THREAT GUARDRAILS:
+- Active Encounter Threat: When an active Encounter block is present, its stated Threat is used for action rolls against those enemies.
 - Pool Selection Rule (Pressure Dictates Pool): Select pool_at_risk based on which active Pressure the character is primarily braving or triggering that turn.
 - Strict Threat Modifiers (max +/- 1):
   • +1 Threat: Player acts recklessly into the Encounter's Instinct, enters an unmitigated Pressure without prep, or attempts a pivot action.
@@ -1707,6 +1708,7 @@ export function buildFaePartyContent() {
     return `<[PARTY]_mechanics>
 COMPANIONS, HIRELINGS & ADVENTURING PARTIES (ZERO-BOOKKEEPING MODEL):
 Rather than tracking separate pools or turns for companions, companions are folded directly into Leverage and Tags:
+When the player's setup mentions friends or party members, the [CHARACTER] Positive Tags entries starting with Companion: or Retainer: ARE the mechanical companions; any other unnamed members are background retinue covered by the protagonist's pools. Do not wait on a tracker party list.
 1. Protagonist-Anchored Pools: Track ONLY {{user}}'s 2–3 core resource pools (representing the collective stamina, morale, and supplies of the group).
 2. Companions as Fictional Leverage: Evaluate Proportional Leverage using the party's combined fictional presence. Coordinating companions can achieve "full" resolution, neutralize a listed Pressure (-1 Threat), or provide specialized capability so an action is not forced into a "pivot".
 3. Companions as Positive Tags (2-Tag Cap & Exempt at Zero): Notable companions or hirelings on the [CHARACTER] sheet carry a "Companion:" or "Retainer:" prefix (e.g., "Companion: Sister Valeria [Cleric]" or "Retainer: Torchbearer"). When they assist in the declared action, they count as 1 of the max 2 Positive Tags (-1 Attrition). Crucially, uninjured Companion: and Retainer: tags remain usable even when the protagonist's pool is at 0!
@@ -2156,6 +2158,8 @@ ${active.defaultPositiveTags.map(t => `  • ${t}`).join('\n')}
    - Milestone advancement occurs every 3–5 completed scenes (\`Scenes: X/Y\` and \`XP: X/Y\`).
 4. **Interactive Choice Buttons (Style B):**
    - Format player choices using Style B: \`— [Pool | +Tag, +Advantage]\` or \`— [Pool]\`. Dialogue and zero-roll actions omit brackets. Never display mechanical scope jargon inside button text.
+5. **Zero-Bookkeeping Companions:**
+   - Zero-Bookkeeping Companions: FAE has modules.party disabled. NEVER instruct the State Tracker to create a [PARTY] block or per-companion pools. Add companions as \`Companion: Name (Role)\` entries under [CHARACTER] Positive Tags, and create their lore entries via command_lorebook_agent. Prefer ONE command per request where possible (the Companion action limit is small).
 
 ---
 
@@ -2217,7 +2221,13 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
         `ARCHETYPE: Choose ONE FAE Archetype (e.g. ${archetypesSnippet}). Output as "Name (Archetype)". FORBIDDEN: No D&D classes or subclasses (no Fighter, Wizard, Paladin, etc.).`,
         heroicDomainInstruction,
         `RESOURCE POOLS: ${poolsStr}. Primary pool mirrors HP.`,
-        `POSITIVE TAGS: Pick 4 distinct descriptive tags (~25–30% situational scope: personal traits, bracketed qualifiers like Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock], signature gear, or "Companion: Name (Role — detail)" if the scenario includes friends/companions/party): ${tagsSnippet}. Follow Trait Qualification Protocol (Tier A: auto-qualify broad traits into Trait [context]; Tier B: omit true omnipotence with grounded Trait [context] replacement).`,
+        (() => {
+            const mentionsPluralParty = /\b(?:friends|companions|party|allies)\b/i.test(customNotes || '');
+            const partyPositiveTagPrompt = mentionsPluralParty
+                ? `personal traits, bracketed qualifiers like Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock], signature gear, or "Companion: Name (Role — detail)"; since the scenario mentions friends/companions/party in the plural, generate 2-3 "Companion: Name (Role — detail)" tags within the 4-tag budget`
+                : `personal traits, bracketed qualifiers like Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock], signature gear, or "Companion: Name (Role — detail)" if the scenario includes friends/companions/party (when the scenario mentions friends/companions/party in the plural, generate 2-3 "Companion: Name (Role — detail)" tags within the 4-tag budget)`;
+            return `POSITIVE TAGS: Pick 4 distinct descriptive tags (~25–30% situational scope: ${partyPositiveTagPrompt}): ${tagsSnippet}. Follow Trait Qualification Protocol (Tier A: auto-qualify broad traits into Trait [context]; Tier B: omit true omnipotence with grounded Trait [context] replacement).`;
+        })(),
         `COMPANIONS & PARTY: Do NOT output a [PARTY] block or separate companion stat sheets. If the scenario includes companions or friends, include them as "Companion: Name [role/specialty]" or "Retainer: Name [role/specialty]" in [CHARACTER] Positive Tags.`,
         knobsLineFmt,
         `NO D&D: No character levels, no [XP] blocks, no spell slots, no AC/DC, or polyhedral damage dice. Use 4dF Attrition, Positive Tags, and Scars/Debuffs in [CHARACTER].`,

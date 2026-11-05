@@ -180,6 +180,8 @@ weakness: Bright magnesium fire
     assert.ok(m.pressures.some(p => p.includes('Crushing Claw Sweep')));
     assert.equal(m.leverageBarriers.length, 2);
     assert.ok(m.fullFinishTriggers.includes('Submerge electrical line'));
+    assert.ok(res.changes.some(c => c.includes('Added FAE Encounter') || c.includes('Updated FAE Encounter')), 'Must log FAE Encounter in changelog');
+    assert.ok(!res.changes.some(c => c.includes('Harm: 4, Armor: 0')), 'Must not leak PbtA Harm/Armor label in FAE changelog');
 });
 
 test('FAE Session Zero Concierge: Serialization to Markdown and Context Formatting', () => {
@@ -991,6 +993,8 @@ positive_tags: Gunsmith (Pistol maintenance)
         assert.ok(builderPrompt.includes('Bypass: Spend 2 Supplies & Traps to barricade the ward door (1 turn) | Total: Crack both armor layers and reduce Health to 0 to permanently destroy core'), 'FAE builder prompt template must showcase Bypass vs Total tradeoff syntax with mechanical thresholds');
         assert.ok(builderPrompt.includes('DO NOT output a `conditions:` field in [PROTAGONIST]'), 'FAE builder prompt must forbid conditions in protagonist');
         assert.ok(builderPrompt.includes('must present an immediate dilemma defining a pre-roll attrition pressure'), 'FAE builder prompt must instruct pre-roll attrition pressure in opening prompt');
+        assert.ok(builderPrompt.includes('title: Evocative 2-4 word campaign title'), 'FAE builder prompt must include title directive in template');
+        assert.ok(builderPrompt.includes('Trait [situational constraint / when...]'), 'FAE builder prompt must instruct Trait [constraint] format');
     });
 
     test('FAE Concierge: NameRAG placeholder resolution for [[NAME:companion]] in positive_tags and look', async () => {

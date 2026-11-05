@@ -1138,7 +1138,7 @@ export function applyDossierUpdates(text, dossier) {
         const newPremise = premiseMatch[1].trim().replace(/^(\*\*|__)(.*?)\1$/, '$2');
         if (newPremise && updated.meta.premise !== newPremise) {
             updated.meta.premise = newPremise;
-            if (!updated.meta.title || updated.meta.title === 'Untitled PbtA Campaign') {
+            if (!updated.meta.title || /^Untitled\s+(PbtA|FAE)\s+Campaign$/i.test(updated.meta.title)) {
                 updated.meta.title = newPremise.slice(0, 40) + '...';
             }
             changes.push(`Premise updated: "${newPremise}"`);
@@ -1700,7 +1700,8 @@ export function applyDossierUpdates(text, dossier) {
             if (parsedMonConds.length) patch.conditions = monsterObj.conditions;
             updated.monsters[existingIdx] = Object.assign({}, updated.monsters[existingIdx], patch);
             Object.assign(monsterObj, updated.monsters[existingIdx]);
-            if (threatLevelNum !== null || kv.layers || monsterObj.threatLevel) {
+            const isFae = updated.meta?.ruleset === 'fae';
+            if (isFae || threatLevelNum !== null || kv.layers || monsterObj.threatLevel) {
                 changes.push(`Updated FAE Encounter "${monsterObj.name}" (Threat: ${monsterObj.threatLevel || 2}, Layers: ${monsterObj.currentHarm}/${monsterObj.harm})`);
             } else {
                 const woundLabel = monsterObj.currentHarm > 0 ? `Harm: ${monsterObj.currentHarm}/${monsterObj.harm}` : `Harm: ${monsterObj.harm}`;
@@ -1708,8 +1709,9 @@ export function applyDossierUpdates(text, dossier) {
             }
         } else {
             updated.monsters.push(monsterObj);
-            if (threatLevelNum !== null || kv.layers) {
-                changes.push(`Added FAE Encounter "${monsterObj.name}" (Threat: ${threatLevelNum || 2}, Layers: ${monsterObj.currentHarm}/${monsterObj.harm})`);
+            const isFae = updated.meta?.ruleset === 'fae';
+            if (isFae || threatLevelNum !== null || kv.layers) {
+                changes.push(`Added FAE Encounter "${monsterObj.name}" (Threat: ${threatLevelNum || monsterObj.threatLevel || 2}, Layers: ${monsterObj.currentHarm || 2}/${monsterObj.harm || 2})`);
             } else {
                 const woundLabel = monsterObj.currentHarm > 0 ? ` (Harm: ${monsterObj.currentHarm}/${monsterObj.harm}, Armor: ${monsterObj.armor})` : ` (Harm: ${monsterObj.harm}, Armor: ${monsterObj.armor})`;
                 changes.push(`Added Adversary "${monsterObj.name}"${woundLabel}`);

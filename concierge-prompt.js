@@ -542,7 +542,7 @@ ${genreSummaries}
 ### 🎲 FAE Philosophy & Character Constraints:
 * Ruleset: fae
 * The Pacing Triad: Endurance (pool capacity 6–12), Intensity (\`base_attrition_shift\` -1/0/+1), Tempo (\`action_tempo\`: action_serial, gritty_default, slow_burn, slice_of_life).
-* Protagonist: 3-4 specific Positive Tags (including signature gear tags) and 0-1 starting Scar in negative_tags.
+* Protagonist: 3-4 specific Positive Tags (including signature gear tags) and 0-1 starting Scar in negative_tags. ALL positive traits MUST enforce the Trait Qualification Protocol using square brackets for situational constraints: \`Trait [situational constraint / when...]\` (e.g. \`Weathered Guard [when blocking heavy blows]\`, \`Mountain Stride [when traversing sheer ice or rock]\`) to ensure ~25–30% situational applicability. Signature gear tags also use square brackets: \`Trenchcoat [deep pockets for evidence]\`. Companion: \`Companion: [[NAME:companion]] (Role)\`.
 * Zero-Bookkeeping Directive (No Conditions): Protagonist debuffs, injuries, and scars live exclusively in \`negative_tags\`. DO NOT output a \`conditions:\` field in [PROTAGONIST].
 * Zero-Bookkeeping Companions: Companions who travel with the PC are recorded as \`Companion: Name (Role)\` entries in the [PROTAGONIST] positive_tags, not as separate [NPC] cards with moves or party roles. NPCs are external mentors, contacts, or faction allies.
 * NPC Scoping Directive: If the player's premise only involves the protagonist and a traveling companion, record the companion under [PROTAGONIST] positive_tags as \`Companion: [[NAME:companion]] (Role)\` and OMIT the [NPC] block entirely. Do not fabricate extraneous stationary contacts unless requested.
@@ -563,6 +563,7 @@ ${genreSummaries}
 \`\`\`text
 [UPDATE_DOSSIER]
 summary: Evocative 1-sentence summary of changes made
+title: Evocative 2-4 word campaign title
 ruleset: fae
 system: cosmic_horror | osr_dungeon | survival_horror | post_apocalyptic | cyberpunk_noir | deep_space | weird_west | custom
 system_label: Optional custom genre name (when system is custom)
@@ -584,7 +585,7 @@ playbook: Archetype / Playbook (e.g. Guardian, Wanderer, Alienist, Veteran)
 heroic_domain: Archetype [specific domains] (When heroic_tier is true; omitted when false)
 appearance: Exhausted detective with a rumpled trenchcoat
 background: Former asylum investigator
-positive_tags: Steady Hand (Pistol training), Quiet (Moving silently), Companion: [[NAME:companion]] (Role), Trenchcoat (Deep pockets for evidence)
+positive_tags: Steady Hand [when firing pistols under pressure], Silent Step [when moving in darkness], Companion: [[NAME:companion]] (Role), Trenchcoat [deep pockets for evidence & gear]
 negative_tags: (-) Paranoia (Prone to seeing watchers in mirrors)
 pools: Health: 8/8 (zero_debuff: Crippled & Bleeding, recovery: camp_or_sleep, overflow: scar_and_ko) | Sanity: 8/8 (zero_debuff: Manic Dissociation, recovery: haven_or_specialist, overflow: lethal)
 [/PROTAGONIST]
@@ -621,7 +622,7 @@ brief_description: The quarantined basement ward
 [KICK]
 starting_location: Starting Location Name
 crisis: Imminent crisis or pressure confronting the protagonist
-opening_prompt: In media res opening scene dropping the protagonist into the crucible (must present an immediate dilemma defining a pre-roll attrition pressure, e.g. deciding which pool will bear the first strain of the encounter before rolling)
+opening_prompt: In media res opening scene dropping the protagonist into the crucible (must present an immediate dilemma defining a pre-roll attrition pressure naming protagonist pools, e.g. "The biting wind instantly threatens your [Health] pool; decide whether you will expend your [Grit] to muscle the timbers shut or tap [Supplies] to burn precious pitch")
 [/KICK]
 [/UPDATE_DOSSIER]
 \`\`\`
@@ -639,8 +640,8 @@ opening_prompt: In media res opening scene dropping the protagonist into the cru
 
 ### 🏗️ Proactive Scaffolding & Delta Rules:
 1. **Turn 1 / Initial Scaffolding (Contemplative Architecture):** If the current blueprint is UNINITIALIZED or empty and the player provides a pitch, inspiration card, or notes:
-   First emit \`[CONTEMPLATION]\` inside \`[UPDATE_DOSSIER]\` to map out the central tension, world consequences, character entanglement, and starting crucible. Then proactively scaffold a complete, coherent starting draft into \`[UPDATE_DOSSIER]\`: \`summary: ...\`, \`ruleset: fae\`, \`system\`, \`tone\`, \`premise\`, \`[CONFIG]\` dials, \`[PROTAGONIST]\`, 1 \`[FACTION]\`, 1 \`[MONSTER]\`, 1 starting \`[MAP]\`, and \`[KICK]\`.
-   * On Turn 1 initial scaffold: proactively generate [CONTEMPLATION], [CONFIG], [PROTAGONIST], 1 [FACTION], 1 [MONSTER], 1 [MAP], and [KICK].
+   First emit \`[CONTEMPLATION]\` inside \`[UPDATE_DOSSIER]\` to map out the central tension, world consequences, character entanglement, and starting crucible. Then proactively scaffold a complete, coherent starting draft into \`[UPDATE_DOSSIER]\`: \`summary: ...\`, \`title: Evocative 2-4 word campaign title\`, \`ruleset: fae\`, \`system\`, \`tone\`, \`premise\`, \`[CONFIG]\` dials, \`[PROTAGONIST]\`, 1 \`[FACTION]\`, 1 \`[MONSTER]\`, 1 starting \`[MAP]\`, and \`[KICK]\`.
+   * On Turn 1 initial scaffold: proactively generate [CONTEMPLATION], [CONFIG], [PROTAGONIST], 1 [FACTION], 1 [MONSTER], 1 [MAP], and [KICK]. Always define an evocative 2-4 word campaign title (\`title: Evocative Title\`).
    * Ensure the Protagonist, Faction, and Monster are **entangled** (shared history, debts, conflicting agendas) rather than isolated tropes.
 2. **Follow-Up Edits (Partial Patches):** On follow-up turns / delta edits: emit ONLY changed entities/fields. Unchanged entities and fields are preserved automatically. NEVER re-emit \`[[NAME:protagonist]]\` or entity name placeholders if the entity already exists in [CURRENT_LIVE_BLUEPRINT]; preserve established character/entity names.
 3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
@@ -1051,7 +1052,7 @@ ${directivesList}
 
 INSTRUCTIONS FOR PASS 2 (REFINER):
 1. Output ONLY an [UPDATE_DOSSIER] block applying these improvements to [CURRENT_LIVE_BLUEPRINT]. Do NOT write any thinking process outside [UPDATE_DOSSIER], and do NOT re-emit [CONTEMPLATION] in Pass 2.
-2. Keep existing entity names when enriching valid entities in-place (do NOT invent duplicate NPCs/Monsters/Maps when updating existing ones — use their exact existing \`name:\` or \`site:\` from [CURRENT_LIVE_BLUEPRINT] so your improvements patch them in place!).
+2. Keep existing entity names when enriching valid entities in-place (do NOT re-emit \`[[NAME:placeholder]]\` tokens for existing entities or invent duplicates — use their exact established \`name:\` or \`site:\` from [CURRENT_LIVE_BLUEPRINT] so your improvements patch them in place!).
 ${cleanupDirective}
 4. You only need to emit the blocks and fields being deepened, connected, removed, or added.
 5. Start your [UPDATE_DOSSIER] block with \`summary: <1-sentence summary of the second-pass refinements>\`.

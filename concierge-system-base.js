@@ -76,6 +76,7 @@ export class ConciergeSystemAdapter {
     createEmptyProtagonist(genreKey) {
         return {
             name: '',
+            gender: '',
             playbook: '',
             species: '',
             appearance: '',

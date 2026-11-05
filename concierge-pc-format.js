@@ -86,6 +86,31 @@ function extractExistingSections(text) {
 }
 
 /**
+ * Formats species and gender into MultiHog's canonical Species field format (sec_species).
+ * MultiHog combines species/race, subtype, and gender into Species (e.g. "Human (Female)"),
+ * which powers the 🧬 Species badge and card list synopses.
+ *
+ * @param {string} species
+ * @param {string} [gender]
+ * @returns {string}
+ */
+export function formatSpeciesWithGender(species, gender) {
+    const cleanSp = (species || '').trim();
+    const cleanG = (gender || '').trim();
+    if (!cleanG || /^(?:none|unspecified|unknown|n\/a)$/i.test(cleanG)) {
+        return cleanSp || 'Human';
+    }
+    const capG = cleanG.charAt(0).toUpperCase() + cleanG.slice(1);
+    if (!cleanSp) {
+        return `Human (${capG})`;
+    }
+    if (new RegExp(`\\b${cleanG}\\b`, 'i').test(cleanSp)) {
+        return cleanSp;
+    }
+    return `${cleanSp} (${capG})`;
+}
+
+/**
  * Builds a fully structured Player Character bio string adhering to MultiHog's
  * `DEFAULT_PC_SECTIONS`.
  *
@@ -105,11 +130,12 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES, op
     // Check if protagonist.bio is already pre-structured with section headers
     const existing = extractExistingSections(p.bio || '');
 
-    // 1. Species
+    // 1. Species (weave gender into sec_species per MultiHog framework contract)
     const speciesLabel = n.sec_species || 'Species';
-    const speciesVal = existing['species']
+    const rawSpecies = existing['species']
         || p.species
         || (p.playbook ? `Human, ${p.playbook}` : 'Human');
+    const speciesVal = formatSpeciesWithGender(rawSpecies, p.gender);
 
     // 2. Body / Appearance
     const bodyLabel = n.sec_body || 'Body';

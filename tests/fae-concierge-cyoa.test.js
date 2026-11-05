@@ -876,15 +876,14 @@ positive_tags: Gunsmith (Pistol maintenance)
         assert.ok(faeCritic.includes('1. **Setting & Tone Cohesion'));
         assert.ok(faeCritic.includes('2. **FAE Encounter Anatomy & Adversary Design'));
         assert.ok(faeCritic.includes('3. **Resource Pools & Calibration Knobs'));
-        assert.ok(faeCritic.includes('4. **Positive Tags, Scars & Mechanical Purity'));
+        assert.ok(faeCritic.includes('4. **Positive Tags, Scars, Companions & Gender'));
         assert.ok(faeCritic.includes('5. **The Kick\'s Immediate Crucible'));
         assert.ok(faeCritic.includes('threat_level'));
         assert.ok(faeCritic.includes('leverage_barriers'));
         assert.ok(faeCritic.includes('zero_debuff'));
         assert.ok(faeCritic.includes('Trait [context]'));
-        assert.ok(faeCritic.includes('Companion: Name (Role)'));
-        assert.ok(faeCritic.includes('Zero-Bookkeeping Companions & NPC Scoping Directive'), 'FAE critic rubric #4 must include NPC Scoping Directive');
-        assert.ok(faeCritic.includes('Do NOT order an `[NPC]` card for companions/recruits'), 'FAE critic rubric #4 must explicitly forbid ordering NPC card for companions/recruits');
+        assert.ok(faeCritic.includes('Companion Tag & Matching NPC Card Audit'), 'FAE critic rubric #4 must audit companion matching');
+        assert.ok(faeCritic.includes('Explicit Character Gender Audit'), 'FAE critic rubric #4 must audit character gender');
         assert.ok(faeCritic.includes('[DOSSIER_CRITIQUE]'));
 
         // PbtA purge check forbids PbtA moves/dice
@@ -945,34 +944,30 @@ positive_tags: Gunsmith (Pistol maintenance)
         assert.ok(!pbtaTalkerCtx.includes('FAE Concierge'));
     });
 
-    test('FAE Concierge: Builder Prompt Name Diversity, Cliché Ban, NPC Scoping & pure FAE phrasing', () => {
+    test('FAE Concierge: Builder Prompt Name Diversity, Companion Dual-Representation & Explicit Gender Directives', () => {
         const builderPrompt = buildFaeConciergeBuilderPrompt();
-        assert.ok(builderPrompt.includes('role: Mentor | Contact | Ally'), 'FAE builder prompt example role must be Mentor | Contact | Ally');
-        assert.ok(!builderPrompt.includes('role: Companion (Party)'), 'FAE builder prompt must not suggest Companion (Party) role');
+        assert.ok(builderPrompt.includes('role: Companion'), 'FAE builder prompt example role should include Companion');
         assert.ok(
-            /companions who travel with the PC are recorded as `Companion: Name \(Role\)` entries in the \[PROTAGONIST\] positive_tags/i.test(builderPrompt),
-            'FAE builder prompt must include positive instruction for companion tags'
+            builderPrompt.includes('Companion Dual-Representation Directive'),
+            'FAE builder prompt must include Companion Dual-Representation Directive'
+        );
+        assert.ok(
+            builderPrompt.includes('Explicit Character Gender Directive'),
+            'FAE builder prompt must include Explicit Character Gender Directive'
         );
 
         // Name Diversity & Unique Placeholders Directive
         assert.ok(builderPrompt.includes('### 📇 Name Diversity & Unique Placeholders Directive:'), 'Must include Name Diversity Directive');
         assert.ok(/Silas,\s*Vance,\s*Elidor,\s*Lyra,\s*Aurelia,\s*Malachi,\s*Thorne/i.test(builderPrompt), 'Must forbid cliché default names');
         assert.ok(builderPrompt.includes('name: [[NAME:protagonist]]'), 'Syntax example must require [[NAME:protagonist]]');
-        assert.ok(builderPrompt.includes('Companion: [[NAME:companion]] (Role)'), 'Syntax example must require Companion: [[NAME:companion]] (Role)');
-        assert.ok(builderPrompt.includes('name: [[NAME:ally]]'), 'Syntax example must require [[NAME:ally]]');
+        assert.ok(builderPrompt.includes('Companion: [[NAME:companion]] (Field Medic)'), 'Syntax example must require companion tag in protagonist');
+        assert.ok(builderPrompt.includes('name: [[NAME:companion]]'), 'Syntax example must require [[NAME:companion]] for matching NPC card');
+        assert.ok(builderPrompt.includes('gender: male'), 'Syntax example must include explicit gender for protagonist');
+        assert.ok(builderPrompt.includes('gender: female'), 'Syntax example must include explicit gender for companion');
         assert.ok(builderPrompt.includes('name: [[NAME:adversary]]'), 'Syntax example must require [[NAME:adversary]]');
 
-        // NPC Scoping Directive
-        assert.ok(
-            builderPrompt.includes('If the player\'s premise only involves the protagonist and a traveling companion, record the companion under [PROTAGONIST] positive_tags as `Companion: [[NAME:companion]] (Role)` and OMIT the [NPC] block entirely. Do not fabricate extraneous stationary contacts unless requested.'),
-            'Must include NPC Scoping Directive'
-        );
-
         // Pure FAE phrasing in examples (no D&D advantage leak)
-        assert.ok(
-            builderPrompt.includes('moves_or_boons: Tactical Support (Provides Fictional Leverage to stabilize wounded allies or reduce recovery strain)'),
-            'Must use pure FAE fictional leverage phrasing'
-        );
+        assert.ok(!builderPrompt.includes('Grants [+] Advantage when assisting'), 'Must eliminate mechanical advantage leak');
         assert.ok(!builderPrompt.includes('Grants [+] Advantage when assisting'), 'Must eliminate mechanical advantage leak');
 
         // [KICK] block in syntax template

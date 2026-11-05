@@ -12,6 +12,8 @@
  * No main-extension file is modified.
  */
 
+import { formatSpeciesWithGender } from './concierge-pc-format.js';
+
 /** Stock section ids → fallback names (mirrors main's DEFAULT_NPC_SECTIONS). */
 const FALLBACK_SECTION_NAMES = {
     sec_species: 'Species',
@@ -104,8 +106,10 @@ export function buildNpcEntryContent(npc, names = FALLBACK_SECTION_NAMES) {
     const background = [npc.role ? `${npc.role}.` : '', npc.background || '']
         .filter(Boolean).join(' ').trim();
 
+    const speciesVal = formatSpeciesWithGender(npc.species, npc.gender);
+
     const core = assembleCore({
-        sec_species: npc.species,
+        sec_species: speciesVal,
         sec_body: npc.appearance,
         sec_equipment: npc.equipment,
         sec_personality: npc.demeanor,

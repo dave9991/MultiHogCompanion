@@ -2822,10 +2822,17 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
             const candidatesStr = (r.candidates && r.candidates.length)
                 ? r.candidates.map(c => c === r.selectedName ? `<b style="color: #4ade80;">${escapeHtml(c)} (picked)</b>` : escapeHtml(c)).join(', ')
                 : '(none returned)';
+            let genderBadge = '';
+            if (r.gender === 'F') genderBadge = ' <span style="font-size: 0.8em; padding: 1px 5px; border-radius: 3px; background: rgba(236, 72, 153, 0.2); color: #f472b6; margin-left: 6px;">♀ Female</span>';
+            else if (r.gender === 'M') genderBadge = ' <span style="font-size: 0.8em; padding: 1px 5px; border-radius: 3px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; margin-left: 6px;">♂ Male</span>';
+            else if (r.gender === 'Dual') genderBadge = ' <span style="font-size: 0.8em; padding: 1px 5px; border-radius: 3px; background: rgba(168, 85, 247, 0.2); color: #c084fc; margin-left: 6px;">⚥ Non-Binary</span>';
             return `
                 <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 4px; padding: 6px 8px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-                        <span style="font-weight: 600; color: #facc15;">${escapeHtml(r.placeholder)}</span>
+                        <div>
+                            <span style="font-weight: 600; color: #facc15;">${escapeHtml(r.placeholder)}</span>
+                            ${genderBadge}
+                        </div>
                         <span style="font-size: 0.85em; opacity: 0.75;">${escapeHtml(r.source || 'NameRAG')}</span>
                     </div>
                     <div style="color: #94a3b8; font-size: 0.9em; margin-bottom: 2px;"><b>Query:</b> <i>"${escapeHtml(r.query || '')}"</i></div>

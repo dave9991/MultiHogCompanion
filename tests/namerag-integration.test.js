@@ -343,4 +343,90 @@ assert.strictEqual(fallbackRoll.source, 'offline_fallback', 'Should be tagged wi
 assert.ok(fallbackRoll.error, 'Should capture error message for toast notification');
 console.log('✓ rollNameRagCandidate tags fallback source and error message cleanly');
 
+// 11. Test explicit gender extraction and NameRAG query passing for companions and protagonists
+console.log('Testing explicit gender extraction and NameRAG integration for companion and protagonist...');
+const dualRepBlueprint = `[UPDATE_DOSSIER]
+[PROTAGONIST]
+name: [[NAME:protagonist]]
+gender: male
+playbook: Veteran Hermit
+positive_tags: Steady Hand [when firing under pressure], Companion: [[NAME:companion]] (Courier Scout), Heirloom Halberd [in close quarters]
+[/PROTAGONIST]
+[NPC]
+name: [[NAME:companion]]
+role: Companion
+gender: female
+archetype: Courier Scout
+appearance: Spunky young woman with leather messenger satchel
+demeanor: Urgent and determined
+background: Fled the tyrant's scouts across mountain ridges
+[/NPC]
+[/UPDATE_DOSSIER]`;
+
+const protoContext = extractContextForPlaceholder(dualRepBlueprint, '[[NAME:protagonist]]');
+assert.strictEqual(protoContext.gender, 'M', 'Protagonist explicit gender: male must normalize to "M"');
+
+const compContext = extractContextForPlaceholder(dualRepBlueprint, '[[NAME:companion]]');
+assert.strictEqual(compContext.gender, 'F', 'Companion explicit gender: female must normalize to "F"');
+assert.strictEqual(compContext.blockType, 'COMPANION');
+assert.ok(compContext.contextSummary.includes('Courier Scout'));
+assert.ok(compContext.contextSummary.includes('Spunky young woman'));
+
+let receivedArgs = [];
+globalThis.fetch = async (url, opts) => {
+    if (url.includes('/call-tool')) {
+        const body = JSON.parse(opts.body);
+        receivedArgs.push(body.arguments);
+        if (body.arguments.gender === 'F') {
+            return {
+                ok: true,
+                json: async () => ({
+                    result: [{ name: 'Diretha', gender: 'F', vibe: 'courageous rebel messenger' }],
+                }),
+            };
+        }
+        return {
+            ok: true,
+            json: async () => ({
+                result: [{ name: 'Montavis', gender: 'M', vibe: 'weary mountain hermit' }],
+            }),
+        };
+    }
+    return {
+        ok: true,
+        json: async () => [
+            {
+                name: 'namerag-mcp',
+                isRunning: true,
+                cachedTools: [{ name: 'search_names' }],
+            },
+        ],
+    };
+};
+await discoverNameRagServer(true);
+
+const { text: resolvedDual, resolutions: dualRes } = await resolveDossierNamePlaceholders(
+    dualRepBlueprint,
+    { meta: { systemKey: 'fae' } },
+    { returnDetails: true }
+);
+
+assert.ok(resolvedDual.includes('name: Montavis'), 'Protagonist resolved to Montavis');
+assert.ok(resolvedDual.includes('Companion: Diretha (Courier Scout)'), 'Companion tag in protagonist resolved to Diretha');
+assert.ok(resolvedDual.includes('name: Diretha'), 'Companion NPC card resolved to Diretha');
+assert.ok(!resolvedDual.includes('[[NAME:'), 'All tokens resolved cleanly');
+
+const protoRes = dualRes.find(r => r.placeholder === '[[NAME:protagonist]]');
+assert.strictEqual(protoRes.gender, 'M', 'Resolution trace must capture gender: M for protagonist');
+
+const compRes = dualRes.find(r => r.placeholder === '[[NAME:companion]]');
+assert.strictEqual(compRes.gender, 'F', 'Resolution trace must capture gender: F for companion');
+
+const compApiCall = receivedArgs.find(a => a.gender === 'F');
+assert.ok(compApiCall, 'NameRAG search_names must be called with gender: "F" for companion');
+const protoApiCall = receivedArgs.find(a => a.gender === 'M');
+assert.ok(protoApiCall, 'NameRAG search_names must be called with gender: "M" for protagonist');
+
+console.log('✓ Companion dual-representation tokens, explicit Builder gender, and NameRAG arguments verified end-to-end');
+
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

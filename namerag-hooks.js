@@ -206,13 +206,14 @@ export function extractNamePlaceholders(text) {
 /**
  * Extracts surrounding entity context (role, playbook, species, background, demeanor, notes)
  * from a raw [UPDATE_DOSSIER] block for a given placeholder token.
- * Also handles companion tokens (e.g. [[NAME:companion]]) embedded in positive_tags or look: fields.
+ * Also handles companion tokens (e.g. [[NAME:companion]]) embedded in positive_tags or look: fields,
+ * and extracts explicit gender: fields directly assigned by the Builder.
  * @param {string} rawText
  * @param {string} token
- * @returns {{ blockType: string, contextSummary: string }}
+ * @returns {{ blockType: string, contextSummary: string, gender?: string }}
  */
 export function extractContextForPlaceholder(rawText, token) {
-    if (!rawText || !token) return { blockType: 'general', contextSummary: '' };
+    if (!rawText || !token) return { blockType: 'general', contextSummary: '', gender: undefined };
 
     const escape = s => s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
     const isCompanionToken = /\[\[NAME:\s*companion\s*\]\]/i.test(token);
@@ -244,21 +245,64 @@ export function extractContextForPlaceholder(rawText, token) {
                         .trim();
                 }
 
+                // Companion Dual-Representation: Look for the companion's matching [NPC] card
+                // to extract the Builder's explicit gender and rich roleplay demeanor/background
+                let companionGender = undefined;
+                let matchedNpcContent = '';
+                const npcBlockRegex = /\[NPC(?::\s*[^\]]+)?\]([\s\S]*?)(?:\[\/NPC\]|$)/gi;
+                let nMatch;
+                while ((nMatch = npcBlockRegex.exec(rawText)) !== null) {
+                    const nContent = nMatch[1];
+                    if (nContent.includes(token) || /role:\s*Companion/i.test(nContent)) {
+                        matchedNpcContent = nContent;
+                        const gMatch = nContent.match(/^\s*gender\s*:\s*([^\n\r]+)/mi);
+                        if (gMatch && gMatch[1]) {
+                            companionGender = normalizeGenderFilter(gMatch[1].trim());
+                        }
+                        break;
+                    }
+                }
+
+                // If not found in the companion's [NPC] card, check current block
+                if (!companionGender) {
+                    const localGMatch = blockContent.match(/^\s*gender\s*:\s*([^\n\r]+)/mi);
+                    if (localGMatch && localGMatch[1]) {
+                        companionGender = normalizeGenderFilter(localGMatch[1].trim());
+                    }
+                }
+
                 const summaryParts = ['companion'];
                 if (companionRole && companionRole.toLowerCase() !== 'role') {
                     summaryParts.push(companionRole);
+                }
+                if (matchedNpcContent) {
+                    const nLines = matchedNpcContent.split(/\r?\n/)
+                        .map(l => l.trim())
+                        .filter(l => l && !l.startsWith('moves:') && !l.startsWith('moves_or_boons:') && !l.startsWith('gender:'))
+                        .map(l => l.replace(token, '').trim())
+                        .filter(Boolean);
+                    if (nLines.length) {
+                        summaryParts.push(nLines.slice(0, 5).join(' '));
+                    }
                 }
 
                 return {
                     blockType,
                     contextSummary: summaryParts.join(' '),
+                    gender: companionGender,
                 };
             }
 
             // Normal entity placeholder context extraction
+            let explicitGender = undefined;
+            const gMatch = blockContent.match(/^\s*gender\s*:\s*([^\n\r]+)/mi);
+            if (gMatch && gMatch[1]) {
+                explicitGender = normalizeGenderFilter(gMatch[1].trim());
+            }
+
             const lines = blockContent.split(/\r?\n/)
                 .map(l => l.trim())
-                .filter(l => l && !l.startsWith('moves:') && !l.startsWith('moves_or_boons:'))
+                .filter(l => l && !l.startsWith('moves:') && !l.startsWith('moves_or_boons:') && !l.startsWith('gender:'))
                 .map(l => {
                     if (l.includes(token)) {
                         // If line is solely a name declaration (e.g. name: [[NAME:...]]), strip it
@@ -275,11 +319,12 @@ export function extractContextForPlaceholder(rawText, token) {
             return {
                 blockType,
                 contextSummary: lines.slice(0, 8).join(' '),
+                gender: explicitGender,
             };
         }
     }
 
-    return { blockType: 'general', contextSummary: '' };
+    return { blockType: 'general', contextSummary: '', gender: undefined };
 }
 
 /**
@@ -395,7 +440,7 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
     const resolutions = [];
 
     for (const ph of placeholders) {
-        const { blockType, contextSummary } = extractContextForPlaceholder(rawBuilderOutput, ph.token);
+        const { blockType, contextSummary, gender } = extractContextForPlaceholder(rawBuilderOutput, ph.token);
         const query = buildQueryFromPlaceholderContext({
             tag: ph.tag,
             genre,
@@ -428,7 +473,7 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
 
         if (!chosenName && nameRagAvailable) {
             try {
-                const results = await searchNames({ query, limit: 6 });
+                const results = await searchNames({ query, limit: 6, gender });
                 if (Array.isArray(results) && results.length > 0) {
                     candidatePool = results.map(r => r?.name).filter(Boolean);
                     const candidate = results.find(r => r?.name && !usedNames.has(r.name.toLowerCase()));
@@ -478,6 +523,7 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
             tag: ph.tag || 'general',
             blockType,
             query,
+            gender,
             source,
             candidates: candidatePool,
             selectedName: chosenName,

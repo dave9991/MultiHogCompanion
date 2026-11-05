@@ -604,6 +604,7 @@ The Kick: Unset
     if (p.name || p.playbook || (isFae && (p.positiveTags?.length || (p.pools && Object.keys(p.pools).length)))) {
         lines.push('[PROTAGONIST]');
         lines.push(`name: ${p.name || 'Unnamed Adventurer'}`);
+        if (p.gender) lines.push(`gender: ${p.gender}`);
         lines.push(`playbook: ${p.playbook || p.archetype || (isFae ? 'Unassigned' : 'In Development')}`);
         if (p.species) lines.push(`species: ${p.species}`);
         if (p.appearance) lines.push(`appearance: ${p.appearance}`);
@@ -661,7 +662,7 @@ The Kick: Unset
             lines.push('[NPC]');
             lines.push(`name: ${n.name}`);
             const fields = [
-                ['role', n.role], ['archetype', n.archetype], ['species', n.species], ['appearance', n.appearance],
+                ['role', n.role], ['archetype', n.archetype], ['gender', n.gender], ['species', n.species], ['appearance', n.appearance],
                 ['equipment', n.equipment], ['demeanor', n.demeanor], ['background', n.background],
                 ['relationship', n.relationship],
                 ['friendship', n.friendship !== undefined ? n.friendship : null],
@@ -1173,6 +1174,13 @@ export function applyDossierUpdates(text, dossier) {
             updated.protagonist.bio = kv.bio;
             changes.push(`Protagonist bio updated`);
         }
+        if (kv.gender) {
+            const cleanG = kv.gender.trim();
+            if (cleanG && updated.protagonist.gender !== cleanG) {
+                updated.protagonist.gender = cleanG;
+                changes.push(`Protagonist gender: "${cleanG}"`);
+            }
+        }
         if (kv.species) {
             const cleanSp = sanitizeSpeciesValue(kv.species) || kv.species.trim();
             if (cleanSp && updated.protagonist.species !== cleanSp) {
@@ -1518,6 +1526,7 @@ export function applyDossierUpdates(text, dossier) {
         const npcObj = {
             name: kv.name,
             role: kv.role || 'Ally',
+            gender: kv.gender ? kv.gender.trim() : '',
             archetype: kv.archetype || kv.playbook || kv.class || '',
             species: cleanNpcSpecies,
             appearance: kv.appearance || kv.description || kv.look || '',
@@ -1541,6 +1550,7 @@ export function applyDossierUpdates(text, dossier) {
             const patch = {};
             const given = (...ks) => ks.some(k => kv[k] !== undefined && kv[k] !== '');
             if (given('role')) patch.role = npcObj.role;
+            if (given('gender')) patch.gender = npcObj.gender;
             if (given('archetype', 'playbook', 'class')) patch.archetype = npcObj.archetype;
             if (given('species', 'race')) patch.species = npcObj.species;
             if (given('appearance', 'description', 'look')) patch.appearance = npcObj.appearance;
@@ -2320,8 +2330,9 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
                 : '';
             const statusPart = n.status ? `\n* **Status:** ${n.status}` : (n.harm?.current > 0 ? '\n* **Status:** (-) Wounded' : '');
             const archetypePart = n.archetype ? `\n* **Archetype:** ${n.archetype}` : '';
+            const genderPart = n.gender ? `\n* **Gender:** ${n.gender}` : '';
             return `### 👤 ${n.name}
-* **Role:** ${n.role || 'Ally'}${archetypePart}${n.species ? `\n* **Species:** ${n.species}` : ''}${harmPart}${statusPart}${condPart}
+* **Role:** ${n.role || 'Ally'}${archetypePart}${genderPart}${n.species ? `\n* **Species:** ${n.species}` : ''}${harmPart}${statusPart}${condPart}
 * **Appearance:** ${n.appearance || 'None specified'}${n.equipment ? `\n* **Equipment:** ${n.equipment}` : ''}
 * **Demeanor:** ${n.demeanor || 'None specified'}
 * **Relationship:** ${n.relationship || 'Allied with protagonist'}${standingsLine}
@@ -2437,7 +2448,7 @@ export function serializeDossierToMarkdown(dossier, options = {}) {
         const heroicDomainLine = (isHeroicTier && heroicDomain) ? `\n* **Heroic Domain:** ${heroicDomain}` : '';
 
         protagonistSection = `## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
-* **Archetype:** ${p.playbook || 'Investigator'}${heroicDomainLine}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}
+* **Archetype:** ${p.playbook || 'Investigator'}${heroicDomainLine}${p.gender ? `\n* **Gender:** ${p.gender}` : ''}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}
 * **Background Bio:** ${p.bio || p.background || 'None'}
 
 ### 🧪 Resource Pools:
@@ -2450,7 +2461,7 @@ ${posTagsMd}
 ${negTagsMd}`;
     } else {
         protagonistSection = `## 👤 Protagonist: ${p.name || 'Unnamed Adventurer'}
-* **Playbook:** ${p.playbook || 'Wanderer'}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}${p.habits ? `\n* **Habits:** ${p.habits}` : ''}
+* **Playbook:** ${p.playbook || 'Wanderer'}${p.gender ? `\n* **Gender:** ${p.gender}` : ''}${p.species ? `\n* **Species:** ${p.species}` : ''}${p.appearance ? `\n* **Appearance:** ${p.appearance}` : ''}${p.equipment ? `\n* **Equipment:** ${p.equipment}` : ''}${p.personality ? `\n* **Personality:** ${p.personality}` : ''}${p.habits ? `\n* **Habits:** ${p.habits}` : ''}
 * **Stats:** ${statString || 'Not assigned'}
 * **Harm Capacity:** ${(p.harm?.current > 0) ? `${p.harm.current}/${p.harm.max || 5} (Wounded)` : (p.harm?.max || 5)} | **Armor:** ${p.harm?.armor || 0}${(p.status || (p.harm?.current > 0 ? '(-) Wounded' : '')) ? `\n* **Status:** ${p.status || '(-) Wounded'}` : ''}${(p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) ? `\n* **Conditions:** ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}` : ''}
 * **Background Bio:** ${p.bio || p.background || 'None'}
@@ -2868,6 +2879,9 @@ export function parseMarkdownToDossier(markdown) {
     const speciesMatch = markdown.match(/\*\s*\*\*Species:\*\*\s*([^\n\r]+)/i);
     if (speciesMatch) dossier.protagonist.species = speciesMatch[1].trim();
 
+    const genderMatch = markdown.match(/\*\s*\*\*Gender:\*\*\s*([^\n\r]+)/i);
+    if (genderMatch) dossier.protagonist.gender = genderMatch[1].trim();
+
     const appMatch = markdown.match(/\*\s*\*\*Appearance:\*\*\s*([^\n\r]+)/i);
     if (appMatch) dossier.protagonist.appearance = appMatch[1].trim();
 
@@ -2932,6 +2946,7 @@ export function parseMarkdownToDossier(markdown) {
             const boonsM = block.match(/\*\s*\*\*Moves\/Boons:\*\*\s*([^\n\r]+)/i);
             const notesM = block.match(/\*\s*\*\*Notes:\*\*\s*([^\n\r]+)/i);
 
+            const genderM = block.match(/\*\s*\*\*Gender:\*\*\s*([^\n\r]+)/i);
             const speciesM = block.match(/\*\s*\*\*Species:\*\*\s*([^\n\r]+)/i);
             const equipM = block.match(/\*\s*\*\*Equipment:\*\*\s*([^\n\r]+)/i);
             const archM = block.match(/\*\s*\*\*Archetype:\*\*\s*([^\n\r]+)/i);
@@ -2952,6 +2967,7 @@ export function parseMarkdownToDossier(markdown) {
             dossier.npcs.push({
                 name,
                 role,
+                gender: genderM ? genderM[1].trim() : '',
                 archetype: archM ? archM[1].trim() : '',
                 species: speciesM ? speciesM[1].trim() : '',
                 appearance: appM && !appM[1].includes('None specified') ? appM[1].trim() : '',

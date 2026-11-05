@@ -3,7 +3,9 @@ import {
     FALLBACK_PC_SECTION_NAMES,
     loadMainPcSectionNames,
     buildPlayerCardBio,
+    formatSpeciesWithGender,
 } from '../concierge-pc-format.js';
+import { buildNpcEntryContent } from '../concierge-npc-format.js';
 import {
     applyDossierUpdates,
     createEmptyDossier,
@@ -145,5 +147,36 @@ assert.equal(roundtripped.protagonist.species, 'Human, male, 42');
 assert.equal(roundtripped.protagonist.appearance, 'Piercing hazel eyes, square jaw, leather jacket');
 assert.equal(roundtripped.protagonist.personality, 'Methodical and watchful');
 console.log('✓ Markdown serialization and reconstitution preserves protagonist fields cleanly');
+
+// ── 7. MultiHog Species & Gender Canonical Alignment ────────────────────────
+console.log('Testing MultiHog Species and Gender canonical formatting...');
+assert.equal(formatSpeciesWithGender('Human', 'female'), 'Human (Female)');
+assert.equal(formatSpeciesWithGender('Human (Female)', 'female'), 'Human (Female)');
+assert.equal(formatSpeciesWithGender('', 'male'), 'Human (Male)');
+assert.equal(formatSpeciesWithGender('Elf', 'non-binary'), 'Elf (Non-binary)');
+assert.equal(formatSpeciesWithGender('Dwarf', 'none'), 'Dwarf');
+
+// Test PC with explicit gender
+const pcWithGender = {
+    name: 'Mainor',
+    gender: 'male',
+    species: 'Human',
+    playbook: 'Veteran Guardian',
+};
+const pcBio = buildPlayerCardBio(pcWithGender);
+assert.ok(pcBio.includes('Species: Human (Male)'), 'PC bio must weave gender into Species: Human (Male)');
+
+// Test NPC with explicit gender
+const npcWithGender = {
+    name: 'Diretha',
+    gender: 'female',
+    species: 'Human',
+    role: 'Companion',
+    appearance: 'Spunky young woman with messenger satchel',
+};
+const npcContent = buildNpcEntryContent(npcWithGender);
+assert.ok(npcContent.core.includes('Species: Human (Female)'), 'NPC [CORE] must weave gender into Species: Human (Female)');
+
+console.log('✓ MultiHog framework Species & Gender canonical formatting verified for PC and NPC');
 
 console.log('\n--- ALL CONCIERGE PC CARD FORMATTING TESTS PASSED CLEANLY! ---');

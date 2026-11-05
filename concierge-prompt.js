@@ -544,8 +544,12 @@ ${genreSummaries}
 * The Pacing Triad: Endurance (pool capacity 6–12), Intensity (\`base_attrition_shift\` -1/0/+1), Tempo (\`action_tempo\`: action_serial, gritty_default, slow_burn, slice_of_life).
 * Protagonist: 3-4 specific Positive Tags (including signature gear tags) and 0-1 starting Scar in negative_tags. ALL positive traits MUST enforce the Trait Qualification Protocol using square brackets for situational constraints: \`Trait [situational constraint / when...]\` (e.g. \`Weathered Guard [when blocking heavy blows]\`, \`Mountain Stride [when traversing sheer ice or rock]\`) to ensure ~25–30% situational applicability. Signature gear tags also use square brackets: \`Trenchcoat [deep pockets for evidence]\`. Companion: \`Companion: [[NAME:companion]] (Role)\`.
 * Zero-Bookkeeping Directive (No Conditions): Protagonist debuffs, injuries, and scars live exclusively in \`negative_tags\`. DO NOT output a \`conditions:\` field in [PROTAGONIST].
-* Zero-Bookkeeping Companions: Companions who travel with the PC are recorded as \`Companion: Name (Role)\` entries in the [PROTAGONIST] positive_tags, not as separate [NPC] cards with moves or party roles. NPCs are external mentors, contacts, or faction allies.
-* NPC Scoping Directive: If the player's premise only involves the protagonist and a traveling companion, record the companion under [PROTAGONIST] positive_tags as \`Companion: [[NAME:companion]] (Role)\` and OMIT the [NPC] block entirely. Do not fabricate extraneous stationary contacts unless requested.
+* Companion Dual-Representation Directive: If the player's premise introduces a traveling companion, recruit, or spunky sidekick:
+  (1) Record them in [PROTAGONIST] positive_tags as \`Companion: [[NAME:companion]] (Role)\`. This handles all mechanical leverage and resolutions.
+  (2) You MUST ALSO generate a matching [NPC] card with \`name: [[NAME:companion]]\`, \`role: Companion\`, and an explicit \`gender:\`. Detail their appearance, demeanor, and background to help the Narrator roleplay them.
+  (3) DO NOT give the companion [NPC] card any separate moves or boons—all mechanical resolutions belong in the protagonist's companion tag.
+  (4) DO NOT emit a [PARTY] block; party vitality/resource tracking is disabled in FAE.
+* Explicit Character Gender Directive: For [PROTAGONIST] and every [NPC], you MUST assign an explicit \`gender:\` field (e.g. \`gender: female\`, \`gender: male\`, \`gender: non-binary\`, \`gender: agender\`, \`gender: none\`, etc. Any gender is valid including none, but it must NEVER be skipped or left blank). Read the player's conversational context and respect any chosen gender (e.g., 'spunky girl' -> female, 'old hero' -> male). If the player does not specify a gender, assign an explicit gender so the Name Diversity Engine can pull authentic gender-appropriate names.
 * Trait Qualification Protocol (Cooperative Qualification):
   - Ideal Scope: ~25–30% situational applicability.
   - Tier A (Auto-Qualify Broad Traits): Convert broad traits (Strong, Smart, Fast, Lucky, Tough) into Trait [context] (e.g. Strong [for lifting, hauling, or breaching doors], Smart [for ancient ciphers and forensic clues]) to keep applicability to ~25–30%.
@@ -581,21 +585,24 @@ playstyle: cyoa_5 | cyoa_3 | freeform
 
 [PROTAGONIST]
 name: [[NAME:protagonist]]
+gender: male
 playbook: Archetype / Playbook (e.g. Guardian, Wanderer, Alienist, Veteran)
 heroic_domain: Archetype [specific domains] (When heroic_tier is true; omitted when false)
 appearance: Exhausted detective with a rumpled trenchcoat
 background: Former asylum investigator
-positive_tags: Steady Hand [when firing pistols under pressure], Silent Step [when moving in darkness], Companion: [[NAME:companion]] (Role), Trenchcoat [deep pockets for evidence & gear]
+positive_tags: Steady Hand [when firing pistols under pressure], Silent Step [when moving in darkness], Companion: [[NAME:companion]] (Field Medic), Trenchcoat [deep pockets for evidence & gear]
 negative_tags: (-) Paranoia (Prone to seeing watchers in mirrors)
 pools: Health: 8/8 (zero_debuff: Crippled & Bleeding, recovery: camp_or_sleep, overflow: scar_and_ko) | Sanity: 8/8 (zero_debuff: Manic Dissociation, recovery: haven_or_specialist, overflow: lethal)
 [/PROTAGONIST]
 
 [NPC]
-name: [[NAME:ally]]
-role: Mentor | Contact | Ally
+name: [[NAME:companion]]
+role: Companion
+gender: female
 archetype: Field Medic
-appearance: Pragmatic doctor with bloodstained apron
-moves_or_boons: Tactical Support (Provides Fictional Leverage to stabilize wounded allies or reduce recovery strain)
+appearance: Pragmatic young medic with rolled-up sleeves and medical satchel
+demeanor: Resilient, dry-witted, and loyal
+background: Escaped through imperial cordons bearing a bloodied map
 [/NPC]
 
 [MONSTER]
@@ -889,10 +896,11 @@ Your ONLY job is to audit the candidate **[CURRENT_LIVE_BLUEPRINT]** against the
    - Protagonist tracks 2–3 setting-appropriate Resource Pools (capacity 6–12) with defined \`zero_debuff\`, \`recovery\` (e.g. \`camp_or_sleep\`, \`haven_or_specialist\`), and \`overflow\` rules.
    - Knobs (\`flee_grace_toggle\`, \`base_attrition_shift\`, \`action_tempo\`, \`overflow_default\`, \`heroic_tier\`) are deliberately tuned to the tone and genre.
    - If \`heroic_tier\` is true, the protagonist has a valid \`heroic_domain\` providing pre-math leverage; if false, \`heroic_domain\` is omitted.
-4. **Positive Tags, Scars & Mechanical Purity (0–20):**
+4. **Positive Tags, Scars, Companions & Gender (0–20):**
    - **Protagonist Tags & Scars:** 3–4 specific Positive Tags (Trait Qualification Protocol: ~25–30% situational applicability, using \`Trait [context]\` for broad adjectives) and 0–1 starting Scar in \`negative_tags\`.
    - **Zero-Bookkeeping & Mechanical Purity:** All debuffs, scars, and lasting penalties must live exclusively in \`negative_tags\`. Protagonist MUST NOT have a redundant \`conditions\` field.
-   - **Zero-Bookkeeping Companions & NPC Scoping Directive:** Travelling companions, recruits, or spunky sidekicks approaching or accompanying the PC belong strictly in \`[PROTAGONIST] positive_tags\` as \`Companion: Name (Role)\`. Do NOT order an \`[NPC]\` card for companions/recruits unless the player explicitly requests stationary external contacts, patrons, or merchants. \`[NPC]\` cards are reserved strictly for external contacts, mentors, or faction figures with \`moves_or_boons\` specifying fictional leverage.
+   - **Companion Tag & Matching NPC Card Audit:** If the protagonist has a \`Companion: <Name> (<Role>)\` tag in positive_tags, verify that a corresponding [NPC] card exists with \`role: Companion\` and a matching name placeholder or name. Verify that the companion [NPC] card does NOT define separate moves or boons (narrator RP only; mechanical leverage stays in the protagonist's companion tag).
+   - **Explicit Character Gender Audit:** Verify that [PROTAGONIST] and all [NPC] cards define an explicit \`gender:\` field (e.g. female, male, non-binary, agender, or none — any gender is fine including none, but it must NOT be skipped or left blank). Verify that player-specified gender from conversational context is faithfully respected.
    - **MANDATORY PURGE CHECK (NO PBTA / NO D&D):** The blueprint MUST NEVER contain PbtA moves ("When you... roll 2d6", 10+/7-9/6- hit outcomes, hold/forward, countdown doom tracks) or D&D terminology (DCs, AC, attack rolls, saving throws, advantage/disadvantage, spell slots). All mechanics strictly rely on the 4dF attrition ladder and resource pools.
 5. **The Kick's Immediate Crucible (0–20):** Does \`[KICK]\` place the protagonist directly at the starting \`[MAP]\` site *in media res* with an urgent crisis and a concrete pre-roll attrition pressure (e.g. deciding which pool will bear the first strain of the encounter) without forcing an immediate dice roll?
 
@@ -909,7 +917,7 @@ weaknesses:
 directives:
 - <Concrete, surgical instruction for the Builder's Second Pass to deepen or connect specific entities/fields>
 - <Concrete instruction #2 (e.g. "Update Encounter [MONSTER] Name's leverage_barriers and pressures to target Sanity")>
-- <Concrete instruction #3 (e.g. "Move companion from [NPC] into [PROTAGONIST] positive_tags as Companion: Name (Role)")>
+- <Concrete instruction #3 (e.g. "Ensure Companion tag in protagonist has a matching [NPC] card with role: Companion and explicit gender")>
 [/DOSSIER_CRITIQUE]
 \`\`\`
 

@@ -2079,7 +2079,7 @@ function bindModalEvents() {
     $('#mhc_load_active_campaign_btn').on('click', async () => {
         startImportProgress('Active Campaign');
         try {
-            toastr?.info('Scanning for active campaign dossier...');
+            toastr?.info('Scanning for active campaign dossier...', 'Active Campaign', { timeOut: 1500 });
             let dossier = await loadActiveCampaignDossier();
             if (!dossier) {
                 const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
@@ -2110,7 +2110,8 @@ function bindModalEvents() {
             }
 
             if (!dossier) {
-                toastr?.warning('No active PbtA campaign dossier found in this chat.');
+                toastr?.clear?.();
+                toastr?.warning('No active campaign dossier found in this chat.');
                 return;
             }
 
@@ -2126,6 +2127,7 @@ function bindModalEvents() {
                     confirmColor: '#2563eb',
                 });
                 if (!proceed) {
+                    toastr?.clear?.();
                     toastr?.info('Load cancelled. Current Session Zero draft retained.');
                     return;
                 }
@@ -2151,11 +2153,14 @@ function bindModalEvents() {
             setConciergeTab('cards');
             await updateSyncButtonState();
 
-            const loadNotice = `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust Harm capacity, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`;
+            const isFae = activeDossier.meta?.ruleset === 'fae';
+            const vitalityTerm = isFae ? 'resource pools' : 'Harm capacity';
+            const loadNotice = `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust ${vitalityTerm}, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`;
             appendChatBubble('assistant', loadNotice);
             chatHistory.push({ role: 'assistant', content: loadNotice });
 
             saveDraft();
+            toastr?.clear?.();
             toastr?.success(`Loaded active campaign: "${candidateTitle}"! Dials and cards are now editable.`);
         } catch (err) {
             toastr?.error(`Failed to load active campaign: ${err.message}`);
@@ -2556,7 +2561,8 @@ function bindModalEvents() {
             if (res.success) {
                 resetConciergeState({ showGreeting: true });
                 $('#mhc_concierge_modal').fadeOut(250);
-                toastr?.success('PbtA Campaign ready! The game is now beginning.', 'Adventure Launched');
+                const isFae = activeDossier?.meta?.ruleset === 'fae';
+                toastr?.success(`${isFae ? 'FAE' : 'PbtA'} Campaign ready! The game is now beginning.`, 'Adventure Launched');
             } else {
                 toastr?.error(`Launch error: ${res.message}`, 'Launch Failed');
             }
@@ -2654,7 +2660,8 @@ function bindModalEvents() {
     $('#mhc_sync_active_campaign_btn').on('click', async () => {
         const activeRunning = await loadActiveCampaignDossier();
         if (!activeRunning) {
-            toastr?.error('No active PbtA campaign found in this chat to synchronize with.', 'Sync Blocked');
+            const isFae = activeDossier?.meta?.ruleset === 'fae';
+            toastr?.error(`No active ${isFae ? 'FAE' : 'PbtA'} campaign found in this chat to synchronize with.`, 'Sync Blocked');
             return;
         }
 

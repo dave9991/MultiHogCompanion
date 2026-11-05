@@ -8,6 +8,7 @@
 
 import { ConciergeSystemAdapter } from './concierge-system-base.js';
 import { FAE_GENRES, buildFaeCartridge, sanitizeFaePositiveTags } from './fae-ruleset.js';
+import { sanitizeHeroicDomain } from './concierge-parser.js';
 import { formatInitialFaeMemo, mergeDossierIntoLiveFaeMemo } from './fae-state-sync.js';
 import { buildMonsterEntryContent } from './concierge-npc-format.js';
 import { buildPlayerCardBio } from './concierge-pc-format.js';
@@ -137,7 +138,7 @@ export class FaeSystemAdapter extends ConciergeSystemAdapter {
         } else if (!isHeroic) {
             heroicDomain = null;
         }
-        protagonist.heroicDomain = heroicDomain;
+        protagonist.heroicDomain = heroicDomain ? sanitizeHeroicDomain(heroicDomain) : null;
 
         protagonist.positiveTags = Array.isArray(protagonist.positiveTags)
             ? sanitizeFaePositiveTags(protagonist.positiveTags)

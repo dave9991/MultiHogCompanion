@@ -28,6 +28,7 @@ import {
     serializeDossierToMarkdown,
     parseMarkdownToDossier,
     healAndNormalizeDossier,
+    sanitizeHeroicDomain,
 } from '../concierge-parser.js';
 
 import {
@@ -1153,5 +1154,20 @@ name: [[NAME:protagonist]]
         // Footer in CYOA mode MUST mention subfooter <choices>
         const cyoaFooter = buildFaeFooterContent('osr_dungeon', { config: { playstyle: 'cyoa_5' } });
         assert.ok(cyoaFooter.includes('<choices>'), 'CYOA footer must include <choices> subfooter guidance');
+    });
+
+    test('sanitizeHeroicDomain strips invented mechanics and preserves narrative scope', () => {
+        const invented = 'Legend [1. Auto-succeed on one Pressure roll per session when shielding the innocent or negate one layer depletion from the Body pool; 2. +1 to Pressure rolls when rallying the broken on ancestral ground]';
+        const cleaned = sanitizeHeroicDomain(invented);
+        assert.equal(cleaned, 'Legend [shielding the innocent, rallying the broken on ancestral ground]');
+
+        // Valid pure narrative scope is preserved untouched
+        const pure = 'Spellblade [short-range blink and arcane ward-breaking]';
+        assert.equal(sanitizeHeroicDomain(pure), pure);
+
+        // Blank/none cases
+        assert.equal(sanitizeHeroicDomain('none'), '');
+        assert.equal(sanitizeHeroicDomain(''), '');
+        assert.equal(sanitizeHeroicDomain(null), '');
     });
 });

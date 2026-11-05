@@ -489,6 +489,59 @@ export function sanitizeConditionsList(rawConds) {
 }
 
 /**
+ * Sanitizes a Heroic Domain string to enforce pure narrative jurisdiction / permissions
+ * and purge any invented quantitative mechanics (e.g. daily powers, roll bonuses, pool negation).
+ * @param {string} domain 
+ * @returns {string}
+ */
+export function sanitizeHeroicDomain(domain) {
+    if (!domain || typeof domain !== 'string') return '';
+    let s = domain.trim();
+    if (!s || /^(?:none|n\/a|null|false|off)$/i.test(s)) return '';
+
+    const bracketMatch = s.match(/^([^\[\]]+)\[([\s\S]*?)\]$/);
+    if (!bracketMatch) {
+        return s;
+    }
+
+    const archetype = bracketMatch[1].trim();
+    let body = bracketMatch[2].trim();
+
+    // Check if mechanical artifacts or numbered list items exist
+    const hasMechanics = /\b(?:auto-succeed|auto-success|negate|per session|per day|layer depletion|\+\d+|-\d+|\broll\b|\bpressure roll\b|\bdrain\b|\bpool\b)\b/i.test(body);
+    const hasNumbers = /\b\d+[.)]\s*/.test(body);
+
+    if (hasMechanics || hasNumbers) {
+        // Split by numbered items or semicolons
+        const items = body.split(/(?:;\s*|\s*\b\d+[.)]\s*)/).map(item => item.trim()).filter(Boolean);
+        const cleanedPhrases = [];
+        for (const item of items) {
+            let phrase = item;
+            // Strip mechanical clauses:
+            // e.g. "Auto-succeed on one Pressure roll per session when shielding the innocent" -> "shielding the innocent"
+            phrase = phrase.replace(/\b(?:auto-succeed|auto-success|succeed)\b[^\b]*(?:when|if|while)\s+/i, '');
+            // e.g. "+1 to Pressure rolls when rallying the broken" -> "rallying the broken"
+            phrase = phrase.replace(/[+-]\d+\s+(?:to\s+)?(?:pressure\s+rolls?|rolls?|actions?|tests?)\s+(?:when|if|while)\s+/i, '');
+            phrase = phrase.replace(/\b(?:or\s+)?negate\s+[^,;\.]*(?:from\s+[^,;\.]*)?/gi, '');
+            phrase = phrase.replace(/\bper\s+(?:session|day|scene|turn|rest)\b/gi, '');
+            phrase = phrase.replace(/\b(?:from\s+the\s+\w+\s+pool|from\s+\w+\s+pool)\b/gi, '');
+            phrase = phrase.replace(/\b(?:on\s+one\s+pressure\s+roll|on\s+pressure\s+rolls?)\b/gi, '');
+            phrase = phrase.replace(/\b(?:layer\s+depletion|pool\s+drain|damage)\b/gi, '');
+            phrase = phrase.replace(/^[0-9]+[.)]\s*/, '');
+            phrase = phrase.replace(/^[,\s;—–-]+|[,\s;—–-]+$/g, '').trim();
+            if (phrase.length > 2) {
+                cleanedPhrases.push(phrase);
+            }
+        }
+        if (cleanedPhrases.length > 0) {
+            body = cleanedPhrases.join(', ');
+        }
+    }
+
+    return `${archetype} [${body}]`;
+}
+
+/**
  * Checks whether a gear array is empty or contains only stock fallback placeholders.
  * @param {any} gear
  * @returns {boolean}
@@ -1292,7 +1345,7 @@ export function applyDossierUpdates(text, dossier) {
         // FAE Heroic Domain
         const domainVal = kv.heroic_domain || kv.domain;
         if (domainVal !== undefined) {
-            const cleanDomain = String(domainVal).trim().replace(/^["']|["']$/g, '');
+            const cleanDomain = sanitizeHeroicDomain(String(domainVal).trim().replace(/^["']|["']$/g, ''));
             const isNone = /^(?:none|null|false|off|n\/a)$/i.test(cleanDomain) || cleanDomain === '';
             const finalDomain = isNone ? '' : cleanDomain;
             if (updated.protagonist.heroicDomain !== finalDomain) {

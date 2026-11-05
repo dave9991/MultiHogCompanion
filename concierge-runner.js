@@ -106,7 +106,7 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
 
         // Invalidate or update SillyTavern's frontend worldInfoCache
         try {
-            const wiMod = await import('../../../public/scripts/world-info.js');
+            const wiMod = await import('../../../world-info.js');
             if (wiMod?.worldInfoCache && typeof wiMod.worldInfoCache.set === 'function') {
                 wiMod.worldInfoCache.set(effectiveBook, bookData);
             }
@@ -457,7 +457,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                     headers: getHeaders(),
                     body: JSON.stringify({ name: `Campaign_${wipeOldTitle}` }),
                 });
-                const wiMod = await import('../../../public/scripts/world-info.js');
+                const wiMod = await import('../../../world-info.js');
                 if (wiMod?.worldInfoCache && typeof wiMod.worldInfoCache.delete === 'function') {
                     wiMod.worldInfoCache.delete(`Campaign_${wipeOldTitle}`);
                 }
@@ -976,6 +976,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
         // 3. Update Ruleset Cartridge with dynamic rules and Harm tiers
         const rulesetId = systemRegistry.detectRuleset(dossier);
         const adapter = systemRegistry.get(rulesetId);
+        const isFae = adapter.id === 'fae' || rulesetId === 'fae';
         onProgress(`🎲 Re-applying ${adapter.label} ruleset cartridge...`, 60);
         const statsList = Object.keys(dossier.protagonist?.stats || {});
         const cartridgeOverrides = {

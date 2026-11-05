@@ -66,6 +66,7 @@ import {
     buildFaeQuickStartInstructions,
     buildFaeFooterContent,
     buildFaeCyoaPrompt,
+    buildFaeCartridge,
 } from '../fae-ruleset.js';
 import { buildPbtAQuickStartInstructions } from '../pbta-ruleset.js';
 import { formatInitialFaeMemo } from '../fae-state-sync.js';
@@ -1131,5 +1132,26 @@ name: [[NAME:protagonist]]
         assert.equal(getDraftStorageKey('pbta'), 'mhc_concierge_draft_pbta');
         assert.equal(getDraftStorageKey(null), 'mhc_concierge_draft_pbta');
         assert.equal(STORAGE_DRAFT_KEY, 'mhc_pbta_concierge_draft');
+    });
+
+    test('FAE Pure Freeform (No Choices) Dial & Footer Purity', () => {
+        const cartridge = buildFaeCartridge('osr_dungeon', { config: { playstyle: 'freeform' } });
+
+        // CYOA_mode must be false in syspromptModules
+        assert.equal(cartridge.payload.syspromptModules.CYOA_mode, false, 'CYOA_mode must be false in freeform mode');
+        assert.equal(cartridge.payload.cyoaConfig.useCustomPrompt, false, 'useCustomPrompt must be false in freeform mode');
+        assert.equal(cartridge.payload.cyoaConfig.useButtonTags, false, 'useButtonTags must be false in freeform mode');
+        assert.equal(cartridge.payload.cyoaConfig.useXmlTag, false, 'useXmlTag must be false in freeform mode');
+        assert.equal(cartridge.payload.cyoaConfig.playstyle, 'freeform', 'playstyle must be freeform in cyoaConfig');
+
+        // Footer in freeform mode must NOT mention choices or <choices>
+        const freeformFooter = buildFaeFooterContent('osr_dungeon', { config: { playstyle: 'freeform' } });
+        assert.ok(!freeformFooter.includes('<choices>'), 'Freeform footer must not mention <choices>');
+        assert.ok(!freeformFooter.includes('above <choices>'), 'Freeform footer must not instruct narrator right above <choices>');
+        assert.ok(freeformFooter.includes('Do NOT append any choices, buttons, or tactical options'), 'Freeform footer must instruct narrator not to append choices');
+
+        // Footer in CYOA mode MUST mention subfooter <choices>
+        const cyoaFooter = buildFaeFooterContent('osr_dungeon', { config: { playstyle: 'cyoa_5' } });
+        assert.ok(cyoaFooter.includes('<choices>'), 'CYOA footer must include <choices> subfooter guidance');
     });
 });

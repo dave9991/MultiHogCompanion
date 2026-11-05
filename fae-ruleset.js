@@ -1659,6 +1659,9 @@ FAE reminder: 4dF Attrition Engine. Single-pass forward momentum. Threat describ
  */
 export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) {
     const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const config = options?.config || options || {};
+    const playstyle = config.playstyle || options.playstyle || 'cyoa_5';
+    const isFreeform = playstyle === 'freeform';
     const activePools = (options?.pools && Object.keys(options.pools).length > 0)
         ? options.pools
         : (options?.config?.pools && Object.keys(options.config.pools).length > 0)
@@ -1672,6 +1675,15 @@ export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) 
     }
     if (options.useDdMmYyFormat) {
         timeFmt = timeFmt.replace(/Day\s+\[X\]/g, '[DD/MM/YYYY]');
+    }
+
+    if (isFreeform) {
+        return `<end_of_output_footer>
+ALWAYS end every narrative message (including turns after a tool call) with these exact two italicized lines:
+*${poolSegments} | (Scenes: [current]/[target]) | (Location: [Site Name, Current Area])*
+*${timeFmt}*
+Do NOT append any choices, buttons, or tactical options. Hand the spotlight directly to {{user}}.
+</end_of_output_footer>`;
     }
 
     return `<end_of_output_footer>
@@ -1974,7 +1986,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         {
             id: 'fae_base_override_footer',
             tag: 'end_of_output_footer',
-            content: buildFaeFooterContent(genreKey, config),
+            content: buildFaeFooterContent(genreKey, { ...config, playstyle, isFreeform, pools: (overrides.pools || config.pools || genre.pools) }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-shoe-prints',
@@ -2047,6 +2059,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         syspromptSectionOrder: [],
         stockPrompts: buildFaeStockPrompts(genreKey, { ...overrides, heroicTier: isHeroic }),
         cyoaConfig: {
+            playstyle,
             useCustomPrompt: !isFreeform,
             customPromptText: isFreeform ? '' : buildFaeCyoaPrompt(genreKey, overrides),
             useButtonTags: !isFreeform,

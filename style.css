@@ -61,6 +61,10 @@
     animation: mhcFadeIn 0.18s ease-in-out;
 }
 
+.multihog-companion-settings > .mhc-tab-content.active {
+    display: block !important;
+}
+
 @keyframes mhcFadeIn {
     from { opacity: 0; transform: translateY(2px); }
     to { opacity: 1; transform: translateY(0); }
@@ -482,6 +486,11 @@
 
 .mhc-tab-content.active {
     display: flex;
+}
+
+#mhc_concierge_modal .mhc-tab-content.active,
+.mhc-dossier-column > .mhc-tab-content.active {
+    display: flex !important;
 }
 
 .mhc-raw-textarea {

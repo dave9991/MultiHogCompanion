@@ -256,7 +256,7 @@ function showToast(type, message, title = 'MultiHog Companion') {
  * Trigger MultiHog to re-save settings, recompile its system prompt, and refresh UI.
  * Attempts the runtime-bridge import first; falls back to clicking the DOM apply button.
  */
-async function refreshMultihogRuntime() {
+export async function refreshMultihogRuntime() {
     try {
         const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
         if (typeof bridge.saveSettings === 'function') bridge.saveSettings();
@@ -1621,18 +1621,20 @@ async function initUI() {
         const settingsHtml = await $.get(`${EXTENSION_FOLDER}/settings.html`);
         $('#extensions_settings').append(settingsHtml);
 
-        // ── Settings Sub-Tabs Navigation ──
+        // ── Settings Sub-Tabs Navigation (strictly scoped to Settings panel) ──
         function setActiveTab(tabId) {
-            $('.mhc-tab-btn').removeClass('active');
-            $(`.mhc-tab-btn[data-tab="${tabId}"]`).addClass('active');
-            $('.mhc-tab-content').removeClass('active').hide();
-            $(`#mhc_tab_${tabId}`).addClass('active').show();
+            const settingsRoot = $('#extensions_settings');
+            const tabBar = settingsRoot.find('.mhc-tab-bar');
+            tabBar.find('.mhc-tab-btn').removeClass('active');
+            tabBar.find(`.mhc-tab-btn[data-tab="${tabId}"]`).addClass('active');
+            settingsRoot.find('.multihog-companion-settings > .mhc-tab-content, #mhc_tab_ruleset, #mhc_tab_story, #mhc_tab_media').removeClass('active').hide();
+            settingsRoot.find(`#mhc_tab_${tabId}`).addClass('active').show();
             try {
                 localStorage.setItem('mhc_active_tab', tabId);
             } catch (_) {}
         }
 
-        $('.mhc-tab-btn').on('click', function (e) {
+        $('#extensions_settings').on('click', '.mhc-tab-bar .mhc-tab-btn', function (e) {
             e.preventDefault();
             const tabId = $(this).data('tab');
             if (tabId) setActiveTab(tabId);

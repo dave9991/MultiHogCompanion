@@ -1308,6 +1308,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         syspromptSectionOrder: [],
         stockPrompts: buildPbtAStockPrompts(genreKey, overrides),
         cyoaConfig: {
+            playstyle,
             useCustomPrompt: !isFreeform,
             customPromptText: isFreeform ? '' : buildPbtACyoaPrompt(genreKey, overrides),
             useButtonTags: !isFreeform,

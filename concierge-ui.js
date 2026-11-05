@@ -362,6 +362,7 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     $('#mhc_confirm_overlay').hide();
     renderAttachmentTray();
     updateBlueprintDeck();
+    setConciergeTab('cards');
 
     if (showGreeting) {
         const greeting = effectiveRuleset === 'fae'
@@ -1970,6 +1971,36 @@ export function setLoadedCampaignOrigin(chatId, title = null, dossier = null) {
 }
 
 /**
+ * Switch active tab in the Concierge modal ('cards', 'raw', or 'debug').
+ * Strictly scoped to #mhc_concierge_modal and guarantees elements are shown/unhidden.
+ *
+ * @param {string} [tabId='cards']
+ */
+export function setConciergeTab(tabId = 'cards') {
+    const modal = typeof globalThis.$ === 'function' ? globalThis.$('#mhc_concierge_modal') : null;
+    if (!modal || !modal.length) return;
+
+    if (typeof modal.find === 'function') {
+        const tabBtns = modal.find('.mhc-dossier-tabs .mhc-tab-btn');
+        if (typeof tabBtns?.removeClass === 'function') tabBtns.removeClass('active');
+        const activeBtn = modal.find(`.mhc-dossier-tabs .mhc-tab-btn[data-tab="${tabId}"]`);
+        if (typeof activeBtn?.addClass === 'function') activeBtn.addClass('active');
+
+        const tabPanels = modal.find('.mhc-dossier-column > .mhc-tab-content');
+        if (typeof tabPanels?.removeClass === 'function') tabPanels.removeClass('active');
+        if (typeof tabPanels?.hide === 'function') tabPanels.hide();
+
+        const target = modal.find(`#mhc_tab_${tabId}`);
+        if (typeof target?.addClass === 'function') target.addClass('active');
+        if (typeof target?.show === 'function') target.show();
+    }
+
+    if (tabId === 'debug') {
+        renderDebugInspectorView();
+    }
+}
+
+/**
  * Bind modal DOM events.
  */
 function bindModalEvents() {
@@ -2117,6 +2148,7 @@ function bindModalEvents() {
             activeDossier._originCampaignTitle = loadedCampaignOriginTitle;
 
             updateBlueprintDeck();
+            setConciergeTab('cards');
             await updateSyncButtonState();
 
             const loadNotice = `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust Harm capacity, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`;
@@ -2451,15 +2483,12 @@ function bindModalEvents() {
         detail.slideToggle(140);
     });
 
-    // Tab buttons
-    $('.mhc-tab-btn').on('click', function () {
-        $('.mhc-tab-btn').removeClass('active');
-        $('.mhc-tab-content').removeClass('active');
-        $(this).addClass('active');
+    // Tab buttons (strictly scoped to Concierge Modal tabs)
+    $('#mhc_concierge_modal').on('click', '.mhc-dossier-tabs .mhc-tab-btn', function (e) {
+        e.preventDefault();
         const tab = $(this).attr('data-tab');
-        $(`#mhc_tab_${tab}`).addClass('active');
-        if (tab === 'debug') {
-            renderDebugInspectorView();
+        if (tab) {
+            setConciergeTab(tab);
         }
     });
 
@@ -2912,5 +2941,7 @@ export async function openConciergeModal({ ruleset = null, genreKey = null } = {
 
     updateBlueprintDeck();
     renderDebugInspectorView();
+    const activeTab = $('#mhc_concierge_modal .mhc-dossier-tabs .mhc-tab-btn.active').attr('data-tab') || 'cards';
+    setConciergeTab(activeTab);
     $('#mhc_concierge_modal').fadeIn(200);
 }

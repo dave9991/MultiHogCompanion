@@ -230,6 +230,12 @@ export class FaeSystemAdapter extends ConciergeSystemAdapter {
         if (typeof options.applyFaeCartridge === 'function') {
             return await options.applyFaeCartridge(systemKey, overrides);
         }
+        try {
+            const { applyFaeCartridge } = await import('./index.js');
+            if (typeof applyFaeCartridge === 'function') {
+                return await applyFaeCartridge(systemKey, overrides);
+            }
+        } catch (_) {}
         const cartridge = buildFaeCartridge(systemKey, overrides);
         const effectiveCtx = options.ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
         const rpg = effectiveCtx?.extensionSettings?.rpg_tracker;

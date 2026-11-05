@@ -85,7 +85,17 @@ globalThis.$ = (selector) => {
         append() { return this; },
         remove() { return this; },
         children() { return { length: 0 }; },
-        find() { return { slideToggle() {}, toggleClass() {} }; },
+        find() {
+            return {
+                slideToggle() { return this; },
+                toggleClass() { return this; },
+                addClass() { return this; },
+                removeClass() { return this; },
+                show() { return this; },
+                hide() { return this; },
+                attr() { return ''; },
+            };
+        },
         closest() { return { find() { return { slideToggle() {} }; }, toggleClass() {} }; },
     };
 };

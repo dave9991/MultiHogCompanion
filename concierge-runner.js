@@ -423,7 +423,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
     const { wipeOldTitle = null } = options;
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     const { healAndNormalizeDossier } = await import('./concierge-parser.js');
-    const { applyPbtACartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
+    const { applyPbtACartridge, applyFaeCartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
     const dossier = healAndNormalizeDossier(rawDossier);
     const systemKey = dossier.meta?.systemKey || 'fantasy';
@@ -514,12 +514,30 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
         // Apply native MultiHog CYOA toggle based on playstyle dial
         const effectiveCtxEarly = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
         const rpgEarly = effectiveCtxEarly?.extensionSettings?.rpg_tracker;
+        const isFreeform = (dossier.config?.playstyle === 'freeform');
         if (rpgEarly) {
             rpgEarly.syspromptModules = rpgEarly.syspromptModules || {};
-            if (dossier.config?.playstyle === 'freeform') {
-                rpgEarly.syspromptModules.CYOA_mode = false;
-            } else {
-                rpgEarly.syspromptModules.CYOA_mode = true;
+            rpgEarly.syspromptModules.CYOA_mode = !isFreeform;
+            if (rpgEarly.cyoaConfig) {
+                rpgEarly.cyoaConfig.useCustomPrompt = !isFreeform;
+                rpgEarly.cyoaConfig.useButtonTags = !isFreeform;
+                rpgEarly.cyoaConfig.useXmlTag = !isFreeform;
+                rpgEarly.cyoaConfig.playstyle = dossier.config?.playstyle || 'cyoa_5';
+                if (isFreeform) rpgEarly.cyoaConfig.customPromptText = '';
+            }
+            if (chatId && rpgEarly.chatStates?.[chatId]) {
+                const part = rpgEarly.chatStates[chatId];
+                if (part.setup) {
+                    part.setup.syspromptModules = part.setup.syspromptModules || {};
+                    part.setup.syspromptModules.CYOA_mode = !isFreeform;
+                    if (part.setup.cyoaConfig) {
+                        part.setup.cyoaConfig.useCustomPrompt = !isFreeform;
+                        part.setup.cyoaConfig.useButtonTags = !isFreeform;
+                        part.setup.cyoaConfig.useXmlTag = !isFreeform;
+                        part.setup.cyoaConfig.playstyle = dossier.config?.playstyle || 'cyoa_5';
+                        if (isFreeform) part.setup.cyoaConfig.customPromptText = '';
+                    }
+                }
             }
         }
 
@@ -866,6 +884,14 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             ? dossier.theKick.openingPrompt
             : `[Initial Setup: ${dossier.meta?.title || defaultOpeningTitle}]\n${dossier.meta?.premise || 'The adventure begins.'}\n\nBegin the adventure and frame the opening scene.`;
 
+        // Guarantee MultiHog sysprompt runtime has compiled the latest cartridge settings
+        try {
+            const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+            if (typeof bridge.autoApplySysprompt === 'function') {
+                await bridge.autoApplySysprompt(true);
+            }
+        } catch (_) {}
+
         await sendOutgoingChatMessage(openingText);
 
         // ── 7. Refresh Campaign Records & Lorebook Agent ──────────────────────
@@ -981,6 +1007,32 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
             },
         };
         await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx });
+
+        const isFreeform = (dossier.config?.playstyle === 'freeform');
+        const rpgSync = ctx?.extensionSettings?.rpg_tracker;
+        if (rpgSync) {
+            rpgSync.syspromptModules = rpgSync.syspromptModules || {};
+            rpgSync.syspromptModules.CYOA_mode = !isFreeform;
+            if (rpgSync.cyoaConfig) {
+                rpgSync.cyoaConfig.useCustomPrompt = !isFreeform;
+                rpgSync.cyoaConfig.useButtonTags = !isFreeform;
+                rpgSync.cyoaConfig.useXmlTag = !isFreeform;
+                rpgSync.cyoaConfig.playstyle = dossier.config?.playstyle || 'cyoa_5';
+                if (isFreeform) rpgSync.cyoaConfig.customPromptText = '';
+            }
+            if (chatId && rpgSync.chatStates?.[chatId]?.setup) {
+                const partSetup = rpgSync.chatStates[chatId].setup;
+                partSetup.syspromptModules = partSetup.syspromptModules || {};
+                partSetup.syspromptModules.CYOA_mode = !isFreeform;
+                if (partSetup.cyoaConfig) {
+                    partSetup.cyoaConfig.useCustomPrompt = !isFreeform;
+                    partSetup.cyoaConfig.useButtonTags = !isFreeform;
+                    partSetup.cyoaConfig.useXmlTag = !isFreeform;
+                    partSetup.cyoaConfig.playstyle = dossier.config?.playstyle || 'cyoa_5';
+                    if (isFreeform) partSetup.cyoaConfig.customPromptText = '';
+                }
+            }
+        }
 
         // 4. Update live state memo and MultiHog memory
         onProgress('⚙️ Synchronizing live state memo & character vitals...', 80);

@@ -550,13 +550,13 @@ ${genreSummaries}
   - Ideal Scope: ~25–30% situational applicability.
   - Tier A (Auto-Qualify Broad Traits): Convert broad traits (Strong, Smart, Fast, Lucky, Tough) into Trait [context] (e.g. Strong [for lifting, hauling, or breaching doors], Smart [for ancient ciphers and forensic clues]) to keep applicability to ~25–30%.
   - Tier B (Remove True Omnipotence): Omit absolute immunity tags (Invincible, Immortal, Never Misses) and replace with grounded Trait [context] alternatives.
-* Resource Pools: 2-3 pools per genre skeleton with current, max, zero_debuff, recovery, on_overflow.
+* Resource Pools: 2-3 pools per genre skeleton with current, max, zero_debuff, recovery, on_overflow. Custom pools must use canonical overflow values: \`scar_and_ko\`, \`lethal\`, \`scene_fail\`, or \`poise_and_ko\`.
 * Zero-Pool Exemptions: Uninjured \`Companion:\` / \`Retainer:\` tags and earned \`[Advantage]\` survive at 0 pool. Advantage is preserved on retreat.
 * Knobs: flee_grace_toggle (true/false), base_attrition_shift (-1/0/+1), action_tempo (action_serial/gritty_default/slow_burn/slice_of_life), overflow_default (scar_and_ko/lethal/scene_fail), heroic_tier (true/false).
 * Heroic Domains (Pre-Math Leverage Permissions): When heroic_tier is true (e.g. osr_dungeon or user toggle), assign \`heroic_domain: Archetype [specific domains]\` to [PROTAGONIST]. This provides pre-math leverage (expands Threat 0, overcomes barriers, neutralizes pressures) and NEVER counts as a -1 Positive Tag. When heroic_tier is false, omit heroic_domain entirely.
 * Adversaries / Encounters (4-Line Block): threat_level (1-4), layers (e.g. 2/2), pools_at_risk, pressures, instinct, status, leverage_barriers, full_finish_triggers. Bypass vs Total Intent tradeoff. $\pm 1$ Threat cap.
   - leverage_barriers MUST use individual bracket formatting: \`[1. ...] [2. ...]\` mapping barrier location and protective function to target layer/pool (e.g. \`[1. Heavy Chitin Plating guarding Layer 1/Health] [2. Blind Thrashing Tendrils shielding Layer 2/Sanity]\`).
-  - full_finish_triggers is MANDATORY for every adversary and defines the Bypass vs Total finish tradeoff: \`Bypass: Barricade the ward door (1 turn) | Total: Crack both armor layers and destroy its core\`. Triggers must define explicit mechanical thresholds (e.g. specific pool drain or tag cost to bypass vs layer/pool exhaustion for total finish).
+  - full_finish_triggers is MANDATORY for every adversary and defines the Bypass vs Total finish tradeoff with explicit mechanical thresholds: \`Bypass: Spend 2 Supplies & Traps to barricade the ward door (1 turn) | Total: Crack both armor layers and reduce Health to 0 to permanently destroy core\`. Triggers must define explicit mechanical thresholds (e.g. specific pool drain or tag cost to bypass vs layer/pool exhaustion for total finish).
 * STRICT PROHIBITION OF D&D AND PBTA 2d6 MECHANICS: Never output DCs, AC, attack rolls, saving throws, advantage/disadvantage, or 2d6 moves.
 
 ### 📋 Directives & Syntax:
@@ -580,7 +580,7 @@ playstyle: cyoa_5 | cyoa_3 | freeform
 
 [PROTAGONIST]
 name: [[NAME:protagonist]]
-playbook: The Alienist
+playbook: Archetype / Playbook (e.g. Guardian, Wanderer, Alienist, Veteran)
 heroic_domain: Archetype [specific domains] (When heroic_tier is true; omitted when false)
 appearance: Exhausted detective with a rumpled trenchcoat
 background: Former asylum investigator
@@ -606,7 +606,7 @@ pressures: Tentacle lashes (Health), Psychic shriek (Sanity)
 instinct: To ambush intruders from shadow and drag them into ventilation shafts
 status: Entrenched
 leverage_barriers: [1. Armored Chitin Husk guarding Layer 1/Health] [2. Blind Flailing Claws shielding Layer 2/Sanity]
-full_finish_triggers: Bypass: Barricade the ward door (1 turn) | Total: Crack both armor layers and destroy its core
+full_finish_triggers: Bypass: Spend 2 Supplies & Traps to barricade the ward door (1 turn) | Total: Crack both armor layers and reduce Health to 0 to permanently destroy core
 [/MONSTER]
 
 [MAP]

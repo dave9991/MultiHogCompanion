@@ -172,7 +172,7 @@ export class FaeSystemAdapter extends ConciergeSystemAdapter {
             dossier.knobs = dossier.config.knobs;
             dossier.character = {
                 name: protagonist.name || 'Protagonist',
-                archetype: protagonist.playbook || genre.archetypes?.[0] || 'Scholar',
+                archetype: protagonist.playbook || protagonist.archetype || genre.archetypes?.[0] || 'Wanderer',
                 heroic_domain: isHeroic ? (heroicDomain || null) : null,
                 positive_tags: protagonist.positiveTags,
                 negative_tags: protagonist.negativeTags,

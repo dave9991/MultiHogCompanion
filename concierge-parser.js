@@ -604,7 +604,7 @@ The Kick: Unset
     if (p.name || p.playbook || (isFae && (p.positiveTags?.length || (p.pools && Object.keys(p.pools).length)))) {
         lines.push('[PROTAGONIST]');
         lines.push(`name: ${p.name || 'Unnamed Adventurer'}`);
-        lines.push(`playbook: ${p.playbook || (isFae ? 'Investigator' : 'In Development')}`);
+        lines.push(`playbook: ${p.playbook || p.archetype || (isFae ? 'Unassigned' : 'In Development')}`);
         if (p.species) lines.push(`species: ${p.species}`);
         if (p.appearance) lines.push(`appearance: ${p.appearance}`);
         if (p.equipment) lines.push(`equipment: ${p.equipment}`);

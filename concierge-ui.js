@@ -2795,11 +2795,11 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
         }
         contempParts.push(`
             <div style="background: rgba(0,0,0,0.28); border: 1px solid rgba(250, 204, 21, 0.25); border-radius: 4px; padding: 6px 8px;">
-                <div style="font-weight: 600; color: #fde047; margin-bottom: 3px;">⚖️ ${refinerApplied ? 'Pass 1 Judge Verdict' : 'Judge Verdict'}: ${escapeHtml(critique.verdict)} (${critique.score}/100 · ${escapeHtml(critique.grade)})</div>
+                <div style="font-weight: 600; color: #fde047; margin-bottom: 3px;">⚖️ ${refinerApplied ? 'Pass 1 Judge Critique' : 'Judge Verdict'}: ${escapeHtml(critique.verdict)} (${critique.score}/100 · ${escapeHtml(critique.grade)})${refinerApplied ? ' <span style="color: #c084fc; font-weight: normal; font-size: 0.9em;">(Resolved in Pass 2)</span>' : ''}</div>
                 ${critique.strengths?.length ? `<div style="color: #86efac;"><b>Strengths:</b> ${critique.strengths.map(s => escapeHtml(s)).join(' · ')}</div>` : ''}
                 ${critique.weaknesses?.length ? `<div style="color: #fca5a5;"><b>Weaknesses:</b> ${critique.weaknesses.map(w => escapeHtml(w)).join(' · ')}</div>` : ''}
                 ${critique.directives?.length ? `<div style="color: #93c5fd;"><b>Directives:</b> ${critique.directives.map(d => escapeHtml(d)).join(' · ')}</div>` : ''}
-                ${tx.refinerPass?.hasMutations ? `<div style="color: #c4b5fd; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(168, 85, 247, 0.3);"><b>🔨 Pass 2 Refiner Applied:</b> ${tx.refinerPass.changes.map(c => escapeHtml(c)).join('; ')}</div>` : ''}
+                ${tx.refinerPass?.hasMutations ? `<div style="color: #c4b5fd; margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(168, 85, 247, 0.4);"><b>✅ Pass 2 Refiner Applied (Resolved):</b> ${tx.refinerPass.changes.map(c => escapeHtml(c)).join('; ')}</div>` : ''}
             </div>
         `);
     } else if (contempParts.length > 0) {

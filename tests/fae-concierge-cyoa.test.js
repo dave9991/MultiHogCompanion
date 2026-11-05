@@ -988,7 +988,7 @@ positive_tags: Gunsmith (Pistol maintenance)
         assert.ok(builderPrompt.includes('leverage_barriers MUST use individual bracket formatting: `[1. ...] [2. ...]`'), 'FAE builder prompt must instruct bracket formatting for leverage_barriers');
         assert.ok(builderPrompt.includes('mapping barrier location and protective function to target layer/pool'), 'FAE builder prompt must instruct layer/pool mapping');
         assert.ok(builderPrompt.includes('full_finish_triggers is MANDATORY for every adversary and defines the Bypass vs Total finish tradeoff'), 'FAE builder prompt must instruct full_finish_triggers requirement');
-        assert.ok(builderPrompt.includes('Bypass: Barricade the ward door (1 turn) | Total: Crack both armor layers and destroy its core'), 'FAE builder prompt template must showcase Bypass vs Total tradeoff syntax');
+        assert.ok(builderPrompt.includes('Bypass: Spend 2 Supplies & Traps to barricade the ward door (1 turn) | Total: Crack both armor layers and reduce Health to 0 to permanently destroy core'), 'FAE builder prompt template must showcase Bypass vs Total tradeoff syntax with mechanical thresholds');
         assert.ok(builderPrompt.includes('DO NOT output a `conditions:` field in [PROTAGONIST]'), 'FAE builder prompt must forbid conditions in protagonist');
         assert.ok(builderPrompt.includes('must present an immediate dilemma defining a pre-roll attrition pressure'), 'FAE builder prompt must instruct pre-roll attrition pressure in opening prompt');
     });

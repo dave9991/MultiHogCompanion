@@ -2975,7 +2975,45 @@ export function parseMarkdownToDossier(markdown) {
         if (lines.length) dossier.protagonist.gear = lines;
     }
 
-    // 6a. FAE Positive Tags & Scars
+    // 6a. FAE Resource Pools
+    const poolsSection = markdown.match(/###\s*(?:🧪\s*)?Resource Pools[^\n]*:\s*([\s\S]*?)(?=###|##|---|$)/i);
+    if (poolsSection) {
+        const lines = poolsSection[1].split('\n').map(l => l.trim()).filter(Boolean);
+        const parsedPools = {};
+        for (const l of lines) {
+            const m = l.match(/\*\s*\*\*([A-Za-z0-9\s&]+?)\s*\(([+-]?\d+)\/(\d+)\)\s*:\*\*\s*(.*)/i);
+            if (m) {
+                const rawLabel = m[1].trim();
+                const cur = parseInt(m[2], 10);
+                const max = parseInt(m[3], 10);
+                const rest = m[4];
+
+                const recM = rest.match(/Recovery via\s*[`"]?([^`"·\n]+)[`"]?/i);
+                const zdM = rest.match(/Zero Debuff:\s*["“]?([^"”·\n]+)["”]?/i);
+                const flowM = rest.match(/Overflow:\s*[`"]?([^`"·\n]+)[`"]?/i);
+
+                const key = rawLabel.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                parsedPools[key] = {
+                    key,
+                    label: rawLabel,
+                    current: isNaN(cur) ? max : cur,
+                    max: isNaN(max) ? 8 : max,
+                    recovery: recM ? recM[1].trim() : 'camp_or_sleep',
+                    zero_debuff: zdM ? zdM[1].trim() : `${rawLabel} Trauma`,
+                    on_overflow: flowM ? flowM[1].trim() : 'scar_and_ko',
+                    barColor: /body|health|phys/i.test(key) ? 'green' : /resolve|mind|spirit|sanity/i.test(key) ? 'purple' : /suppl|gear|torch|trail/i.test(key) ? 'amber' : 'blue',
+                    passive_drain: null,
+                    strain_flavor: '',
+                };
+            }
+        }
+        if (Object.keys(parsedPools).length > 0) {
+            dossier.protagonist.pools = parsedPools;
+            dossier.pools = parsedPools;
+        }
+    }
+
+    // 6b. FAE Positive Tags & Scars
     const posTagsMatch = markdown.match(/###\s*(?:🏷️\s*)?Positive Tags[^\n]*:\s*([\s\S]*?)(?=###|##|---|$)/i);
     if (posTagsMatch) {
         const lines = posTagsMatch[1].split('\n')

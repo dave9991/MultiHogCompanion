@@ -207,3 +207,66 @@ test('5. healAndNormalizeDossier supplies clean default gear without Harm for FA
         'PbtA default gear must retain authentic PbtA tags'
     );
 });
+
+test('6. parseMarkdownToDossier preserves custom Resource Pools and mergeDossierIntoLiveFaeMemo prunes stale pools', async () => {
+    const { parseMarkdownToDossier } = await import('../concierge-parser.js');
+
+    const customMd = `# 📜 CAMPAIGN DOSSIER: Mountain Outpost
+* **System Engine:** Freeform Attrition Engine (Gritty Mountain Folk) (\`custom\`)
+* **FAE Knobs:** Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko | Heroic: ON
+* **Premise:** Outpost survival against winter wraiths.
+
+---
+
+## 👤 Protagonist: Hill
+* **Archetype:** Veteran / Legend
+* **Heroic Domain:** Legend [shielding the innocent]
+
+### 🧪 Resource Pools:
+* **Body (9/9):** Recovery via \`camp_or_hot_spring\` · Zero Debuff: "Crippled" · Overflow: \`scar_and_ko\`
+* **Resolve (7/7):** Recovery via \`haven_or_specialist\` · Zero Debuff: "Numb" · Overflow: \`lethal\`
+* **Trail Supplies (6/6):** Recovery via \`forage_or_camp\` · Zero Debuff: "Freezing" · Overflow: \`scene_fail\`
+
+### 🏷️ Positive Tags (Signature Gear & Traits):
+* Mountain Stride [in blizzards]
+
+### 🩹 Scars & Debuffs:
+* (-) Frostbite
+`;
+
+    const parsed = parseMarkdownToDossier(customMd);
+    assert.ok(parsed, 'Dossier must be parsed successfully');
+    assert.deepEqual(Object.keys(parsed.protagonist.pools), ['body', 'resolve', 'trail_supplies'], 'Must accurately parse custom resource pools from markdown');
+    assert.equal(parsed.protagonist.pools.body.max, 9);
+    assert.equal(parsed.protagonist.pools.resolve.max, 7);
+    assert.equal(parsed.protagonist.pools.trail_supplies.max, 6);
+
+    // Test mergeDossierIntoLiveFaeMemo removes stale pools (like Health/Sanity) from live memo
+    const memoWithStalePools = `[TIME]
+Day 1, 08:00 AM (Morning)
+[/TIME]
+
+[LOCATION]
+The Ridge
+[/LOCATION]
+
+[CHARACTER]
+Hill (Veteran / Legend): 9/9 HP | Pool: Body (9/9) | Scenes: 0/4 | XP: 0/4
+((BARPURPLE)) Resolve: 7/7
+((BARGOLD)) Trail Supplies: 6/6
+((BARGREEN)) Health: 10/10
+((BARPURPLE)) Sanity: 8/8
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko | Tempo: slow_burn | Idle: 0t | Breather: READY | Heroic: ON
+Heroic Domain: Legend [shielding the innocent]
+((PILLS)) Positive Tags: Mountain Stride [in blizzards]
+((PILLS)) Scars & Debuffs: (-) Frostbite
+Status: Healthy
+[/CHARACTER]`;
+
+    const merged = mergeDossierIntoLiveFaeMemo(memoWithStalePools, parsed);
+    assert.ok(!merged.includes('Health: 10/10'), 'Stale Health pool must be pruned');
+    assert.ok(!merged.includes('Sanity: 8/8'), 'Stale Sanity pool must be pruned');
+    assert.ok(merged.includes('Body (9/9)'), 'Body pool must be preserved');
+    assert.ok(merged.includes('Resolve: 7/7'), 'Resolve pool must be preserved');
+    assert.ok(merged.includes('Trail Supplies: 6/6'), 'Trail Supplies pool must be preserved');
+});

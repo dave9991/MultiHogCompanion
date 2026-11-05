@@ -1080,7 +1080,20 @@ export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) 
     }
 
     // Update pool definitions without losing current depletion
-    const dossierPools = p.pools || dossier?.pools || FAE_GENRES[genreKey]?.pools || {};
+    const dossierPools = (p.pools && Object.keys(p.pools).length > 0)
+        ? p.pools
+        : ((dossier?.pools && Object.keys(dossier.pools).length > 0) ? dossier.pools : (FAE_GENRES[genreKey]?.pools || {}));
+
+    // If dossier specifies explicit pools, prune any stale pools in activeState that are NOT in the dossier
+    const explicitDossierPoolKeys = new Set(Object.keys(dossierPools));
+    if (explicitDossierPoolKeys.size > 0) {
+        for (const existingKey of Object.keys(nextState.pools)) {
+            if (!explicitDossierPoolKeys.has(existingKey)) {
+                delete nextState.pools[existingKey];
+            }
+        }
+    }
+
     for (const [key, dPool] of Object.entries(dossierPools)) {
         if (!dPool) continue;
         if (nextState.pools[key]) {

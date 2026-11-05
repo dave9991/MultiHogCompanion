@@ -78,6 +78,7 @@ import {
     parseMarkdownToDossier,
     validateDraft,
     isDossierEmptyOrUntouched,
+    isDefaultUntitledCampaignTitle,
     escapeHtml,
     buildAxiomCardHtml,
 } from './concierge-parser.js';
@@ -1229,8 +1230,9 @@ async function handleUserSend() {
     // Format LLM message payload
     let userMsgLlmContent;
     if (imagePayload) {
+        const rulesetLabel = activeDossier?.meta?.ruleset === 'fae' ? 'FAE' : 'PbtA';
         userMsgLlmContent = [
-            { type: 'text', text: fullUserText || 'Please analyze this inspiration image for our PbtA campaign.' },
+            { type: 'text', text: fullUserText || `Please analyze this inspiration image for our ${rulesetLabel} campaign.` },
             imagePayload,
         ];
     } else {
@@ -1423,7 +1425,7 @@ async function handleUserSend() {
                 }
                 currentBuilderMessages = [
                     ...builderMessages,
-                    { role: 'assistant', name: 'PbtA_Builder', content: clipRetryEcho(builderRawResponse) },
+                    { role: 'assistant', name: 'Concierge_Builder', content: clipRetryEcho(builderRawResponse) },
                     {
                         role: 'system',
                         name: 'System',
@@ -1436,7 +1438,7 @@ async function handleUserSend() {
                 }
                 currentBuilderMessages = [
                     ...builderMessages,
-                    { role: 'assistant', name: 'PbtA_Builder', content: clipRetryEcho(builderRawResponse) },
+                    { role: 'assistant', name: 'Concierge_Builder', content: clipRetryEcho(builderRawResponse) },
                     {
                         role: 'system',
                         name: 'System',
@@ -1936,7 +1938,7 @@ export async function updateSyncButtonState(targetChatId = null) {
 export async function refreshConciergeActiveContext(targetChatId = null) {
     try {
         const activeRunning = await loadActiveCampaignDossier(targetChatId);
-        if (activeRunning?.meta?.title && activeRunning.meta.title !== 'Untitled PbtA Campaign') {
+        if (activeRunning?.meta?.title && !isDefaultUntitledCampaignTitle(activeRunning.meta.title)) {
             const shortTitle = activeRunning.meta.title.length > 20 ? `${activeRunning.meta.title.slice(0, 18)}...` : activeRunning.meta.title;
             $('#mhc_load_active_campaign_btn')
                 .attr('title', `Active campaign "${activeRunning.meta.title}" detected in this chat! Click to pull into Session Zero.`)
@@ -2234,7 +2236,7 @@ function bindModalEvents() {
 
     // Campaign Title manual edit interaction
     $('#mhc_deck_edit_title_btn, #mhc_deck_campaign_title').on('click', () => {
-        const currentTitle = activeDossier.meta?.title === 'Untitled PbtA Campaign' ? '' : (activeDossier.meta?.title || '');
+        const currentTitle = isDefaultUntitledCampaignTitle(activeDossier.meta?.title) ? '' : (activeDossier.meta?.title || '');
         const newTitle = window.prompt('Enter campaign title (2-3 words recommended):', currentTitle);
         if (newTitle !== null) {
             const clean = newTitle.trim().replace(/[\\/:*?"<>|]/g, '');

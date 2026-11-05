@@ -13,6 +13,16 @@ import './concierge-system-pbta.js';
 import './concierge-system-fae.js';
 
 /**
+ * Checks if a given campaign title matches any default placeholder (e.g. Untitled PbtA Campaign, Untitled FAE Campaign).
+ * @param {string|null|undefined} title
+ * @returns {boolean}
+ */
+export function isDefaultUntitledCampaignTitle(title) {
+    if (!title || typeof title !== 'string') return true;
+    return /^Untitled(?:\s+[A-Za-z0-9_-]+)?\s+Campaign$/i.test(title.trim());
+}
+
+/**
  * Creates a clean default Campaign Dossier object.
  * Delegates ruleset-specific protagonist, config, and pool scaffolding to the active system adapter.
  *
@@ -3296,7 +3306,7 @@ export function parseMarkdownToDossier(markdown) {
         }
     }
 
-    const isValid = Boolean(dossier.protagonist.name || dossier.meta.title !== 'Untitled PbtA Campaign' || (dossier.worldRules?.axioms && dossier.worldRules.axioms.length > 0));
+    const isValid = Boolean(dossier.protagonist.name || !isDefaultUntitledCampaignTitle(dossier.meta?.title) || (dossier.worldRules?.axioms && dossier.worldRules.axioms.length > 0));
     return isValid ? healAndNormalizeDossier(dossier, markdown) : null;
 }
 

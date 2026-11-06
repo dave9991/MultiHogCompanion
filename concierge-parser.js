@@ -11,6 +11,7 @@ import { stripThinkingContent } from './concierge-connection.js';
 import { systemRegistry } from './concierge-system-registry.js';
 import './concierge-system-pbta.js';
 import './concierge-system-fae.js';
+import { DND5E_GENRES } from './concierge-system-dnd5e.js';
 
 /**
  * Checks if a given campaign title matches any default placeholder (e.g. Untitled PbtA Campaign, Untitled FAE Campaign).
@@ -943,6 +944,21 @@ function matchDossierSectionBlocks(raw, tagRegexStr, closeTagRegexStr) {
     return results;
 }
 
+/**
+ * Narrow repair for a known LLM slip: a section closer emitted WITHOUT brackets on its own line
+ * (e.g. a bare `/protagonist` instead of `[/PROTAGONIST]`). Only whole-line, known-tag closers are
+ * rewritten, so prose, values like "12/12", and every other engine's blocks are untouched.
+ * @param {string} text
+ * @returns {string}
+ */
+export function normalizeMalformedDossierClosers(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text.replace(
+        /^[ \t]*\/(PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|CYOA|CONFIG|CONTEMPLATION|WORLD_RULES?|CUSTOM_MODULE)[ \t]*$/gim,
+        (_, tag) => `[/${tag.toUpperCase()}]`,
+    );
+}
+
 export function applyDossierUpdates(text, dossier) {
     const fallbackResult = {
         success: true,
@@ -958,7 +974,7 @@ export function applyDossierUpdates(text, dossier) {
     if (!text || typeof text !== 'string') return fallbackResult;
 
     // Strip any closed <think>...</think> blocks before parsing directives
-    const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const cleanedText = normalizeMalformedDossierClosers(text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim());
     if (!cleanedText) return fallbackResult;
 
     // 0. Check for explicit NOOP (standalone line-start [NOOP] or explicitly closed [NOOP]...[/NOOP])
@@ -1088,7 +1104,7 @@ export function applyDossierUpdates(text, dossier) {
     const rulesetMatch = topLevelRaw.match(/ruleset\s*:\s*([^\n\r]+)/i);
     if (rulesetMatch) {
         const rVal = rulesetMatch[1].trim().toLowerCase();
-        if (rVal === 'fae' || rVal === 'pbta') {
+        if (rVal === 'fae' || rVal === 'pbta' || rVal === 'dnd5e') {
             if (updated.meta.ruleset !== rVal) {
                 updated.meta.ruleset = rVal;
                 changes.push(`Ruleset set to ${rVal.toUpperCase()}`);
@@ -1146,6 +1162,17 @@ export function applyDossierUpdates(text, dossier) {
                 updated.meta.systemKey = customKey;
                 updated.meta.systemLabel = customLabel;
             }
+        } else if (updated.meta?.ruleset === 'dnd5e' || (DND5E_GENRES && DND5E_GENRES[normalizeSystemKey(rawKey)]) || normalizeSystemKey(rawKey) === 'dnd5e') {
+            let key = normalizeSystemKey(rawKey);
+            if (key === 'dnd5e' || !DND5E_GENRES?.[key]) key = 'fantasy';
+            updated.meta.ruleset = 'dnd5e';
+            updated.meta.genreEstablished = true;
+            const nextLabel = sysLabelMatch ? sysLabelMatch[1].trim() : (DND5E_GENRES?.[key]?.label || 'High Fantasy');
+            if (updated.meta.systemKey !== key || updated.meta.systemLabel !== nextLabel) {
+                updated.meta.systemKey = key;
+                updated.meta.systemLabel = nextLabel;
+                changes.push(`D&D 5e Genre set to ${nextLabel} (${key})`);
+            }
         } else {
             const key = normalizeSystemKey(rawKey);
             if (key && PBTA_GENRES[key]) {
@@ -1202,7 +1229,7 @@ export function applyDossierUpdates(text, dossier) {
         const newPremise = premiseMatch[1].trim().replace(/^(\*\*|__)(.*?)\1$/, '$2');
         if (newPremise && updated.meta.premise !== newPremise) {
             updated.meta.premise = newPremise;
-            if (!updated.meta.title || /^Untitled\s+(PbtA|FAE)\s+Campaign$/i.test(updated.meta.title)) {
+            if (!updated.meta.title || isDefaultUntitledCampaignTitle(updated.meta.title)) {
                 updated.meta.title = newPremise.slice(0, 40) + '...';
             }
             changes.push(`Premise updated: "${newPremise}"`);
@@ -1227,11 +1254,30 @@ export function applyDossierUpdates(text, dossier) {
             changes.push(`Protagonist name: "${kv.name}" (was "${updated.protagonist.name || 'Unnamed'}")`);
             updated.protagonist.name = kv.name;
         }
-        const archVal = kv.archetype || kv.playbook;
-        if (archVal && (updated.protagonist.playbook !== archVal || updated.protagonist.archetype !== archVal)) {
-            changes.push(`Protagonist archetype/playbook: "${archVal}" (was "${updated.protagonist.archetype || updated.protagonist.playbook || 'None'}")`);
+        const archVal = kv.archetype || kv.playbook || kv.class || kv.character_class;
+        if (archVal && (updated.protagonist.playbook !== archVal || updated.protagonist.archetype !== archVal || updated.protagonist.class !== archVal)) {
+            changes.push(`Protagonist archetype/class: "${archVal}" (was "${updated.protagonist.archetype || updated.protagonist.playbook || updated.protagonist.class || 'None'}")`);
             updated.protagonist.playbook = archVal;
             updated.protagonist.archetype = archVal;
+            updated.protagonist.class = archVal;
+        }
+        if (kv.class) {
+            updated.protagonist.class = kv.class.trim();
+        }
+        if (kv.ac) {
+            const parsedAc = parseInt(kv.ac, 10);
+            if (!isNaN(parsedAc)) {
+                updated.protagonist.ac = parsedAc;
+            }
+        }
+        if (kv.hp) {
+            const hpMatch = String(kv.hp).match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (hpMatch) {
+                updated.protagonist.hp = { current: parseInt(hpMatch[1], 10), max: parseInt(hpMatch[2], 10) };
+            } else if (!isNaN(parseInt(kv.hp, 10))) {
+                const hVal = parseInt(kv.hp, 10);
+                updated.protagonist.hp = { current: hVal, max: hVal };
+            }
         }
         if (kv.bio && updated.protagonist.bio !== kv.bio) {
             updated.protagonist.bio = kv.bio;
@@ -1336,6 +1382,18 @@ export function applyDossierUpdates(text, dossier) {
         if (moves.length && updated.meta?.ruleset !== 'fae') {
             updated.protagonist.startingMoves = moves;
             changes.push(`Protagonist moves updated (${moves.length} moves registered)`);
+        }
+
+        const features = parseBulletOrListItems(pBlock, 'features', { splitCommas: false });
+        if (features.length) {
+            updated.protagonist.features = features;
+            changes.push(`Protagonist features updated (${features.length} features registered)`);
+        }
+
+        const abilities = parseBulletOrListItems(pBlock, 'abilities', { splitCommas: false });
+        if (abilities.length) {
+            updated.protagonist.abilities = abilities;
+            changes.push(`Protagonist abilities updated (${abilities.length} abilities registered)`);
         }
 
         const gearList = parseBulletOrListItems(pBlock, 'gear', { splitCommas: true });

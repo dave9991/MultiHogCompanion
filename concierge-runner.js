@@ -11,7 +11,7 @@
  * 6. Drops the player into the fiction with Turn 0 opening scene
  */
 
-import { serializeDossierToMarkdown } from './concierge-parser.js';
+import { serializeDossierToMarkdown, isDefaultUntitledCampaignTitle } from './concierge-parser.js';
 import { formatInitialPbtaMemo } from './pbta-ruleset.js';
 import { formatInitialFaeMemo } from './fae-state-sync.js';
 import { buildFaeCartridge } from './fae-ruleset.js';
@@ -19,6 +19,7 @@ import { getStagedCanonEntries, writeStagedCanon } from './concierge-canon.js';
 import { systemRegistry } from './concierge-system-registry.js';
 import './concierge-system-pbta.js';
 import './concierge-system-fae.js';
+import './concierge-system-dnd5e.js';
 import {
     loadMainNpcSectionNames,
     buildNpcEntryContent,
@@ -428,7 +429,21 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
     const dossier = healAndNormalizeDossier(rawDossier);
     const systemKey = dossier.meta?.systemKey || 'fantasy';
     const charName = (dossier.protagonist?.name || '').trim();
-    const adventureTitle = (dossier.meta?.title || '').trim();
+    let adventureTitle = (dossier.meta?.title || '').trim();
+    if (!adventureTitle || isDefaultUntitledCampaignTitle(adventureTitle)) {
+        const loc = (dossier.maps?.[0]?.name || dossier.theKick?.startingLocation || '').trim();
+        if (charName && loc) {
+            adventureTitle = `${charName} - ${loc}`;
+        } else if (charName) {
+            adventureTitle = `${charName}'s Adventure`;
+        } else if (dossier.meta?.premise) {
+            adventureTitle = dossier.meta.premise.slice(0, 40).trim();
+        }
+        if (adventureTitle) {
+            dossier.meta = dossier.meta || {};
+            dossier.meta.title = adventureTitle;
+        }
+    }
 
     try {
         // ── 0. Optional Fresh Wipe / Lorebook Purge ────────────────────────────
@@ -774,6 +789,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                     rpgSettings.chatStates[chatId].currentMemo = initialMemo;
                     rpgSettings.chatStates[chatId].campaignDossier = dossier;
                     rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
+                    rpgSettings.chatStates[chatId].companionDossier = dossier;
                     rpgSettings.chatStates[chatId].simulationDepth = simDepth;
                     rpgSettings.chatStates[chatId].worldProgressionEnabled = rpgSettings.worldProgressionEnabled;
                     rpgSettings.chatStates[chatId].mapEvolutionEnabled = rpgSettings.mapEvolutionEnabled;
@@ -933,7 +949,21 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
     const dossier = healAndNormalizeDossier(rawDossier);
     const systemKey = dossier.meta?.systemKey || 'fantasy';
     const charName = (dossier.protagonist?.name || '').trim();
-    const adventureTitle = (dossier.meta?.title || '').trim();
+    let adventureTitle = (dossier.meta?.title || '').trim();
+    if (!adventureTitle || isDefaultUntitledCampaignTitle(adventureTitle)) {
+        const loc = (dossier.maps?.[0]?.name || dossier.theKick?.startingLocation || '').trim();
+        if (charName && loc) {
+            adventureTitle = `${charName} - ${loc}`;
+        } else if (charName) {
+            adventureTitle = `${charName}'s Adventure`;
+        } else if (dossier.meta?.premise) {
+            adventureTitle = dossier.meta.premise.slice(0, 40).trim();
+        }
+        if (adventureTitle) {
+            dossier.meta = dossier.meta || {};
+            dossier.meta.title = adventureTitle;
+        }
+    }
     
     // Robust active chat ID resolution matching framework & companion conventions
     const chatId = String(

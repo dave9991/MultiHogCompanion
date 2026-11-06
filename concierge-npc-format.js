@@ -137,7 +137,34 @@ export function buildNpcEntryContent(npc, names = FALLBACK_SECTION_NAMES) {
 export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES, options = {}) {
     const ruleset = (typeof options === 'string' ? options : options?.ruleset)
         || monster?.ruleset
-        || ((monster?.threatLevel !== undefined || monster?.threat !== undefined || monster?.instinct || monster?.pressures || monster?.poolsAtRisk) ? 'fae' : 'pbta');
+        || ((monster?.threatLevel !== undefined || monster?.threat !== undefined || monster?.instinct || monster?.pressures || monster?.poolsAtRisk) ? 'fae' : (monster?.cr !== undefined || monster?.challenge !== undefined || (monster?.hp?.max && monster?.ac) ? 'dnd5e' : 'pbta'));
+
+    if (ruleset === 'dnd5e') {
+        const hpMax = Math.max(1, parseInt(monster.hp?.max ?? (typeof monster.hp === 'string' && monster.hp.includes('/') ? monster.hp.split('/')[1] : monster.hp), 10) || 15);
+        const hpCur = Math.max(0, parseInt(monster.hp?.current ?? (typeof monster.hp === 'string' && monster.hp.includes('/') ? monster.hp.split('/')[0] : hpMax), 10));
+        const ac = parseInt(monster.ac, 10) || 12;
+        const cr = monster.cr || monster.challenge || '1/2';
+        const attacks = Array.isArray(monster.attacks)
+            ? monster.attacks
+            : (monster.actions ? (Array.isArray(monster.actions) ? monster.actions : [monster.actions]) : []);
+        const status = monster.status ? monster.status.trim() : (hpCur < hpMax ? '(-) Wounded' : 'Healthy');
+
+        const combatLines = [
+            `${monster.name}: ${hpCur}/${hpMax} HP | AC: ${ac} | CR: ${cr}`,
+            attacks.length ? `((PILLS)) Attacks: ${attacks.join(', ')}` : '',
+            monster.weakness && monster.weakness !== 'Unknown' ? `((PILLS)) Weakness: ${monster.weakness}` : '',
+            `Status: ${status}`,
+        ].filter(Boolean);
+
+        const core = assembleCore({
+            sec_background: monster.notes ? `D&D 5e adversary. ${monster.notes}` : 'D&D 5e adversary.',
+            sec_strengths: attacks.length ? `\n${bullets(attacks)}` : '',
+            sec_flaws: monster.weakness && monster.weakness !== 'Unknown' ? `\n${bullets([monster.weakness])}` : '',
+            sec_combat_profile: `\n${combatLines.join('\n')}`,
+        }, names);
+
+        return { core, full: core };
+    }
 
     if (ruleset === 'fae') {
         const rawLayers = Math.max(1, parseInt(monster.layers ?? monster.barriers ?? monster.harm?.max ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[1] : monster.harm), 10) || 2);

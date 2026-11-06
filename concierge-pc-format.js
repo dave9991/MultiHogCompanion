@@ -124,8 +124,9 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES, op
     const n = names || FALLBACK_PC_SECTION_NAMES;
     const ruleset = (typeof options === 'string' ? options : options?.ruleset)
         || p?.ruleset
-        || ((p?.positiveTags || p?.positive_tags || p?.heroicDomain || p?.heroic_domain) ? 'fae' : 'pbta');
+        || ((p?.positiveTags || p?.positive_tags || p?.heroicDomain || p?.heroic_domain) ? 'fae' : (p?.hitDie || p?.class ? 'dnd5e' : 'pbta'));
     const isFae = ruleset === 'fae';
+    const isDnd = ruleset === 'dnd5e';
 
     // Check if protagonist.bio is already pre-structured with section headers
     const existing = extractExistingSections(p.bio || '');
@@ -208,6 +209,15 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES, op
             } else {
                 strVal = '\n- Resilient and adaptable under pressure.';
             }
+        } else if (isDnd) {
+            const feats = Array.isArray(p.features) ? p.features : [];
+            const abs = Array.isArray(p.abilities) ? p.abilities : [];
+            const all = [...feats, ...abs];
+            if (all.length) {
+                strVal = `\n${bullets(all)}`;
+            } else {
+                strVal = '\n- Resilient and adaptable adventurer.';
+            }
         } else {
             const moves = Array.isArray(p.startingMoves) && p.startingMoves.length
                 ? p.startingMoves
@@ -241,6 +251,15 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES, op
                 flawsVal = `\n${bullets(flawsItems)}`;
             } else {
                 flawsVal = '\n- Bound by obligations that leave little room for error.';
+            }
+        } else if (isDnd) {
+            const flawsItems = Array.isArray(p.flaws) && p.flaws.length
+                ? p.flaws
+                : (p.flaw ? [p.flaw] : (Array.isArray(p.conditions) && p.conditions.length ? p.conditions : []));
+            if (flawsItems.length) {
+                flawsVal = `\n${bullets(flawsItems)}`;
+            } else {
+                flawsVal = '\n- Bound by heroic code or personal vulnerabilities.';
             }
         } else {
             const conds = Array.isArray(p.conditions) && p.conditions.length

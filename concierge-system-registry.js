@@ -89,7 +89,17 @@ class ConciergeSystemRegistry {
             return 'fae';
         }
 
-        // 3. Check systemKey if meta.ruleset was unset
+        // 3. D&D 5e (D&D Lite) structural markers
+        if (
+            dossier.progressionBlueprint ||
+            p.hitDie ||
+            (p.stats && (p.stats.STR !== undefined || p.stats.DEX !== undefined || p.stats.CON !== undefined) && !Array.isArray(p.startingMoves) && !dossier.config?.harmMax) ||
+            (dossier.meta?.ruleset === 'dnd5e')
+        ) {
+            return 'dnd5e';
+        }
+
+        // 4. Check systemKey if meta.ruleset was unset
         const sysKey = (dossier.meta?.systemKey || '').toLowerCase();
         if (sysKey) {
             for (const adapter of this.#systems.values()) {

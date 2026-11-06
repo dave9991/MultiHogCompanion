@@ -5,7 +5,7 @@
  * Renders in-drawer progression roadmap and archetype controls across:
  * - D&D 5e (D&D Lite): Single-track 1–20 tier table, Hit Die selector, ability routing badges.
  * - PbtA: Playbook starting moves vs advance matrix, stat arrays, and Harm capacity.
- * - FAE: Approach ladder (+3 to +0), Resource Pool tuning, positive tags, and milestone track.
+ * - FAE: Resource Pools, positive tags & scars, heroic domain, and 4-scene milestone pacing (no approach ladder in this engine).
  *
  * [CATALOG: FEAT-02] See FEATURES.md — Concierge Session Zero & Living World Dossier
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
@@ -332,7 +332,7 @@ function renderPbtaProgression($container, dossier, onUpdate) {
 }
 
 /**
- * Renders FAE Approach Ladder & Milestone Desk view.
+ * Renders FAE Resource Pools, Positive Tags & Milestone Desk view.
  */
 function renderFaeProgression($container, dossier, onUpdate) {
     const p = dossier.protagonist || {};

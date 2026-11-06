@@ -113,7 +113,7 @@ test('Progression Codex: Renders PbtA Playbook Moves and Advance Matrix', () => 
     assert.ok(renderedHtml.includes('Playbook Advances'), 'Contains advances section');
 });
 
-test('Progression Codex: Renders FAE Approach Ladder, Resource Pools, and Tags', () => {
+test('Progression Codex: Renders FAE Resource Pools, Positive Tags, and Milestone Desk', () => {
     const dossier = createEmptyDossier('fae');
     dossier.protagonist = {
         name: 'Lyra',

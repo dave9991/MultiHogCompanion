@@ -1,0 +1,201 @@
+{
+  "storageKey": "mhc_concierge_draft_fae",
+  "draft": {
+    "dossier": {
+      "meta": {
+        "title": "The Hollow Light",
+        "ruleset": "fae",
+        "systemKey": "cosmic_horror",
+        "systemLabel": "Cosmic Horror Investigation (1920s Cthulhu / Caves of Madness)",
+        "genreEstablished": true,
+        "premise": "A lantern warden descends into a drowned chapel where the light has begun to answer back.",
+        "tone": "Creeping dread and candlelit stone",
+        "createdAt": 1793980279154
+      },
+      "protagonist": {
+        "name": "Ines",
+        "playbook": "",
+        "species": "",
+        "appearance": "",
+        "equipment": "",
+        "personality": "",
+        "background": "",
+        "habits": "",
+        "heroicDomain": null,
+        "stats": {},
+        "startingMoves": [],
+        "positiveTags": [
+          "Lantern Warden [when guarding a threshold]",
+          "Trained Archivist [for forbidden texts]",
+          "Steady Hands [when handling fragile relics]"
+        ],
+        "negativeTags": [
+          "Scar: Hollow Tinnitus"
+        ],
+        "pools": {
+          "health": {
+            "key": "health",
+            "label": "Health",
+            "barColor": "green",
+            "current": 8,
+            "max": 8,
+            "recovery": "camp_or_sleep",
+            "passive_drain": null,
+            "strain_flavor": "bruised ribs, winded breath, and grazing blows",
+            "zero_debuff": "Crippled & Bleeding",
+            "on_overflow": "scar_and_ko"
+          },
+          "sanity": {
+            "key": "sanity",
+            "label": "Sanity",
+            "barColor": "purple",
+            "current": 8,
+            "max": 8,
+            "recovery": "haven_or_specialist",
+            "passive_drain": {
+              "trigger": "day_pass",
+              "amount": 1,
+              "reason": "The oppressive psychic resonance erodes your mind each day."
+            },
+            "strain_flavor": "creeping dread, cold sweat, and sensory static",
+            "zero_debuff": "Manic Dissociation",
+            "on_overflow": "lethal"
+          }
+        },
+        "harm": {
+          "max": 5,
+          "current": 0,
+          "armor": 0
+        },
+        "conditions": [],
+        "status": "",
+        "gear": [
+          "Essential explorer kit",
+          "Signature tool or weapon"
+        ],
+        "bio": "",
+        "portraitSrc": null,
+        "gender": "female"
+      },
+      "npcs": [],
+      "monsters": [],
+      "maps": [
+        {
+          "site": "The Drowned Chapel",
+          "kind": "DUNGEON",
+          "threat": "MODERATE",
+          "entrance": "Flooded Nave",
+          "prompt": "",
+          "briefDescription": "A half-sunk chapel whose bells ring under the water.",
+          "status": "queued"
+        }
+      ],
+      "factions": [],
+      "theKick": {
+        "startingLocation": "The Drowned Chapel",
+        "crisis": "The chapel's light has started repeating the warden's words.",
+        "openingPrompt": ""
+      },
+      "cyoaExamples": [],
+      "worldRules": {
+        "axioms": [],
+        "customModule": null
+      },
+      "contemplation": {
+        "coreTension": "",
+        "worldConsequences": "",
+        "webOfEntanglement": "",
+        "kickPressure": ""
+      },
+      "config": {
+        "playstyle": "cyoa_5",
+        "cyoaEmojis": true,
+        "harmMax": 5,
+        "partyMode": "solo",
+        "artStyle": "",
+        "pacingXp": 5,
+        "simulationDepth": "active_fronts",
+        "relationships": false,
+        "maxHarmFate": {
+          "rule": "Mortal Peril (Last Breath / Dying)",
+          "statusToken": "(-) Incapacitated",
+          "cyoaStyle": "crisis"
+        },
+        "actionTempo": "slow_burn",
+        "heroicTier": false,
+        "knobs": {
+          "flee_grace_toggle": true,
+          "base_attrition_shift": 0,
+          "overflow_default": "lethal",
+          "action_tempo": "slow_burn",
+          "heroic_tier": false
+        },
+        "pacingScenes": 4,
+        "heroic_tier": false
+      },
+      "pools": {
+        "health": {
+          "key": "health",
+          "label": "Health",
+          "barColor": "green",
+          "current": 8,
+          "max": 8,
+          "recovery": "camp_or_sleep",
+          "passive_drain": null,
+          "strain_flavor": "bruised ribs, winded breath, and grazing blows",
+          "zero_debuff": "Crippled & Bleeding",
+          "on_overflow": "scar_and_ko"
+        },
+        "sanity": {
+          "key": "sanity",
+          "label": "Sanity",
+          "barColor": "purple",
+          "current": 8,
+          "max": 8,
+          "recovery": "haven_or_specialist",
+          "passive_drain": {
+            "trigger": "day_pass",
+            "amount": 1,
+            "reason": "The oppressive psychic resonance erodes your mind each day."
+          },
+          "strain_flavor": "creeping dread, cold sweat, and sensory static",
+          "zero_debuff": "Manic Dissociation",
+          "on_overflow": "lethal"
+        }
+      },
+      "knobs": {
+        "flee_grace_toggle": true,
+        "base_attrition_shift": 0,
+        "overflow_default": "lethal",
+        "action_tempo": "slow_burn",
+        "heroic_tier": false
+      },
+      "character": {
+        "name": "Ines",
+        "archetype": "The Antiquarian",
+        "heroic_domain": null,
+        "positive_tags": [
+          "Lantern Warden [when guarding a threshold]",
+          "Trained Archivist [for forbidden texts]",
+          "Steady Hands [when handling fragile relics]"
+        ],
+        "negative_tags": [
+          "Scar: Hollow Tinnitus"
+        ],
+        "scenes_completed": 0,
+        "scenes_target": 4
+      }
+    },
+    "chatHistory": [],
+    "changelog": [],
+    "originChatId": null,
+    "originCampaignTitle": null,
+    "timestamp": 1793980279162
+  },
+  "expected": {
+    "name": "Ines",
+    "title": "The Hollow Light",
+    "location": "The Drowned Chapel",
+    "initialMemo": "[TIME]\nDay 1, 08:00 AM (Morning)\n[/TIME]\n\n[LOCATION]\nThe Drowned Chapel\n[/LOCATION]\n\n[CHARACTER]\nInes (The Antiquarian): 8/8 HP | Pool: Health (8/8) | Scenes: 0/4 | XP: 0/4\n((BARPURPLE)) Sanity: 8/8\nFAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: lethal | Tempo: slow_burn | Idle: 0t | Breather: READY\n((PILLS)) Positive Tags: Lantern Warden [when guarding a threshold] (Positive Tag), Trained Archivist [for forbidden texts] (Positive Tag), Steady Hands [when handling fragile relics] (Positive Tag)\n((PILLS)) Scars & Debuffs: (-) Scar (Hollow Tinnitus)\nStatus: (-) Strained & Injured\n[/CHARACTER]\n\n[DUNGEON]\nActive Site: The Drowned Chapel\nThreat: MODERATE\n[/DUNGEON]\n\n[COMBAT]\nActive: false\n[/COMBAT]"
+  }
+}

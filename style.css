@@ -1391,7 +1391,8 @@
     color: #fff !important;
 }
 
-#mhc-level-up-modal .mhc-blueprint-table-container {
+#mhc-level-up-modal .mhc-blueprint-table-container,
+#mhc_concierge_modal .mhc-blueprint-table-container {
     max-height: 250px;
     overflow-y: auto;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1399,14 +1400,16 @@
     background: rgba(0, 0, 0, 0.25);
 }
 
-#mhc-level-up-modal .mhc-blueprint-table {
+#mhc-level-up-modal .mhc-blueprint-table,
+#mhc_concierge_modal .mhc-blueprint-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.84em;
     text-align: left;
 }
 
-#mhc-level-up-modal .mhc-blueprint-table th {
+#mhc-level-up-modal .mhc-blueprint-table th,
+#mhc_concierge_modal .mhc-blueprint-table th {
     background: #18191c;
     color: #94a3b8;
     padding: 7px 10px;
@@ -1417,28 +1420,33 @@
     z-index: 2;
 }
 
-#mhc-level-up-modal .mhc-blueprint-table td {
+#mhc-level-up-modal .mhc-blueprint-table td,
+#mhc_concierge_modal .mhc-blueprint-table td {
     padding: 6px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     vertical-align: middle;
 }
 
-#mhc-level-up-modal .mhc-blueprint-row:hover {
+#mhc-level-up-modal .mhc-blueprint-row:hover,
+#mhc_concierge_modal .mhc-blueprint-row:hover {
     background: rgba(255, 255, 255, 0.025);
 }
 
-#mhc-level-up-modal .mhc-row-current {
+#mhc-level-up-modal .mhc-row-current,
+#mhc_concierge_modal .mhc-row-current {
     background: rgba(59, 130, 246, 0.12) !important;
     border-left: 3px solid #3b82f6;
 }
 
-#mhc-level-up-modal .mhc-td-lvl {
+#mhc-level-up-modal .mhc-td-lvl,
+#mhc_concierge_modal .mhc-td-lvl {
     font-weight: 600;
     color: #e2e8f0;
     white-space: nowrap;
 }
 
-#mhc-level-up-modal .mhc-tag-current {
+#mhc-level-up-modal .mhc-tag-current,
+#mhc_concierge_modal .mhc-tag-current {
     font-size: 0.7em;
     background: #2563eb;
     color: #fff;
@@ -1447,14 +1455,28 @@
     margin-left: 4px;
 }
 
-#mhc-level-up-modal .mhc-td-prof {
+#mhc-level-up-modal .mhc-td-prof,
+#mhc_concierge_modal .mhc-td-prof {
     color: #38bdf8;
     font-weight: 600;
 }
 
-#mhc-level-up-modal .mhc-td-feats {
+#mhc-level-up-modal .mhc-td-feats,
+#mhc_concierge_modal .mhc-td-feats {
     line-height: 1.4;
     color: #cbd5e1;
+}
+
+.mhc-mode-nav-btn {
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.mhc-mode-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #e2e8f0 !important;
+}
+.mhc-mode-nav-btn.active {
+    background: rgba(59, 130, 246, 0.35) !important;
+    color: #93c5fd !important;
 }
 
 #mhc-level-up-modal .mhc-table-milestone {

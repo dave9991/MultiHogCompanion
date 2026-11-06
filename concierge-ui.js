@@ -97,8 +97,10 @@ import {
     isFaeActive,
 } from './pbta-ruleset-persistence.js';
 import { systemRegistry } from './concierge-system-registry.js';
+import { renderProgressionArchitect } from './progression-architect-ui.js';
 import './concierge-system-pbta.js';
 import './concierge-system-fae.js';
+import './concierge-system-dnd5e.js';
 let extension_settings = globalThis.extension_settings || {};
 try {
     const extModule = await import('../../../extensions.js');
@@ -390,15 +392,15 @@ export function switchRulesetMode(newRuleset = 'pbta', newGenreKey = null) {
         return;
     }
 
-    const isFae = newRuleset === 'fae';
-    const defaultGenre = isFae ? (newGenreKey || 'cosmic_horror') : (newGenreKey || 'fantasy');
+    const adapter = systemRegistry.get(newRuleset);
+    const defaultGenre = newGenreKey || adapter.getDefaultGenre();
     activeDossier = createEmptyDossier(newRuleset, newGenreKey);
     chatHistory = [];
     $('#mhc_chat_messages').empty();
-    changelog.push(`Switched ruleset mode to ${newRuleset.toUpperCase()} (${activeDossier.meta?.systemKey || defaultGenre})`);
+    changelog.push(`Switched ruleset mode to ${adapter.label} (${activeDossier.meta?.systemKey || defaultGenre})`);
     updateBlueprintDeck();
     saveDraft();
-    const modeLabel = isFae ? 'Freeform Attrition Engine (4dF)' : 'Powered by the Apocalypse (2d6)';
+    const modeLabel = `${adapter.label} (${adapter.diceEngine})`;
     appendChatBubble(
         'assistant',
         `Switched Session Zero mode to **${modeLabel}** (${activeDossier.meta?.systemLabel || defaultGenre}). What kind of adventure or setting would you like to build?`
@@ -451,10 +453,13 @@ function updateBlueprintDeck() {
                     if (typeof $(this).toggleClass === 'function') $(this).toggleClass('active', active);
                     if (typeof $(this).css === 'function') {
                         if (active) {
-                            $(this).css(adapter.id === 'fae'
-                                ? { background: 'rgba(245, 158, 11, 0.35)', color: '#fde68a' }
-                                : { background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' }
-                            );
+                            let activeStyle = { background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' };
+                            if (adapter.id === 'fae') {
+                                activeStyle = { background: 'rgba(245, 158, 11, 0.35)', color: '#fde68a' };
+                            } else if (adapter.id === 'dnd5e') {
+                                activeStyle = { background: 'rgba(217, 119, 6, 0.35)', color: '#fbbf24' };
+                            }
+                            $(this).css(activeStyle);
                         } else {
                             $(this).css({ background: 'transparent', color: '#9ca3af' });
                         }
@@ -1827,8 +1832,21 @@ export async function loadActiveCampaignDossier(targetChatId = null) {
 
     // 2. Check candidate chatStates partitions in memory
     for (const cid of candidateIds) {
+        if (rpgSettings?.chatStates?.[cid]?.companionDossier) {
+            return healAndNormalizeDossier(rpgSettings.chatStates[cid].companionDossier);
+        }
         if (rpgSettings?.chatStates?.[cid]?.pbtaCampaignDossier) {
             return healAndNormalizeDossier(rpgSettings.chatStates[cid].pbtaCampaignDossier);
+        }
+    }
+
+    const compSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
+        || globalThis.extension_settings?.multihog_companion;
+    if (compSettings?.chatStates) {
+        for (const cid of candidateIds) {
+            if (compSettings.chatStates[cid]?.companionDossier) {
+                return healAndNormalizeDossier(compSettings.chatStates[cid].companionDossier);
+            }
         }
     }
 
@@ -1999,7 +2017,31 @@ export function setConciergeTab(tabId = 'cards') {
 
     if (tabId === 'debug') {
         renderDebugInspectorView();
+    } else if (tabId === 'progression') {
+        renderProgressionTabView();
+    } else if (tabId === 'raw') {
+        $('#mhc_raw_markdown_text').val(serializeDossierToMarkdown(activeDossier));
     }
+}
+
+/**
+ * Renders the polymorphic Progression Codex & Archetype Architect view inside the Progression tab.
+ */
+export function renderProgressionTabView() {
+    const modal = typeof globalThis.$ === 'function' ? globalThis.$('#mhc_concierge_modal') : null;
+    if (!modal || !modal.length) return;
+    const container = modal.find('#mhc_progression_tab_mount');
+    if (!container.length) return;
+
+    renderProgressionArchitect(container, {
+        dossier: activeDossier,
+        ruleset: activeDossier?.meta?.ruleset,
+        onUpdate: (updatedDossier) => {
+            activeDossier = updatedDossier;
+            saveDraft();
+            updateBlueprintDeck();
+        },
+    });
 }
 
 /**
@@ -2499,6 +2541,52 @@ function bindModalEvents() {
         }
     });
 
+    // In-drawer Progression Codex shortcut button on protagonist card
+    $('#mhc_concierge_modal').on('click', '#mhc_open_codex_tab_btn', function (e) {
+        e.preventDefault();
+        setConciergeTab('progression');
+    });
+
+    // Header Mode Switcher (.mhc-mode-nav-btn)
+    let _isNavigatingMode = false;
+    $('#mhc_concierge_modal').on('click', '.mhc-mode-nav-btn', async function (e) {
+        e.preventDefault();
+        if (_isNavigatingMode) return;
+        _isNavigatingMode = true;
+        try {
+            const mode = $(this).attr('data-nav-mode');
+            if (mode === 'character') {
+                saveDraft();
+                $('#mhc_concierge_modal').fadeOut(150);
+                const { launchLevelUpOrRespecDesk } = await import('./index.js');
+                await launchLevelUpOrRespecDesk({ isRespec: true });
+            } else if (mode === 'living-world') {
+                const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+                const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+                    || ctx?.getCurrentChatId?.()
+                    || ctx?.chatId
+                    || '';
+                if (currentChatId) {
+                    const campaignDossier = await loadActiveCampaignDossier(currentChatId);
+                    if (campaignDossier) {
+                        activeDossier = campaignDossier;
+                        updateBlueprintDeck();
+                        setConciergeTab('cards');
+                        toastr?.info(`Loaded Living World Dossier for "${campaignDossier.meta?.title || 'Active Campaign'}"`, 'Living World');
+                    } else {
+                        toastr?.warning('No active campaign dossier found for the current chat.', 'Living World');
+                    }
+                } else {
+                    toastr?.warning('No active chat selected.', 'Living World');
+                }
+            } else if (mode === 'new-adventure') {
+                setConciergeTab('cards');
+            }
+        } finally {
+            setTimeout(() => { _isNavigatingMode = false; }, 300);
+        }
+    });
+
     // Copy Markdown
     $('#mhc_copy_markdown_btn').on('click', () => {
         const text = $('#mhc_raw_markdown_text').val();
@@ -2563,8 +2651,9 @@ function bindModalEvents() {
             if (res.success) {
                 resetConciergeState({ showGreeting: true });
                 $('#mhc_concierge_modal').fadeOut(250);
-                const isFae = activeDossier?.meta?.ruleset === 'fae';
-                toastr?.success(`${isFae ? 'FAE' : 'PbtA'} Campaign ready! The game is now beginning.`, 'Adventure Launched');
+                const rulesetKey = activeDossier?.meta?.ruleset || 'dnd5e';
+                const rulesetLabel = systemRegistry.get(rulesetKey)?.label || (rulesetKey === 'fae' ? 'FAE' : (rulesetKey === 'pbta' ? 'PbtA' : 'D&D 5e'));
+                toastr?.success(`${rulesetLabel} Campaign ready! The game is now beginning.`, 'Adventure Launched');
             } else {
                 toastr?.error(`Launch error: ${res.message}`, 'Launch Failed');
             }

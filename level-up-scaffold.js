@@ -9,6 +9,7 @@
 
 import { getCandidateChatIds } from './persona-matching.js';
 import { PBTA_GENRES, splitTopLevelPillItems, splitPbtaMovesLine } from './pbta-ruleset.js';
+import { getCanonicalDndProgression } from './level-up-blueprint.js';
 
 /**
  * Derives the canonical D&D 5e Hit Die ('d6' | 'd8' | 'd10' | 'd12') from a class name.
@@ -442,6 +443,19 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
             }
         }
 
+        // Auto-link canonical SRD progression if class matches and blueprint is missing
+        if (!pbtaMode && !dossier.progressionBlueprint && dossier.protagonist?.class) {
+            const canonical = getCanonicalDndProgression(dossier.protagonist.class);
+            if (canonical) {
+                dossier.progressionBlueprint = {
+                    className: canonical.className,
+                    hitDie: canonical.hitDie,
+                    primaryStats: canonical.primaryStats,
+                    levels: { ...canonical.levels },
+                };
+            }
+        }
+
         // Keep partition cache in sync
         if (companionSettings?.chatStates && chatId) {
             companionSettings.chatStates[chatId] = companionSettings.chatStates[chatId] || {};
@@ -454,6 +468,18 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
     // 4. Auto-Scaffold fresh stub from current state memo
     const chatTitle = options.chatTitle || '';
     const stub = scaffoldDossierStubForChat(chatId, liveMemo, chatTitle);
+
+    if (stub.protagonist?.class && stub.meta?.systemKey !== 'pbta') {
+        const canonical = getCanonicalDndProgression(stub.protagonist.class);
+        if (canonical) {
+            stub.progressionBlueprint = {
+                className: canonical.className,
+                hitDie: canonical.hitDie,
+                primaryStats: canonical.primaryStats,
+                levels: { ...canonical.levels },
+            };
+        }
+    }
 
     // Save in chat partition
     if (companionSettings?.chatStates && chatId) {

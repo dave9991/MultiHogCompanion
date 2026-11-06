@@ -2272,7 +2272,7 @@ export function initWandMenu() {
         wandContainer.appendChild(btn);
     }
 
-    // [CATALOG: FEAT-10] Dynamic Level-Up / Respec Wand item
+    // [CATALOG: FEAT-10] Dynamic Level-Up / Respec / Concierge Wand item
     let levelUpBtn = document.getElementById('mhc_wand_level_up_respec');
     if (!levelUpBtn) {
         levelUpBtn = document.createElement('div');
@@ -2280,6 +2280,13 @@ export function initWandMenu() {
         levelUpBtn.classList.add('list-group-item', 'flex-container', 'flexGap5');
         wandContainer.appendChild(levelUpBtn);
     }
+
+    levelUpBtn.title = 'Open MultiHog Concierge: Character & Leveling Desk, Living World Dossier, or New Adventure';
+    levelUpBtn.setAttribute('data-is-level-up', 'false');
+    levelUpBtn.innerHTML = `
+        <div class="fa-solid fa-wand-magic-sparkles extensionsMenuExtensionButton" style="color: #c084fc;"></div>
+        <span>🧙‍♂️ Concierge</span>
+    `;
 
     // Inspect active eligibility to determine label & icon
     try {
@@ -2311,11 +2318,11 @@ export function initWandMenu() {
                     <span>${labelText}</span>
                 `;
             } else {
-                levelUpBtn.title = 'Review build, tweak feats, or adjust stats with the Leveling Concierge';
+                levelUpBtn.title = 'Open MultiHog Concierge: Character & Leveling Desk, Living World Dossier, or New Adventure';
                 levelUpBtn.setAttribute('data-is-level-up', 'false');
                 levelUpBtn.innerHTML = `
-                    <div class="fa-solid fa-arrows-rotate extensionsMenuExtensionButton"></div>
-                    <span>Respec / Edit Character Sheet</span>
+                    <div class="fa-solid fa-wand-magic-sparkles extensionsMenuExtensionButton" style="color: #c084fc;"></div>
+                    <span>🧙‍♂️ Concierge</span>
                 `;
             }
         }).catch(() => {});
@@ -3421,7 +3428,22 @@ if (typeof jQuery !== 'undefined') {
     $(document).on('click.mhc_wand_level_up', '#mhc_wand_level_up_respec', async function (e) {
         e.preventDefault();
         const isLevelUp = this.getAttribute('data-is-level-up') === 'true';
-        await launchLevelUpOrRespecDesk({ isRespec: !isLevelUp });
+        if (isLevelUp) {
+            await launchLevelUpOrRespecDesk({ isRespec: false });
+        } else {
+            const rpgSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
+                || globalThis.extension_settings?.rpg_tracker
+                || {};
+            const curMemo = rpgSettings.currentMemo
+                || (typeof document !== 'undefined' ? document.getElementById('rpg-tracker-memo')?.value : null)
+                || '';
+            if (curMemo && curMemo.trim().length > 0) {
+                await launchLevelUpOrRespecDesk({ isRespec: true });
+            } else {
+                const { openConciergeModal } = await import('./concierge-ui.js');
+                await openConciergeModal();
+            }
+        }
     });
 
     $(document).off('click.mhc_loc_reroll', '.menu_button, button, [id*="rt-loc-image"]');

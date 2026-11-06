@@ -12,7 +12,13 @@
             </div>
             
             <div class="mhc-header-controls">
-                <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px;" title="Switch Session Zero Ruleset Engine between PbtA (2d6) and FAE (4dF)">
+                <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px;" title="Switch between Character Desk, Living World Dossier, and New Adventure">
+                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="character" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Open Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
+                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
+                    <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="new-adventure" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Conversational Session Zero Draft"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
+                </div>
+                <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px;" title="Switch Session Zero Ruleset Engine between D&D 5e, PbtA, and FAE">
+                    <button type="button" class="mhc-ruleset-btn" data-ruleset="dnd5e" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">⚔️ D&D Lite (d20)</button>
                     <button type="button" class="mhc-ruleset-btn active" data-ruleset="pbta" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🎲 PbtA (2d6)</button>
                     <button type="button" class="mhc-ruleset-btn" data-ruleset="fae" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🕯️ FAE (4dF)</button>
                 </div>
@@ -93,6 +99,7 @@
             <div class="mhc-dossier-column">
                 <div class="mhc-dossier-tabs">
                     <button type="button" class="mhc-tab-btn active" data-tab="cards">Live Blueprint</button>
+                    <button type="button" class="mhc-tab-btn" data-tab="progression" id="mhc_tab_progression_btn">📜 Progression Codex</button>
                     <button type="button" class="mhc-tab-btn" data-tab="raw">Raw Markdown</button>
                     <button type="button" class="mhc-tab-btn" data-tab="debug" id="mhc_tab_debug_btn">🛠️ Debug</button>
                 </div>
@@ -187,6 +194,11 @@
                         <div id="mhc_deck_char_moves" class="mhc-moves-list" style="margin-top: 6px; font-size: 0.82em; opacity: 0.85;">
                             • Moves or Scars will be forged in the conversation.
                         </div>
+                        <div style="margin-top: 8px; display: flex; justify-content: flex-end;">
+                            <button type="button" id="mhc_open_codex_tab_btn" class="menu_button" style="font-size: 0.8em; padding: 3px 8px; border-color: rgba(251, 191, 36, 0.4); color: #fbbf24;" title="Open in-drawer Progression Codex">
+                                <i class="fa-solid fa-scroll"></i> View / Customize Progression Codex ➔
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Supporting Allies & NPCs Card -->
@@ -241,6 +253,13 @@
                         <div id="mhc_deck_kick_text" class="mhc-card-desc">
                             The starting scene and crisis will be staged here.
                         </div>
+                    </div>
+                </div>
+
+                <!-- Tab 1b: Progression Codex & Archetype Architect -->
+                <div id="mhc_tab_progression" class="mhc-tab-content" style="display: none; flex-direction: column; gap: 8px; overflow-y: auto;">
+                    <div id="mhc_progression_tab_mount">
+                        <!-- Populated dynamically by renderProgressionArchitect -->
                     </div>
                 </div>
 

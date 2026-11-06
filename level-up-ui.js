@@ -654,7 +654,14 @@ export function openLevelUpModal({
         <div class="mhc-stage-view" id="mhc-stage-definition" style="${currentStage === 1 ? 'display:flex;' : 'display:none;'}">
             <div class="mhc-modal-header">
                 <div class="mhc-header-title-box">
-                    <div class="mhc-modal-title">${escapeHtml(stage1Title)}</div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                        <div class="mhc-modal-title">${escapeHtml(stage1Title)}</div>
+                        <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 2px; gap: 2px;">
+                            <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="character" style="border: none; background: rgba(59,130,246,0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
+                        </div>
+                    </div>
                     <div class="mhc-header-subbadges">
                         <span class="mhc-badge-class"><i class="fa-solid fa-wand-magic-sparkles"></i> Class: <span id="mhc-blueprint-badge-class">${escapeHtml(activeBlueprint?.className || proposal.className)}</span></span>
                         <span class="mhc-badge-hitdie"><i class="fa-solid fa-dice-d20"></i> Hit Die: <span id="mhc-blueprint-badge-hitdie">${escapeHtml(activeBlueprint?.hitDie || proposal.hitDie || 'd8')}</span></span>
@@ -750,7 +757,14 @@ export function openLevelUpModal({
         <div class="mhc-stage-view" id="mhc-stage-advancement" style="${currentStage === 2 ? 'display:flex;' : 'display:none;'}">
             <div class="mhc-modal-header">
                 <div class="mhc-header-title-box">
-                    <div class="mhc-modal-title">${escapeHtml(stage2Title)}</div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                        <div class="mhc-modal-title">${escapeHtml(stage2Title)}</div>
+                        <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 2px; gap: 2px;">
+                            <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="character" style="border: none; background: rgba(59,130,246,0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
+                        </div>
+                    </div>
                     <div class="mhc-header-subbadges">
                         ${stage2SubBadgesHtml}
                         ${stageSwitchBtnHtml}
@@ -2037,6 +2051,33 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
     modal.querySelector('#mhc-stage2-close-btn')?.addEventListener('click', handleClose);
     modal.querySelector('#mhc-stage1-cancel-btn')?.addEventListener('click', handleClose);
     modal.querySelector('#mhc-stage2-cancel-btn')?.addEventListener('click', handleClose);
+
+    // Header Mode Switcher (.mhc-mode-nav-btn)
+    let _isLevelUpNavigating = false;
+    modal.querySelectorAll('.mhc-mode-nav-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (_isLevelUpNavigating) return;
+            const mode = btn.getAttribute('data-nav-mode');
+            if (mode === 'character') return;
+            _isLevelUpNavigating = true;
+            try {
+                closeLevelUpModal();
+                const { openConciergeModal, loadActiveCampaignDossier, setConciergeTab } = await import('./concierge-ui.js');
+                if (mode === 'living-world') {
+                    await openConciergeModal({ ruleset: isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e') });
+                    const campaignDossier = await loadActiveCampaignDossier(chatId);
+                    if (campaignDossier) {
+                        setConciergeTab('cards');
+                    }
+                } else if (mode === 'new-adventure') {
+                    await openConciergeModal({ ruleset: isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e') });
+                }
+            } finally {
+                setTimeout(() => { _isLevelUpNavigating = false; }, 300);
+            }
+        });
+    });
 
     // HP Roll and Avg toggles
     const hpAvgBtn = modal.querySelector('#mhc-hp-avg-btn');

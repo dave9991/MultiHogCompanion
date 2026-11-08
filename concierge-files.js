@@ -7,6 +7,7 @@
  */
 
 import { resolveCardMacros } from './concierge-card-reader.js';
+import { normalizePdfText } from './concierge-canon.js';
 
 /**
  * Read an image file as a Base64 data URL.
@@ -23,6 +24,93 @@ export function readImageAsDataUrl(file) {
         reader.onerror = () => reject(reader.error || new Error('Failed to read image.'));
         reader.readAsDataURL(file);
     });
+}
+
+/**
+ * Extract structured text from a PDF with layout preservation (lines, paragraphs)
+ * and drop-shadow / kerning-doubled glyph deduplication.
+ * @param {Blob|File} file
+ * @returns {Promise<string>}
+ */
+export async function extractStructuredPdfText(file) {
+    if (!('pdfjsLib' in globalThis)) {
+        await import('../../../lib/pdf.min.mjs');
+        await import('../../../lib/pdf.worker.min.mjs');
+    }
+    const pdfjs = globalThis.pdfjsLib;
+    if (!pdfjs || typeof pdfjs.getDocument !== 'function') {
+        throw new Error('pdfjsLib is not available');
+    }
+
+    const buffer = typeof file.arrayBuffer === 'function'
+        ? await file.arrayBuffer()
+        : await new Promise((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result);
+            reader.onerror = rej;
+            reader.readAsArrayBuffer(file);
+        });
+
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const pages = [];
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        let pageBuf = '';
+        let prevItem = null;
+        let prevX = 0;
+        let prevY = null;
+        let prevEndX = 0;
+        let prevHasEOL = false;
+
+        for (const item of textContent.items) {
+            if (!item || typeof item.str !== 'string') continue;
+            if (!item.str && !item.hasEOL) continue;
+
+            const str = item.str;
+            const x = item.transform?.[4] ?? 0;
+            const y = item.transform?.[5] ?? 0;
+            const h = Math.abs(item.transform?.[3] || item.height || 10);
+            const w = item.width || 0;
+
+            // Drop-shadow deduplication: skip duplicate shadow glyph
+            if (
+                prevItem &&
+                str.trim() &&
+                str.trim() === prevItem.str.trim() &&
+                Math.abs(x - prevX) < Math.max(4, h * 0.45) &&
+                Math.abs(y - prevY) < 4
+            ) {
+                continue;
+            }
+
+            // Line & Paragraph breaks
+            if (prevY !== null) {
+                const dy = Math.abs(y - prevY);
+                if (dy > Math.max(h * 1.4, 14)) {
+                    pageBuf += '\n\n';
+                } else if (dy > 3 || prevHasEOL) {
+                    pageBuf += '\n';
+                } else if ((x - prevEndX) > h * 0.25 || (!pageBuf.endsWith(' ') && !str.startsWith(' ') && (x - prevEndX) > 1)) {
+                    pageBuf += ' ';
+                }
+            }
+
+            pageBuf += str;
+            prevItem = item;
+            prevX = x;
+            prevY = y;
+            prevEndX = x + w;
+            prevHasEOL = Boolean(item.hasEOL);
+        }
+
+        if (pageBuf.trim()) {
+            pages.push(pageBuf.trim());
+        }
+    }
+
+    return normalizePdfText(pages.join('\n\n'));
 }
 
 /**
@@ -68,6 +156,14 @@ export async function extractDocumentContent(file) {
 
         // PDF
         if (mime === 'application/pdf' || ext === 'pdf') {
+            try {
+                const text = await extractStructuredPdfText(file);
+                if (text && text.trim()) {
+                    return { filename, text: text.trim(), type: 'pdf' };
+                }
+            } catch (err) {
+                console.warn('[PbtA Concierge] Structured PDF extraction failed, falling back to ST extractTextFromPDF:', err);
+            }
             if (typeof utils.extractTextFromPDF === 'function') {
                 const text = await utils.extractTextFromPDF(file);
                 return { filename, text: text.trim(), type: 'pdf' };

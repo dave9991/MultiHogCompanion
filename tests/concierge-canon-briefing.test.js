@@ -37,7 +37,9 @@ assert.strictEqual(shouldBrief(), false);
 await stageCanonSource({ name: 'tiny', type: 'doc', text: 'small' });
 assert.strictEqual(shouldBrief(), false, 'vibe mode never briefs');
 setModeOverride('archivist');
-await stageCanonSource({ name: 'tiny', type: 'doc', text: '# Town\nA city.' });
+await stageCanonSource({ name: 'tiny', type: 'doc', text: '# Town\nA city.' }, {
+    send: async () => '[{"id":"tiny#0","kind":"LOCATION","name":"Town","importance":3}]',
+});
 assert.strictEqual(shouldBrief(), true);
 markBriefed();
 assert.ok(isBriefed());

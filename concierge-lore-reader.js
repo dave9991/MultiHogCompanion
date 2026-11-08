@@ -126,14 +126,17 @@ Output ONLY the structured Setting Brief.`;
         { role: 'user', content: `Lorebook Name: "${bookName}"\n\n${entryBlocks.join('\n\n')}` },
     ];
 
+    let brief;
     try {
-        const brief = await sendConciergeRequest(messages);
-        return stripThinkingContent(brief).trim();
+        brief = await sendConciergeRequest(messages);
     } catch (err) {
-        console.warn('[PbtA Concierge] World Archivist pass failed, falling back to extractive summary:', err);
-        onStatus('Archivist summary failed; using an excerpt of the first entries instead.');
-        return entryBlocks.slice(0, 5).join('\n\n').slice(0, 8000);
+        throw new Error(`Archivist synthesis failed for lorebook "${bookName}": ${err?.message || err}`);
     }
+    const cleaned = stripThinkingContent(brief).trim();
+    if (!cleaned) {
+        throw new Error(`Archivist synthesis failed for lorebook "${bookName}": LLM returned an empty response`);
+    }
+    return cleaned;
 }
 
 /**

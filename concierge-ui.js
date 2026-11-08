@@ -905,27 +905,32 @@ function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
 
 /**
  * Stage a source for Archivist-mode Canon ingest (labels it when total size warrants).
- * Failures never block the import; they toast and the regular prompt path still works.
+ * Throws and rolls back on failure so failed sources are never attached.
  */
 async function stageSourceForCanon(source, label) {
     startImportProgress(`Canon: ${label}`);
+    const timeoutMs = Math.max(30000, (Number(getConciergeConnectionSettings()?.timeoutSec) || 300) * 1000);
     try {
         const res = await stageCanonSource(source, {
             send: (messages, signal) => sendConciergeRequest(messages, signal),
             onStatus: msg => toastr?.info(msg),
-            onFallback: () => toastr?.warning('Some lore was labeled with the offline fallback (LLM labeling unavailable).'),
+            timeoutMs,
         });
         if (res.mode === 'archivist') {
             toastr?.success(`Archivist mode: ${res.entries.length} canon entries catalogued.`);
         }
+        return res;
     } catch (err) {
-        toastr?.warning(`Canon cataloguing skipped for "${label}": ${err.message}`);
+        unstageCanonSource(source.name);
+        toastr?.error(`Canon cataloguing failed for "${label}": ${err.message}`);
+        throw err;
     } finally {
         stopImportProgress(`Canon: ${label}`);
     }
 }
 
 async function attachLoreSource(name, loreRes) {
+    await stageSourceForCanon({ name, type: 'lore', entries: loreRes.entries }, name);
     pendingAttachments.push({
         type: 'lore',
         name,
@@ -933,15 +938,14 @@ async function attachLoreSource(name, loreRes) {
         mode: loreRes.mode,
         entries: loreRes.entries,
     });
-    await stageSourceForCanon({ name, type: 'lore', entries: loreRes.entries }, name);
 }
 
 async function stageDocForCanon(name, text) {
+    const res = await stageSourceForCanon({ name, type: 'doc', text }, name);
     const words = String(text || '').split(/\s+/).length;
-    if (words > 5000) {
-        toastr?.warning(`"${name}" is ${words} words; the chat prompt sees the first 5,000. The full text is catalogued to Canon when Archivist mode is active.`);
+    if (res?.mode === 'vibe' && words > 5000) {
+        toastr?.warning(`"${name}" is ${words} words; Quick vibe mode only sends the first 5,000 words. Switch to Big lore mode to catalogue the full text.`);
     }
-    await stageSourceForCanon({ name, type: 'doc', text }, name);
 }
 
 /**
@@ -1006,11 +1010,15 @@ function renderAttachmentTray() {
     $('.mhc-mode-override').on('change', async function () {
         setModeOverride($(this).val());
         // Re-stage so an override to Big lore labels already-attached sources now.
-        for (const att of pendingAttachments) {
-            if (att.type === 'lore') await stageSourceForCanon({ name: att.name, type: 'lore', entries: att.entries || [] }, att.name);
-            if (att.type === 'doc') await stageSourceForCanon({ name: att.name, type: 'doc', text: att.text }, att.name);
+        try {
+            for (const att of pendingAttachments) {
+                if (att.type === 'lore') await stageSourceForCanon({ name: att.name, type: 'lore', entries: att.entries || [] }, att.name);
+                if (att.type === 'doc') await stageSourceForCanon({ name: att.name, type: 'doc', text: att.text }, att.name);
+            }
+        } catch (_) {}
+        finally {
+            renderAttachmentTray();
         }
-        renderAttachmentTray();
     });
 
     $('.mhc-chip-remove').on('click', function () {
@@ -1301,12 +1309,15 @@ async function handleUserSend() {
                 { role: 'user', name: 'Player', content: userMsgLlmContent },
             ]);
             if (turn.cancelled) return;
-            const { text: briefingText, starts } = parseSuggestedStarts(stripThinkingContent(reply || ''));
+            const cleanedReply = stripThinkingContent(reply || '').trim();
+            const { text: briefingText, starts } = parseSuggestedStarts(cleanedReply);
+            if (!briefingText) {
+                throw new Error('Archivist briefing failed: the LLM returned an empty response.');
+            }
             typingBubble.remove();
-            const bubbleText = briefingText || 'Your lore is catalogued. Where would you like to start?';
-            appendChatBubble('assistant', bubbleText);
+            appendChatBubble('assistant', briefingText);
             renderStartChips(starts);
-            chatHistory.push({ role: 'assistant', content: bubbleText });
+            chatHistory.push({ role: 'assistant', content: briefingText });
             markBriefed();
             if (!isVectorsWorldInfoEnabled(extension_settings)) {
                 toastr?.info('Tip: enable SillyTavern → Vector Storage → "Enable for World Info" so Canon entries also match by meaning, not just keywords.');
@@ -1561,10 +1572,7 @@ async function handleUserSend() {
                         }
                     }
                 } catch (judgeErr) {
-                    // Stop (or reset) must cancel the whole turn; any other failure only skips the optional Judge/Refiner.
-                    if (classifyTurnAbort(judgeErr) === 'user' || turn.cancelled) throw judgeErr;
-                    console.warn('[PbtA Concierge] Contemplative Judge/Refiner pass skipped due to error:', judgeErr);
-                    globalThis.toastr?.warning(`Blueprint Judge/Refiner skipped: ${judgeErr?.message || judgeErr}`, 'PbtA Concierge');
+                    throw judgeErr;
                 }
             }
         } else if (finalStatus === 'NOOP') {
@@ -1616,19 +1624,10 @@ async function handleUserSend() {
             },
         ];
 
-        let finalChatBubbleText = '';
-        try {
-            const talkerResponse = await llm(talkerMessages);
-            finalChatBubbleText = (stripConciergeStateBlocks(talkerResponse) || talkerResponse || '').trim();
-            if (!finalChatBubbleText) {
-                console.warn('[PbtA Concierge] Talker returned an empty reply, using Builder summary.');
-                globalThis.toastr?.warning('The Concierge returned an empty reply; showing the blueprint summary instead.', 'PbtA Concierge');
-                finalChatBubbleText = builderSummaryText ? `I have noted: ${builderSummaryText}` : 'The Concierge had nothing to say this turn — try rephrasing.';
-            }
-        } catch (talkerErr) {
-            if (classifyTurnAbort(talkerErr) || turn.cancelled) throw talkerErr;
-            console.warn('[PbtA Concierge] Talker error, falling back to basic response:', talkerErr);
-            finalChatBubbleText = builderSummaryText ? `I have noted: ${builderSummaryText}` : 'Could not generate conversational response.';
+        const talkerResponse = await llm(talkerMessages);
+        const finalChatBubbleText = (stripConciergeStateBlocks(talkerResponse) || talkerResponse || '').trim();
+        if (!finalChatBubbleText) {
+            throw new Error('The Concierge Talker returned an empty response.');
         }
 
         if (turn.cancelled) return;
@@ -1777,28 +1776,34 @@ async function handleFilesSelected(files) {
                     toastr?.error(`Could not read image "${file.name}": ${err.message}`);
                 }
             } else {
+                let doc;
                 try {
-                    const doc = await extractDocumentContent(file);
-                    if (doc.type === 'chat') {
-                        pendingAttachments.push({
-                            type: 'chat',
-                            file,
-                            name: doc.chatData?.charName ? `${doc.chatData.charName} (Chat)` : doc.filename,
-                            chatData: doc.chatData,
-                        });
-                        toastr?.success(`Imported prior chat log: "${doc.chatData?.charName || doc.filename}" (${doc.chatData?.messages?.length || 0} messages).`);
-                    } else {
+                    doc = await extractDocumentContent(file);
+                } catch (err) {
+                    toastr?.error(`Could not parse document "${file.name}": ${err.message}`);
+                    continue;
+                }
+                if (doc.type === 'chat') {
+                    pendingAttachments.push({
+                        type: 'chat',
+                        file,
+                        name: doc.chatData?.charName ? `${doc.chatData.charName} (Chat)` : doc.filename,
+                        chatData: doc.chatData,
+                    });
+                    toastr?.success(`Imported prior chat log: "${doc.chatData?.charName || doc.filename}" (${doc.chatData?.messages?.length || 0} messages).`);
+                } else {
+                    toastr?.info(`Extracted text from "${doc.filename}".`);
+                    try {
+                        await stageDocForCanon(doc.filename, doc.text);
                         pendingAttachments.push({
                             type: 'doc',
                             file,
                             name: doc.filename,
                             text: doc.text,
                         });
-                        toastr?.info(`Extracted text from "${doc.filename}".`);
-                        await stageDocForCanon(doc.filename, doc.text);
+                    } catch (_) {
+                        /* stageSourceForCanon already toasted the error */
                     }
-                } catch (err) {
-                    toastr?.error(`Could not parse document "${file.name}": ${err.message}`);
                 }
             }
         } finally {

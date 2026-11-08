@@ -639,28 +639,29 @@ async function sendViaDefault(context, settings, messages, { signal = null, call
             responseLength: responseLength,
         });
         const extracted = extractTextFromApiResponse(rawData);
-        if (extracted) {
+        if (extracted && extracted.trim()) {
             return extracted;
         }
         console.warn(`[${callerName}] generateRawData returned empty content. Raw data:`, rawData);
-    }
-
-    // 2. Fallback to generateRaw
-    if (typeof context.generateRaw === 'function') {
-        try {
-            return await context.generateRaw({
-                prompt: isolatedMessages,
-                quietToLoud: false,
-                quietName: callerName,
-                instructOverride: false,
-                trimNames: false,
-                responseLength: responseLength,
-            });
-        } catch (err) {
-            console.warn(`[${callerName}] generateRaw failed:`, err?.message || err);
-            // If generateRaw throws 'No message generated', return empty string instead of crashing
-            return '';
+        const reasoning = rawData?.choices?.[0]?.message?.reasoning_content || rawData?.choices?.[0]?.message?.reasoning;
+        if (reasoning && String(reasoning).trim()) {
+            throw new Error('LLM exhausted its response token budget inside reasoning (<think>) before producing output. Increase Max Response Tokens.');
         }
+        throw new Error('LLM returned an empty response.');
+    } else if (typeof context.generateRaw === 'function') {
+        // 2. Fallback to generateRaw
+        const raw = await context.generateRaw({
+            prompt: isolatedMessages,
+            quietToLoud: false,
+            quietName: callerName,
+            instructOverride: false,
+            trimNames: false,
+            responseLength: responseLength,
+        });
+        if (typeof raw === 'string' && raw.trim()) {
+            return raw;
+        }
+        throw new Error('LLM returned an empty response.');
     }
 
     throw new Error('No suitable SillyTavern generation function available.');

@@ -38,6 +38,7 @@ import {
     reconcileFaeMemoAfterTurn,
     formatInitialFaeMemo,
     splitTopLevelPillItems,
+    normalizeFaePill,
     normalizeFaePillsLine,
     stripFaePartyBlockFromMemo,
 } from '../fae-state-sync.js';
@@ -758,10 +759,38 @@ describe('Freeform Attrition Engine (FAE) — State Sync & Post-Turn Reconciliat
         assert.ok(memoBlock.includes('((BARPURPLE)) Sanity: 8/8'));
         assert.ok(!memoBlock.includes('Zero Debuff'), 'Secondary bar line must not include Zero Debuff');
         assert.ok(memoBlock.includes('FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: lethal | Tempo: slow_burn | Idle: 0t | Breather: READY | [Advantage: Safe Combo]'));
-        assert.ok(memoBlock.includes('((PILLS)) Positive Tags:'));
+        assert.ok(memoBlock.includes('((PILLS)) Positive Tags: Ex-Military, Calm (under gunfire and shock), Quiet, Service Revolver'));
+        assert.ok(!memoBlock.includes('(Positive Tag)'), 'Unqualified tags must not have useless (Positive Tag) hover toast');
         assert.ok(memoBlock.includes('((PILLS)) Scars & Debuffs: (+) Advantage: Safe Combo (-1 Attrition on next action)'));
         assert.ok(memoBlock.includes('Status: Healthy'));
         assert.ok(memoBlock.includes('[/CHARACTER]'));
+    });
+
+    test('normalizeFaePill converts bracketed qualifiers to parentheses and strips redundant boilerplate suffixes', () => {
+        assert.strictEqual(
+            normalizeFaePill('Lantern Warden [when guarding a threshold]'),
+            'Lantern Warden (when guarding a threshold)'
+        );
+        assert.strictEqual(
+            normalizeFaePill('Trained Archivist [for forbidden texts] (Positive Tag)'),
+            'Trained Archivist (for forbidden texts)'
+        );
+        assert.strictEqual(
+            normalizeFaePill('Ex-Military'),
+            'Ex-Military'
+        );
+        assert.strictEqual(
+            normalizeFaePill('Ex-Military (Positive Tag)'),
+            'Ex-Military'
+        );
+        assert.strictEqual(
+            normalizeFaePill('Scar (Debuff)'),
+            'Scar'
+        );
+        assert.strictEqual(
+            normalizeFaePill('Companion: Sister Valeria [Cleric]'),
+            'Companion: Sister Valeria (Cleric)'
+        );
     });
 
     test('parseFaeStateFromMemo accurately reconstitutes FAE state', () => {
@@ -1152,7 +1181,7 @@ describe('Freeform Attrition Engine (FAE) — Heroic Domains (Pre-Math Leverage 
 
         const heroicState = createInitialFaeState('osr_dungeon');
         const memo = formatFaeCharacterMemoBlock(heroicState);
-        assert.ok(memo.includes('Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]'), 'Memo block must serialize Heroic Domain');
+        assert.ok(memo.includes('Heroic Domain: Spellblade (short-range blink and arcane ward-breaking)'), 'Memo block must serialize Heroic Domain with parentheses');
         assert.ok(memo.includes('Heroic: ON'), 'Memo block knobs must include Heroic: ON');
     });
 
@@ -1213,7 +1242,7 @@ Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]
 
         const serialized = formatFaeCharacterMemoBlock(parsed);
         assert.ok(serialized.includes('Heroic: ON'));
-        assert.ok(serialized.includes('Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]'));
+        assert.ok(serialized.includes('Heroic Domain: Spellblade (short-range blink and arcane ward-breaking)'));
 
         // When Heroic is OFF
         const rawMemoOff = rawMemo.replace('Heroic: ON', 'Heroic: OFF').replace('Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]\n', '');

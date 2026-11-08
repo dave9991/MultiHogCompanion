@@ -1157,13 +1157,13 @@ export function resolveAction(state, options = {}, fixedRollArg = null) {
 
     // Filter out Heroic Domain from positive tags (Pure Pre-Math Leverage, Section 2.5: NEVER a -1 tag!)
     const heroicDomain = state.character?.heroic_domain ? String(state.character.heroic_domain).trim() : '';
-    const heroicArchetype = heroicDomain ? heroicDomain.split('[')[0].trim().toLowerCase() : '';
+    const heroicArchetype = heroicDomain ? heroicDomain.split(/[[(]/)[0].trim().toLowerCase() : '';
     const filteredPosTags = matched_positive_tags.filter(tag => {
         if (!tag || typeof tag !== 'string') return false;
         const cleanTag = tag.trim().toLowerCase();
         if (/^heroic(?:\s*domain)?\s*:/i.test(cleanTag)) return false;
         if (heroicDomain && (cleanTag === heroicDomain.toLowerCase() || cleanTag.startsWith(heroicDomain.toLowerCase()))) return false;
-        if (heroicArchetype && (cleanTag === heroicArchetype || cleanTag.startsWith(`${heroicArchetype} [`))) return false;
+        if (heroicArchetype && (cleanTag === heroicArchetype || cleanTag.startsWith(`${heroicArchetype} [`) || cleanTag.startsWith(`${heroicArchetype} (`))) return false;
         return true;
     });
 

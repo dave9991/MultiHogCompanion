@@ -692,7 +692,7 @@ export function applyFaeMilestoneSelection(proposal, milestoneSelection) {
     } else if (type === 'new_capability') {
         const rawTag = (milestoneSelection.tag || '').trim();
         if (rawTag) {
-            const norm = normalizeFaePill(rawTag, 'Capability');
+            const norm = normalizeFaePill(rawTag);
             proposal.positiveTags = Array.isArray(proposal.positiveTags) ? proposal.positiveTags : [];
             const key = extractFeatureKey(norm);
             const existingIdx = proposal.positiveTags.findIndex(t => extractFeatureKey(t) === key);

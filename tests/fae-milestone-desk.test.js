@@ -235,13 +235,13 @@ test('FAE Milestone Desk: applyFaeMilestoneSelection & applyLevelUpCommit for al
     });
     assert.strictEqual(prop2.faeMilestone.rejected, true);
 
-    // 2b. Accept bracket-qualified trait (Tier A: Trait [context])
+    // 2b. Accept bracket-qualified trait (Tier A: Trait [context]) and convert to parenthetical toast
     applyFaeMilestoneSelection(prop2, {
         type: 'new_capability',
         tag: 'Strong [for lifting or carrying]',
     });
     assert.strictEqual(prop2.faeMilestone.applied, true);
-    assert.ok(prop2.positiveTags.some(t => t.includes('Strong [for lifting or carrying]')));
+    assert.ok(prop2.positiveTags.some(t => t.includes('Strong (for lifting or carrying)')));
 
     // 2c. Accept valid specific capability tag
     applyFaeMilestoneSelection(prop2, {
@@ -260,7 +260,7 @@ test('FAE Milestone Desk: applyFaeMilestoneSelection & applyLevelUpCommit for al
     });
     assert.strictEqual(res2.success, true);
     assert.ok(res2.updatedMemo.includes('Occult Cryptography'), 'New positive tag must appear in memo');
-    assert.ok(res2.updatedMemo.includes('Strong [for lifting or carrying]'), 'Bracketed tag must appear in memo');
+    assert.ok(res2.updatedMemo.includes('Strong (for lifting or carrying)'), 'Converted parenthetical tag must appear in memo');
     assert.ok(res2.updatedMemo.includes('Scenes: 0/4 | XP: 0/4'), 'Scenes completed must reset to 0/4');
 
     // ─────────────────────────────────────────────────────────────

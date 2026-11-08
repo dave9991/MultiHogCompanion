@@ -1721,7 +1721,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 if (dir.tag === 'ADD_TAG' && isFae) {
                     const rawTag = dir.payload.trim();
                     if (rawTag) {
-                        const norm = normalizeFaePill(rawTag, 'Positive Tag');
+                        const norm = normalizeFaePill(rawTag);
                         proposal.positiveTags = proposal.positiveTags || [];
                         const key = extractFeatureKey(norm);
                         const idx = proposal.positiveTags.findIndex(t => extractFeatureKey(t) === key);
@@ -1742,7 +1742,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 } else if (dir.tag === 'ADD_SCAR' && isFae) {
                     let rawScar = dir.payload.trim();
                     if (rawScar.startsWith('(-)')) rawScar = rawScar.replace(/^\(-\)\s*/, '');
-                    const norm = normalizeFaePill(rawScar, 'Debuff');
+                    const norm = normalizeFaePill(rawScar);
                     proposal.negativeTags = proposal.negativeTags || [];
                     const key = extractFeatureKey(norm);
                     const idx = proposal.negativeTags.findIndex(s => extractFeatureKey(s) === key);
@@ -2192,7 +2192,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
         const handleAddPosTag = () => {
             const val = posTagInput?.value?.trim();
             if (!val) return;
-            const norm = normalizeFaePill(val, 'Capability');
+            const norm = normalizeFaePill(val);
             proposal.positiveTags = proposal.positiveTags || [];
             const key = extractFeatureKey(norm);
             const idx = proposal.positiveTags.findIndex(t => extractFeatureKey(t) === key);
@@ -2221,7 +2221,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             let val = negTagInput?.value?.trim();
             if (!val) return;
             if (val.startsWith('(-)')) val = val.replace(/^\(-\)\s*/, '');
-            const norm = normalizeFaePill(val, 'Debuff');
+            const norm = normalizeFaePill(val);
             proposal.negativeTags = proposal.negativeTags || [];
             const key = extractFeatureKey(norm);
             const idx = proposal.negativeTags.findIndex(s => extractFeatureKey(s) === key);

@@ -69,7 +69,8 @@ export function splitTopLevelPillItems(str) {
 }
 
 /**
- * Normalizes a pill item so it follows "Name (Description)" syntax.
+ * Normalizes a pill item so it follows "Name (Description)" syntax when a
+ * qualifier is present, and leaves unqualified items clean (no redundant toast).
  *
  * @param {string} item
  * @param {string} [defaultDesc='']
@@ -80,6 +81,18 @@ export function normalizeFaePill(item, defaultDesc = '') {
     let trimmed = item.trim().replace(/^[-*•]\s*/, '').trim();
     if (!trimmed) return '';
 
+    // Strip redundant legacy boilerplate suffixes like (Positive Tag), (Debuff), (Capability), (Boon)
+    trimmed = trimmed.replace(/\s*\((?:Positive Tag|Debuff|Capability|Boon)\)\s*$/i, '').trim();
+    if (!trimmed) return '';
+
+    // Convert trailing bracketed qualifier "Name [qualifier]" -> "Name (qualifier)"
+    const bracketMatch = trimmed.match(/^(.+?)\s*\[([^\]]+)\]$/);
+    if (bracketMatch) {
+        const name = bracketMatch[1].trim();
+        const desc = bracketMatch[2].trim().replace(/\(/g, '[').replace(/\)/g, ']');
+        return `${name} (${desc})`;
+    }
+
     // Check if it already has trailing parentheses
     if (/\([^)]+\)$/.test(trimmed)) {
         return trimmed;
@@ -89,11 +102,35 @@ export function normalizeFaePill(item, defaultDesc = '') {
     const colonMatch = trimmed.match(/^([^:()]{1,40}):\s*(.+)$/);
     if (colonMatch) {
         const name = colonMatch[1].trim();
-        const desc = colonMatch[2].trim().replace(/\(/g, '[').replace(/\)/g, ']');
+        const rawDesc = colonMatch[2].trim();
+        // If rawDesc itself is "Person [role]" or "Person (role)", preserve it for Companion: Name (Role)
+        const innerBracket = rawDesc.match(/^(.+?)\s*\[([^\]]+)\]$/);
+        if (innerBracket) {
+            return `${name}: ${innerBracket[1].trim()} (${innerBracket[2].trim()})`;
+        }
+        const desc = rawDesc.replace(/\(/g, '[').replace(/\)/g, ']');
         return `${name} (${desc})`;
     }
 
     return defaultDesc ? `${trimmed} (${defaultDesc})` : trimmed;
+}
+
+/**
+ * Formats a Heroic Domain string so trailing brackets become parentheses
+ * (e.g. "Spellblade [short-range blink]" -> "Spellblade (short-range blink)")
+ * for clean MultiHog highlight rendering.
+ *
+ * @param {string} domain
+ * @returns {string}
+ */
+export function formatFaeHeroicDomain(domain) {
+    if (!domain || typeof domain !== 'string') return '';
+    const trimmed = domain.trim();
+    const bracketMatch = trimmed.match(/^(.+?)\s*\[([^\]]+)\]$/);
+    if (bracketMatch) {
+        return `${bracketMatch[1].trim()} (${bracketMatch[2].trim()})`;
+    }
+    return trimmed;
 }
 
 /**
@@ -154,12 +191,12 @@ export function formatFaeCharacterMemoBlock(faeState) {
     );
 
     if (isHeroic) {
-        lines.push(`Heroic Domain: ${char.heroic_domain || 'None'}`);
+        lines.push(`Heroic Domain: ${char.heroic_domain ? formatFaeHeroicDomain(char.heroic_domain) : 'None'}`);
     }
 
     // Positive Tags
     const rawPosTags = Array.isArray(char.positive_tags) ? char.positive_tags : [];
-    const formattedPosTags = rawPosTags.map(t => normalizeFaePill(t, 'Positive Tag')).filter(Boolean);
+    const formattedPosTags = rawPosTags.map(t => normalizeFaePill(t)).filter(Boolean);
     lines.push(`((PILLS)) Positive Tags: ${formattedPosTags.length > 0 ? formattedPosTags.join(', ') : 'None'}`);
 
     // Scars & Debuffs (and temp advantage formatted as a (+) pill)
@@ -168,7 +205,7 @@ export function formatFaeCharacterMemoBlock(faeState) {
         let clean = t.trim();
         const hasMinus = clean.startsWith('(-)');
         if (hasMinus) clean = clean.replace(/^\(-\)\s*/, '');
-        const normalized = normalizeFaePill(clean, 'Debuff');
+        const normalized = normalizeFaePill(clean);
         return `(-) ${normalized}`;
     });
 
@@ -393,7 +430,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
     const posMatch = charText.match(/(?:\(\(PILLS\)\)\s*)?Positive Tags:\s*(.+)$/m);
     if (posMatch && !/^none$/i.test(posMatch[1].trim())) {
         positiveTags = splitTopLevelPillItems(posMatch[1])
-            .map(t => t.trim())
+            .map(t => normalizeFaePill(t))
             .filter(t => t && !/^none$/i.test(t));
     } else {
         positiveTags = [...fallbackGenre.defaultPositiveTags];
@@ -418,8 +455,8 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
             }
 
             // Normal negative debuff
-            const deMinus = clean.replace(/^\(-\)\s*/, '').trim();
-            negativeTags.push(deMinus);
+            const deMinus = normalizeFaePill(clean.replace(/^\(-\)\s*/, '').trim());
+            if (deMinus) negativeTags.push(deMinus);
         }
     }
 
@@ -841,7 +878,7 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
                     : typeof rawTags === 'string'
                         ? splitTopLevelPillItems(rawTags)
                         : [String(rawTags)];
-                const cTagsStr = tagsList.map(t => normalizeFaePill(t, 'Positive Tag')).filter(Boolean).join(', ') || 'Resourceful (adept survivor)';
+                const cTagsStr = tagsList.map(t => normalizeFaePill(t)).filter(Boolean).join(', ') || 'Resourceful (adept survivor)';
 
                 const rawBoons = comp.boons || comp.gear || ['Field Kit (1 Use)'];
                 const boonsList = Array.isArray(rawBoons)
@@ -849,7 +886,7 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
                     : typeof rawBoons === 'string'
                         ? splitTopLevelPillItems(rawBoons)
                         : [String(rawBoons)];
-                const cBoonsStr = boonsList.map(b => normalizeFaePill(b, 'Boon')).filter(Boolean).join(', ') || 'Field Kit (1 Use)';
+                const cBoonsStr = boonsList.map(b => normalizeFaePill(b)).filter(Boolean).join(', ') || 'Field Kit (1 Use)';
 
                 if (i > 0) partyLines.push('');
                 partyLines.push(

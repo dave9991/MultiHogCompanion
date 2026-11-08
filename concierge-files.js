@@ -34,8 +34,8 @@ export function readImageAsDataUrl(file) {
  */
 export async function extractStructuredPdfText(file) {
     if (!('pdfjsLib' in globalThis)) {
-        await import('../../../lib/pdf.min.mjs');
-        await import('../../../lib/pdf.worker.min.mjs');
+        await import('../../../../lib/pdf.min.mjs');
+        await import('../../../../lib/pdf.worker.min.mjs');
     }
     const pdfjs = globalThis.pdfjsLib;
     if (!pdfjs || typeof pdfjs.getDocument !== 'function') {
@@ -156,18 +156,11 @@ export async function extractDocumentContent(file) {
 
         // PDF
         if (mime === 'application/pdf' || ext === 'pdf') {
-            try {
-                const text = await extractStructuredPdfText(file);
-                if (text && text.trim()) {
-                    return { filename, text: text.trim(), type: 'pdf' };
-                }
-            } catch (err) {
-                console.warn('[PbtA Concierge] Structured PDF extraction failed, falling back to ST extractTextFromPDF:', err);
+            const text = await extractStructuredPdfText(file);
+            if (!text || !text.trim()) {
+                throw new Error(`PDF "${filename}" contained no extractable text.`);
             }
-            if (typeof utils.extractTextFromPDF === 'function') {
-                const text = await utils.extractTextFromPDF(file);
-                return { filename, text: text.trim(), type: 'pdf' };
-            }
+            return { filename, text: text.trim(), type: 'pdf' };
         }
 
         // Microsoft Office (DOCX / PPTX / XLSX)

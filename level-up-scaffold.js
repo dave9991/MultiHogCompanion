@@ -682,7 +682,7 @@ export async function syncDossierToWorldInfoBook(chatId, dossier) {
 
         // Invalidate frontend cache if available
         try {
-            const wiMod = await import('../../../public/scripts/world-info.js');
+            const wiMod = await import('../../../world-info.js');
             if (wiMod?.worldInfoCache && typeof wiMod.worldInfoCache.set === 'function') {
                 wiMod.worldInfoCache.set(bookName, bookData);
             }

@@ -232,4 +232,42 @@ for (const rel of docFiles) {
 }
 console.log(`✓ File references and cross-doc anchors verified across ${docFiles.length} documents`);
 
+// 9. Verify Browser URL Resolution of Escaping Relative Imports across all JS source files
+const stPublicRoot = path.resolve(extensionRoot, '../../st-source/public');
+if (fs.existsSync(stPublicRoot)) {
+    console.log('Verifying browser URL resolution of escaping relative imports across JS source files...');
+    const importRegex = /(?:import\s*\(\s*['"](\.\.\/[^'"]+)['"]\s*\)|from\s*['"](\.\.\/[^'"]+)['"])/g;
+    let checkedImports = 0;
+
+    for (const filePath of jsFiles) {
+        const code = fs.readFileSync(filePath, 'utf8');
+        const file = path.relative(extensionRoot, filePath);
+        let m;
+        while ((m = importRegex.exec(code)) !== null) {
+            const specifier = m[1] || m[2];
+            checkedImports++;
+            const normalizedUrl = path.posix.normalize(
+                path.posix.join('/scripts/extensions/third-party/MultiHogCompanion', path.posix.dirname(file), specifier)
+            );
+
+            let exists = false;
+            let targetPath = '';
+            if (normalizedUrl.startsWith('/scripts/extensions/third-party/')) {
+                const relSub = normalizedUrl.slice('/scripts/extensions/third-party/'.length);
+                targetPath = path.resolve(extensionRoot, '..', relSub);
+                exists = fs.existsSync(targetPath);
+            } else {
+                targetPath = path.join(stPublicRoot, normalizedUrl);
+                exists = fs.existsSync(targetPath);
+            }
+
+            assert.ok(
+                exists,
+                `Browser 404 hazard in ${file}: import "${specifier}" resolves to "${normalizedUrl}", but target does not exist at "${targetPath}"`
+            );
+        }
+    }
+    console.log(`✓ All ${checkedImports} escaping relative imports verified to resolve cleanly against browser URL paths`);
+}
+
 console.log('--- ALL ARCHITECTURE & CATALOG INTEGRITY CHECKS PASSED CLEANLY! ---');

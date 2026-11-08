@@ -52,6 +52,8 @@ import {
     resolvePromoteRequests,
     markSlicePromoted,
     getPromotedSet,
+    decideMode,
+    estimateTokens,
 } from './concierge-canon.js';
 import {
     buildConciergeSystemPrompt,
@@ -135,6 +137,11 @@ const MAX_PASS_HISTORY = 24;
 /** Max chars of a failed Builder reply echoed back on retry (never feed a loop back to the model). */
 const MAX_RETRY_ECHO_CHARS = 1500;
 let activeImports = [];
+let isImportCommitPending = false;
+let importStatusText = '';
+let importAbortController = null;
+export function getImportCommitPending() { return isImportCommitPending; }
+export function setImportCommitPending(val) { isImportCommitPending = Boolean(val); }
 let activeNameRagSeeds = '';
 let activeNameRagKey = '';
 
@@ -343,6 +350,12 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     pendingAttachments = [];
     clearStagedCanon();
     pendingPromotions = [];
+    isImportCommitPending = false;
+    importStatusText = '';
+    if (importAbortController) {
+        try { importAbortController.abort(); } catch (_) {}
+        importAbortController = null;
+    }
     if (activeTurn) {
         activeTurn.cancelled = true;
         try { activeTurn.controller.abort(); } catch (_) {}
@@ -904,16 +917,62 @@ function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
 }
 
 /**
+ * Synchronize the Import & Commit Box visibility and state with active imports and staged canon entries.
+ */
+export function syncImportCommitBoxUI() {
+    const hasImporting = activeImports.length > 0 && isImportCommitPending;
+    const canonEntries = getCurrentMode() === 'archivist' ? getStagedCanonEntries() : [];
+    const needsCommit = isImportCommitPending && (hasImporting || (canonEntries.length > 0 && shouldBrief()));
+    if (needsCommit) {
+        $('.mhc-chat-input-row').hide();
+        $('#mhc_import_commit_box').show();
+        if (hasImporting) {
+            $('#mhc_import_commit_icon').html('<span class="mhc-spin">⏳</span>');
+            $('#mhc_import_commit_status_text').text(importStatusText || `Importing ${activeImports.join(', ')}...`);
+            $('#mhc_import_commit_btn').prop('disabled', true).text('⏳ Importing Lore...');
+            $('#mhc_import_cancel_btn').show();
+            $('#mhc_import_use_vibe_btn').hide();
+        } else {
+            $('#mhc_import_commit_icon').text('🗃️');
+            $('#mhc_import_commit_status_text').text(`Ready: ${canonEntries.length} canon entries catalogued (~${getStagedTokenTotal()} tok). Add more files or click Commit for your setting overview.`);
+            $('#mhc_import_commit_btn').prop('disabled', false).text(`✅ Commit & Review Lore (${canonEntries.length} entries)`);
+            $('#mhc_import_cancel_btn').hide();
+            $('#mhc_import_use_vibe_btn').show();
+        }
+    } else {
+        isImportCommitPending = false;
+        $('#mhc_import_commit_box').hide();
+        $('.mhc-chat-input-row').show();
+    }
+}
+
+/**
  * Stage a source for Archivist-mode Canon ingest (labels it when total size warrants).
  * Throws and rolls back on failure so failed sources are never attached.
  */
 async function stageSourceForCanon(source, label) {
+    const sourceTokens = Array.isArray(source.entries)
+        ? source.entries.reduce((a, e) => a + estimateTokens(e.content), 0)
+        : estimateTokens(source.text);
+    const willBeArchivist = decideMode(getStagedTokenTotal() + sourceTokens, getModeOverride()) === 'archivist';
+    if (willBeArchivist) {
+        isImportCommitPending = true;
+        importStatusText = `Cataloguing "${label}" into Canon...`;
+    }
+    if (!importAbortController) {
+        importAbortController = new AbortController();
+    }
     startImportProgress(`Canon: ${label}`);
     const timeoutMs = Math.max(30000, (Number(getConciergeConnectionSettings()?.timeoutSec) || 300) * 1000);
     try {
         const res = await stageCanonSource(source, {
             send: (messages, signal) => sendConciergeRequest(messages, signal),
-            onStatus: msg => toastr?.info(msg),
+            onStatus: msg => {
+                importStatusText = `${label}: ${msg}`;
+                syncImportCommitBoxUI();
+                toastr?.info(msg);
+            },
+            signal: importAbortController.signal,
             timeoutMs,
         });
         if (res.mode === 'archivist') {
@@ -922,9 +981,15 @@ async function stageSourceForCanon(source, label) {
         return res;
     } catch (err) {
         unstageCanonSource(source.name);
-        toastr?.error(`Canon cataloguing failed for "${label}": ${err.message}`);
+        if (getStagedCanonEntries().length === 0) isImportCommitPending = false;
+        if (importAbortController?.signal?.aborted) {
+            toastr?.info(`Import cancelled for "${label}".`);
+        } else {
+            toastr?.error(`Canon cataloguing failed for "${label}": ${err.message}`);
+        }
         throw err;
     } finally {
+        importStatusText = '';
         stopImportProgress(`Canon: ${label}`);
     }
 }
@@ -957,6 +1022,7 @@ function renderAttachmentTray() {
 
     if (!pendingAttachments.length && !activeImports.length) {
         tray.hide();
+        syncImportCommitBoxUI();
         return;
     }
 
@@ -994,6 +1060,15 @@ function renderAttachmentTray() {
             </div>
         `);
         tray.append(modeChip);
+
+        if (mode === 'vibe') {
+            const upgradeBtn = $(`
+                <button type="button" class="menu_button mhc-bar-btn mhc-upgrade-archivist-btn" title="Catalogue attached documents/lorebooks into a vectorized Campaign Canon Lorebook">
+                    🗃️ Build Canon Lorebook
+                </button>
+            `);
+            tray.append(upgradeBtn);
+        }
     }
 
     // 2. Active in-progress import chips
@@ -1007,8 +1082,28 @@ function renderAttachmentTray() {
         tray.append(loadingChip);
     });
 
+    $('.mhc-upgrade-archivist-btn').on('click', async function () {
+        setModeOverride('archivist');
+        isImportCommitPending = true;
+        syncImportCommitBoxUI();
+        try {
+            for (const att of pendingAttachments) {
+                if (att.type === 'lore') await stageSourceForCanon({ name: att.name, type: 'lore', entries: att.entries || [] }, att.name);
+                if (att.type === 'doc') await stageSourceForCanon({ name: att.name, type: 'doc', text: att.text }, att.name);
+            }
+        } catch (_) {}
+        finally {
+            renderAttachmentTray();
+        }
+    });
+
     $('.mhc-mode-override').on('change', async function () {
-        setModeOverride($(this).val());
+        const newMode = $(this).val();
+        setModeOverride(newMode);
+        if (newMode === 'archivist') {
+            isImportCommitPending = true;
+            syncImportCommitBoxUI();
+        }
         // Re-stage so an override to Big lore labels already-attached sources now.
         try {
             for (const att of pendingAttachments) {
@@ -1027,6 +1122,8 @@ function renderAttachmentTray() {
         if (removed && (removed.type === 'lore' || removed.type === 'doc')) unstageCanonSource(removed.name);
         renderAttachmentTray();
     });
+
+    syncImportCommitBoxUI();
 }
 
 /**
@@ -1150,6 +1247,108 @@ function renderPromoteChips(found) {
     $('#mhc_chat_messages').append(wrap);
     const box = document.getElementById('mhc_chat_messages');
     if (box) box.scrollTop = box.scrollHeight;
+}
+
+/**
+ * Commit imported world lore into Canon and generate the Archivist setting overview & suggested starts.
+ */
+export async function handleCommitImportedLore() {
+    if (isGenerating || activeImports.length > 0) return;
+    const canonEntries = getStagedCanonEntries();
+    if (!canonEntries.length) {
+        isImportCommitPending = false;
+        syncImportCommitBoxUI();
+        return;
+    }
+
+    const inventoryBlock = buildInventoryBlock(canonEntries);
+    const userBubbleEl = appendChatBubble('user', `🗃️ Committed imported world lore (${canonEntries.length} canon entries)`);
+    const commitPromptText = `Please review the committed world lore and provide a setting overview / vibe check along with suggested starting points.\n${inventoryBlock}`;
+    chatHistory.push({
+        role: 'user',
+        content: `🗃️ Committed imported world lore (${canonEntries.length} canon entries)`,
+        displayContent: `🗃️ Committed imported world lore (${canonEntries.length} canon entries)`,
+        llmContent: commitPromptText,
+    });
+
+    const stream = document.getElementById('mhc_chat_messages');
+    const typingBubble = document.createElement('div');
+    typingBubble.className = 'mhc-bubble mhc-bubble-assistant';
+    typingBubble.id = 'mhc_typing_indicator';
+    typingBubble.innerHTML = '<i class="mhc-stage">🗃️ The Archivist is reviewing the catalogued lore...</i><div class="mhc-stream-preview" style="margin-top:6px;font-size:0.78em;opacity:0.65;white-space:pre-wrap;word-break:break-word;"></div>';
+    if (stream) {
+        stream.appendChild(typingBubble);
+        stream.scrollTop = stream.scrollHeight;
+    }
+
+    const turn = { controller: new AbortController(), cancelled: false };
+    activeTurn = turn;
+    isGenerating = true;
+    $('#mhc_import_commit_btn').prop('disabled', true).text('⏳ Generating Overview...');
+    $('#mhc_import_add_more_btn').hide();
+    $('#mhc_import_use_vibe_btn').hide();
+    $('#mhc_import_cancel_btn').text('⏹ Stop Overview').show();
+    $('#mhc_stop_btn').show();
+
+    let lastPreviewAt = 0;
+    const llm = (messages) => sendConciergeRequest(messages, turn.controller.signal, {
+        onProgress: ({ content, thinking, chars, thinkingChars }) => {
+            const now = Date.now();
+            if (now - lastPreviewAt < 150) return;
+            lastPreviewAt = now;
+            const prev = typingBubble.querySelector('.mhc-stream-preview');
+            if (!prev) return;
+            const tail = (content || thinking || '').slice(-220).replace(/\s+/g, ' ');
+            const looping = detectRepetition(content || thinking || '');
+            prev.textContent = `${looping ? '⚠️ repeating… ' : ''}${chars} chars${thinkingChars ? ` + ${thinkingChars} thinking` : ''} — …${tail}`;
+            const box = document.getElementById('mhc_chat_messages');
+            if (box) box.scrollTop = box.scrollHeight;
+        },
+    });
+
+    try {
+        const reply = await llm([
+            { role: 'system', name: 'System', content: buildArchivistBriefingPrompt() },
+            { role: 'user', name: 'Player', content: commitPromptText },
+        ]);
+        if (turn.cancelled || turn.controller.signal.aborted) return;
+        const cleanedReply = stripThinkingContent(reply || '').trim();
+        const { text: briefingText, starts } = parseSuggestedStarts(cleanedReply);
+        if (!briefingText) {
+            throw new Error('Archivist briefing failed: the LLM returned an empty response.');
+        }
+        typingBubble.remove();
+        appendChatBubble('assistant', briefingText);
+        renderStartChips(starts);
+        chatHistory.push({ role: 'assistant', content: briefingText });
+        markBriefed();
+        pendingAttachments = pendingAttachments.filter(a => a.type !== 'doc' && a.type !== 'lore');
+        isImportCommitPending = false;
+        renderAttachmentTray();
+        if (!isVectorsWorldInfoEnabled(extension_settings)) {
+            toastr?.info('Tip: enable SillyTavern → Vector Storage → "Enable for World Info" so Canon entries also match by meaning, not just keywords.');
+        }
+        saveDraft();
+    } catch (err) {
+        typingBubble?.remove();
+        userBubbleEl?.remove();
+        if (chatHistory.length && chatHistory[chatHistory.length - 1]?.content?.startsWith('🗃️ Committed imported world lore')) {
+            chatHistory.pop();
+        }
+        isImportCommitPending = true;
+        syncImportCommitBoxUI();
+        if (turn.controller.signal.aborted) {
+            toastr?.info('Archivist overview cancelled.');
+        } else {
+            toastr?.error(`Overview generation failed: ${err.message}`);
+        }
+    } finally {
+        isGenerating = false;
+        activeTurn = null;
+        $('#mhc_stop_btn').hide();
+        $('#mhc_import_cancel_btn').text('⏹ Cancel Import');
+        $('#mhc_import_add_more_btn').show();
+    }
 }
 
 /**
@@ -1718,7 +1917,17 @@ async function handleFilesSelected(files) {
                     if (card.characterBook) {
                         startImportProgress(`${card.name}'s Worldbook`);
                         try {
-                            const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
+                            const loreRes = await processLorebookForConcierge(
+                                `${card.name}'s Lorebook`,
+                                card.characterBook,
+                                msg => {
+                                    isImportCommitPending = true;
+                                    importStatusText = msg;
+                                    syncImportCommitBoxUI();
+                                    toastr?.info(msg);
+                                },
+                                card.name,
+                            );
                             await attachLoreSource(`${card.name}'s Lorebook`, loreRes);
                             toastr?.info(`Imported embedded worldbook for "${card.name}".`);
                         } catch (err) {
@@ -1746,7 +1955,12 @@ async function handleFilesSelected(files) {
                         const loreRes = await processLorebookForConcierge(
                             file.name.replace(/\.json$/i, ''),
                             json,
-                            msg => toastr?.info(msg),
+                            msg => {
+                                isImportCommitPending = true;
+                                importStatusText = msg;
+                                syncImportCommitBoxUI();
+                                toastr?.info(msg);
+                            },
                             activeDossier?.protagonist?.name || '',
                         );
                         await attachLoreSource(file.name.replace(/\.json$/i, ''), loreRes);
@@ -2108,7 +2322,17 @@ function bindModalEvents() {
             if (card.characterBook) {
                 startImportProgress(`${card.name}'s Worldbook`);
                 try {
-                    const loreRes = await processLorebookForConcierge(`${card.name}'s Lorebook`, card.characterBook, () => {}, card.name);
+                    const loreRes = await processLorebookForConcierge(
+                        `${card.name}'s Lorebook`,
+                        card.characterBook,
+                        msg => {
+                            isImportCommitPending = true;
+                            importStatusText = msg;
+                            syncImportCommitBoxUI();
+                            toastr?.info(msg);
+                        },
+                        card.name,
+                    );
                     await attachLoreSource(`${card.name}'s Lorebook`, loreRes);
                     renderAttachmentTray();
                     toastr?.info(`Imported embedded worldbook for "${card.name}".`);
@@ -2238,7 +2462,17 @@ function bindModalEvents() {
                 return;
             }
 
-            const loreRes = await processLorebookForConcierge(bookName, bookData, msg => toastr?.info(msg), activeDossier?.protagonist?.name || '');
+            const loreRes = await processLorebookForConcierge(
+                bookName,
+                bookData,
+                msg => {
+                    isImportCommitPending = true;
+                    importStatusText = msg;
+                    syncImportCommitBoxUI();
+                    toastr?.info(msg);
+                },
+                activeDossier?.protagonist?.name || '',
+            );
             await attachLoreSource(bookName, loreRes);
             renderAttachmentTray();
             toastr?.success(`Imported lorebook: "${bookName}" (${loreRes.mode === 'synthesized' ? 'Synthesized' : 'Direct'}).`);
@@ -2247,6 +2481,41 @@ function bindModalEvents() {
         } finally {
             stopImportProgress(bookName);
         }
+    });
+
+    // Inspiration Toolbar: Manual World Lore Import Trigger & Hidden Input
+    $('#mhc_import_world_lore_btn').on('click', () => $('#mhc_import_lore_file_input').click());
+    $('#mhc_import_lore_file_input').on('change', function () {
+        if (this.files && this.files.length) {
+            setModeOverride('archivist');
+            isImportCommitPending = true;
+            syncImportCommitBoxUI();
+            handleFilesSelected(this.files);
+            this.value = '';
+        }
+    });
+
+    // Import & Commit Box actions
+    $('#mhc_import_add_more_btn').on('click', () => $('#mhc_import_lore_file_input').click());
+    $('#mhc_import_commit_btn').on('click', handleCommitImportedLore);
+    $('#mhc_import_cancel_btn').on('click', () => {
+        if (activeTurn) {
+            activeTurn.controller.abort();
+            return;
+        }
+        if (importAbortController) {
+            try { importAbortController.abort(); } catch (_) {}
+            importAbortController = null;
+        }
+        activeImports = [];
+        isImportCommitPending = false;
+        renderAttachmentTray();
+    });
+    $('#mhc_import_use_vibe_btn').on('click', () => {
+        setModeOverride('vibe');
+        isImportCommitPending = false;
+        renderAttachmentTray();
+        toastr?.info('Switched to Quick Vibe mode (chat prompt will use the first 5,000 words).');
     });
 
     // Send on button or Enter (Shift+Enter for newline)

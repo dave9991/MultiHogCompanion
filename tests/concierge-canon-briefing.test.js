@@ -54,4 +54,116 @@ assert.ok(bp.includes('Do NOT emit [UPDATE_DOSSIER]'));
 assert.ok(bp.includes('[SUGGESTED_STARTS]'));
 assert.ok(buildConciergeSystemPrompt().includes('[CANON_INVENTORY]'));
 
+// ── Import & Commit Box & Manual Trigger Verification ──────────────────────────
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ROOT_DIR = path.resolve(__dirname, '..');
+
+// 1. Template Verification
+const modalHtml = fs.readFileSync(path.join(ROOT_DIR, 'concierge-modal.html'), 'utf8');
+assert.ok(modalHtml.includes('id="mhc_import_world_lore_btn"'), 'Modal must have #mhc_import_world_lore_btn');
+assert.ok(modalHtml.includes('id="mhc_import_lore_file_input"'), 'Modal must have #mhc_import_lore_file_input');
+assert.ok(modalHtml.includes('id="mhc_import_commit_box"'), 'Modal must have #mhc_import_commit_box');
+assert.ok(modalHtml.includes('id="mhc_import_commit_icon"'), 'Modal must have #mhc_import_commit_icon');
+assert.ok(modalHtml.includes('id="mhc_import_commit_status_text"'), 'Modal must have #mhc_import_commit_status_text');
+assert.ok(modalHtml.includes('id="mhc_import_add_more_btn"'), 'Modal must have #mhc_import_add_more_btn');
+assert.ok(modalHtml.includes('id="mhc_import_cancel_btn"'), 'Modal must have #mhc_import_cancel_btn');
+assert.ok(modalHtml.includes('id="mhc_import_use_vibe_btn"'), 'Modal must have #mhc_import_use_vibe_btn');
+assert.ok(modalHtml.includes('id="mhc_import_commit_btn"'), 'Modal must have #mhc_import_commit_btn');
+
+// 2. CSS Verification
+const styleCss = fs.readFileSync(path.join(ROOT_DIR, 'style.css'), 'utf8');
+assert.ok(styleCss.includes('.mhc-import-commit-box'), 'style.css must have .mhc-import-commit-box');
+assert.ok(styleCss.includes('.mhc-import-commit-status-row'), 'style.css must have .mhc-import-commit-status-row');
+assert.ok(styleCss.includes('.mhc-import-commit-actions'), 'style.css must have .mhc-import-commit-actions');
+assert.ok(styleCss.includes('.mhc-commit-btn'), 'style.css must have .mhc-commit-btn');
+assert.ok(styleCss.includes('.mhc-upgrade-archivist-btn'), 'style.css must have .mhc-upgrade-archivist-btn');
+
+// 3. UI State Synchronization Mock Test
+const mockDomState = {
+    inputRowVisible: true,
+    commitBoxVisible: false,
+    commitBtnDisabled: true,
+    commitBtnText: '',
+    cancelBtnVisible: false,
+    vibeBtnVisible: false,
+    statusText: '',
+};
+
+globalThis.$ = (selector) => {
+    return {
+        show() {
+            if (selector === '.mhc-chat-input-row') mockDomState.inputRowVisible = true;
+            if (selector === '#mhc_import_commit_box') mockDomState.commitBoxVisible = true;
+            if (selector === '#mhc_import_cancel_btn') mockDomState.cancelBtnVisible = true;
+            if (selector === '#mhc_import_use_vibe_btn') mockDomState.vibeBtnVisible = true;
+            return this;
+        },
+        hide() {
+            if (selector === '.mhc-chat-input-row') mockDomState.inputRowVisible = false;
+            if (selector === '#mhc_import_commit_box') mockDomState.commitBoxVisible = false;
+            if (selector === '#mhc_import_cancel_btn') mockDomState.cancelBtnVisible = false;
+            if (selector === '#mhc_import_use_vibe_btn') mockDomState.vibeBtnVisible = false;
+            return this;
+        },
+        prop(propName, val) {
+            if (selector === '#mhc_import_commit_btn' && propName === 'disabled') {
+                mockDomState.commitBtnDisabled = val;
+            }
+            return this;
+        },
+        text(t) {
+            if (t !== undefined) {
+                if (selector === '#mhc_import_commit_btn') mockDomState.commitBtnText = t;
+                if (selector === '#mhc_import_commit_status_text') mockDomState.statusText = t;
+            }
+            return t;
+        },
+        html(h) {
+            return this;
+        },
+        val() { return ''; },
+        on() { return this; },
+    };
+};
+
+const { syncImportCommitBoxUI, setImportCommitPending, getImportCommitPending } = await import('../concierge-ui.js');
+
+// Test: when isImportCommitPending is false, normal chat input is visible
+setImportCommitPending(false);
+syncImportCommitBoxUI();
+assert.strictEqual(mockDomState.inputRowVisible, true);
+assert.strictEqual(mockDomState.commitBoxVisible, false);
+
+// Test: when isImportCommitPending is true and canon entries exist needing briefing
+clearStagedCanon();
+setModeOverride('archivist');
+await stageCanonSource({ name: 'lorebook', type: 'doc', text: '# Kingdom\nA great realm.' }, {
+    send: async () => '[{"id":"lorebook#0","kind":"LOCATION","name":"Kingdom","importance":4}]',
+});
+assert.strictEqual(shouldBrief(), true);
+
+setImportCommitPending(true);
+syncImportCommitBoxUI();
+assert.strictEqual(mockDomState.inputRowVisible, false, 'chat input must be hidden when commit is needed');
+assert.strictEqual(mockDomState.commitBoxVisible, true, 'commit box must be shown when commit is needed');
+assert.strictEqual(mockDomState.commitBtnDisabled, false, 'commit button must be enabled when ready');
+assert.ok(mockDomState.commitBtnText.includes('Commit & Review Lore (1 entries)'));
+assert.strictEqual(mockDomState.cancelBtnVisible, false);
+assert.strictEqual(mockDomState.vibeBtnVisible, true);
+
+// Test: switching back from pending commit restores chat input
+setImportCommitPending(false);
+syncImportCommitBoxUI();
+assert.strictEqual(mockDomState.inputRowVisible, true);
+assert.strictEqual(mockDomState.commitBoxVisible, false);
+
+// Clean up
+clearStagedCanon();
+setModeOverride('auto');
+
 console.log('✅ Concierge Archivist Briefing test suite passed.');

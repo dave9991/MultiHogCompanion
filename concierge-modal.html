@@ -75,6 +75,33 @@
                     <select id="mhc_st_lore_select" class="text_pole" style="display: none; font-size: 0.8em; max-width: 160px; padding: 2px 6px;">
                         <option value="">-- Choose Lorebook --</option>
                     </select>
+
+                    <button type="button" id="mhc_import_world_lore_btn" class="menu_button mhc-bar-btn" title="Import a world document or lorebook directly into a Campaign Canon Lorebook (forces Archivist mode)">
+                        🗃️ Import World Lore
+                    </button>
+                    <input type="file" id="mhc_import_lore_file_input" multiple accept=".pdf,.docx,.txt,.md,.epub,.json" style="display: none;">
+                </div>
+
+                <!-- Import & Commit Box (Replaces chat input during/after Archivist LLM Import until Committed) -->
+                <div id="mhc_import_commit_box" class="mhc-import-commit-box" style="display: none;">
+                    <div class="mhc-import-commit-status-row">
+                        <span id="mhc_import_commit_icon">⏳</span>
+                        <span id="mhc_import_commit_status_text">Cataloguing world lore into Canon...</span>
+                    </div>
+                    <div class="mhc-import-commit-actions">
+                        <button type="button" id="mhc_import_add_more_btn" class="menu_button mhc-bar-btn" title="Attach another world document or lorebook before committing">
+                            📎 Add More Files
+                        </button>
+                        <button type="button" id="mhc_import_cancel_btn" class="menu_button mhc-bar-btn" style="border-color: rgba(239, 68, 68, 0.4) !important; color: #f87171 !important;" title="Cancel active import">
+                            ⏹ Cancel Import
+                        </button>
+                        <button type="button" id="mhc_import_use_vibe_btn" class="menu_button mhc-bar-btn" style="display: none;" title="Skip Canon Lorebook mode and use Quick Vibe mode (first 5,000 words)">
+                            ✨ Use Quick Vibe Instead
+                        </button>
+                        <button type="button" id="mhc_import_commit_btn" class="menu_button mhc-commit-btn" disabled title="Commit imported Canon lore and generate the Archivist setting overview &amp; vibe check">
+                            ✅ Commit &amp; Review Lore
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Input Bar -->

@@ -32,6 +32,7 @@ When inspecting upstream behavior, look in these modules:
 ### A. The Turn Loop & Message Routing
 * **Source**: [`router.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/router.js) & [`renderer.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/renderer.js)
 * **Behavior**: Orchestrates prompt dispatch, captures response chunks, updates the state tracker memo, and renders CYOA choice buttons into the message footer.
+* **Rendering Reference**: See [`multihog-rendering-reference.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/multihog-rendering-reference.md) for the complete catalog of `((MARKER))` tokens, pill hover-toast syntax (`Name (desc)` vs `Name [desc]`), color/gradient modifiers, and implicit `STOCK_FIELD_RULES`.
 
 ### B. State Tracker & Live Memo Loop
 * **Source**: [`state-manager.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/state-manager.js) & [`memo-processor.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/memo-processor.js)

@@ -11,6 +11,7 @@ Before modifying code, designing features, or debugging async timing:
 * **Turn Lifecycle & Race Conditions**: Consult [docs/listeners-and-lifecycle.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/listeners-and-lifecycle.md) for event order, race conditions, and coordinator patterns.
 * **SillyTavern Host Contracts**: Consult [docs/host-sillytavern.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/host-sillytavern.md) for pointers to `SillyTavern-Docs` and `st-source`.
 * **Upstream MultiHog Framework**: Consult [docs/upstream-multihog.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/upstream-multihog.md) for pointers to upstream design docs, memo loops, and cartridges.
+* **State Tracker HUD & Rendering Reference**: Consult [docs/multihog-rendering-reference.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/multihog-rendering-reference.md) for `((MARKER))` tokens, pill hover-toast rules (`(...)` vs `[...]`), color/gradient syntax, and implicit field highlighting.
 
 ---
 

@@ -53,6 +53,7 @@ Developing this extension requires understanding the interaction across three di
 | **Monkey Patching & DOM Interception** | [MONKEYPATCHES.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/MONKEYPATCHES.md) | Architectural Decision Records (ADRs) and safe wrapping patterns |
 | **PbtA Ruleset & Vitality Mechanics** | [PBTA.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/PBTA.md) | `pbta-ruleset.js`, `pbta-vitality-sync.js`, `pbta-companion-bridge.js` |
 | **Freeform Attrition Engine (FAE)** | [FAE.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/FAE.md) | `fae-ruleset.js`, `fae-state-sync.js` |
+| **State Tracker HUD & Marker Syntax** | [multihog-rendering-reference.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/multihog-rendering-reference.md) | `extensions/SillyTavern-MultihogDnDFramework/renderer.js`<br>`extensions/SillyTavern-MultihogDnDFramework/memo-processor.js` |
 
 ---
 

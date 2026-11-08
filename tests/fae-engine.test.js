@@ -1221,4 +1221,21 @@ Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]
         assert.strictEqual(parsedOff.knobs.heroic_tier, false);
         assert.strictEqual(parsedOff.character.heroic_domain, null);
     });
+
+    test('7. parseFaeStateFromMemo and reconcileFaeMemoAfterTurn do not leak osr_dungeon pools or Spellblade heroic domain into a cosmic_horror memo', () => {
+        const cosmicMemo = formatInitialFaeMemo('cosmic_horror', { heroicTier: false });
+        assert.ok(cosmicMemo.includes('Health (8/8)'));
+        assert.ok(cosmicMemo.includes('Sanity: 8/8'));
+
+        const parsed = parseFaeStateFromMemo(cosmicMemo, 'osr_dungeon');
+        assert.deepStrictEqual(Object.keys(parsed.pools), ['health', 'sanity']);
+        assert.strictEqual(parsed.knobs.heroic_tier, false);
+        assert.strictEqual(parsed.character.heroic_domain, null);
+
+        const reconciled = reconcileFaeMemoAfterTurn(null, cosmicMemo, 'osr_dungeon');
+        assert.ok(!reconciled.memo.includes('Resolve'), 'Reconciled memo must not contain Resolve');
+        assert.ok(!reconciled.memo.includes('Torch & Supplies'), 'Reconciled memo must not contain Torch & Supplies');
+        assert.ok(!reconciled.memo.includes('Heroic: ON'), 'Reconciled memo must not contain Heroic: ON');
+        assert.ok(!reconciled.memo.includes('Spellblade'), 'Reconciled memo must not contain Spellblade');
+    });
 });

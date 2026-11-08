@@ -291,7 +291,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         if (breatherM) state_flags.breather_available = !/^(?:USED|OFF|false)$/i.test(breatherM[1].trim());
 
         const heroicM = kLine.match(/\bHeroic:\s*(ON|OFF|true|false)\b/i);
-        if (heroicM) knobs.heroic_tier = /^(?:ON|true)$/i.test(heroicM[1]);
+        knobs.heroic_tier = heroicM ? /^(?:ON|true)$/i.test(heroicM[1]) : false;
 
         const advM = kLine.match(/\[Advantage:\s*([^\]]+)\]/i);
         if (advM) tempAdvantage = advM[1].trim();
@@ -379,10 +379,12 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         }
     }
 
-    // Ensure all fallback genre pools exist in parsedPools
-    for (const [k, p] of Object.entries(fallbackGenre.pools)) {
-        if (!parsedPools[k]) {
-            parsedPools[k] = { ...p, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
+    // Only backfill fallback genre pools when the memo had no secondary pool lines at all
+    if (Object.keys(parsedPools).length <= 1) {
+        for (const [k, p] of Object.entries(fallbackGenre.pools)) {
+            if (!parsedPools[k]) {
+                parsedPools[k] = { ...p, passive_drain: p.passive_drain ? { ...p.passive_drain } : null };
+            }
         }
     }
 

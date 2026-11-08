@@ -790,6 +790,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                     rpgSettings.chatStates[chatId].campaignDossier = dossier;
                     rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
                     rpgSettings.chatStates[chatId].companionDossier = dossier;
+                    if (isFae) {
+                        rpgSettings.chatStates[chatId].faeCampaignDossier = dossier;
+                    }
                     rpgSettings.chatStates[chatId].simulationDepth = simDepth;
                     rpgSettings.chatStates[chatId].worldProgressionEnabled = rpgSettings.worldProgressionEnabled;
                     rpgSettings.chatStates[chatId].mapEvolutionEnabled = rpgSettings.mapEvolutionEnabled;

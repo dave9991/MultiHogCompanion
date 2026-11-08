@@ -86,6 +86,7 @@ import {
 } from './namerag-hooks.js';
 import {
     setupCompanionDocInterceptor,
+    detectActiveFaeGenre,
 } from './pbta-companion-bridge.js';
 import {
     isPbtAActive,
@@ -685,8 +686,7 @@ export async function runSync(reason = '') {
             if (isFaeActive(chatId)) {
                 const rawMemo = rpgSettings.currentMemo || rpgSettings.chatStates?.[chatId]?.currentMemo || '';
                 if (rawMemo) {
-                    const compSettings = getSettings();
-                    const genreKey = compSettings.lastFaeGenre || 'cosmic_horror';
+                    const genreKey = detectActiveFaeGenre({ chatId, rpgSettings, currentMemo: rawMemo });
                     const prevMemo = _lastFaeMemoByChat.get(chatId) || null;
                     let memoToReconcile = rawMemo;
                     if (reason === 'CHARACTER_MESSAGE_RENDERED') {
@@ -979,24 +979,10 @@ export async function applyFaeCartridge(genreKey = 'cosmic_horror', overrides = 
         Object.assign(s.modules, cartridge.payload.modules);
     }
 
-    // 7. Save settings
-    saveSettingsDebounced();
-
-    // 7b. Persist FAE setup snapshot so MultiHog's Chat Setup Link & F5 reloads preserve FAE
-    const activeChatId = getActiveChatId();
-    if (activeChatId) {
-        await persistPbtaChatState(activeChatId);
-    }
-
-    // 8. Re-apply sysprompt via MultiHog runtime bridge
-    await refreshMultihogRuntime();
-    syncCompanionDiceFunctionTools();
-
-    // Persist active genre in Companion settings
+    // 7. Persist active genre in Companion settings and active cartridge record first
     const compSettings = getSettings();
     compSettings.lastFaeGenre = genreKey;
-    saveSettingsDebounced();
-
+    const activeChatId = getActiveChatId();
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
     const activeDossierSnapshot = overrides.dossier || s.chatStates?.[activeChatId]?.faeCampaignDossier || s.chatStates?.[activeChatId]?.pbtaCampaignDossier || null;
     if (activeChatId) {
@@ -1008,6 +994,16 @@ export async function applyFaeCartridge(genreKey = 'cosmic_horror', overrides = 
             ...(activeDossierSnapshot ? { dossier: JSON.parse(JSON.stringify(activeDossierSnapshot)) } : {}),
         });
     }
+    saveSettingsDebounced();
+
+    // 7b. Persist FAE setup snapshot so MultiHog's Chat Setup Link & F5 reloads preserve FAE
+    if (activeChatId) {
+        await persistPbtaChatState(activeChatId);
+    }
+
+    // 8. Re-apply sysprompt via MultiHog runtime bridge
+    await refreshMultihogRuntime();
+    syncCompanionDiceFunctionTools();
     logRulesetEvent('applyFaeCartridge', {
         genreKey,
         activeChatId,
@@ -2583,8 +2579,8 @@ export function syncCompanionDiceFunctionTools() {
             action: async (args) => {
                 const curSettings = getRpgSettings();
                 const curChatId = getActiveChatId();
-                const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
                 const memo = curSettings?.currentMemo || curSettings?.chatStates?.[curChatId]?.currentMemo || '';
+                const genreKey = detectActiveFaeGenre({ chatId: curChatId, rpgSettings: curSettings, currentMemo: memo });
                 const state = parseFaeStateFromMemo(memo, genreKey);
                 const out = executeFaeActionTool(state, args);
                 _pendingFaeToolResolutionByChat.set(curChatId, {
@@ -2658,7 +2654,7 @@ export function syncActiveRulesetRngMode(rpgSettings = null) {
 
     if (fae) {
         const memo = s.currentMemo || s.chatStates?.[activeChatId]?.currentMemo || '';
-        const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
+        const genreKey = detectActiveFaeGenre({ chatId: activeChatId, rpgSettings: s, currentMemo: memo });
         const faeState = parseFaeStateFromMemo(memo, genreKey);
         const isHeroic = Boolean(faeState.knobs?.heroic_tier);
         const desiredRng = buildFaeRngContent({ toolMode });
@@ -2815,7 +2811,7 @@ function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
         }
 
         const memo = rpgSettings?.currentMemo || rpgSettings?.chatStates?.[activeChatId]?.currentMemo || '';
-        const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
+        const genreKey = detectActiveFaeGenre({ chatId: activeChatId, rpgSettings, currentMemo: memo });
         const faeState = parseFaeStateFromMemo(memo, genreKey);
         const combatMatch = memo.match(/\[COMBAT\]([\s\S]*?)\[\/COMBAT\]/i);
         const hasActiveEncounter = Boolean(combatMatch && /[1-9]\d*\s*\/\s*[1-9]\d*\s*HP/i.test(combatMatch[1]));
@@ -3204,7 +3200,7 @@ if (typeof jQuery !== 'undefined') {
                 const rpgSettings = getRpgSettings();
                 const currentMemo = rpgSettings?.currentMemo || '';
                 const chatId = getActiveChatId();
-                const genreKey = getSettings().lastFaeGenre || 'cosmic_horror';
+                const genreKey = detectActiveFaeGenre({ chatId, rpgSettings, currentMemo });
                 const state = parseFaeStateFromMemo(currentMemo, genreKey);
                 const restRes = triggerEventOrRest(state, eventType);
 

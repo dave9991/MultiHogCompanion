@@ -91,25 +91,30 @@ export function detectActiveFaeGenre(customContext = {}) {
         return customContext.lastGenre;
     }
 
-    // 2. Companion active cartridge record
+    // 2. Companion active cartridge record or chat dossier
     try {
-        const activeCart = getCompanionActiveCartridge(customContext.chatId || null, customContext.rpgSettings || null);
+        const s = customContext.rpgSettings
+            || (typeof globalThis !== 'undefined'
+                ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.rpg_tracker
+                : null);
+        const chatId = customContext.chatId || null;
+        const activeCart = getCompanionActiveCartridge(chatId, s);
         if (activeCart?.genre && FAE_GENRES[activeCart.genre]) {
             return activeCart.genre;
         }
-    } catch (_) { /* ignore */ }
-
-    // 3. MultiHog Companion extension settings
-    try {
-        const extSettings = typeof globalThis !== 'undefined'
-            ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.multihog_companion
-            : null;
-        if (extSettings?.lastFaeGenre && FAE_GENRES[extSettings.lastFaeGenre]) {
-            return extSettings.lastFaeGenre;
+        if (chatId && s?.chatStates?.[chatId]) {
+            const chatPart = s.chatStates[chatId];
+            const dGenre = chatPart.faeCampaignDossier?.meta?.systemKey
+                || chatPart.pbtaCampaignDossier?.meta?.systemKey
+                || chatPart.companionDossier?.meta?.systemKey
+                || chatPart.campaignDossier?.meta?.systemKey;
+            if (dGenre && FAE_GENRES[dGenre]) {
+                return dGenre;
+            }
         }
     } catch (_) { /* ignore */ }
 
-    // 4. Inspect active state memo content for FAE genre pool signatures
+    // 3. Inspect active state memo content for FAE genre pool signatures
     const memo = customContext.currentMemo
         || customContext.rpgSettings?.currentMemo
         || (typeof globalThis !== 'undefined'
@@ -124,7 +129,18 @@ export function detectActiveFaeGenre(customContext = {}) {
         if (/\b(heat\s*(&|and)\s*trace|heat_and_trace)\b/i.test(memoLower)) return 'cyberpunk_noir';
         if (/\b(oxygen\s*(&|and)\s*power|oxygen_and_power)\b/i.test(memoLower)) return 'deep_space';
         if (/\b(trail\s*supplies|trail_supplies)\b/i.test(memoLower)) return 'weird_west';
+        if (/\bsanity\s*:\s*\d+\/\d+/i.test(memoLower)) return 'cosmic_horror';
     }
+
+    // 4. MultiHog Companion extension settings fallback
+    try {
+        const extSettings = typeof globalThis !== 'undefined'
+            ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.multihog_companion
+            : null;
+        if (extSettings?.lastFaeGenre && FAE_GENRES[extSettings.lastFaeGenre]) {
+            return extSettings.lastFaeGenre;
+        }
+    } catch (_) { /* ignore */ }
 
     // 5. Default fallback
     return 'cosmic_horror';

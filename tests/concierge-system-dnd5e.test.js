@@ -226,15 +226,15 @@ test('8. formatInitialMemo produces standard Day 0 MultiHog D&D state memo compl
     const dossier = {
         meta: { title: 'The Lost Crypt', ruleset: 'dnd5e' },
         protagonist: {
-            name: 'Lou',
-            class: 'Rogue',
-            hitDie: 'd8',
-            hp: { current: 10, max: 10 },
-            ac: 14,
-            stats: { STR: 10, DEX: 16, CON: 14, INT: 12, WIS: 12, CHA: 10 },
-            features: ['Sneak Attack (Deal +1d6 damage when having advantage)'],
-            abilities: ['Cunning Action (Dash, Disengage, or Hide as bonus action)'],
-            equipment: 'Leather armor, shortswords, thieves\' tools',
+            name: 'Donald',
+            class: 'Fighter',
+            hitDie: 'd10',
+            hp: { current: 12, max: 12 },
+            ac: 18,
+            stats: { STR: 16, DEX: 14, CON: 14, INT: 10, WIS: 12, CHA: 10 },
+            features: ['Fighting Style: Defense (+1 AC)'],
+            abilities: ['Second Wind (Bonus Action: heal 1d10+Level HP; 1/1 per short rest)'],
+            equipment: 'Chain Mail (AC 16), Longsword, Shield (+2 AC), Adventurer\'s pack, 15 gp',
         },
         maps: [{ name: 'Crypt Entrance' }],
     };
@@ -266,16 +266,53 @@ test('8. formatInitialMemo produces standard Day 0 MultiHog D&D state memo compl
     assert.ok(!blocks.TIME.includes('[CHARACTER]'), 'TIME block must NOT contain unparsed [CHARACTER]');
     assert.ok(!blocks.LOCATION.includes('[CHARACTER]'), 'LOCATION block must NOT contain unparsed [CHARACTER]');
 
-    // 4. Content assertions
-    assert.match(blocks.CHARACTER, /Lou\s*\(Rogue\):\s*10\/10 HP/);
+    // 4. Content assertions for native stock D&D fields
+    assert.match(blocks.TIME, /Last Rest:\s*N\/A/);
+    assert.match(blocks.TIME, /Current Time:\s*08:00 AM,\s*Day 1/);
+    assert.match(blocks.CHARACTER, /Donald\s*\(Fighter\):\s*12\/12 HP/);
     assert.ok(!blocks.CHARACTER.includes('Protagonist'), 'CHARACTER block must use authored name, not fallback "Protagonist"');
-    assert.match(blocks.CHARACTER, /HD:\s*d8\s*\(1\/1\)/);
-    assert.match(blocks.CHARACTER, /AC:\s*14/);
-    assert.match(blocks.CHARACTER, /Stats:\s*STR 10 \(\+0\),\s*DEX 16 \(\+3\),\s*CON 14 \(\+2\)/);
-    assert.match(blocks.CHARACTER, /\(\(PILLS\)\)\s*Traits:\s*Sneak Attack/);
-    assert.match(blocks.ABILITIES, /Cunning Action/);
-    assert.match(blocks.XP, /\(0\/300\)\s*Level:\s*1/);
+    assert.match(blocks.CHARACTER, /Combat:\s*BAB:\s*\+1\s*\|\s*Ranged\s*\(1 attack\):\s*\+3\s*\|\s*Melee\s*\(1 attack\):\s*\+4\s*\|\s*Base AC:\s*12\s*\|\s*Total AC:\s*18/);
+    assert.match(blocks.CHARACTER, /Gear:\s*Longsword/);
+    assert.match(blocks.CHARACTER, /Proficiencies:\s*All Armor,\s*Shields,\s*Simple & Martial Weapons/);
+    assert.match(blocks.CHARACTER, /Attr:\s*STR 16 \(\+3\),\s*DEX 14 \(\+2\),\s*CON 14 \(\+2\),\s*INT 10 \(\+0\),\s*WIS 12 \(\+1\),\s*CHA 10 \(\+0\)/);
+    assert.match(blocks.CHARACTER, /Saves:\s*Fort\s*\+4\s*\|\s*Ref\s*\+2\s*\|\s*Will\s*\+1/);
+    assert.match(blocks.CHARACTER, /Skills:\s*Athletics/);
+    assert.match(blocks.CHARACTER, /Traits:\s*Fighting Style/);
+    assert.match(blocks.CHARACTER, /HD:\s*d10\s*\(1\/1\)/);
+    assert.match(blocks.CHARACTER, /Status:\s*Healthy/);
+    assert.match(blocks.ABILITIES, /Second Wind/);
+    assert.match(blocks.XP, /Total:\s*0\s*\/\s*300\s*XP\s*\(Level 1\)/);
+    assert.match(blocks.INVENTORY, /- Chain Mail \(AC 16\) \[E\]/);
+    assert.match(blocks.INVENTORY, /- Longsword \[E\]/);
+    assert.match(blocks.INVENTORY, /- Shield \(\+2 AC\) \[E\]/);
+    assert.match(blocks.INVENTORY, /- Adventurer's pack/);
+    assert.match(blocks.INVENTORY, /- 15 gp/);
     assert.match(blocks.LOCATION, /Crypt Entrance/);
+
+    // 5. Caster verification: spells block with Level 1 (2/2):
+    const casterDossier = {
+        meta: { title: 'The Arcane Vault', ruleset: 'dnd5e' },
+        protagonist: {
+            name: 'Silas',
+            class: 'Wizard',
+            hitDie: 'd6',
+            hp: { current: 7, max: 7 },
+            ac: 12,
+            stats: { STR: 8, DEX: 14, CON: 12, INT: 16, WIS: 12, CHA: 10 },
+            cantrips: ['Light', 'Prestidigitation'],
+            spells: ['Magic Missile', 'Shield'],
+            spellSlots: { 1: 2 },
+            equipment: 'Quarterstaff, Component pouch, 10 gp',
+        },
+    };
+    const casterMemo = adapter.formatInitialMemo(casterDossier);
+    const casterBlocks = {};
+    for (const [, tag, content] of casterMemo.matchAll(UPSTREAM_MULTIHOG_PATTERN)) {
+        casterBlocks[tag.trim().toUpperCase()] = content.trim();
+    }
+    assert.ok(casterBlocks.SPELLS, 'Caster must produce [SPELLS] block');
+    assert.match(casterBlocks.SPELLS, /Cantrips:\s*Light,\s*Prestidigitation/);
+    assert.match(casterBlocks.SPELLS, /Level 1\s*\(2\/2\):\s*Magic Missile,\s*Shield/);
 });
 
 test('9. concierge-parser parses D&D 5e [UPDATE_DOSSIER] with class, stats, features, abilities and derives title', async () => {

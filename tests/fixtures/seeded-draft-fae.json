@@ -10,7 +10,7 @@
         "genreEstablished": true,
         "premise": "A lantern warden descends into a drowned chapel where the light has begun to answer back.",
         "tone": "Creeping dread and candlelit stone",
-        "createdAt": 1793980279154
+        "createdAt": 1794105156786
       },
       "protagonist": {
         "name": "Ines",
@@ -190,12 +190,14 @@
     "changelog": [],
     "originChatId": null,
     "originCampaignTitle": null,
-    "timestamp": 1793980279162
+    "timestamp": 1794105156794,
+    "turn0Text": "[TIME]\nDay 1, 08:00 AM (Morning)\n[/TIME]\n\n[LOCATION]\nThe Drowned Chapel\n[/LOCATION]\n\n[CHARACTER]\nInes (The Antiquarian): 8/8 HP | Pool: Health (8/8) | Scenes: 0/4 | XP: 0/4\n((BARPURPLE)) Sanity: 8/8\nFAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: lethal | Tempo: slow_burn | Idle: 0t | Breather: READY\n((PILLS)) Positive Tags: Lantern Warden [when guarding a threshold] (Positive Tag), Trained Archivist [for forbidden texts] (Positive Tag), Steady Hands [when handling fragile relics] (Positive Tag)\n((PILLS)) Scars & Debuffs: (-) Scar (Hollow Tinnitus)\nStatus: (-) Strained & Injured\n[/CHARACTER]\n\n[DUNGEON]\nActive Site: The Drowned Chapel\nThreat: MODERATE\n[/DUNGEON]\n\n[COMBAT]\nActive: false\n[/COMBAT]"
   },
   "expected": {
     "name": "Ines",
     "title": "The Hollow Light",
     "location": "The Drowned Chapel",
-    "initialMemo": "[TIME]\nDay 1, 08:00 AM (Morning)\n[/TIME]\n\n[LOCATION]\nThe Drowned Chapel\n[/LOCATION]\n\n[CHARACTER]\nInes (The Antiquarian): 8/8 HP | Pool: Health (8/8) | Scenes: 0/4 | XP: 0/4\n((BARPURPLE)) Sanity: 8/8\nFAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: lethal | Tempo: slow_burn | Idle: 0t | Breather: READY\n((PILLS)) Positive Tags: Lantern Warden [when guarding a threshold] (Positive Tag), Trained Archivist [for forbidden texts] (Positive Tag), Steady Hands [when handling fragile relics] (Positive Tag)\n((PILLS)) Scars & Debuffs: (-) Scar (Hollow Tinnitus)\nStatus: (-) Strained & Injured\n[/CHARACTER]\n\n[DUNGEON]\nActive Site: The Drowned Chapel\nThreat: MODERATE\n[/DUNGEON]\n\n[COMBAT]\nActive: false\n[/COMBAT]"
+    "initialMemo": "[TIME]\nDay 1, 08:00 AM (Morning)\n[/TIME]\n\n[LOCATION]\nThe Drowned Chapel\n[/LOCATION]\n\n[CHARACTER]\nInes (The Antiquarian): 8/8 HP | Pool: Health (8/8) | Scenes: 0/4 | XP: 0/4\n((BARPURPLE)) Sanity: 8/8\nFAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: lethal | Tempo: slow_burn | Idle: 0t | Breather: READY\n((PILLS)) Positive Tags: Lantern Warden [when guarding a threshold] (Positive Tag), Trained Archivist [for forbidden texts] (Positive Tag), Steady Hands [when handling fragile relics] (Positive Tag)\n((PILLS)) Scars & Debuffs: (-) Scar (Hollow Tinnitus)\nStatus: (-) Strained & Injured\n[/CHARACTER]\n\n[DUNGEON]\nActive Site: The Drowned Chapel\nThreat: MODERATE\n[/DUNGEON]\n\n[COMBAT]\nActive: false\n[/COMBAT]",
+    "turn0Text": "[TIME]\nDay 1, 08:00 AM (Morning)\n[/TIME]\n\n[LOCATION]\nThe Drowned Chapel\n[/LOCATION]\n\n[CHARACTER]\nInes (The Antiquarian): 8/8 HP | Pool: Health (8/8) | Scenes: 0/4 | XP: 0/4\n((BARPURPLE)) Sanity: 8/8\nFAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: lethal | Tempo: slow_burn | Idle: 0t | Breather: READY\n((PILLS)) Positive Tags: Lantern Warden [when guarding a threshold] (Positive Tag), Trained Archivist [for forbidden texts] (Positive Tag), Steady Hands [when handling fragile relics] (Positive Tag)\n((PILLS)) Scars & Debuffs: (-) Scar (Hollow Tinnitus)\nStatus: (-) Strained & Injured\n[/CHARACTER]\n\n[DUNGEON]\nActive Site: The Drowned Chapel\nThreat: MODERATE\n[/DUNGEON]\n\n[COMBAT]\nActive: false\n[/COMBAT]"
   }
 }

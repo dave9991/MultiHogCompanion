@@ -1,0 +1,419 @@
+{
+  "storageKey": "mhc_concierge_draft_dnd5e",
+  "draft": {
+    "dossier": {
+      "meta": {
+        "title": "The Sunken Vault",
+        "ruleset": "dnd5e",
+        "systemKey": "fantasy",
+        "systemLabel": "High Fantasy (Heroic Adventure)",
+        "genreEstablished": true,
+        "premise": "A draconic sorcerer investigates an ancient vault beneath a crossroads tavern whose cellar stones whisper of dragons.",
+        "tone": "High fantasy mystery and arcane danger",
+        "createdAt": 1794105147399
+      },
+      "protagonist": {
+        "name": "Vespera",
+        "gender": "female",
+        "class": "Sorcerer",
+        "level": 1,
+        "hitDie": "d6",
+        "hp": {
+          "current": 8,
+          "max": 8
+        },
+        "ac": 15,
+        "stats": {
+          "STR": 10,
+          "DEX": 14,
+          "CON": 14,
+          "INT": 12,
+          "WIS": 10,
+          "CHA": 16
+        },
+        "features": [
+          "Draconic Resilience (Base AC 13 + DEX modifier when unarmored)"
+        ],
+        "abilities": [
+          "Breath Weapon (Fire 15ft cone; 2d6 fire damage, DEX save DC 13; 1/1 per rest)"
+        ],
+        "spellSlots": {
+          "1": 2
+        },
+        "species": "Dragonborn",
+        "appearance": "",
+        "equipment": "Adventurer's kit, signature weapon, 15 gp",
+        "personality": "",
+        "background": "",
+        "habits": "",
+        "playbook": "Sorcerer",
+        "archetype": "Sorcerer",
+        "gear": [
+          "Dagger",
+          "Arcane Focus (Crystal Orb)",
+          "Dungeoneer's Pack",
+          "15 gp"
+        ],
+        "bio": "",
+        "portraitSrc": null,
+        "conditions": [],
+        "harm": {
+          "max": 5,
+          "current": 0,
+          "armor": 0
+        },
+        "status": ""
+      },
+      "npcs": [
+        {
+          "name": "Caleb",
+          "role": "Tavern Keeper",
+          "gender": "",
+          "archetype": "",
+          "species": "",
+          "appearance": "",
+          "equipment": "",
+          "demeanor": "",
+          "background": "",
+          "relationship": "",
+          "friendship": 0,
+          "affection": 0,
+          "movesOrBoons": "",
+          "notes": "Discovered glowing draconic runes beneath his cellar beer barrels.",
+          "portraitSrc": null,
+          "harm": null,
+          "conditions": [],
+          "status": ""
+        }
+      ],
+      "monsters": [],
+      "maps": [
+        {
+          "site": "The Crossroads Tavern",
+          "kind": "SETTLEMENT",
+          "threat": "LOW",
+          "entrance": "Heavy Oak Doors",
+          "prompt": "",
+          "briefDescription": "A bustling waystation perched on the high trade road.",
+          "status": "queued"
+        }
+      ],
+      "factions": [],
+      "theKick": {
+        "startingLocation": "The Crossroads Tavern",
+        "crisis": "Goblin looters have breached the forgotten vault below the wine cellar.",
+        "openingPrompt": ""
+      },
+      "cyoaExamples": [],
+      "worldRules": {
+        "axioms": [],
+        "customModule": null
+      },
+      "contemplation": {
+        "coreTension": "",
+        "worldConsequences": "",
+        "webOfEntanglement": "",
+        "kickPressure": ""
+      },
+      "config": {
+        "playstyle": "cyoa_5",
+        "relationships": true,
+        "partyMode": "solo",
+        "simulationDepth": "active_fronts",
+        "pacingXp": 5,
+        "knobs": {
+          "action_tempo": "gritty_default"
+        },
+        "harmMax": 5,
+        "actionTempo": "gritty_default",
+        "cyoaEmojis": true,
+        "artStyle": "",
+        "maxHarmFate": {
+          "rule": "Mortal Peril (Last Breath / Dying)",
+          "statusToken": "(-) Incapacitated",
+          "cyoaStyle": "crisis"
+        }
+      },
+      "progressionBlueprint": {
+        "className": "Sorcerer",
+        "hitDie": "d6",
+        "primaryStats": [
+          "CHA",
+          "CON",
+          "DEX"
+        ],
+        "levels": {
+          "1": {
+            "features": [
+              "Spellcasting (Innate bloodline magic)"
+            ],
+            "profBonus": 2,
+            "asi": false,
+            "subclass": true,
+            "spellSlots": {
+              "1": 2
+            }
+          },
+          "2": {
+            "features": [
+              "Font of Magic (Convert Sorcery Points and spell slots; 2/2 points per long rest)"
+            ],
+            "profBonus": 2,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 3
+            }
+          },
+          "3": {
+            "features": [
+              "Metamagic (Twinned Spell, Quickened Spell, Careful Spell, Subtle Spell; 3/3 Sorcery Points)"
+            ],
+            "profBonus": 2,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 2
+            }
+          },
+          "4": {
+            "features": [],
+            "profBonus": 2,
+            "asi": true,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3
+            }
+          },
+          "5": {
+            "features": [
+              "Magical Guidance (Spend 1 Sorcery Point to reroll a failed ability check)"
+            ],
+            "profBonus": 3,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 2
+            }
+          },
+          "6": {
+            "features": [
+              "Elemental Affinity (Add CHA modifier to elemental spell damage & gain resistance)"
+            ],
+            "profBonus": 3,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3
+            }
+          },
+          "7": {
+            "features": [
+              "Arcane Surge (Channel bloodline power to ignore elemental resistance)"
+            ],
+            "profBonus": 3,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 1
+            }
+          },
+          "8": {
+            "features": [],
+            "profBonus": 3,
+            "asi": true,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 2
+            }
+          },
+          "9": {
+            "features": [
+              "Bloodline Conduit (+1 to spell save DC when spending Sorcery Points)"
+            ],
+            "profBonus": 4,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 3,
+              "5": 1
+            }
+          },
+          "10": {
+            "features": [
+              "Metamagic (3 options known; 10/10 Sorcery Points per long rest)"
+            ],
+            "profBonus": 4,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 3,
+              "5": 2
+            }
+          },
+          "11": {
+            "features": [
+              "High Sorcery (Innate mastery of high-circle bloodline spells)"
+            ],
+            "profBonus": 4,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 3,
+              "5": 2,
+              "6": 1
+            }
+          },
+          "12": {
+            "features": [],
+            "profBonus": 4,
+            "asi": true,
+            "subclass": false
+          },
+          "13": {
+            "features": [
+              "Origin Focus (Maintain concentration through minor damage)"
+            ],
+            "profBonus": 5,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 3,
+              "5": 2,
+              "6": 1,
+              "7": 1
+            }
+          },
+          "14": {
+            "features": [
+              "Draconic Wings (Bonus Action: manifest wings for flying speed equal to walking speed)"
+            ],
+            "profBonus": 5,
+            "asi": false,
+            "subclass": false
+          },
+          "15": {
+            "features": [
+              "Sovereign Arcana (Advantage on saves against spells and magical effects)"
+            ],
+            "profBonus": 5,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 3,
+              "5": 2,
+              "6": 1,
+              "7": 1,
+              "8": 1
+            }
+          },
+          "16": {
+            "features": [],
+            "profBonus": 5,
+            "asi": true,
+            "subclass": false
+          },
+          "17": {
+            "features": [
+              "Metamagic (4 options known; 17/17 Sorcery Points per long rest)"
+            ],
+            "profBonus": 6,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "1": 4,
+              "2": 3,
+              "3": 3,
+              "4": 3,
+              "5": 2,
+              "6": 1,
+              "7": 1,
+              "8": 1,
+              "9": 1
+            }
+          },
+          "18": {
+            "features": [
+              "Draconic Presence (Spend 5 Sorcery Points for 60 ft awe or fear aura; 1/1 per rest)"
+            ],
+            "profBonus": 6,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "5": 3
+            }
+          },
+          "19": {
+            "features": [],
+            "profBonus": 6,
+            "asi": true,
+            "subclass": false,
+            "spellSlots": {
+              "6": 2
+            }
+          },
+          "20": {
+            "features": [
+              "Sorcerous Restoration (Regain 4 expended Sorcery Points on every short rest)"
+            ],
+            "profBonus": 6,
+            "asi": false,
+            "subclass": false,
+            "spellSlots": {
+              "7": 2
+            }
+          }
+        },
+        "createdAt": "2026-11-08T02:32:27.410Z"
+      },
+      "quests": [
+        {
+          "name": "The Cellar Incursion",
+          "status": "active",
+          "giver": "Caleb the Barkeep",
+          "description": "Clear the goblin looters out of the cellar and seal the breached vault door."
+        }
+      ]
+    },
+    "chatHistory": [],
+    "changelog": [],
+    "originChatId": null,
+    "originCampaignTitle": null,
+    "timestamp": 1794105147419,
+    "turn0Text": "[TIME]\nLast Rest: N/A\nCurrent Time: 08:00 AM, Day 1\n[/TIME]\n\n[LOCATION]\nThe Crossroads Tavern\n[/LOCATION]\n\n[CHARACTER]\nVespera (Sorcerer): 8/8 HP\nCombat: BAB: +0 | Ranged (1 attack): +2 | Melee (1 attack): +0 | Base AC: 12 | Total AC: 15\nGear: Quarterstaff (+0 to hit, 1d6 Bludgeoning) | Light Crossbow (+2 to hit, 1d8 Piercing)\nProficiencies: Simple Weapons, Arcane Focus\nAttr: STR 10 (+0), DEX 14 (+2), CON 14 (+2), INT 12 (+1), WIS 10 (+0), CHA 16 (+3)\nSaves: Fort +4 | Ref +2 | Will +2\nSkills: Arcana +3, Perception +2, Insight +2\nTraits: Draconic Resilience (Base AC 13 + DEX modifier when unarmored)\nHD: d6 (1/1)\nStatus: Healthy\n[/CHARACTER]\n\n[ABILITIES]\nBreath Weapon (Fire 15ft cone; 2d6 fire damage, DEX save DC 13; 1/1 per rest)\n[/ABILITIES]\n\n[SPELLS]\nCantrips: Fire Bolt, Prestidigitation\nLevel 1 (2/2): Magic Missile, Shield\n[/SPELLS]\n\n[XP]\nTotal: 0 / 300 XP (Level 1)\n[/XP]\n\n[INVENTORY]\n- Dagger [E]\n- Arcane Focus (Crystal Orb) [E]\n- Dungeoneer's Pack\n- 15 gp\n[/INVENTORY]"
+  },
+  "expected": {
+    "name": "Vespera",
+    "title": "The Sunken Vault",
+    "location": "The Crossroads Tavern",
+    "initialMemo": "[TIME]\nLast Rest: N/A\nCurrent Time: 08:00 AM, Day 1\n[/TIME]\n\n[LOCATION]\nThe Crossroads Tavern\n[/LOCATION]\n\n[CHARACTER]\nVespera (Sorcerer): 8/8 HP\nCombat: BAB: +0 | Ranged (1 attack): +2 | Melee (1 attack): +0 | Base AC: 12 | Total AC: 15\nGear: Quarterstaff (+0 to hit, 1d6 Bludgeoning) | Light Crossbow (+2 to hit, 1d8 Piercing)\nProficiencies: Simple Weapons, Arcane Focus\nAttr: STR 10 (+0), DEX 14 (+2), CON 14 (+2), INT 12 (+1), WIS 10 (+0), CHA 16 (+3)\nSaves: Fort +4 | Ref +2 | Will +2\nSkills: Arcana +3, Perception +2, Insight +2\nTraits: Draconic Resilience (Base AC 13 + DEX modifier when unarmored)\nHD: d6 (1/1)\nStatus: Healthy\n[/CHARACTER]\n\n[ABILITIES]\nBreath Weapon (Fire 15ft cone; 2d6 fire damage, DEX save DC 13; 1/1 per rest)\n[/ABILITIES]\n\n[SPELLS]\nCantrips: Fire Bolt, Prestidigitation\nLevel 1 (2/2): Magic Missile, Shield\n[/SPELLS]\n\n[XP]\nTotal: 0 / 300 XP (Level 1)\n[/XP]\n\n[INVENTORY]\n- Dagger [E]\n- Arcane Focus (Crystal Orb) [E]\n- Dungeoneer's Pack\n- 15 gp\n[/INVENTORY]",
+    "turn0Text": "[TIME]\nLast Rest: N/A\nCurrent Time: 08:00 AM, Day 1\n[/TIME]\n\n[LOCATION]\nThe Crossroads Tavern\n[/LOCATION]\n\n[CHARACTER]\nVespera (Sorcerer): 8/8 HP\nCombat: BAB: +0 | Ranged (1 attack): +2 | Melee (1 attack): +0 | Base AC: 12 | Total AC: 15\nGear: Quarterstaff (+0 to hit, 1d6 Bludgeoning) | Light Crossbow (+2 to hit, 1d8 Piercing)\nProficiencies: Simple Weapons, Arcane Focus\nAttr: STR 10 (+0), DEX 14 (+2), CON 14 (+2), INT 12 (+1), WIS 10 (+0), CHA 16 (+3)\nSaves: Fort +4 | Ref +2 | Will +2\nSkills: Arcana +3, Perception +2, Insight +2\nTraits: Draconic Resilience (Base AC 13 + DEX modifier when unarmored)\nHD: d6 (1/1)\nStatus: Healthy\n[/CHARACTER]\n\n[ABILITIES]\nBreath Weapon (Fire 15ft cone; 2d6 fire damage, DEX save DC 13; 1/1 per rest)\n[/ABILITIES]\n\n[SPELLS]\nCantrips: Fire Bolt, Prestidigitation\nLevel 1 (2/2): Magic Missile, Shield\n[/SPELLS]\n\n[XP]\nTotal: 0 / 300 XP (Level 1)\n[/XP]\n\n[INVENTORY]\n- Dagger [E]\n- Arcane Focus (Crystal Orb) [E]\n- Dungeoneer's Pack\n- 15 gp\n[/INVENTORY]"
+  }
+}

@@ -93,6 +93,59 @@ export function formatDndModifierString(score) {
     return mod >= 0 ? `+${mod}` : `${mod}`;
 }
 
+/**
+ * Calculates a D&D 5e ability modifier from a raw score.
+ *
+ * @param {number|string} score
+ * @returns {number}
+ */
+export function getDndStatModifier(score) {
+    return calculateDndModifier(score);
+}
+
+/**
+ * Normalizes equipment items into individual `- Item` inventory lines,
+ * tagging weapons, armor, and gear with `[E]` (equipped).
+ *
+ * @param {string|string[]} equipmentRaw
+ * @returns {string[]}
+ */
+export function normalizeDndInventoryLines(equipmentRaw) {
+    let items = [];
+    if (Array.isArray(equipmentRaw)) {
+        for (const entry of equipmentRaw) {
+            if (typeof entry === 'string') {
+                const subItems = entry.split(/\r?\n|,\s*(?![^()]*\))/).map(s => s.trim()).filter(Boolean);
+                items.push(...subItems);
+            }
+        }
+    } else if (typeof equipmentRaw === 'string') {
+        items = equipmentRaw.split(/\r?\n|,\s*(?![^()]*\))/).map(s => s.trim()).filter(Boolean);
+    }
+    if (items.length === 0) {
+        items = [
+            "Adventurer's pack",
+            'Primary weapon',
+            '15 gp',
+        ];
+    }
+    const bulletRx = /^[-*+•–—]\s*/;
+    const cleanItems = items.map(it => it.replace(bulletRx, '').trim()).filter(Boolean);
+
+    const GEAR_MATCH_RX = /\b(mail|armor|leather|shield|sword|longsword|shortsword|greatsword|axe|greataxe|handaxe|mace|warhammer|dagger|rapier|scimitar|bow|shortbow|longbow|crossbow|quarterstaff|staff|focus|wand|symbol|totem|greaves|helm|gauntlets|cloak|robe)\b/i;
+    const NON_EQUIP_RX = /\b(pack|pouch|gold|gp|sp|cp|rations|rope|bedroll|tools|torch|potion|scroll|waterskin)\b/i;
+
+    return cleanItems.map(item => {
+        if (/\[E\]/i.test(item)) {
+            return `- ${item}`;
+        }
+        if (GEAR_MATCH_RX.test(item) && !NON_EQUIP_RX.test(item)) {
+            return `- ${item} [E]`;
+        }
+        return `- ${item}`;
+    });
+}
+
 export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
     id = 'dnd5e';
     label = 'D&D 5e (D&D Lite)';
@@ -302,14 +355,15 @@ export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
     }
 
     /**
-     * Formats Day 0 State Memo for D&D 5e.
+     * Formats Day 0 State Memo for D&D 5e aligned with upstream MultiHog stock format.
      */
     formatInitialMemo(dossier, options = {}) {
         if (!dossier || typeof dossier !== 'object') return '';
         const p = dossier.protagonist || {};
         const charName = (p.name || 'Protagonist').trim();
         const className = (p.class || 'Fighter').trim();
-        const hitDie = p.hitDie || 'd8';
+        const rawHitDie = p.hitDie || deriveHitDieForClass(className) || 'd8';
+        const hitDie = String(rawHitDie).replace(/^\d+/, '') || 'd8';
         const curHp = p.hp?.current ?? 10;
         const maxHp = p.hp?.max ?? 10;
         const ac = p.ac || 14;
@@ -322,30 +376,179 @@ export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
         const wis = stats.WIS ?? 10;
         const cha = stats.CHA ?? 10;
 
-        const traitsList = Array.isArray(p.features) && p.features.length
-            ? p.features.map(formatTraitAsPill).filter(Boolean)
-            : ['Resilient (Roll with advantage on death saves)'];
-        const traitsLine = `((PILLS)) Traits: ${traitsList.join(', ')}`;
+        const strMod = calculateDndModifier(str);
+        const dexMod = calculateDndModifier(dex);
+        const conMod = calculateDndModifier(con);
+        const intMod = calculateDndModifier(int);
+        const wisMod = calculateDndModifier(wis);
+        const chaMod = calculateDndModifier(cha);
 
-        const abilitiesList = Array.isArray(p.abilities) && p.abilities.length
-            ? p.abilities.map(formatTraitAsPill).filter(Boolean)
+        const cl = className.toLowerCase();
+
+        // Combat calculations
+        const martialClasses = ['fighter', 'paladin', 'ranger', 'barbarian', 'monk', 'rogue'];
+        const bab = martialClasses.includes(cl) ? 1 : 0;
+        const babStr = (bab >= 0 ? '+' : '') + bab;
+        const rangedAtk = bab + dexMod;
+        const rangedStr = (rangedAtk >= 0 ? '+' : '') + rangedAtk;
+        const meleeAtk = bab + strMod;
+        const meleeStr = (meleeAtk >= 0 ? '+' : '') + meleeAtk;
+        const baseAc = 10 + dexMod;
+
+        // Gear (Combat Gear Summary)
+        let combatGearLine = '';
+        if (p.combatGear && typeof p.combatGear === 'string' && p.combatGear.trim()) {
+            combatGearLine = p.combatGear.trim();
+        } else {
+            if (cl === 'fighter' || cl === 'paladin') {
+                combatGearLine = `Longsword (${meleeStr} to hit, 1d8${strMod >= 0 ? '+' + strMod : strMod} Slashing) | Chain Mail (AC 16) | Shield (+2 AC)`;
+            } else if (cl === 'barbarian') {
+                combatGearLine = `Greataxe (${meleeStr} to hit, 1d12${strMod >= 0 ? '+' + strMod : strMod} Slashing) | Javelin (${rangedStr} to hit, 1d6 Piercing)`;
+            } else if (cl === 'rogue' || cl === 'ranger' || cl === 'bard') {
+                const finesseMod = bab + Math.max(strMod, dexMod);
+                const finesseStr = (finesseMod >= 0 ? '+' : '') + finesseMod;
+                combatGearLine = `Rapier (${finesseStr} to hit, 1d8 Piercing) | Shortbow (${rangedStr} to hit, 1d6 Piercing) | Leather Armor (+1 AC)`;
+            } else if (cl === 'cleric' || cl === 'druid') {
+                combatGearLine = `Mace (${meleeStr} to hit, 1d6 Bludgeoning) | Scale Mail (+4 AC) | Shield (+2 AC)`;
+            } else if (cl === 'monk') {
+                const monkAtk = bab + Math.max(strMod, dexMod);
+                const monkStr = (monkAtk >= 0 ? '+' : '') + monkAtk;
+                combatGearLine = `Unarmed Strike (${monkStr} to hit, 1d4 Bludgeoning) | Quarterstaff (${meleeStr} to hit, 1d6 Bludgeoning)`;
+            } else if (cl === 'wizard' || cl === 'sorcerer' || cl === 'warlock') {
+                combatGearLine = `Quarterstaff (${meleeStr} to hit, 1d6 Bludgeoning) | Light Crossbow (${rangedStr} to hit, 1d8 Piercing)`;
+            } else {
+                combatGearLine = `Longsword (${meleeStr} to hit, 1d8${strMod >= 0 ? '+' + strMod : strMod} Slashing) | Leather Armor (+1 AC)`;
+            }
+        }
+
+        // Proficiencies
+        let proficienciesLine = '';
+        if (p.proficiencies) {
+            proficienciesLine = Array.isArray(p.proficiencies)
+                ? p.proficiencies.join(', ')
+                : String(p.proficiencies).trim();
+        } else {
+            if (cl === 'fighter' || cl === 'paladin') {
+                proficienciesLine = 'All Armor, Shields, Simple & Martial Weapons';
+            } else if (cl === 'rogue' || cl === 'bard') {
+                proficienciesLine = 'Light Armor, Simple Weapons, Finesse Weapons';
+            } else if (cl === 'ranger' || cl === 'barbarian' || cl === 'cleric' || cl === 'druid') {
+                proficienciesLine = 'Light & Medium Armor, Shields, Simple Weapons';
+            } else if (cl === 'wizard' || cl === 'sorcerer' || cl === 'warlock') {
+                proficienciesLine = 'Simple Weapons, Arcane Focus';
+            } else if (cl === 'monk') {
+                proficienciesLine = 'Simple Weapons, Shortswords';
+            } else {
+                proficienciesLine = 'Simple Weapons';
+            }
+        }
+
+        // Saves
+        const fortProfClasses = ['fighter', 'barbarian', 'sorcerer', 'monk', 'ranger'];
+        const refProfClasses = ['rogue', 'ranger', 'bard', 'monk'];
+        const willProfClasses = ['wizard', 'cleric', 'druid', 'paladin', 'warlock', 'bard', 'sorcerer'];
+
+        const fort = conMod + (fortProfClasses.includes(cl) ? 2 : 0);
+        const ref = dexMod + (refProfClasses.includes(cl) ? 2 : 0);
+        const will = wisMod + (willProfClasses.includes(cl) ? 2 : 0);
+
+        const fortStr = (fort >= 0 ? '+' : '') + fort;
+        const refStr = (ref >= 0 ? '+' : '') + ref;
+        const willStr = (will >= 0 ? '+' : '') + will;
+
+        // Skills
+        let skillsLine = '';
+        if (Array.isArray(p.skills) && p.skills.length > 0) {
+            skillsLine = p.skills.join(', ');
+        } else if (typeof p.skills === 'string' && p.skills.trim()) {
+            skillsLine = p.skills.trim();
+        } else {
+            if (cl === 'fighter' || cl === 'barbarian' || cl === 'paladin') {
+                skillsLine = `Athletics ${(strMod + 2 >= 0 ? '+' : '') + (strMod + 2)}, Perception ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}, Intimidation ${(chaMod + 2 >= 0 ? '+' : '') + (chaMod + 2)}`;
+            } else if (cl === 'wizard' || cl === 'sorcerer' || cl === 'warlock') {
+                skillsLine = `Arcana ${(intMod + 2 >= 0 ? '+' : '') + (intMod + 2)}, Perception ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}, Insight ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}`;
+            } else if (cl === 'rogue' || cl === 'ranger' || cl === 'bard' || cl === 'monk') {
+                skillsLine = `Stealth ${(dexMod + 2 >= 0 ? '+' : '') + (dexMod + 2)}, Perception ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}, Acrobatics ${(dexMod + 2 >= 0 ? '+' : '') + (dexMod + 2)}`;
+            } else if (cl === 'cleric' || cl === 'druid') {
+                skillsLine = `Insight ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}, Medicine ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}, Perception ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}`;
+            } else {
+                skillsLine = `Athletics ${(strMod + 2 >= 0 ? '+' : '') + (strMod + 2)}, Perception ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}, Insight ${(wisMod + 2 >= 0 ? '+' : '') + (wisMod + 2)}`;
+            }
+        }
+
+        // Traits
+        const canonicalProgression = getCanonicalDndProgression(className);
+        let traitsList = Array.isArray(p.features) && p.features.length > 0
+            ? p.features.map(formatTraitAsPill).filter(Boolean)
             : [];
+        if (traitsList.length === 0 && canonicalProgression?.levels?.[1]?.features) {
+            const partitioned = partitionFeaturesAndAbilities(canonicalProgression.levels[1].features);
+            traitsList = (partitioned.traits.length > 0 ? partitioned.traits : canonicalProgression.levels[1].features)
+                .map(formatTraitAsPill)
+                .filter(Boolean);
+        }
+        if (traitsList.length === 0) {
+            traitsList = ['Resilient (Roll with advantage on death saves)'];
+        }
+        const traitsText = traitsList.join(', ');
+
+        // Abilities
+        let abilitiesSource = Array.isArray(p.abilities) && p.abilities.length > 0
+            ? p.abilities
+            : [];
+        if (abilitiesSource.length === 0 && canonicalProgression?.levels?.[1]?.features) {
+            const partitioned = partitionFeaturesAndAbilities(canonicalProgression.levels[1].features);
+            if (partitioned.abilities.length > 0) {
+                abilitiesSource = partitioned.abilities;
+            }
+        }
+        const abilitiesList = abilitiesSource.map(formatTraitAsPill).filter(Boolean);
         const abilitiesBlock = abilitiesList.length ? abilitiesList.join('\n') : 'None recorded';
 
+        // Spells
         const spellSlots = p.spellSlots || {};
+        const isCaster = /\b(wizard|cleric|druid|sorcerer|bard|warlock)\b/.test(cl);
         let spellsBlock = '';
-        if (Object.keys(spellSlots).length > 0) {
-            const slotsText = Object.entries(spellSlots)
-                .map(([lvl, max]) => `Level ${lvl}: ${max}/${max}`)
-                .join(' | ');
-            spellsBlock = `Slots: ${slotsText}\nCantrips: Light (illumines 20ft), Prestidigitation (minor sensory tricks)`;
+        const hasSlots = Object.keys(spellSlots).length > 0;
+        const cantripsList = Array.isArray(p.cantrips)
+            ? p.cantrips
+            : (typeof p.cantrips === 'string' && p.cantrips.trim() ? p.cantrips.split(',').map(s => s.trim()).filter(Boolean) : []);
+        const spellsList = Array.isArray(p.spells)
+            ? p.spells
+            : (typeof p.spells === 'string' && p.spells.trim() ? p.spells.split(',').map(s => s.trim()).filter(Boolean) : []);
+
+        if (hasSlots || isCaster || cantripsList.length > 0 || spellsList.length > 0) {
+            const effectiveSlots = hasSlots ? spellSlots : (cl === 'warlock' ? { 1: 1 } : { 1: 2 });
+            let defaultCantrips = 'Light, Prestidigitation';
+            if (cl === 'cleric') defaultCantrips = 'Sacred Flame, Thaumaturgy';
+            else if (cl === 'druid') defaultCantrips = 'Druidcraft, Shillelagh';
+            else if (cl === 'warlock') defaultCantrips = 'Eldritch Blast, Mage Hand';
+            else if (cl === 'sorcerer') defaultCantrips = 'Fire Bolt, Prestidigitation';
+
+            let defaultLvl1 = 'Magic Missile, Shield';
+            if (cl === 'cleric') defaultLvl1 = 'Cure Wounds, Bless';
+            else if (cl === 'druid') defaultLvl1 = 'Cure Wounds, Entangle';
+            else if (cl === 'warlock') defaultLvl1 = 'Armor of Agathys, Hex';
+            else if (cl === 'bard') defaultLvl1 = 'Dissonant Whispers, Healing Word';
+
+            const cantripsLine = `Cantrips: ${cantripsList.length > 0 ? cantripsList.join(', ') : defaultCantrips}`;
+            const slotLines = [];
+            for (const [lvlKey, maxVal] of Object.entries(effectiveSlots)) {
+                const max = parseInt(maxVal, 10) || 1;
+                const slotLabel = String(lvlKey).toLowerCase().startsWith('level') ? lvlKey : `Level ${lvlKey}`;
+                const spellNames = spellsList.length > 0 ? spellsList.join(', ') : defaultLvl1;
+                slotLines.push(`${slotLabel} (${max}/${max}): ${spellNames}`);
+            }
+            spellsBlock = [cantripsLine, ...slotLines].join('\n');
         }
 
         const startLoc = (options.location || dossier.theKick?.startingLocation || dossier.maps?.[0]?.name || dossier.maps?.[0]?.site || 'The Crossroads Tavern').trim();
-        const gearText = p.equipment || 'Adventurer\'s pack, primary weapon, 15 gp';
+        const inventoryLines = normalizeDndInventoryLines(p.gear && p.gear.length ? p.gear : p.equipment);
+        const statusText = p.status ? p.status.trim() : 'Healthy';
 
         let memo = `[TIME]
-Morning, Day 1
+Last Rest: N/A
+Current Time: 08:00 AM, Day 1
 [/TIME]
 
 [LOCATION]
@@ -354,12 +557,15 @@ ${startLoc}
 
 [CHARACTER]
 ${charName} (${className}): ${curHp}/${maxHp} HP
-Class: ${className}
-Level: 1
+Combat: BAB: ${babStr} | Ranged (1 attack): ${rangedStr} | Melee (1 attack): ${meleeStr} | Base AC: ${baseAc} | Total AC: ${ac}
+Gear: ${combatGearLine}
+Proficiencies: ${proficienciesLine}
+Attr: STR ${str} (${formatDndModifierString(str)}), DEX ${dex} (${formatDndModifierString(dex)}), CON ${con} (${formatDndModifierString(con)}), INT ${int} (${formatDndModifierString(int)}), WIS ${wis} (${formatDndModifierString(wis)}), CHA ${cha} (${formatDndModifierString(cha)})
+Saves: Fort ${fortStr} | Ref ${refStr} | Will ${willStr}
+Skills: ${skillsLine}
+Traits: ${traitsText}
 HD: ${hitDie} (1/1)
-AC: ${ac}
-Stats: STR ${str} (${formatDndModifierString(str)}), DEX ${dex} (${formatDndModifierString(dex)}), CON ${con} (${formatDndModifierString(con)}), INT ${int} (${formatDndModifierString(int)}), WIS ${wis} (${formatDndModifierString(wis)}), CHA ${cha} (${formatDndModifierString(cha)})
-${traitsLine}
+Status: ${statusText}
 [/CHARACTER]
 
 [ABILITIES]
@@ -371,11 +577,11 @@ ${abilitiesBlock}
         }
 
         memo += `\n\n[XP]
-(0/300) Level: 1
+Total: 0 / 300 XP (Level 1)
 [/XP]
 
 [INVENTORY]
-${gearText}
+${inventoryLines.join('\n')}
 [/INVENTORY]`;
 
         return memo;

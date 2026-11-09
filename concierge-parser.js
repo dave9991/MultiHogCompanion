@@ -47,6 +47,9 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
             genreEstablished: Boolean(genreKey && genres[genreKey]),
             premise: '',
             tone: '',
+            focalLens: '',
+            framingComplete: false,
+            rulesetConfirmed: false,
             createdAt: Date.now(),
         },
         protagonist: adapter.createEmptyProtagonist(systemKey),
@@ -102,6 +105,7 @@ export function isDossierEmptyOrUntouched(dossier) {
         !/^untitled\s+.*campaign$/i.test(meta.title.trim())
     );
     const hasPremise = Boolean(meta.premise && meta.premise.trim() !== '');
+    const hasFocalLens = Boolean(meta.focalLens && meta.focalLens.trim() !== '');
     const hasProto = Boolean(
         (proto.name && proto.name.trim() !== '') ||
         (Array.isArray(proto.positiveTags) && proto.positiveTags.length > 0)
@@ -120,7 +124,7 @@ export function isDossierEmptyOrUntouched(dossier) {
         worldRules.customModule
     );
 
-    return !hasTitle && !hasPremise && !hasProto && !hasNpcs && !hasMonsters && !hasMaps && !hasFactions && !hasKick && !hasCustomRules;
+    return !hasTitle && !hasPremise && !hasFocalLens && !hasProto && !hasNpcs && !hasMonsters && !hasMaps && !hasFactions && !hasKick && !hasCustomRules;
 }
 
 /**
@@ -307,6 +311,9 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[UPDATE_DOSSIER\][\s\S]*?(?:\[\/UPDATE_DOSSIER\]|$)/gi, '')
         .replace(/\[CONCIERGE_STATE\][\s\S]*?(?:\[\/CONCIERGE_STATE\]|$)/gi, '')
         .replace(/\[CONTEMPLATION\][\s\S]*?(?:\[\/CONTEMPLATION\]|$)/gi, '')
+        .replace(/\[FRAMING\][\s\S]*?(?:\[\/FRAMING\]|$)/gi, '')
+        .replace(/\[CANON_(?:ENTRY|UPDATE)(?::[^\n\]]+)?\][\s\S]*?(?:\[\/CANON_(?:ENTRY|UPDATE)\]|$)/gi, '')
+        .replace(/\[(?:DISABLE|ENABLE|REMOVE)_CANON:[^\n\]]+\]/gi, '')
         .replace(/\[DOSSIER_CRITIQUE\][\s\S]*?(?:\[\/DOSSIER_CRITIQUE\]|$)/gi, '')
         .replace(/\[PROTAGONIST(?::[^\n\]]+)?\][\s\S]*?(?:\[\/PROTAGONIST\]|$)/gi, '')
         .replace(/\[NPC(?::[^\n\]]+)?\][\s\S]*?(?:\[\/NPC\]|$)/gi, '')
@@ -897,7 +904,7 @@ export function formatChangelogForContext(changelog, maxEntries = 8) {
  *   hasMutations: boolean
  * }}
  */
-const NEXT_DOSSIER_BLOCK_LOOKAHEAD = String.raw`(?=\n[ \t]*\[(?:\/?(?:UPDATE_DOSSIER|CONCIERGE_STATE|CONTEMPLATION|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE))(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$))`;
+const NEXT_DOSSIER_BLOCK_LOOKAHEAD = String.raw`(?=\n[ \t]*\[(?:\/?(?:UPDATE_DOSSIER|CONCIERGE_STATE|CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON))(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$))`;
 
 /**
  * Matches all occurrences of a section block (e.g., PROTAGONIST, NPC, MONSTER, MAP, FACTION, KICK, WORLD_RULES, CUSTOM_MODULE, CONFIG, CYOA).
@@ -954,7 +961,7 @@ function matchDossierSectionBlocks(raw, tagRegexStr, closeTagRegexStr) {
 export function normalizeMalformedDossierClosers(text) {
     if (!text || typeof text !== 'string') return text;
     return text.replace(
-        /^[ \t]*\/(PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|CYOA|CONFIG|CONTEMPLATION|WORLD_RULES?|CUSTOM_MODULE)[ \t]*$/gim,
+        /^[ \t]*\/(PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|CYOA|CONFIG|CONTEMPLATION|WORLD_RULES?|CUSTOM_MODULE|FRAMING|CANON_UPDATE|CANON_ENTRY|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON)[ \t]*$/gim,
         (_, tag) => `[/${tag.toUpperCase()}]`,
     );
 }
@@ -969,6 +976,7 @@ export function applyDossierUpdates(text, dossier) {
         isNoop: false,
         builderSummary: 'No blueprint mutations detected',
         contemplation: null,
+        canonMutations: [],
     };
 
     if (!text || typeof text !== 'string') return fallbackResult;
@@ -1001,6 +1009,7 @@ export function applyDossierUpdates(text, dossier) {
             isNoop: true,
             builderSummary: noopSummary || 'No blueprint changes requested',
             contemplation: null,
+            canonMutations: [],
         };
     }
 
@@ -1022,7 +1031,7 @@ export function applyDossierUpdates(text, dossier) {
             return fallbackResult;
         }
         // Fallback: check if text contains standalone line-start blocks or explicitly closed blocks directly
-        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
+        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
         if (hasDirectBlocks) {
             raw = cleanedText;
         }
@@ -1033,6 +1042,7 @@ export function applyDossierUpdates(text, dossier) {
     const updated = JSON.parse(JSON.stringify(dossier));
     const changes = [];
     const errors = [];
+    const canonMutations = [];
 
     // 0b. Extract [CONTEMPLATION] architectural reasoning scratchpad (inside or alongside [UPDATE_DOSSIER])
     let extractedContemplation = null;
@@ -1058,6 +1068,8 @@ export function applyDossierUpdates(text, dossier) {
 
     // Pre-extract section blocks so top-level metadata keys (title:, system:, premise:, tone:, summary:)
     // never accidentally match keys inside [WORLD_RULES], [CUSTOM_MODULE], [PROTAGONIST], etc.
+    const framingBlocks = matchDossierSectionBlocks(raw, 'FRAMING', 'FRAMING');
+    const canonEntryBlocks = matchDossierSectionBlocks(raw, 'CANON_(?:ENTRY|UPDATE)(?::\\s*([^\\]\\r\\n]+))?', 'CANON_(?:ENTRY|UPDATE)');
     const protoBlocks = matchDossierSectionBlocks(raw, 'PROTAGONIST', 'PROTAGONIST');
     const npcBlocks = matchDossierSectionBlocks(raw, 'NPC(?::\\s*([^\\]\\r\\n]+))?', 'NPC');
     const monsterBlocks = matchDossierSectionBlocks(raw, 'MONSTER(?::\\s*([^\\]\\r\\n]+))?', 'MONSTER');
@@ -1072,6 +1084,8 @@ export function applyDossierUpdates(text, dossier) {
     let topLevelRaw = raw;
     for (const group of [
         contempBlocks,
+        framingBlocks,
+        canonEntryBlocks,
         protoBlocks,
         npcBlocks,
         monsterBlocks,
@@ -1242,6 +1256,81 @@ export function applyDossierUpdates(text, dossier) {
         if (rawTone && updated.meta.tone !== rawTone) {
             updated.meta.tone = rawTone;
             changes.push(`Campaign tone set to: "${rawTone}"`);
+        }
+    }
+
+    // 0c. Framing blocks & top-level framing directives
+    for (const fb of framingBlocks) {
+        const kv = parseKeyValueLines(fb.content);
+        if (kv.title) {
+            const newTitle = cleanTargetName(kv.title);
+            if (newTitle && updated.meta.title !== newTitle) {
+                changes.push(`Campaign title set to "${newTitle}"`);
+                updated.meta.title = newTitle;
+            }
+        }
+        if (kv.premise) {
+            const newPremise = kv.premise.trim().replace(/^(\*\*|__)(.*?)\1$/, '$2');
+            if (newPremise && updated.meta.premise !== newPremise) {
+                updated.meta.premise = newPremise;
+                if (!updated.meta.title || isDefaultUntitledCampaignTitle(updated.meta.title)) {
+                    updated.meta.title = newPremise.slice(0, 40) + '...';
+                }
+                changes.push(`Premise updated: "${newPremise}"`);
+            }
+        }
+        if (kv.tone) {
+            const rawTone = cleanTargetName(kv.tone);
+            if (rawTone && updated.meta.tone !== rawTone) {
+                updated.meta.tone = rawTone;
+                changes.push(`Campaign tone set to: "${rawTone}"`);
+            }
+        }
+        const lensVal = kv.focal_lens || kv.lens;
+        if (lensVal && lensVal.trim()) {
+            const cleanLens = cleanTargetName(lensVal);
+            if (cleanLens && updated.meta.focalLens !== cleanLens) {
+                updated.meta.focalLens = cleanLens;
+                changes.push(`Campaign focal lens set to "${cleanLens}"`);
+            }
+        }
+        const readyVal = kv.ready_for_canon || kv.framing_complete;
+        if (readyVal && /^(true|yes|1)$/i.test(readyVal.trim())) {
+            if (!updated.meta.framingComplete) {
+                updated.meta.framingComplete = true;
+                changes.push('Framing marked ready for Canon');
+            }
+        }
+    }
+
+    const focalLensMatch = topLevelRaw.match(/(?:focal_lens|lens)\s*:\s*([^\n\r]+)/i);
+    if (focalLensMatch) {
+        const cleanLens = cleanTargetName(focalLensMatch[1]);
+        if (cleanLens && updated.meta.focalLens !== cleanLens) {
+            updated.meta.focalLens = cleanLens;
+            changes.push(`Campaign focal lens set to "${cleanLens}"`);
+        }
+    }
+
+    const framingCompleteMatch = topLevelRaw.match(/(?:ready_for_canon|framing_complete)\s*:\s*([^\n\r]+)/i);
+    if (framingCompleteMatch) {
+        const readyVal = framingCompleteMatch[1].trim();
+        if (/^(true|yes|1)$/i.test(readyVal)) {
+            if (!updated.meta.framingComplete) {
+                updated.meta.framingComplete = true;
+                changes.push('Framing marked ready for Canon');
+            }
+        }
+    }
+
+    const rulesetConfirmedMatch = topLevelRaw.match(/(?:ruleset_confirmed|rulesetConfirmed)\s*:\s*([^\n\r]+)/i);
+    if (rulesetConfirmedMatch) {
+        const confVal = rulesetConfirmedMatch[1].trim();
+        if (/^(true|yes|1)$/i.test(confVal)) {
+            if (!updated.meta.rulesetConfirmed) {
+                updated.meta.rulesetConfirmed = true;
+                changes.push('Ruleset confirmed');
+            }
         }
     }
 
@@ -2126,6 +2215,69 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
+    // ── 7d. Canon Lorebook Mutations ──────────────────────────────────────────
+    const disableCanonMatches = raw.matchAll(/(?:\[DISABLE_CANON:\s*([^\]]+)\]|disable_canon\s*:\s*([^\n\r]+))/gi);
+    for (const m of disableCanonMatches) {
+        const cleanName = cleanTargetName(m[1] || m[2]);
+        if (cleanName) {
+            canonMutations.push({ action: 'disable', target: cleanName });
+            changes.push(`Disabled Canon entry "${cleanName}"`);
+        }
+    }
+
+    const enableCanonMatches = raw.matchAll(/(?:\[ENABLE_CANON:\s*([^\]]+)\]|enable_canon\s*:\s*([^\n\r]+))/gi);
+    for (const m of enableCanonMatches) {
+        const cleanName = cleanTargetName(m[1] || m[2]);
+        if (cleanName) {
+            canonMutations.push({ action: 'enable', target: cleanName });
+            changes.push(`Enabled Canon entry "${cleanName}"`);
+        }
+    }
+
+    const removeCanonMatches = raw.matchAll(/(?:\[REMOVE_CANON:\s*([^\]]+)\]|remove_canon\s*:\s*([^\n\r]+))/gi);
+    for (const m of removeCanonMatches) {
+        const cleanName = cleanTargetName(m[1] || m[2]);
+        if (cleanName) {
+            canonMutations.push({ action: 'remove', target: cleanName });
+            changes.push(`Removed Canon entry "${cleanName}"`);
+        }
+    }
+
+    for (const block of canonEntryBlocks) {
+        const kv = parseKeyValueLines(block.content);
+        const name = cleanTargetName(kv.name || kv.title || block.inlineArg || '');
+        if (!name) continue;
+
+        if (kv.action === 'remove' || kv.remove === 'true') {
+            canonMutations.push({ action: 'remove', target: name });
+            changes.push(`Removed Canon entry "${name}"`);
+        } else if (kv.action === 'disable' || kv.disabled === 'true') {
+            canonMutations.push({ action: 'disable', target: name });
+            changes.push(`Disabled Canon entry "${name}"`);
+        } else if (kv.action === 'enable' || kv.disabled === 'false') {
+            canonMutations.push({ action: 'enable', target: name });
+            changes.push(`Enabled Canon entry "${name}"`);
+        } else {
+            const kind = (kv.kind || 'LORE').toUpperCase();
+            const aliases = kv.aliases ? kv.aliases.split(',').map(s => s.trim()).filter(Boolean) : [];
+            const importance = parseInt(kv.importance, 10) || 4;
+            const content = kv.content || kv.description || kv.text || '';
+            const disabled = /^(true|yes|1)$/i.test(String(kv.disabled || ''));
+            canonMutations.push({
+                action: 'upsert',
+                entry: {
+                    kind,
+                    name,
+                    aliases,
+                    importance,
+                    content,
+                    disabled,
+                },
+            });
+            changes.push(`Upserted Canon entry [${kind}] "${name}"`);
+        }
+    }
+
     // ── 8. Configuration / Campaign Dials ───────────────────────────────────────
     updated.config = updated.config || {
         playstyle: 'cyoa_5',
@@ -2393,10 +2545,11 @@ export function applyDossierUpdates(text, dossier) {
         updatedDossier: updated,
         changes,
         errors,
-        hasMutations: changes.length > 0,
+        hasMutations: changes.length > 0 || canonMutations.length > 0,
         isNoop: false,
         builderSummary: builderSummary || (changes.length ? changes.join('; ') : 'Blueprint in sync'),
         contemplation: extractedContemplation,
+        canonMutations,
     };
 }
 
@@ -2680,6 +2833,10 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.meta.premise = dossier.meta.premise || '';
     dossier.meta.tone = dossier.meta.tone || '';
     dossier.meta.createdAt = dossier.meta.createdAt || Date.now();
+    const rawMeta = dossier.meta;
+    dossier.meta.focalLens = typeof rawMeta.focalLens === 'string' ? rawMeta.focalLens.trim() : '';
+    dossier.meta.framingComplete = Boolean(rawMeta.framingComplete);
+    dossier.meta.rulesetConfirmed = Boolean(rawMeta.rulesetConfirmed);
     if (dossier.meta.genreEstablished !== undefined) {
         dossier.meta.genreEstablished = Boolean(dossier.meta.genreEstablished);
     } else {

@@ -12,11 +12,24 @@
  */
 
 export const ARCHIVIST_TOKEN_THRESHOLD = 6000;
+export const MIDDLE_IMPORT_TOKEN_THRESHOLD = 300;
 export const CHUNK_TOKEN_TARGET = 600;
 export const CLASSIFY_BATCH_SIZE = 5;
 export const CLASSIFY_TIMEOUT_MS = 300000;
 export const CANON_ENTRY_ORDER = 50; // below dossier-driven books (100)
 export const CANON_KINDS = ['NPC', 'MONSTER', 'LOCATION', 'FACTION', 'RULE', 'EVENT', 'LORE'];
+
+/**
+ * Detect 3-bucket canon scale tier based on total staged tokens.
+ * @param {number} totalTokens
+ * @returns {'big'|'middle'|'vibe'}
+ */
+export function detectCanonBucket(totalTokens) {
+    const t = Number(totalTokens) || 0;
+    if (t > ARCHIVIST_TOKEN_THRESHOLD) return 'big';
+    if (t >= MIDDLE_IMPORT_TOKEN_THRESHOLD) return 'middle';
+    return 'vibe';
+}
 
 /**
  * Rough token estimate: ~4 chars/token for latin text, ~1 token per CJK character.
@@ -124,6 +137,13 @@ export function chunkLoreSource(source) {
         return out;
     }
 
+    if (source.card && !source.text) {
+        if (source.card.description) push(`${srcName} Description`, source.card.description);
+        if (source.card.personality) push(`${srcName} Personality`, source.card.personality);
+        if (source.card.scenario) push(`${srcName} Scenario`, source.card.scenario);
+        if (out.length) return out;
+    }
+
     const text = normalizePdfText(String(source.text || ''));
     const lines = text.split(/\r?\n/);
     const headings = [];
@@ -221,12 +241,15 @@ export function parseClassificationJson(reply) {
     for (const r of arr) {
         if (!r || typeof r !== 'object' || (r.id === undefined && !r.kind && !r.name)) continue;
         const kind = String(r.kind || '').toUpperCase();
+        const isDisabled = Boolean(r.disabled || r.outOfScope || Number(r.importance) === 0);
+        const importance = isDisabled ? 1 : Math.min(5, Math.max(1, Math.round(Number(r.importance)) || 3));
         out.push({
             id: r.id !== undefined ? String(r.id) : undefined,
             kind: CANON_KINDS.includes(kind) ? kind : 'LORE',
             name: r.name ? String(r.name).trim() : undefined,
             aliases: Array.isArray(r.aliases) ? r.aliases.map(a => String(a).trim()).filter(Boolean).slice(0, 8) : [],
-            importance: Math.min(5, Math.max(1, Math.round(Number(r.importance)) || 3)),
+            importance,
+            disabled: isDisabled,
         });
     }
     return out;
@@ -249,16 +272,18 @@ function withTimeout(promise, ms, signal) {
  * times out, or returns invalid/incomplete data.
  *
  * @param {Array} chunks
- * @param {{ send?: Function, onStatus?: Function, signal?: AbortSignal|null, timeoutMs?: number }} [opts]
+ * @param {{ send?: Function, onStatus?: Function, signal?: AbortSignal|null, timeoutMs?: number, framingBrief?: object }} [opts]
  * @returns {Promise<Array<{ chunk: object, label: object }>>}
  */
 export async function classifyChunks(chunks, opts = {}) {
     if (!chunks || !chunks.length) return [];
-    const { send = null, onStatus = () => {}, signal = null, timeoutMs = CLASSIFY_TIMEOUT_MS } = opts;
+    const { send = null, onStatus = () => {}, signal = null, timeoutMs = CLASSIFY_TIMEOUT_MS, framingBrief = {} } = opts;
     if (typeof send !== 'function') {
         throw new Error('Canon classification requires an active LLM connection.');
     }
     const results = [];
+
+    const focalLens = (framingBrief.focalLens || framingBrief.premise || '').trim();
 
     for (let i = 0; i < chunks.length; i += CLASSIFY_BATCH_SIZE) {
         if (signal?.aborted) throw new Error('Canon labeling cancelled');
@@ -268,7 +293,10 @@ export async function classifyChunks(chunks, opts = {}) {
 
         let reply;
         try {
-            const system = `You label tabletop RPG setting notes. For each numbered passage return one JSON object. Reply with ONLY a JSON array: [{"id":"<id>","kind":"NPC|MONSTER|LOCATION|FACTION|RULE|EVENT|LORE","name":"<canonical name>","aliases":["..."],"importance":1-5}]. importance 5 = central to the setting, 1 = trivia.`;
+            let system = `You label tabletop RPG setting notes. For each numbered passage return one JSON object. Reply with ONLY a JSON array: [{"id":"<id>","kind":"NPC|MONSTER|LOCATION|FACTION|RULE|EVENT|LORE","name":"<canonical name>","aliases":["..."],"importance":1-5}]. importance 5 = central to the setting, 1 = trivia.`;
+            if (focalLens) {
+                system += ` Campaign Focal Lens: ${focalLens}. Set "disabled": true and "importance": 1 for passages that are out-of-scope or irrelevant to this focal lens; set "disabled": false and "importance": 3-5 for passages relevant to this lens.`;
+            }
             const user = batch.map(c => `ID: ${c.id}\nTitle: ${c.title}\nHint keys: ${(c.keys || []).join(', ')}\nText: ${c.text.slice(0, 1200)}`).join('\n\n---\n\n');
             reply = await withTimeout(send([{ role: 'system', content: system }, { role: 'user', content: user }], signal), timeoutMs, signal);
         } catch (err) {
@@ -291,7 +319,7 @@ export async function classifyChunks(chunks, opts = {}) {
             if (!l) {
                 throw new Error(`Canon LLM labeling omitted chunk "${chunk.id}" on batch ${batchNum}.`);
             }
-            results.push({ chunk, label: { ...l, name: l.name || chunk.title } });
+            results.push({ chunk, label: { ...l, name: l.name || chunk.title, disabled: Boolean(l.disabled) } });
         }
     }
     return results;
@@ -300,19 +328,23 @@ export async function classifyChunks(chunks, opts = {}) {
 /**
  * Build a vector-matchable ST World Info entry for a labeled chunk.
  * @param {{ chunk: object, label: object }} item
- * @returns {{ name: string, comment: string, keys: string[], content: string, kind: string, importance: number }}
+ * @returns {{ id: string, name: string, comment: string, keys: string[], content: string, kind: string, importance: number, disabled: boolean }}
  */
 export function buildCanonEntry({ chunk, label }) {
+    const kind = label.kind || 'LORE';
     const name = (label.name || chunk.title || 'Untitled').trim();
+    const id = chunk.id || label.id || `${kind}:${name}`;
     const keys = [...new Set([name, ...(label.aliases || []), ...(chunk.keys || [])]
         .map(k => String(k).trim()).filter(Boolean))].slice(0, 12);
     return {
+        id,
         name,
-        comment: `[${label.kind}] ${name}`,
+        comment: `[${kind}] ${name}`,
         keys,
         content: chunk.text,
-        kind: label.kind,
-        importance: label.importance,
+        kind,
+        importance: label.importance !== undefined ? label.importance : 3,
+        disabled: Boolean(label.disabled),
     };
 }
 
@@ -346,12 +378,22 @@ export function setModeOverride(mode) {
 }
 export function getModeOverride() { return _override; }
 
+function estimateSourceTokens(source) {
+    if (!source) return 0;
+    if (Array.isArray(source.entries)) {
+        return source.entries.reduce((a, e) => a + estimateTokens(e.content), 0);
+    }
+    if (source.text) return estimateTokens(source.text);
+    if (source.card) {
+        return estimateTokens([source.card.description, source.card.personality, source.card.scenario].filter(Boolean).join('\n\n'));
+    }
+    return 0;
+}
+
 export function getStagedTokenTotal() {
     let total = 0;
     for (const { source } of _sources.values()) {
-        total += Array.isArray(source.entries)
-            ? source.entries.reduce((a, e) => a + estimateTokens(e.content), 0)
-            : estimateTokens(source.text);
+        total += estimateSourceTokens(source);
     }
     return total;
 }
@@ -367,6 +409,399 @@ export function getStagedCanonEntries() {
 }
 
 /**
+ * Stage a source with zero LLM latency (pure parsing & chunking).
+ * @param {object} source { name, type, entries?, text?, card? }
+ * @returns {{ bucket: 'big'|'middle'|'vibe', totalTokens: number, sources: Array }}
+ */
+export function stageRawCanonSource(source) {
+    if (source?.name) {
+        const chunks = chunkLoreSource(source);
+        _sources.set(source.name, { source, chunks, labeled: null });
+    }
+    const totalTokens = getStagedTokenTotal();
+    const bucket = detectCanonBucket(totalTokens);
+    return {
+        bucket,
+        totalTokens,
+        sources: getStagedSourcesSummary(),
+    };
+}
+
+/**
+ * Returns a summary of staged sources (name, type, tokens, chunkCount, up to 12 headings).
+ * @returns {Array<{ name: string, type: string, tokens: number, chunkCount: number, headings: string[] }>}
+ */
+export function getStagedSourcesSummary() {
+    const list = [];
+    for (const [name, rec] of _sources.entries()) {
+        if (name === '__synthesized_canon__' || name === '__manual_canon__') continue;
+        const source = rec.source || { name };
+        const chunks = rec.chunks || chunkLoreSource(source);
+        if (!rec.chunks) rec.chunks = chunks;
+        const headings = chunks.map(c => c.title).filter(Boolean).slice(0, 12);
+        const tokens = estimateSourceTokens(source) || chunks.reduce((acc, c) => acc + estimateTokens(c.text), 0);
+        list.push({
+            name: source.name || name,
+            type: source.type || 'doc',
+            tokens,
+            chunkCount: chunks.length,
+            headings,
+        });
+    }
+    return list;
+}
+
+/**
+ * Builds a compact prompt block [ATTACHED_SOURCES_OUTLINE] summarizing the staged sources.
+ * @param {number} [maxTokens=1200]
+ * @returns {string}
+ */
+export function extractSourcesStructuralOutline(maxTokens = 1200) {
+    const summary = getStagedSourcesSummary();
+    if (!summary.length) return '';
+
+    const totalTokens = getStagedTokenTotal();
+    const bucket = detectCanonBucket(totalTokens);
+
+    const parts = [
+        `[ATTACHED_SOURCES_OUTLINE]`,
+        `Detected Bucket: ${bucket} (Total Tokens: ~${totalTokens})`,
+    ];
+
+    if (bucket === 'big') {
+        for (const s of summary) {
+            const rec = _sources.get(s.name);
+            const chunks = rec?.chunks || chunkLoreSource(rec?.source);
+            const titles = chunks.map(c => c.title).slice(0, 25);
+            parts.push(`- Source "${s.name}" (${s.type}, ~${s.tokens} tokens, ${s.chunkCount} chunks):`);
+            if (titles.length) {
+                parts.push(`  Headings / Entries: ${titles.join(', ')}`);
+            }
+        }
+    } else if (bucket === 'middle') {
+        let budgetLeft = maxTokens - estimateTokens(parts.join('\n'));
+        for (const s of summary) {
+            const rec = _sources.get(s.name);
+            const chunks = rec?.chunks || chunkLoreSource(rec?.source);
+            const titles = chunks.map(c => c.title).slice(0, 25);
+            parts.push(`- Source "${s.name}" (${s.type}, ~${s.tokens} tokens):`);
+            if (titles.length) {
+                parts.push(`  Headings: ${titles.join(', ')}`);
+            }
+            parts.push(`  Passages:`);
+            for (const c of chunks) {
+                const chunkStr = `### ${c.title}\n${c.text}\n`;
+                const cost = estimateTokens(chunkStr);
+                if (budgetLeft - cost < 50) {
+                    parts.push(`[...truncated remaining passages due to token budget...]`);
+                    budgetLeft = 0;
+                    break;
+                }
+                parts.push(chunkStr.trim());
+                budgetLeft -= cost;
+            }
+            if (budgetLeft <= 0) break;
+        }
+    } else {
+        for (const s of summary) {
+            const rec = _sources.get(s.name);
+            const chunks = rec?.chunks || chunkLoreSource(rec?.source);
+            parts.push(`- Source "${s.name}" (${s.type}, ~${s.tokens} tokens):`);
+            for (const c of chunks) {
+                parts.push(`### ${c.title}\n${c.text}`);
+            }
+        }
+    }
+
+    parts.push(`[/ATTACHED_SOURCES_OUTLINE]`);
+    return parts.join('\n');
+}
+
+/**
+ * Replaces _sources with a single '__manual_canon__' record.
+ * @param {Array} entries
+ */
+export function setStagedCanonEntries(entries) {
+    _sources = new Map();
+    _sources.set('__manual_canon__', {
+        source: { name: '__manual_canon__', type: 'doc' },
+        chunks: [],
+        labeled: Array.isArray(entries) ? [...entries] : [],
+    });
+}
+
+/**
+ * Finds matching entry in _sources labeled arrays by comment, id, or name (case-insensitive)
+ * and toggles entry.disabled.
+ * @param {string} commentOrName
+ * @param {boolean} disabled
+ * @returns {object|null}
+ */
+export function toggleCanonEntryDisabled(commentOrName, disabled) {
+    const target = String(commentOrName || '').trim().toLowerCase();
+    if (!target) return null;
+    for (const rec of _sources.values()) {
+        if (!Array.isArray(rec.labeled)) continue;
+        for (const entry of rec.labeled) {
+            const comment = String(entry.comment || '').trim().toLowerCase();
+            const id = String(entry.id || '').trim().toLowerCase();
+            const name = String(entry.name || '').trim().toLowerCase();
+            if (comment === target || id === target || name === target) {
+                entry.disabled = Boolean(disabled);
+                return entry;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Upserts a Canon entry into _sources (matching by comment or kind + name).
+ * @param {object} rawEntry
+ * @returns {object|null}
+ */
+export function upsertCanonEntry(rawEntry) {
+    if (!rawEntry || typeof rawEntry !== 'object') return null;
+    const kind = String(rawEntry.kind || 'LORE').toUpperCase();
+    const name = String(rawEntry.name || rawEntry.title || 'Untitled').trim();
+    const comment = String(rawEntry.comment || `[${kind}] ${name}`).trim();
+    const formatted = {
+        id: rawEntry.id || `${kind}:${name}`,
+        name,
+        comment,
+        keys: Array.isArray(rawEntry.keys) ? rawEntry.keys : [name],
+        content: String(rawEntry.content || rawEntry.text || ''),
+        kind,
+        importance: rawEntry.importance !== undefined ? Number(rawEntry.importance) : 3,
+        disabled: Boolean(rawEntry.disabled),
+    };
+
+    const targetComment = comment.toLowerCase();
+    const targetKindName = `[${kind}] ${name}`.toLowerCase();
+
+    for (const rec of _sources.values()) {
+        if (!Array.isArray(rec.labeled)) continue;
+        for (let i = 0; i < rec.labeled.length; i++) {
+            const e = rec.labeled[i];
+            const eComment = String(e.comment || '').trim().toLowerCase();
+            const eKindName = `[${e.kind || ''}] ${e.name || ''}`.trim().toLowerCase();
+            if (eComment === targetComment || eKindName === targetKindName) {
+                rec.labeled[i] = { ...e, ...formatted };
+                return rec.labeled[i];
+            }
+        }
+    }
+
+    let targetRec = _sources.get('__manual_canon__');
+    if (!targetRec) {
+        if (!_sources.size) {
+            targetRec = { source: { name: '__manual_canon__', type: 'doc' }, chunks: [], labeled: [] };
+            _sources.set('__manual_canon__', targetRec);
+        } else {
+            targetRec = _sources.values().next().value;
+            if (!Array.isArray(targetRec.labeled)) targetRec.labeled = [];
+        }
+    }
+    targetRec.labeled.push(formatted);
+    return formatted;
+}
+
+/**
+ * Removes matching entry from _sources labeled arrays.
+ * @param {string} commentOrName
+ * @returns {boolean}
+ */
+export function removeCanonEntry(commentOrName) {
+    const target = String(commentOrName || '').trim().toLowerCase();
+    if (!target) return false;
+    let removed = false;
+    for (const rec of _sources.values()) {
+        if (!Array.isArray(rec.labeled)) continue;
+        const initialLen = rec.labeled.length;
+        rec.labeled = rec.labeled.filter(entry => {
+            const comment = String(entry.comment || '').trim().toLowerCase();
+            const id = String(entry.id || '').trim().toLowerCase();
+            const name = String(entry.name || '').trim().toLowerCase();
+            return !(comment === target || id === target || name === target);
+        });
+        if (rec.labeled.length < initialLen) removed = true;
+    }
+    return removed;
+}
+
+/**
+ * Tolerantly parses synthesized Canon entries from LLM response.
+ * @param {string} reply
+ * @returns {Array<object>}
+ */
+export function parseSynthesizedCanonEntries(reply) {
+    let s = String(reply || '')
+        .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+        .replace(/<think(?:ing)?>[\s\S]*$/gi, '')
+        .trim();
+    const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) s = fence[1].trim();
+    const start = s.indexOf('[');
+    const end = s.lastIndexOf(']');
+    if (start === -1 || end <= start) return [];
+    let arr;
+    try { arr = JSON.parse(s.slice(start, end + 1)); } catch (_) { return []; }
+    if (!Array.isArray(arr)) return [];
+
+    const out = [];
+    let idx = 0;
+    for (const r of arr) {
+        if (!r || typeof r !== 'object') continue;
+        const name = String(r.name || r.title || '').trim();
+        if (!name) continue;
+        const rawKind = String(r.kind || '').toUpperCase();
+        const kind = CANON_KINDS.includes(rawKind) ? rawKind : 'LORE';
+        const disabled = Boolean(r.disabled || r.outOfScope || Number(r.importance) === 0);
+        const importance = disabled ? 1 : Math.min(5, Math.max(1, Math.round(Number(r.importance)) || 3));
+        const aliases = Array.isArray(r.aliases) ? r.aliases.map(a => String(a).trim()).filter(Boolean).slice(0, 8) : [];
+        const content = String(r.content || r.text || '').trim();
+        const chunk = {
+            id: r.id !== undefined ? String(r.id) : `synth#${idx++}`,
+            title: name,
+            text: content,
+            keys: aliases,
+        };
+        const label = {
+            id: chunk.id,
+            kind,
+            name,
+            aliases,
+            importance,
+            disabled,
+        };
+        out.push(buildCanonEntry({ chunk, label }));
+    }
+    return out;
+}
+
+/**
+ * Universal 3-Bucket Canon Builder from campaign framing.
+ * @param {object} [framingBrief]
+ * @param {object} [opts]
+ * @returns {Promise<{ bucket: 'big'|'middle'|'vibe', entries: Array }>}
+ */
+export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
+    const { send = null, onStatus = () => {}, signal = null, timeoutMs = CLASSIFY_TIMEOUT_MS } = opts;
+    if (typeof send !== 'function') {
+        throw new Error('Canon generation requires an active LLM connection.');
+    }
+
+    const totalTokens = getStagedTokenTotal();
+    const bucket = detectCanonBucket(totalTokens);
+
+    if (bucket === 'big') {
+        const chunkSourceMap = new Map();
+        const allChunks = [];
+        for (const [name, rec] of _sources.entries()) {
+            if (name === '__synthesized_canon__' || name === '__manual_canon__') continue;
+            const chunks = rec.chunks || chunkLoreSource(rec.source);
+            rec.chunks = chunks;
+            for (const c of chunks) {
+                chunkSourceMap.set(c.id, name);
+                allChunks.push(c);
+            }
+        }
+        if (allChunks.length) {
+            const labeledPairs = await classifyChunks(allChunks, { send, onStatus, signal, timeoutMs, framingBrief });
+            const bySource = new Map();
+            for (const pair of labeledPairs) {
+                const srcName = chunkSourceMap.get(pair.chunk.id) || pair.chunk.source || '';
+                if (!bySource.has(srcName)) bySource.set(srcName, []);
+                bySource.get(srcName).push(buildCanonEntry(pair));
+            }
+            for (const [name, rec] of _sources.entries()) {
+                if (bySource.has(name)) {
+                    rec.labeled = bySource.get(name);
+                } else if (name !== '__synthesized_canon__' && name !== '__manual_canon__') {
+                    rec.labeled = [];
+                }
+            }
+        }
+
+        if (opts.synthesizeBridge !== false && framingBrief.focalLens?.trim()) {
+            try {
+                onStatus('Synthesizing focal bridge Canon entries…');
+                const bridgeSystem = `You are a tabletop RPG lore archivist. The user provided imported campaign lore notes, but needs 2-4 focal bridge Canon entries connecting the broad lore to the campaign focal lens: "${framingBrief.focalLens.trim()}". Return ONLY a JSON array of 2-4 entries: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of specific local canon connecting to the focal lens"}]`;
+                const bridgeUser = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens}\nTone: ${framingBrief.tone || ''}\n\nSynthesize 2 to 4 bridge entries that anchor this focal lens to the campaign setting.`;
+                const bridgeReply = await withTimeout(send([{ role: 'system', content: bridgeSystem }, { role: 'user', content: bridgeUser }], signal), timeoutMs, signal);
+                const bridgeEntries = parseSynthesizedCanonEntries(bridgeReply);
+                if (bridgeEntries.length) {
+                    let synthRec = _sources.get('__synthesized_canon__');
+                    if (!synthRec) {
+                        synthRec = { source: { name: '__synthesized_canon__', type: 'doc' }, chunks: [], labeled: [] };
+                        _sources.set('__synthesized_canon__', synthRec);
+                    }
+                    synthRec.labeled.push(...bridgeEntries);
+                }
+            } catch (err) {
+                if (signal?.aborted) throw err;
+                console.warn('[concierge-canon] Bridge synthesis skipped or failed:', err);
+            }
+        }
+    } else if (bucket === 'middle') {
+        const chunkSourceMap = new Map();
+        const allChunks = [];
+        for (const [name, rec] of _sources.entries()) {
+            if (name === '__synthesized_canon__' || name === '__manual_canon__') continue;
+            const chunks = rec.chunks || chunkLoreSource(rec.source);
+            rec.chunks = chunks;
+            for (const c of chunks) {
+                chunkSourceMap.set(c.id, name);
+                allChunks.push(c);
+            }
+        }
+        if (allChunks.length) {
+            const labeledPairs = await classifyChunks(allChunks, { send, onStatus, signal, timeoutMs, framingBrief });
+            const bySource = new Map();
+            for (const pair of labeledPairs) {
+                const srcName = chunkSourceMap.get(pair.chunk.id) || pair.chunk.source || '';
+                if (!bySource.has(srcName)) bySource.set(srcName, []);
+                bySource.get(srcName).push(buildCanonEntry(pair));
+            }
+            for (const [name, rec] of _sources.entries()) {
+                if (bySource.has(name)) {
+                    rec.labeled = bySource.get(name);
+                } else if (name !== '__synthesized_canon__' && name !== '__manual_canon__') {
+                    rec.labeled = [];
+                }
+            }
+        }
+
+        onStatus('Expanding background canon from framing Q&A…');
+        const systemPrompt = `You expand tabletop RPG campaign lore. Given the user's framing notes and imported notes, generate 5-8 expanded background Canon entries that fill in the missing world context around the imported notes and campaign framing. Reply with ONLY a JSON array: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of rich campaign canon"}]`;
+        const userContent = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens || ''}\nTone: ${framingBrief.tone || ''}\nPillars: ${Array.isArray(framingBrief.pillars) ? framingBrief.pillars.join(', ') : (framingBrief.pillars || '')}\n\nImported Notes Summary:\n${extractSourcesStructuralOutline(800)}`;
+        const reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
+        const synthEntries = parseSynthesizedCanonEntries(reply);
+        _sources.set('__synthesized_canon__', {
+            source: { name: '__synthesized_canon__', type: 'doc' },
+            chunks: [],
+            labeled: synthEntries,
+        });
+    } else {
+        onStatus('Synthesizing foundational Canon Sketch…');
+        const systemPrompt = `You are a tabletop RPG world builder. Based on the campaign framing, generate 8-12 foundational Canon Sketch entries covering factions, locations, notable NPCs, world rules, historical events, and general lore. Reply with ONLY a JSON array: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of rich campaign canon"}]`;
+        const userContent = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens || ''}\nTone: ${framingBrief.tone || ''}\nPillars: ${Array.isArray(framingBrief.pillars) ? framingBrief.pillars.join(', ') : (framingBrief.pillars || '')}`;
+        const reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
+        const synthEntries = parseSynthesizedCanonEntries(reply);
+        if (!synthEntries.length) {
+            throw new Error('Canon synthesis returned invalid or empty JSON.');
+        }
+        _sources.set('__synthesized_canon__', {
+            source: { name: '__synthesized_canon__', type: 'doc' },
+            chunks: [],
+            labeled: synthEntries,
+        });
+    }
+
+    return { bucket, entries: getStagedCanonEntries() };
+}
+
+/**
  * Register a source for Canon ingest. If the staged total puts us in Archivist mode,
  * label all unlabeled sources now (so the user sees progress at attach time).
  *
@@ -376,14 +811,16 @@ export function getStagedCanonEntries() {
  */
 export async function stageCanonSource(source, opts = {}) {
     if (!source?.name) return { mode: getCurrentMode(), entries: [] };
-    _sources.set(source.name, { source, labeled: null });
+    const chunks = chunkLoreSource(source);
+    _sources.set(source.name, { source, chunks, labeled: null });
     const mode = getCurrentMode();
     if (mode === 'archivist') {
         try {
             for (const rec of _sources.values()) {
                 if (rec.labeled) continue;
-                const chunks = chunkLoreSource(rec.source);
-                const labeled = await classifyChunks(chunks, opts);
+                const recChunks = rec.chunks || chunkLoreSource(rec.source);
+                rec.chunks = recChunks;
+                const labeled = await classifyChunks(recChunks, opts);
                 rec.labeled = labeled.map(buildCanonEntry);
             }
         } catch (err) {
@@ -418,14 +855,25 @@ export async function writeStagedCanon(prefix, deps = {}) {
         bookData = { entries: {}, name: bookName, scan_depth: 4, token_budget: 800, recursive: false, extensions: {} };
     }
 
-    const existing = new Set(Object.values(bookData.entries).map(e => String(e.comment || '').toLowerCase()));
     let nextUid = Math.max(-1, ...Object.keys(bookData.entries).map(Number).filter(n => !isNaN(n))) + 1;
     let written = 0;
     let skipped = 0;
 
     for (const e of entries) {
-        if (existing.has(e.comment.toLowerCase())) { skipped++; continue; }
-        existing.add(e.comment.toLowerCase());
+        const eComment = String(e.comment || '').toLowerCase();
+        const existingEntry = Object.values(bookData.entries).find(be => String(be.comment || '').toLowerCase() === eComment);
+
+        if (existingEntry) {
+            const shouldDisable = Boolean(e.disabled);
+            if (Boolean(existingEntry.disable) !== shouldDisable) {
+                existingEntry.disable = shouldDisable;
+                written++;
+            } else {
+                skipped++;
+            }
+            continue;
+        }
+
         bookData.entries[nextUid] = {
             uid: nextUid,
             key: e.keys,
@@ -439,7 +887,7 @@ export async function writeStagedCanon(prefix, deps = {}) {
             addMemo: true,
             order: CANON_ENTRY_ORDER,
             position: 0,
-            disable: false,
+            disable: Boolean(e.disabled),
             probability: 100,
             useProbability: false,
             depth: 4,
@@ -613,3 +1061,277 @@ export function resolvePromoteRequests(names, entries) {
 let _promoted = new Set(); // comments already shown in full this session
 export function markSlicePromoted(slice) { slice.forEach(e => _promoted.add(e.comment)); }
 export function getPromotedSet() { return _promoted; }
+
+// ── Deterministic Snapshot, Diff & Agnostic Extraction Helpers ──────────────
+
+/**
+ * Snapshots framing metadata from a campaign dossier.
+ * @param {object} dossier
+ * @returns {{ title: string, premise: string, focalLens: string, tone: string }}
+ */
+export function snapshotFraming(dossier) {
+    return {
+        title: dossier?.meta?.title || '',
+        premise: dossier?.meta?.premise || '',
+        focalLens: dossier?.meta?.focalLens || '',
+        tone: dossier?.meta?.tone || '',
+    };
+}
+
+/**
+ * Computes difference between two framing snapshots.
+ * @param {object} oldSnap
+ * @param {object} newSnap
+ * @returns {{ hasChanges: boolean, lines: string[], block: string }}
+ */
+export function computeFramingDiff(oldSnap, newSnap) {
+    const lines = [];
+    const fields = [
+        ['Title', oldSnap?.title || '', newSnap?.title || ''],
+        ['Premise', oldSnap?.premise || '', newSnap?.premise || ''],
+        ['Focal Lens', oldSnap?.focalLens || '', newSnap?.focalLens || ''],
+        ['Tone', oldSnap?.tone || '', newSnap?.tone || ''],
+    ];
+
+    for (const [label, oldVal, newVal] of fields) {
+        if (oldVal !== newVal) {
+            lines.push(`${label}: "${oldVal}" -> "${newVal}"`);
+        }
+    }
+
+    const hasChanges = lines.length > 0;
+    const block = hasChanges ? `[UPSTREAM_FRAMING_DIFF]\n${lines.join('\n')}\n[/UPSTREAM_FRAMING_DIFF]` : '';
+    return { hasChanges, lines, block };
+}
+
+/**
+ * Snapshots canon entries and world rules axioms.
+ * @param {Array} [entries]
+ * @param {object|null} [worldRules]
+ * @returns {Array<object>}
+ */
+export function snapshotCanon(entries = getStagedCanonEntries(), worldRules = null) {
+    const list = (entries || []).map(e => ({
+        comment: e.comment || `[${e.kind || 'LORE'}] ${e.name || 'Untitled'}`,
+        name: e.name || '',
+        kind: e.kind || 'LORE',
+        content: e.content || '',
+        disabled: Boolean(e.disabled),
+    }));
+    const axioms = (worldRules?.axioms || []).map(a => ({
+        title: a.title || '',
+        playerText: a.playerText || '',
+    }));
+    list.axioms = axioms;
+    list.entries = list;
+    return list;
+}
+
+/**
+ * Computes difference between two canon snapshots.
+ * @param {Array|object} oldSnap
+ * @param {Array|object} newSnap
+ * @returns {{ hasChanges: boolean, added: string[], modified: string[], disabled: string[], enabled: string[], removed: string[], axiomsChanged: string[], block: string }}
+ */
+export function computeCanonDiff(oldSnap, newSnap) {
+    const oldEntries = Array.isArray(oldSnap) ? oldSnap : (oldSnap?.entries || []);
+    const newEntries = Array.isArray(newSnap) ? newSnap : (newSnap?.entries || []);
+    const oldAxioms = oldSnap?.axioms || [];
+    const newAxioms = newSnap?.axioms || [];
+
+    const added = [];
+    const modified = [];
+    const disabled = [];
+    const enabled = [];
+    const removed = [];
+    const axiomsChanged = [];
+
+    const oldMap = new Map();
+    for (const e of oldEntries) {
+        const key = (e.comment || e.name || '').trim().toLowerCase();
+        if (key) oldMap.set(key, e);
+    }
+
+    const newMap = new Map();
+    for (const e of newEntries) {
+        const key = (e.comment || e.name || '').trim().toLowerCase();
+        if (key) newMap.set(key, e);
+    }
+
+    for (const [key, newE] of newMap.entries()) {
+        const label = newE.comment || newE.name || key;
+        if (!oldMap.has(key)) {
+            added.push(label);
+        } else {
+            const oldE = oldMap.get(key);
+            if (!oldE.disabled && newE.disabled) {
+                disabled.push(label);
+            } else if (oldE.disabled && !newE.disabled) {
+                enabled.push(label);
+            }
+            if (oldE.content !== newE.content || oldE.name !== newE.name || oldE.kind !== newE.kind) {
+                modified.push(label);
+            }
+        }
+    }
+
+    for (const [key, oldE] of oldMap.entries()) {
+        if (!newMap.has(key)) {
+            removed.push(oldE.comment || oldE.name || key);
+        }
+    }
+
+    const oldAxMap = new Map((oldAxioms || []).map(a => [(a.title || '').trim().toLowerCase(), a]));
+    const newAxMap = new Map((newAxioms || []).map(a => [(a.title || '').trim().toLowerCase(), a]));
+
+    for (const [titleKey, newA] of newAxMap.entries()) {
+        if (!oldAxMap.has(titleKey)) {
+            axiomsChanged.push(`Added axiom: "${newA.title}"`);
+        } else {
+            const oldA = oldAxMap.get(titleKey);
+            if ((oldA.playerText || '') !== (newA.playerText || '')) {
+                axiomsChanged.push(`Modified axiom: "${newA.title}"`);
+            }
+        }
+    }
+    for (const [titleKey, oldA] of oldAxMap.entries()) {
+        if (!newAxMap.has(titleKey)) {
+            axiomsChanged.push(`Removed axiom: "${oldA.title}"`);
+        }
+    }
+
+    const hasChanges = Boolean(
+        added.length || modified.length || disabled.length || enabled.length || removed.length || axiomsChanged.length
+    );
+
+    let block = '';
+    if (hasChanges) {
+        const lines = [];
+        if (added.length) lines.push(`Added: ${added.join(', ')}`);
+        if (removed.length) lines.push(`Removed: ${removed.join(', ')}`);
+        if (disabled.length) lines.push(`Disabled: ${disabled.join(', ')}`);
+        if (enabled.length) lines.push(`Enabled: ${enabled.join(', ')}`);
+        if (modified.length) lines.push(`Modified: ${modified.join(', ')}`);
+        if (axiomsChanged.length) {
+            lines.push(`Axioms Changed:`);
+            axiomsChanged.forEach(a => lines.push(`* ${a}`));
+        }
+        block = `[UPSTREAM_CANON_DIFF]\n${lines.join('\n')}\n[/UPSTREAM_CANON_DIFF]`;
+    }
+
+    return { hasChanges, added, modified, disabled, enabled, removed, axiomsChanged, block };
+}
+
+/**
+ * Snapshots ruleset and adventure fields from a campaign dossier.
+ * @param {object} dossier
+ * @returns {object}
+ */
+export function snapshotAdventure(dossier) {
+    return {
+        ruleset: dossier?.meta?.ruleset || '',
+        kick: dossier?.theKick || {},
+        maps: (dossier?.maps || []).map(m => ({ site: m.site || m.name || '', briefDescription: m.briefDescription || m.prompt || '' })),
+        monsters: (dossier?.monsters || []).map(m => ({ name: m.name || '', description: m.description || m.instinct || '' })),
+        npcs: (dossier?.npcs || []).map(n => ({ name: n.name || '', role: n.role || '', description: n.description || '' })),
+    };
+}
+
+/**
+ * Computes difference between two adventure snapshots.
+ * @param {object} oldSnap
+ * @param {object} newSnap
+ * @returns {{ hasChanges: boolean, lines: string[], block: string }}
+ */
+export function computeAdventureDiff(oldSnap, newSnap) {
+    const lines = [];
+
+    if ((oldSnap?.ruleset || '') !== (newSnap?.ruleset || '')) {
+        lines.push(`Ruleset changed: "${oldSnap?.ruleset || ''}" -> "${newSnap?.ruleset || ''}"`);
+    }
+
+    const oldKick = oldSnap?.kick || {};
+    const newKick = newSnap?.kick || {};
+    if ((oldKick.startingLocation || '') !== (newKick.startingLocation || '')) {
+        lines.push(`Starting Location: "${oldKick.startingLocation || ''}" -> "${newKick.startingLocation || ''}"`);
+    }
+    if ((oldKick.crisis || '') !== (newKick.crisis || '')) {
+        lines.push(`Crisis: "${oldKick.crisis || ''}" -> "${newKick.crisis || ''}"`);
+    }
+    if ((oldKick.openingPrompt || '') !== (newKick.openingPrompt || '')) {
+        lines.push(`Opening Prompt changed`);
+    }
+
+    const oldMaps = (oldSnap?.maps || []).map(m => m.site || '');
+    const newMaps = (newSnap?.maps || []).map(m => m.site || '');
+    const addedMaps = newMaps.filter(m => m && !oldMaps.includes(m));
+    const removedMaps = oldMaps.filter(m => m && !newMaps.includes(m));
+    if (addedMaps.length) lines.push(`Added Maps: ${addedMaps.join(', ')}`);
+    if (removedMaps.length) lines.push(`Removed Maps: ${removedMaps.join(', ')}`);
+
+    const oldMonsters = (oldSnap?.monsters || []).map(m => m.name || '');
+    const newMonsters = (newSnap?.monsters || []).map(m => m.name || '');
+    const addedMonsters = newMonsters.filter(m => m && !oldMonsters.includes(m));
+    const removedMonsters = oldMonsters.filter(m => m && !newMonsters.includes(m));
+    if (addedMonsters.length) lines.push(`Added Monsters: ${addedMonsters.join(', ')}`);
+    if (removedMonsters.length) lines.push(`Removed Monsters: ${removedMonsters.join(', ')}`);
+
+    const oldNpcs = (oldSnap?.npcs || []).map(n => n.name || '');
+    const newNpcs = (newSnap?.npcs || []).map(n => n.name || '');
+    const addedNpcs = newNpcs.filter(n => n && !oldNpcs.includes(n));
+    const removedNpcs = oldNpcs.filter(n => n && !newNpcs.includes(n));
+    if (addedNpcs.length) lines.push(`Added NPCs: ${addedNpcs.join(', ')}`);
+    if (removedNpcs.length) lines.push(`Removed NPCs: ${removedNpcs.join(', ')}`);
+
+    const hasChanges = lines.length > 0;
+    const block = hasChanges ? `[UPSTREAM_ADVENTURE_DIFF]\n${lines.join('\n')}\n[/UPSTREAM_ADVENTURE_DIFF]` : '';
+    return { hasChanges, lines, block };
+}
+
+/**
+ * Extracts ruleset-agnostic bones from a dossier when switching rulesets.
+ * @param {object} dossier
+ * @returns {object}
+ */
+export function extractAgnosticAdventureBones(dossier) {
+    const meta = dossier?.meta || {};
+    const cfg = dossier?.config || {};
+    const kick = dossier?.theKick || {};
+
+    return {
+        title: meta.title || dossier?.title || '',
+        premise: meta.premise || dossier?.premise || '',
+        focalLens: meta.focalLens || dossier?.focalLens || '',
+        tone: meta.tone || dossier?.tone || '',
+        agnosticConfig: {
+            playstyle: cfg.playstyle !== undefined ? cfg.playstyle : 'story',
+            partyMode: cfg.partyMode !== undefined ? cfg.partyMode : 'squad',
+            cyoaEmojis: cfg.cyoaEmojis !== undefined ? cfg.cyoaEmojis : true,
+            simulationDepth: cfg.simulationDepth !== undefined ? cfg.simulationDepth : 'active_fronts',
+            relationships: cfg.relationships !== undefined ? cfg.relationships : true,
+            artStyle: cfg.artStyle !== undefined ? cfg.artStyle : 'fantasy',
+        },
+        theKick: {
+            startingLocation: kick.startingLocation || '',
+            crisis: kick.crisis || '',
+            openingPrompt: kick.openingPrompt || '',
+        },
+        maps: (dossier?.maps || []).map(m => ({
+            site: m.site || m.name || '',
+            kind: m.kind || 'INTERIOR',
+            threat: m.threat || 'MODERATE',
+            briefDescription: m.briefDescription || m.prompt || m.description || '',
+            entrance: m.entrance || '',
+        })),
+        npcs: (dossier?.npcs || []).map(n => ({
+            name: n.name || '',
+            role: n.role || '',
+            description: n.description || '',
+            personality: n.personality || '',
+        })),
+        monsters: (dossier?.monsters || []).map(m => ({
+            name: m.name || '',
+            concept: m.description || m.instinct || m.species || '',
+        })),
+    };
+}

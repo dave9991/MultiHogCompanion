@@ -227,6 +227,83 @@
     color: #ef4444 !important;
 }
 
+/* ── New Adventure Stepper Bar ── */
+.mhc-adventure-stepper-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid var(--mhc-border, rgba(255, 255, 255, 0.1));
+}
+
+.mhc-step-btn {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: #9ca3af;
+    font-size: 0.8em;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    position: relative;
+}
+
+.mhc-step-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f3f4f6;
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.mhc-step-btn.active {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: rgba(96, 165, 250, 0.6);
+    color: #93c5fd;
+    font-weight: 700;
+}
+
+.mhc-step-btn.has-diff-dot::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #f59e0b;
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    box-shadow: 0 0 4px #f59e0b;
+}
+
+.mhc-step-arrow {
+    font-size: 0.8em;
+    opacity: 0.45;
+    color: #9ca3af;
+}
+
+.mhc-canon-toggle-btn {
+    transition: all 0.15s ease;
+}
+
+.mhc-canon-toggle-btn:hover {
+    filter: brightness(1.15);
+}
+
+.mhc-initial-source-row {
+    transition: background 0.15s ease;
+}
+
+.mhc-initial-source-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.mhc-gate-hint-banner {
+    animation: mhcFadeIn 0.2s ease-in-out;
+}
+
 .mhc-concierge-body {
     flex: 1;
     display: flex;

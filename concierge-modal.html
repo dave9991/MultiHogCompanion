@@ -17,11 +17,6 @@
                     <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
                     <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="new-adventure" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Conversational Session Zero Draft"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
                 </div>
-                <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px;" title="Switch Session Zero Ruleset Engine between D&D 5e, PbtA, and FAE">
-                    <button type="button" class="mhc-ruleset-btn" data-ruleset="dnd5e" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">⚔️ D&D Lite (d20)</button>
-                    <button type="button" class="mhc-ruleset-btn active" data-ruleset="pbta" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🎲 PbtA (2d6)</button>
-                    <button type="button" class="mhc-ruleset-btn" data-ruleset="fae" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🕯️ FAE (4dF)</button>
-                </div>
                 <div id="mhc_header_system_badge" class="mhc-system-badge" title="Active Genre / System (Concierge can use any preset or create a custom setting)">
                     ✨ Any Genre / Custom
                 </div>
@@ -43,6 +38,17 @@
             </div>
         </div>
 
+        <!-- New Adventure 4-Step Stepper Bar -->
+        <div id="mhc_new_adventure_stepper" class="mhc-adventure-stepper-bar" style="display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: rgba(0,0,0,0.3); border-bottom: 1px solid var(--mhc-border, rgba(255,255,255,0.1));">
+            <button type="button" class="mhc-step-btn active" data-step="initial" id="mhc_step_btn_initial">1. 🧭 Initial</button>
+            <span class="mhc-step-arrow" id="mhc_step_arrow_canon" style="display: none; opacity: 0.45;">➔</span>
+            <button type="button" class="mhc-step-btn" data-step="canon" id="mhc_step_btn_canon" style="display: none;">2. 📚 Canon</button>
+            <span class="mhc-step-arrow" id="mhc_step_arrow_adventure" style="display: none; opacity: 0.45;">➔</span>
+            <button type="button" class="mhc-step-btn" data-step="adventure" id="mhc_step_btn_adventure" style="display: none;">3. 🗺️ Adventure</button>
+            <span class="mhc-step-arrow" id="mhc_step_arrow_character" style="display: none; opacity: 0.45;">➔</span>
+            <button type="button" class="mhc-step-btn" data-step="character" id="mhc_step_btn_character" style="display: none;">4. 👤 Character</button>
+        </div>
+
         <!-- Main Body: Two Columns -->
         <div class="mhc-concierge-body">
             <!-- Left Column: Conversational Stream -->
@@ -58,7 +64,7 @@
 
                 <!-- Inspiration Quick Toolbar -->
                 <div class="mhc-inspiration-bar">
-                    <button type="button" id="mhc_load_active_campaign_btn" class="menu_button mhc-bar-btn" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #7dd3fc;" title="Pull the active chat's Campaign Dossier into Session Zero to view or edit">
+                    <button type="button" id="mhc_load_active_campaign_btn" class="menu_button mhc-bar-btn" style="display: none; background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #7dd3fc;" title="Pull the active chat's Campaign Dossier into Session Zero to view or edit">
                         📂 Load Active Campaign
                     </button>
 
@@ -133,11 +139,66 @@
 
                 <!-- Tab 1: Live Cards -->
                 <div id="mhc_tab_cards" class="mhc-tab-content active">
-                    <!-- System Card -->
-                    <div class="mhc-card mhc-card-system">
+                    <!-- Step 1: Initial Framing Card -->
+                    <div id="mhc_card_initial_framing" class="mhc-card mhc-stage-card" data-stage="initial">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">🧭 Framing Brief</span>
+                            <span id="mhc_initial_framing_status" class="mhc-pill" style="border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;">In Progress</span>
+                        </div>
+                        <div class="mhc-card-desc" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                            <div><b>Campaign Title:</b> <span id="mhc_initial_title" style="color: var(--mhc-accent, #38bdf8); font-weight: 600;">Untitled Campaign</span></div>
+                            <div><b>Premise:</b> <span id="mhc_initial_premise" style="opacity: 0.9;">(Waiting for premise...)</span></div>
+                            <div><b>Focal Lens / Pivot:</b> <span id="mhc_initial_focal_lens" style="opacity: 0.9;">(Waiting for focal lens/pivot...)</span></div>
+                            <div><b>Tone:</b> <span id="mhc_initial_tone" style="opacity: 0.9;">(Waiting for tone...)</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Step 1: Attached Sources & Intake Card -->
+                    <div id="mhc_card_initial_sources" class="mhc-card mhc-stage-card" data-stage="initial">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">📦 Attached Sources &amp; Intake</span>
+                            <span id="mhc_initial_sources_count" class="mhc-badge-count">0</span>
+                        </div>
+                        <div id="mhc_initial_sources_list" class="mhc-deck-list" style="max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                            <div class="mhc-empty-hint">No sources attached yet. Click 📎 to attach lore, cards, or notes.</div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Canon Entries Card -->
+                    <div id="mhc_card_canon_entries" class="mhc-card mhc-stage-card" data-stage="canon">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">📚 Series Bible (_Canon Lorebook)</span>
+                            <span id="mhc_deck_canon_count" class="mhc-badge-count">0</span>
+                        </div>
+                        <div id="mhc_deck_canon_list" class="mhc-deck-list" style="max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">
+                            <div class="mhc-empty-hint">No Series Bible entries generated yet. Advance from Initial Framing to build Canon.</div>
+                        </div>
+                    </div>
+
+                    <!-- World Axioms & Laws Card -->
+                    <div class="mhc-card mhc-card-world-rules" id="mhc_deck_world_rules_card" data-stage="canon">
+                        <div class="mhc-card-header">
+                            <span class="mhc-card-title">🌐 World Axioms &amp; Laws</span>
+                            <span id="mhc_deck_world_rules_count" class="mhc-badge-count">0</span>
+                        </div>
+                        <div id="mhc_deck_world_rules_list" class="mhc-deck-list">
+                            <div class="mhc-empty-hint">Standard world physics &amp; tropes apply.</div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3 System & Ruleset Gate Card -->
+                    <div class="mhc-card mhc-card-system mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
                             <span id="mhc_deck_engine_title" class="mhc-card-title">🎲 PbtA Engine</span>
                             <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
+                        </div>
+                        <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px; margin: 8px 0;" title="Switch Session Zero Ruleset Engine between D&D 5e, PbtA, and FAE">
+                            <button type="button" class="mhc-ruleset-btn" data-ruleset="dnd5e" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">⚔️ D&D Lite (d20)</button>
+                            <button type="button" class="mhc-ruleset-btn active" data-ruleset="pbta" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🎲 PbtA (2d6)</button>
+                            <button type="button" class="mhc-ruleset-btn" data-ruleset="fae" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🕯️ FAE (4dF)</button>
+                        </div>
+                        <div id="mhc_adventure_ruleset_gate_hint" class="mhc-gate-hint-banner" style="display: none; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; padding: 6px 10px; border-radius: 6px; font-size: 0.82em; margin-bottom: 6px;">
+                            👆 Choose a ruleset engine above to unlock the Episode 1 Adventure builder &amp; chat.
                         </div>
                         <div class="mhc-deck-title-row" style="margin: 6px 0 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                             <div style="font-size: 1.05em; font-weight: 700; color: var(--mhc-accent, #38bdf8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -154,7 +215,7 @@
                     </div>
 
                     <!-- Campaign Calibration Dials Card -->
-                    <div class="mhc-card mhc-card-dials">
+                    <div class="mhc-card mhc-card-dials mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
                             <span class="mhc-card-title">⚙️ Campaign Dials</span>
                             <span id="mhc_deck_dial_playstyle" class="mhc-pill mhc-clickable-pill" title="Click to cycle playstyle (CYOA 5 -> CYOA 3 -> Pure Freeform)">CYOA (5 Choices)</span>
@@ -175,19 +236,8 @@
                         </div>
                     </div>
 
-                    <!-- World Axioms & Laws Card -->
-                    <div class="mhc-card mhc-card-world-rules" id="mhc_deck_world_rules_card">
-                        <div class="mhc-card-header">
-                            <span class="mhc-card-title">🌐 World Axioms & Laws</span>
-                            <span id="mhc_deck_world_rules_count" class="mhc-badge-count">0</span>
-                        </div>
-                        <div id="mhc_deck_world_rules_list" class="mhc-deck-list">
-                            <div class="mhc-empty-hint">Standard world physics & tropes apply.</div>
-                        </div>
-                    </div>
-
                     <!-- Custom HUD Tracker Module Card -->
-                    <div class="mhc-card mhc-card-custom-module" id="mhc_deck_custom_module_card" style="display: none;">
+                    <div class="mhc-card mhc-card-custom-module" id="mhc_deck_custom_module_card" data-stage="character" style="display: none;">
                         <div class="mhc-card-header">
                             <span class="mhc-card-title">📟 Custom HUD Tracker</span>
                             <div style="display: flex; align-items: center; gap: 6px;">
@@ -203,7 +253,7 @@
                     </div>
 
                     <!-- Protagonist Card -->
-                    <div class="mhc-card mhc-card-char">
+                    <div class="mhc-card mhc-card-char mhc-stage-card" data-stage="character">
                         <div class="mhc-card-header">
                             <span class="mhc-card-title">👤 Protagonist</span>
                             <span id="mhc_deck_char_playbook" class="mhc-pill">Waiting...</span>
@@ -229,9 +279,9 @@
                     </div>
 
                     <!-- Supporting Allies & NPCs Card -->
-                    <div class="mhc-card mhc-card-npcs">
+                    <div class="mhc-card mhc-card-npcs mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
-                            <span class="mhc-card-title">👥 Allies & Supporting NPCs</span>
+                            <span class="mhc-card-title">👥 Allies &amp; Supporting NPCs</span>
                             <span id="mhc_deck_npc_count" class="mhc-badge-count">0</span>
                         </div>
                         <div id="mhc_deck_npcs_list" class="mhc-deck-list">
@@ -240,7 +290,7 @@
                     </div>
 
                     <!-- Queued Adversaries & Monsters -->
-                    <div class="mhc-card mhc-card-monsters">
+                    <div class="mhc-card mhc-card-monsters mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
                             <span class="mhc-card-title">👹 Queued Adversaries</span>
                             <span id="mhc_deck_monster_count" class="mhc-badge-count">0</span>
@@ -251,7 +301,7 @@
                     </div>
 
                     <!-- Queued Locations & Maps -->
-                    <div class="mhc-card mhc-card-maps">
+                    <div class="mhc-card mhc-card-maps mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
                             <span class="mhc-card-title">🗺️ Queued Maps</span>
                             <span id="mhc_deck_map_count" class="mhc-badge-count">0</span>
@@ -262,9 +312,9 @@
                     </div>
 
                     <!-- Factions & Powers Card -->
-                    <div class="mhc-card mhc-card-factions">
+                    <div class="mhc-card mhc-card-factions mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
-                            <span class="mhc-card-title">🚩 Factions & Powers</span>
+                            <span class="mhc-card-title">🚩 Factions &amp; Powers</span>
                             <span id="mhc_deck_faction_count" class="mhc-badge-count">0</span>
                         </div>
                         <div id="mhc_deck_factions_list" class="mhc-deck-list">
@@ -273,7 +323,7 @@
                     </div>
 
                     <!-- The Kick (Opening Crisis) -->
-                    <div class="mhc-card mhc-card-kick">
+                    <div class="mhc-card mhc-card-kick mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
                             <span class="mhc-card-title">⚡ The Kick (Starting Scene)</span>
                         </div>

@@ -54,6 +54,22 @@ import {
     getPromotedSet,
     decideMode,
     estimateTokens,
+    detectCanonBucket,
+    stageRawCanonSource,
+    getStagedSourcesSummary,
+    extractSourcesStructuralOutline,
+    buildCanonFromFraming,
+    setStagedCanonEntries,
+    toggleCanonEntryDisabled,
+    upsertCanonEntry,
+    removeCanonEntry,
+    snapshotFraming,
+    computeFramingDiff,
+    snapshotCanon,
+    computeCanonDiff,
+    snapshotAdventure,
+    computeAdventureDiff,
+    extractAgnosticAdventureBones,
 } from './concierge-canon.js';
 import {
     buildConciergeSystemPrompt,
@@ -62,6 +78,14 @@ import {
     buildConciergeCriticContext,
     buildConciergeRefinerContext,
     buildConciergeTalkerContext,
+    buildStage1InitialBuilderPrompt,
+    buildStage1InitialTalkerPrompt,
+    buildStage2CanonBuilderPrompt,
+    buildStage2CanonTalkerPrompt,
+    buildStage3AdventureBuilderPrompt,
+    buildStage3AdventureTalkerPrompt,
+    buildStage4CharacterBuilderPrompt,
+    buildStage4CharacterTalkerPrompt,
 } from './concierge-prompt.js';
 import {
     createEmptyDossier,
@@ -145,6 +169,22 @@ export function setImportCommitPending(val) { isImportCommitPending = Boolean(va
 let activeNameRagSeeds = '';
 let activeNameRagKey = '';
 
+let currentNavMode = 'new-adventure';
+let currentAdventureStep = 'initial';
+let unlockedSteps = { initial: true, canon: false, adventure: false, character: false };
+let stageChatHistories = { initial: [], canon: [], adventure: [], character: [] };
+let lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
+let attachedSources = [];
+
+export function getConciergeStageState() {
+    return {
+        currentNavMode,
+        currentAdventureStep,
+        unlockedSteps: { ...unlockedSteps },
+        rulesetConfirmed: Boolean(activeDossier?.meta?.rulesetConfirmed),
+    };
+}
+
 function startImportProgress(label) {
     if (!label) return;
     activeImports.push(label);
@@ -202,6 +242,13 @@ function saveDraft() {
             originChatId: loadedCampaignOriginChatId,
             originCampaignTitle: loadedCampaignOriginTitle,
             timestamp: Date.now(),
+            currentNavMode,
+            currentAdventureStep,
+            unlockedSteps,
+            stageChatHistories,
+            stagedCanonEntries: getStagedCanonEntries(),
+            lastSyncedSnapshots,
+            attachedSources,
         };
         localStorage.setItem(key, JSON.stringify(payload));
     } catch (_) {}
@@ -352,6 +399,12 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     pendingPromotions = [];
     isImportCommitPending = false;
     importStatusText = '';
+    currentNavMode = 'new-adventure';
+    currentAdventureStep = 'initial';
+    unlockedSteps = { initial: true, canon: false, adventure: false, character: false };
+    stageChatHistories = { initial: [], canon: [], adventure: [], character: [] };
+    lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
+    attachedSources = [];
     if (importAbortController) {
         try { importAbortController.abort(); } catch (_) {}
         importAbortController = null;
@@ -385,7 +438,10 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
             ? "Welcome to Session Zero! I'm your FAE Concierge. Tell me what kind of adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?"
             : "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?";
         appendChatBubble('assistant', greeting);
+        chatHistory.push({ role: 'assistant', content: greeting });
+        stageChatHistories.initial = [...chatHistory];
     }
+    evaluateStepUnlocks();
 }
 
 /**
@@ -418,6 +474,393 @@ export function switchRulesetMode(newRuleset = 'pbta', newGenreKey = null) {
         'assistant',
         `Switched Session Zero mode to **${modeLabel}** (${activeDossier.meta?.systemLabel || defaultGenre}). What kind of adventure or setting would you like to build?`
     );
+}
+
+/**
+ * Re-renders the message stream DOM from current chatHistory array.
+ */
+function renderChatHistoryFromState() {
+    $('#mhc_chat_messages').empty();
+    if (!Array.isArray(chatHistory)) return;
+    chatHistory.forEach(msg => {
+        const displayStr = msg.displayContent || (typeof msg.content === 'string' ? msg.content : '');
+        if (displayStr) {
+            const isAssistant = msg.role === 'assistant';
+            const text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
+            appendChatBubble(msg.role, text, msg.imageSrc || null);
+        } else if (Array.isArray(msg.content)) {
+            let text = '';
+            let imgSrc = null;
+            msg.content.forEach(p => {
+                if (p.type === 'text') text += p.text;
+                if (p.type === 'image_url') imgSrc = p.image_url?.url;
+            });
+            appendChatBubble(msg.role, text, imgSrc || msg.imageSrc || null);
+        }
+    });
+}
+
+/**
+ * Evaluates step unlocking conditions across the 4-step progressive pipeline:
+ * 1. Initial ➔ 2. Canon ➔ 3. Adventure ➔ 4. Character
+ */
+export function evaluateStepUnlocks() {
+    unlockedSteps.initial = true;
+
+    // Step 2 (Canon) unlocks if already unlocked OR framingComplete OR has premise and (not big bucket or has lens)
+    if (!unlockedSteps.canon) {
+        const framingDone = Boolean(activeDossier?.meta?.framingComplete);
+        const hasPremise = Boolean(activeDossier?.meta?.premise?.trim());
+        const bucket = detectCanonBucket(getStagedTokenTotal());
+        const hasLens = Boolean(activeDossier?.meta?.focalLens?.trim());
+        if (framingDone || (hasPremise && (bucket !== 'big' || hasLens))) {
+            unlockedSteps.canon = true;
+        }
+    }
+
+    // Step 3 (Adventure) unlocks if already unlocked OR staged Canon entries exist OR worldRules axioms exist
+    if (!unlockedSteps.adventure) {
+        const hasCanon = getStagedCanonEntries().length > 0;
+        const hasAxioms = Array.isArray(activeDossier?.worldRules?.axioms) && activeDossier.worldRules.axioms.length > 0;
+        if (hasCanon || hasAxioms) {
+            unlockedSteps.adventure = true;
+        }
+    }
+
+    // Step 4 (Character) unlocks if already unlocked OR (ruleset confirmed AND Episode 1 content exists)
+    if (!unlockedSteps.character) {
+        const rulesetConfirmed = Boolean(activeDossier?.meta?.rulesetConfirmed);
+        const kick = activeDossier?.theKick || {};
+        const hasEpisode1Content = Boolean(
+            kick.crisis ||
+            kick.startingLocation ||
+            activeDossier?.maps?.length ||
+            activeDossier?.monsters?.length ||
+            activeDossier?.npcs?.length
+        );
+        if (rulesetConfirmed && hasEpisode1Content) {
+            unlockedSteps.character = true;
+        }
+    }
+
+    // Stepper DOM buttons & arrows visibility
+    const canonArrow = $('#mhc_step_arrow_canon');
+    if (typeof canonArrow.show === 'function' && typeof canonArrow.hide === 'function') {
+        if (unlockedSteps.canon) canonArrow.show(); else canonArrow.hide();
+    }
+    const canonBtn = $('#mhc_step_btn_canon');
+    if (typeof canonBtn.show === 'function' && typeof canonBtn.hide === 'function') {
+        if (unlockedSteps.canon) canonBtn.show(); else canonBtn.hide();
+    }
+
+    const advArrow = $('#mhc_step_arrow_adventure');
+    if (typeof advArrow.show === 'function' && typeof advArrow.hide === 'function') {
+        if (unlockedSteps.adventure) advArrow.show(); else advArrow.hide();
+    }
+    const advBtn = $('#mhc_step_btn_adventure');
+    if (typeof advBtn.show === 'function' && typeof advBtn.hide === 'function') {
+        if (unlockedSteps.adventure) advBtn.show(); else advBtn.hide();
+    }
+
+    const charArrow = $('#mhc_step_arrow_character');
+    if (typeof charArrow.show === 'function' && typeof charArrow.hide === 'function') {
+        if (unlockedSteps.character) charArrow.show(); else charArrow.hide();
+    }
+    const charBtn = $('#mhc_step_btn_character');
+    if (typeof charBtn.show === 'function' && typeof charBtn.hide === 'function') {
+        if (unlockedSteps.character) charBtn.show(); else charBtn.hide();
+    }
+
+    const stepperBtns = $('#mhc_new_adventure_stepper .mhc-step-btn');
+    if (typeof stepperBtns.removeClass === 'function') {
+        stepperBtns.removeClass('active');
+    }
+    const curBtn = $(`#mhc_step_btn_${currentAdventureStep}`);
+    if (typeof curBtn.addClass === 'function') {
+        curBtn.addClass('active');
+    }
+
+    // Launch button state
+    const launchBtn = $('#mhc_launch_campaign_btn');
+    const isReady = currentNavMode !== 'new-adventure' || currentAdventureStep === 'character' || unlockedSteps.character;
+    if (typeof launchBtn.prop === 'function') {
+        launchBtn.prop('disabled', !isReady);
+    }
+    if (typeof launchBtn.css === 'function') {
+        launchBtn.css({ opacity: isReady ? '1' : '0.5', 'pointer-events': isReady ? 'auto' : 'none' });
+    }
+}
+
+/**
+ * Runs a single Stage Builder + Talker harmonization pass.
+ */
+async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBones = null } = {}) {
+    let builderSys = '';
+    let talkerSys = '';
+    const stagedCanon = getStagedCanonEntries();
+
+    if (stage === 'canon') {
+        builderSys = buildStage2CanonBuilderPrompt(activeDossier, stagedCanon, upstreamDiff);
+        talkerSys = buildStage2CanonTalkerPrompt(activeDossier, stagedCanon, upstreamDiff);
+    } else if (stage === 'adventure') {
+        builderSys = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
+        talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
+    } else if (stage === 'character') {
+        builderSys = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff });
+        talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff });
+    }
+
+    const builderMsgs = [
+        { role: 'system', name: 'System', content: builderSys },
+        { role: 'user', name: 'Player', content: upstreamDiff ? `[UPSTREAM_DIFF]:\n${upstreamDiff}\nPlease harmonize this stage with upstream updates.` : 'Please harmonize this stage with upstream updates.' },
+    ];
+    const builderRaw = await sendConciergeRequest(builderMsgs);
+    const builderReport = applyDossierUpdates(builderRaw, activeDossier);
+
+    if (stage === 'canon' && builderReport?.canonMutations?.length > 0) {
+        for (const m of builderReport.canonMutations) {
+            if (m.action === 'upsert' && m.entry) upsertCanonEntry(m.entry);
+            else if (m.action === 'disable') toggleCanonEntryDisabled(m.target, true);
+            else if (m.action === 'enable') toggleCanonEntryDisabled(m.target, false);
+            else if (m.action === 'remove') removeCanonEntry(m.target);
+        }
+        builderReport.hasMutations = true;
+    }
+
+    if (builderReport.hasMutations) {
+        activeDossier = builderReport.updatedDossier;
+    }
+
+    const talkerMsgs = [
+        { role: 'system', name: 'System', content: talkerSys },
+        { role: 'user', name: 'Player', content: 'What updates were made?' },
+    ];
+    const talkerRaw = await sendConciergeRequest(talkerMsgs);
+    const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || 'Stage harmonized with upstream updates.';
+
+    $('#mhc_chat_messages').empty();
+    appendChatBubble('assistant', cleanTalker);
+    chatHistory = [{ role: 'assistant', content: cleanTalker }];
+    stageChatHistories[stage] = [...chatHistory];
+    updateBlueprintDeck();
+}
+
+/**
+ * Runs an autonomous stage Builder + Talker pass to generate stage contents.
+ */
+async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstreamDiff = '' } = {}) {
+    const stream = document.getElementById('mhc_chat_messages');
+    const typingBubble = document.createElement('div');
+    typingBubble.className = 'mhc-bubble mhc-bubble-assistant';
+    typingBubble.id = 'mhc_typing_indicator';
+    typingBubble.innerHTML = '<i class="mhc-stage">🎩 The Concierge is constructing Episode 1 Adventure...</i>';
+    if (stream) {
+        stream.appendChild(typingBubble);
+        stream.scrollTop = stream.scrollHeight;
+    }
+
+    try {
+        const stagedCanon = getStagedCanonEntries();
+        let builderSys = '';
+        let talkerSys = '';
+
+        if (stage === 'adventure') {
+            builderSys = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
+            talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
+        } else if (stage === 'character') {
+            builderSys = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff });
+            talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff });
+        }
+
+        const builderMsgs = [
+            { role: 'system', name: 'System', content: builderSys },
+            { role: 'user', name: 'Player', content: promptText },
+        ];
+        const builderRaw = await sendConciergeRequest(builderMsgs);
+        const report = applyDossierUpdates(builderRaw, activeDossier);
+        if (report.hasMutations) {
+            activeDossier = report.updatedDossier;
+        }
+
+        const talkerMsgs = [
+            { role: 'system', name: 'System', content: talkerSys },
+            { role: 'user', name: 'Player', content: promptText },
+        ];
+        const talkerRaw = await sendConciergeRequest(talkerMsgs);
+        const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || 'Episode 1 Adventure constructed.';
+
+        typingBubble.remove();
+        $('#mhc_chat_messages').empty();
+        appendChatBubble('assistant', cleanTalker);
+        chatHistory = [{ role: 'assistant', content: cleanTalker }];
+        stageChatHistories[stage] = [...chatHistory];
+        evaluateStepUnlocks();
+        updateBlueprintDeck();
+        saveDraft();
+    } catch (err) {
+        typingBubble.remove();
+        console.error('[MultiHog Companion] Stage auto-pass error:', err);
+        toastr?.error(`Auto-pass failed: ${err.message}`);
+    }
+}
+
+/**
+ * Transitions the UI stage controller to targetStep:
+ * 'initial' | 'canon' | 'adventure' | 'character'
+ */
+export async function setAdventureStep(targetStep, opts = {}) {
+    if (!['initial', 'canon', 'adventure', 'character'].includes(targetStep)) return;
+    if (!unlockedSteps[targetStep] && !opts.force) return;
+
+    // 1. Before leaving current step, save chat history and snapshot
+    stageChatHistories[currentAdventureStep] = [...chatHistory];
+
+    if (currentAdventureStep === 'initial' && lastSyncedSnapshots.framing === null) {
+        lastSyncedSnapshots.framing = snapshotFraming(activeDossier);
+    } else if (currentAdventureStep === 'canon' && lastSyncedSnapshots.canon === null) {
+        lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+    } else if (currentAdventureStep === 'adventure' && lastSyncedSnapshots.adventure === null) {
+        lastSyncedSnapshots.adventure = snapshotAdventure(activeDossier);
+    }
+
+    currentAdventureStep = targetStep;
+
+    // 2. Handle step transition logic
+    if (targetStep === 'initial') {
+        $('.mhc-chat-column').show();
+        chatHistory = [...(stageChatHistories.initial || [])];
+        renderChatHistoryFromState();
+    } else if (targetStep === 'canon') {
+        $('.mhc-chat-column').show();
+        const framingDiff = lastSyncedSnapshots.framing
+            ? computeFramingDiff(lastSyncedSnapshots.framing, snapshotFraming(activeDossier))
+            : null;
+
+        if (getStagedCanonEntries().length === 0 && !opts.skipCanonBuild) {
+            stageChatHistories.canon = [];
+            chatHistory = [];
+            $('#mhc_chat_messages').empty();
+            appendChatBubble('assistant', '🗃️ Building & organizing Series Bible Canon from your framing...');
+
+            try {
+                await buildCanonFromFraming({
+                    title: activeDossier.meta?.title,
+                    premise: activeDossier.meta?.premise,
+                    focalLens: activeDossier.meta?.focalLens,
+                    tone: activeDossier.meta?.tone,
+                }, {
+                    send: (msgs, sig) => sendConciergeRequest(msgs, sig),
+                    onStatus: msg => toastr?.info(msg),
+                });
+            } catch (err) {
+                console.error('[MultiHog Companion] Canon build error:', err);
+                toastr?.error(`Failed building Canon: ${err.message}`);
+            }
+
+            lastSyncedSnapshots.framing = snapshotFraming(activeDossier);
+            lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+            unlockedSteps.adventure = true;
+
+            const canon = getStagedCanonEntries();
+            const activeCount = canon.filter(e => !e.disabled).length;
+            const disabledCount = canon.filter(e => e.disabled).length;
+            const cats = [...new Set(canon.map(e => e.kind))].join(', ') || 'LORE';
+
+            $('#mhc_chat_messages').empty();
+            const welcomeText = `📚 **Series Bible Canon Generated!**\n\nI have structured **${canon.length}** canon entries (${cats}).\n• **${activeCount}** active entries in play.\n• **${disabledCount}** background/deferred entries.\n\nYou can review, expand, or toggle entries in the Series Bible on the right, or click **3. 🗺️ Adventure** up top to choose your ruleset engine and forge Episode 1!`;
+            appendChatBubble('assistant', welcomeText);
+            chatHistory = [{ role: 'assistant', content: welcomeText }];
+            stageChatHistories.canon = [...chatHistory];
+        } else if (framingDiff?.hasChanges && !opts.skipHarmonization) {
+            stageChatHistories.canon = [];
+            chatHistory = [];
+            $('#mhc_chat_messages').empty();
+            appendChatBubble('assistant', '🔄 Harmonizing Canon with your updated Initial framing...');
+
+            try {
+                await runStageHarmonizationPass('canon', { upstreamDiff: framingDiff.block });
+                lastSyncedSnapshots.framing = snapshotFraming(activeDossier);
+            } catch (err) {
+                console.error('[MultiHog Companion] Canon harmonization error:', err);
+                toastr?.error(`Failed harmonizing Canon: ${err.message}`);
+            }
+        } else {
+            chatHistory = [...(stageChatHistories.canon || [])];
+            renderChatHistoryFromState();
+        }
+    } else if (targetStep === 'adventure') {
+        const rulesetConfirmed = Boolean(activeDossier?.meta?.rulesetConfirmed);
+        if (!rulesetConfirmed) {
+            chatHistory = [...(stageChatHistories.adventure || [])];
+            renderChatHistoryFromState();
+        } else {
+            $('.mhc-chat-column').show();
+            const canonDiff = lastSyncedSnapshots.canon
+                ? computeCanonDiff(lastSyncedSnapshots.canon, snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules))
+                : null;
+
+            if (canonDiff?.hasChanges && !opts.skipHarmonization) {
+                stageChatHistories.adventure = [];
+                chatHistory = [];
+                $('#mhc_chat_messages').empty();
+                appendChatBubble('assistant', '🔄 Harmonizing Episode 1 Adventure with updated Canon...');
+
+                try {
+                    await runStageHarmonizationPass('adventure', { upstreamDiff: canonDiff.block });
+                    lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+                } catch (err) {
+                    console.error('[MultiHog Companion] Adventure harmonization error:', err);
+                    toastr?.error(`Failed harmonizing Adventure: ${err.message}`);
+                }
+            } else {
+                chatHistory = [...(stageChatHistories.adventure || [])];
+                renderChatHistoryFromState();
+            }
+        }
+    } else if (targetStep === 'character') {
+        $('.mhc-chat-column').show();
+        const canonDiff = lastSyncedSnapshots.canon
+            ? computeCanonDiff(lastSyncedSnapshots.canon, snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules))
+            : null;
+        const advDiff = lastSyncedSnapshots.adventure
+            ? computeAdventureDiff(lastSyncedSnapshots.adventure, snapshotAdventure(activeDossier))
+            : null;
+
+        const combinedDiff = [
+            canonDiff?.hasChanges ? canonDiff.block : '',
+            advDiff?.hasChanges ? advDiff.block : '',
+        ].filter(Boolean).join('\n\n');
+
+        if (combinedDiff && !opts.skipHarmonization) {
+            stageChatHistories.character = [];
+            chatHistory = [];
+            $('#mhc_chat_messages').empty();
+            appendChatBubble('assistant', '🔄 Harmonizing Protagonist with updated Adventure & Canon...');
+
+            try {
+                await runStageHarmonizationPass('character', { upstreamDiff: combinedDiff });
+                lastSyncedSnapshots.adventure = snapshotAdventure(activeDossier);
+                lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+            } catch (err) {
+                console.error('[MultiHog Companion] Character harmonization error:', err);
+                toastr?.error(`Failed harmonizing Character: ${err.message}`);
+            }
+        } else if (!stageChatHistories.character || stageChatHistories.character.length === 0) {
+            chatHistory = [];
+            $('#mhc_chat_messages').empty();
+            const charGreeting = "👤 **Step 4: Character & Protagonist**\n\nNow let's forge your Protagonist! Tell me who you want to play, or pick an existing SillyTavern character / persona inspiration from the toolbar below. You can also view and customize your **📜 Progression Codex** using the tab on the right.";
+            appendChatBubble('assistant', charGreeting);
+            chatHistory = [{ role: 'assistant', content: charGreeting }];
+            stageChatHistories.character = [...chatHistory];
+        } else {
+            chatHistory = [...(stageChatHistories.character || [])];
+            renderChatHistoryFromState();
+        }
+    }
+
+    evaluateStepUnlocks();
+    updateBlueprintDeck();
+    saveDraft();
 }
 
 /**
@@ -870,6 +1313,171 @@ function updateBlueprintDeck() {
         $('#mhc_deck_kick_text').text('The starting scene and crisis will be staged here.');
     }
 
+    // Step 1 Initial Framing Card
+    const isFramingReady = Boolean(meta.framingComplete);
+    $('#mhc_initial_framing_status')
+        .text(isFramingReady ? '✓ Ready for Canon' : 'In Progress')
+        .css({
+            borderColor: isFramingReady ? 'rgba(34, 197, 94, 0.4)' : 'rgba(59, 130, 246, 0.4)',
+            color: isFramingReady ? '#4ade80' : '#93c5fd',
+        });
+    $('#mhc_initial_title').text((meta.title || '').trim() || 'Untitled Campaign');
+    $('#mhc_initial_premise').text((meta.premise || '').trim() || '(Waiting for premise...)');
+    $('#mhc_initial_focal_lens').text((meta.focalLens || '').trim() || '(Waiting for focal lens/pivot...)');
+    $('#mhc_initial_tone').text((meta.tone || '').trim() || '(Waiting for tone...)');
+
+    // Step 1 Attached Sources Card
+    const sourceSummaryList = getStagedSourcesSummary();
+    const mergedSources = [...attachedSources];
+    for (const src of sourceSummaryList) {
+        if (!mergedSources.some(m => m.name === src.name)) {
+            mergedSources.push(src);
+        }
+    }
+    $('#mhc_initial_sources_count').text(mergedSources.length);
+    const initialSourcesList = $('#mhc_initial_sources_list');
+    initialSourcesList.empty();
+    if (mergedSources.length) {
+        mergedSources.forEach(s => {
+            let icon = '📄';
+            if (s.type === 'lore') icon = '📚';
+            else if (s.type === 'char') icon = '👤';
+            else if (s.type === 'image') icon = '🖼️';
+            const tokStr = s.tokens ? `~${s.tokens} tok` : '';
+            initialSourcesList.append(`
+                <div class="mhc-initial-source-row" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;">
+                    <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        <span>${icon}</span>
+                        <span style="font-size: 0.82em; font-weight: 600; color: #e5e7eb; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(s.name)}</span>
+                        ${tokStr ? `<span class="mhc-pill" style="font-size: 0.7em; opacity: 0.7;">${tokStr}</span>` : ''}
+                    </div>
+                    <button type="button" class="menu_button mhc-source-remove-btn" data-name="${escapeHtml(s.name)}" style="padding: 1px 6px; font-size: 0.75em; color: #f87171; border-color: rgba(239,68,68,0.3);" title="Remove source">✕</button>
+                </div>
+            `);
+        });
+    } else {
+        initialSourcesList.append('<div class="mhc-empty-hint">No sources attached yet. Click 📎 to attach lore, cards, or notes.</div>');
+    }
+
+    // Step 2 Series Bible (_Canon Lorebook) Card
+    const stagedCanon = getStagedCanonEntries();
+    $('#mhc_deck_canon_count').text(stagedCanon.length);
+    const canonDeckList = $('#mhc_deck_canon_list');
+    canonDeckList.empty();
+    if (stagedCanon.length) {
+        const grouped = {};
+        for (const entry of stagedCanon) {
+            const kind = (entry.kind || 'LORE').toUpperCase();
+            if (!grouped[kind]) grouped[kind] = [];
+            grouped[kind].push(entry);
+        }
+        const order = ['FACTION', 'LOCATION', 'NPC', 'RULE', 'EVENT', 'LORE'];
+        const allKinds = [...new Set([...order, ...Object.keys(grouped)])];
+        for (const k of allKinds) {
+            const entries = grouped[k];
+            if (!entries || !entries.length) continue;
+            canonDeckList.append(`
+                <div class="mhc-canon-group-header" style="font-size: 0.78em; font-weight: 700; color: #93c5fd; text-transform: uppercase; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+                    ${escapeHtml(k)} (${entries.length})
+                </div>
+            `);
+            for (const entry of entries) {
+                const comment = entry.comment || `[${entry.kind}] ${entry.name}`;
+                const isDisabled = Boolean(entry.disabled);
+                const statusLabel = isDisabled ? '⊘ Disabled' : '✓ Active';
+                const statusStyle = isDisabled
+                    ? 'background: rgba(107, 114, 128, 0.25); border-color: rgba(156, 163, 175, 0.4); color: #9ca3af;'
+                    : 'background: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.5); color: #4ade80;';
+                const impBadge = entry.importance !== undefined ? `<span class="mhc-pill" style="font-size: 0.7em;">Imp: ${entry.importance}</span>` : '';
+                canonDeckList.append(`
+                    <div class="mhc-deck-item collapsible" style="opacity: ${isDisabled ? '0.6' : '1'};">
+                        <div class="mhc-deck-item-header" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                            <div class="mhc-deck-item-title" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                <span style="font-weight: 600;">${escapeHtml(entry.name || 'Untitled')}</span>
+                                <span class="mhc-pill" style="font-size: 0.7em; margin-left: 4px;">${escapeHtml(entry.kind || k)}</span>
+                                ${impBadge}
+                            </div>
+                            <button type="button" class="menu_button mhc-canon-toggle-btn" data-comment="${escapeHtml(comment)}" style="font-size: 0.72em; padding: 2px 8px; border-radius: 4px; font-weight: 600; cursor: pointer; ${statusStyle}" title="Toggle between Active and Disabled">
+                                ${statusLabel}
+                            </button>
+                            <span class="mhc-deck-item-toggle">▼</span>
+                        </div>
+                        <div class="mhc-deck-item-detail">
+                            <div style="font-size: 0.82em; opacity: 0.85; white-space: pre-wrap; line-height: 1.35;">${escapeHtml(entry.content || '')}</div>
+                        </div>
+                    </div>
+                `);
+            }
+        }
+    } else {
+        canonDeckList.append('<div class="mhc-empty-hint">No Series Bible entries generated yet. Advance from Initial Framing to build Canon.</div>');
+    }
+
+    // Stage-specific cards visibility based on mode & currentAdventureStep
+    if (currentNavMode === 'living-world') {
+        $('#mhc_new_adventure_stepper').hide();
+        $('#mhc_tab_progression_btn').show();
+        $('.mhc-chat-column').show();
+        $('#mhc_adventure_ruleset_gate_hint').hide();
+
+        $('#mhc_card_initial_framing').hide();
+        $('#mhc_card_initial_sources').hide();
+        $('#mhc_card_canon_entries').show();
+        $('#mhc_deck_world_rules_card').show();
+        $('.mhc-card-system').show();
+        $('.mhc-card-dials').show();
+        $('.mhc-card-char').show();
+        $('.mhc-card-npcs').show();
+        $('.mhc-card-monsters').show();
+        $('.mhc-card-maps').show();
+        $('.mhc-card-factions').show();
+        $('.mhc-card-kick').show();
+    } else {
+        $('#mhc_new_adventure_stepper').show();
+        $('#mhc_tab_cards .mhc-card').hide();
+
+        if (currentAdventureStep === 'initial') {
+            $('#mhc_card_initial_framing').show();
+            $('#mhc_card_initial_sources').show();
+            $('#mhc_tab_progression_btn').hide();
+            $('.mhc-chat-column').show();
+            $('#mhc_attachment_tray').hide();
+        } else if (currentAdventureStep === 'canon') {
+            $('#mhc_deck_world_rules_card').show();
+            $('#mhc_card_canon_entries').show();
+            $('#mhc_tab_progression_btn').hide();
+            $('.mhc-chat-column').show();
+        } else if (currentAdventureStep === 'adventure') {
+            $('.mhc-card-system').show();
+            $('.mhc-card-dials').show();
+            $('#mhc_tab_progression_btn').hide();
+
+            const rulesetConfirmed = Boolean(activeDossier.meta?.rulesetConfirmed);
+            if (rulesetConfirmed) {
+                $('.mhc-card-kick').show();
+                $('.mhc-card-maps').show();
+                $('.mhc-card-monsters').show();
+                $('.mhc-card-npcs').show();
+                $('.mhc-card-factions').show();
+                $('#mhc_adventure_ruleset_gate_hint').hide();
+                $('.mhc-chat-column').show();
+            } else {
+                $('#mhc_adventure_ruleset_gate_hint').show();
+                $('#mhc_dial_harm_btn').hide();
+                $('#mhc_dial_downed_btn').hide();
+                $('#mhc_dial_heroic_btn').hide();
+                $('#mhc_dial_tempo_btn').hide();
+            }
+        } else if (currentAdventureStep === 'character') {
+            $('.mhc-card-char').show();
+            if (worldRules.customModule && (worldRules.customModule.tag || worldRules.customModule.label)) {
+                $('#mhc_deck_custom_module_card').show();
+            }
+            $('#mhc_tab_progression_btn').show();
+            $('.mhc-chat-column').show();
+        }
+    }
+
     // Raw Markdown Tab
     $('#mhc_raw_markdown_text').val(serializeDossierToMarkdown(activeDossier));
 }
@@ -995,6 +1603,22 @@ async function stageSourceForCanon(source, label) {
 }
 
 async function attachLoreSource(name, loreRes) {
+    if (currentNavMode === 'new-adventure' && currentAdventureStep === 'initial') {
+        stageRawCanonSource({ name, type: 'lore', entries: loreRes.entries });
+        if (!attachedSources.some(s => s.name === name)) {
+            attachedSources.push({
+                id: `lore_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                name,
+                type: 'lore',
+                tokens: Array.isArray(loreRes.entries) ? loreRes.entries.reduce((a, e) => a + estimateTokens(e.content), 0) : 0,
+                entries: loreRes.entries,
+            });
+        }
+        evaluateStepUnlocks();
+        updateBlueprintDeck();
+        toastr?.success(`Attached lorebook "${name}" for Initial Intake.`);
+        return;
+    }
     await stageSourceForCanon({ name, type: 'lore', entries: loreRes.entries }, name);
     pendingAttachments.push({
         type: 'lore',
@@ -1006,6 +1630,22 @@ async function attachLoreSource(name, loreRes) {
 }
 
 async function stageDocForCanon(name, text) {
+    if (currentNavMode === 'new-adventure' && currentAdventureStep === 'initial') {
+        stageRawCanonSource({ name, type: 'doc', text });
+        if (!attachedSources.some(s => s.name === name)) {
+            attachedSources.push({
+                id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                name,
+                type: 'doc',
+                tokens: estimateTokens(text),
+                text,
+            });
+        }
+        evaluateStepUnlocks();
+        updateBlueprintDeck();
+        toastr?.success(`Attached document "${name}" for Initial Intake.`);
+        return;
+    }
     const res = await stageSourceForCanon({ name, type: 'doc', text }, name);
     const words = String(text || '').split(/\s+/).length;
     if (res?.mode === 'vibe' && words > 5000) {
@@ -1019,6 +1659,11 @@ async function stageDocForCanon(name, text) {
 function renderAttachmentTray() {
     const tray = $('#mhc_attachment_tray');
     tray.empty();
+
+    if (currentNavMode === 'new-adventure' && currentAdventureStep === 'initial') {
+        tray.hide();
+        return;
+    }
 
     if (!pendingAttachments.length && !activeImports.length) {
         tray.hide();
@@ -1402,12 +2047,6 @@ async function handleUserSend() {
             if (useCanonInventory) continue;
             documentPromptAdditions += formatDocumentPromptBlock(att.name, att.text, 5000, activeDossier?.protagonist?.name || '');
         } else if (att.type === 'char') {
-            if (att.avatar && !imageSrcForDisplay) {
-                imageSrcForDisplay = att.avatar;
-            }
-            if (att.avatar && !activeDossier.protagonist.portraitSrc) {
-                activeDossier.protagonist.portraitSrc = att.avatar;
-            }
             documentPromptAdditions += `\n${att.promptAddition}\n`;
         } else if (att.type === 'chat') {
             documentPromptAdditions += formatChatTranscriptPromptBlock(att.chatData, att.name, 40, activeDossier?.protagonist?.name || '');
@@ -1576,11 +2215,27 @@ async function handleUserSend() {
             setStage('<i>🎩 The Concierge is contemplating &amp; scaffolding the blueprint...</i>');
         }
 
+        let builderPromptContent = '';
+        if (currentNavMode === 'new-adventure') {
+            const stagedCanon = getStagedCanonEntries();
+            if (currentAdventureStep === 'initial') {
+                builderPromptContent = buildStage1InitialBuilderPrompt(activeDossier, extractSourcesStructuralOutline());
+            } else if (currentAdventureStep === 'canon') {
+                builderPromptContent = buildStage2CanonBuilderPrompt(activeDossier, stagedCanon);
+            } else if (currentAdventureStep === 'adventure') {
+                builderPromptContent = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon);
+            } else if (currentAdventureStep === 'character') {
+                builderPromptContent = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon);
+            }
+        } else {
+            builderPromptContent = buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds);
+        }
+
         const builderMessages = [
             {
                 role: 'system',
                 name: 'System',
-                content: buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds),
+                content: builderPromptContent,
             },
             ...recentHistory().map(formatHistoryMessage),
         ];
@@ -1630,6 +2285,15 @@ async function handleUserSend() {
             });
 
             if (builderReport.hasMutations || builderReport.isNoop) {
+                if (currentNavMode === 'new-adventure' && currentAdventureStep === 'canon' && builderReport.canonMutations?.length > 0) {
+                    for (const m of builderReport.canonMutations) {
+                        if (m.action === 'upsert' && m.entry) upsertCanonEntry(m.entry);
+                        else if (m.action === 'disable') toggleCanonEntryDisabled(m.target, true);
+                        else if (m.action === 'enable') toggleCanonEntryDisabled(m.target, false);
+                        else if (m.action === 'remove') removeCanonEntry(m.target);
+                    }
+                    builderReport.hasMutations = true;
+                }
                 break;
             }
 
@@ -1683,7 +2347,8 @@ async function handleUserSend() {
             await refreshNameRagSeedsIfNeeded();
 
             // ── Stage 1b: Smart-Gated Blueprint Judge / Critic Pass & Second-Pass Refiner ──
-            const shouldJudge = shouldRunContemplativeJudgePass({
+            const isLightweightStage = currentNavMode === 'new-adventure' && (currentAdventureStep === 'initial' || currentAdventureStep === 'canon');
+            const shouldJudge = !isLightweightStage && shouldRunContemplativeJudgePass({
                 prevDossier: preTurnDossier,
                 updatedDossier: activeDossier,
                 builderReport,
@@ -1809,11 +2474,27 @@ async function handleUserSend() {
 
         const talkerInstruction = buildTalkerInstructionNotice(finalStatus, builderSummaryText, builderReport?.errors);
 
+        let talkerPromptContent = '';
+        if (currentNavMode === 'new-adventure') {
+            const stagedCanon = getStagedCanonEntries();
+            if (currentAdventureStep === 'initial') {
+                talkerPromptContent = buildStage1InitialTalkerPrompt(activeDossier, extractSourcesStructuralOutline());
+            } else if (currentAdventureStep === 'canon') {
+                talkerPromptContent = buildStage2CanonTalkerPrompt(activeDossier, stagedCanon);
+            } else if (currentAdventureStep === 'adventure') {
+                talkerPromptContent = buildStage3AdventureTalkerPrompt(activeDossier, stagedCanon);
+            } else if (currentAdventureStep === 'character') {
+                talkerPromptContent = buildStage4CharacterTalkerPrompt(activeDossier, stagedCanon);
+            }
+        } else {
+            talkerPromptContent = buildConciergeTalkerContext(activeDossier, changelog, activeNameRagSeeds);
+        }
+
         const talkerMessages = [
             {
                 role: 'system',
                 name: 'System',
-                content: buildConciergeTalkerContext(activeDossier, changelog, activeNameRagSeeds),
+                content: talkerPromptContent,
             },
             ...recentHistory().map(formatHistoryMessage),
             {
@@ -1851,6 +2532,9 @@ async function handleUserSend() {
             content: finalChatBubbleText,
             builderReport: builderSummaryText,
         });
+        stageChatHistories[currentAdventureStep] = [...chatHistory];
+        evaluateStepUnlocks();
+        updateBlueprintDeck();
         saveDraft();
     } catch (err) {
         // Reset already tore down this turn's UI/state; nothing to roll back.
@@ -2577,13 +3261,121 @@ function bindModalEvents() {
         }
     });
 
+    // 4-Step Stepper bar navigation
+    $('#mhc_concierge_modal').on('click', '.mhc-step-btn', async function (e) {
+        e.preventDefault();
+        const targetStep = $(this).attr('data-step');
+        if (!targetStep || !unlockedSteps[targetStep]) return;
+        if (targetStep === currentAdventureStep) return;
+        await setAdventureStep(targetStep);
+    });
+
+    // Canon toggle active/disabled buttons
+    $('#mhc_concierge_modal').on('click', '.mhc-canon-toggle-btn', function (e) {
+        e.stopPropagation();
+        const comment = $(this).attr('data-comment');
+        if (!comment) return;
+        const all = getStagedCanonEntries();
+        const target = all.find(ent => (ent.comment || `[${ent.kind}] ${ent.name}`) === comment || ent.name === comment);
+        const newDisabled = !target?.disabled;
+        toggleCanonEntryDisabled(comment, newDisabled);
+        updateBlueprintDeck();
+        saveDraft();
+    });
+
+    // Attached source remove buttons
+    $('#mhc_concierge_modal').on('click', '.mhc-source-remove-btn', function (e) {
+        e.stopPropagation();
+        const name = $(this).attr('data-name');
+        if (!name) return;
+        unstageCanonSource(name);
+        attachedSources = attachedSources.filter(s => s.name !== name);
+        evaluateStepUnlocks();
+        updateBlueprintDeck();
+        saveDraft();
+        toastr?.info(`Removed source "${name}".`);
+    });
+
     // Ruleset Switch segmented buttons
-    $('#mhc_concierge_modal').on('click', '.mhc-ruleset-btn', function (e) {
+    $('#mhc_concierge_modal').on('click', '.mhc-ruleset-btn', async function (e) {
         e.stopPropagation();
         const targetRuleset = $(this).attr('data-ruleset');
-        if (targetRuleset && systemRegistry.has(targetRuleset)) {
-            switchRulesetMode(targetRuleset);
+        if (!targetRuleset || !systemRegistry.has(targetRuleset)) return;
+
+        if (currentNavMode === 'new-adventure' && currentAdventureStep === 'adventure') {
+            const rulesetConfirmed = Boolean(activeDossier?.meta?.rulesetConfirmed);
+            if (!rulesetConfirmed) {
+                // Case A: First selection in Step 3
+                activeDossier.meta.ruleset = targetRuleset;
+                activeDossier.meta.rulesetConfirmed = true;
+                const adapter = systemRegistry.get(targetRuleset);
+                const defaultGenre = adapter.getDefaultGenre();
+                activeDossier.meta.systemKey = defaultGenre;
+                activeDossier.meta.systemLabel = adapter.getGenre(defaultGenre)?.label || defaultGenre;
+
+                // Re-initialize ruleset-specific protagonist defaults
+                adapter.initializeProtagonist(activeDossier.protagonist, activeDossier);
+
+                updateBlueprintDeck();
+                evaluateStepUnlocks();
+                saveDraft();
+
+                // Reveal chat column and run initial Stage 3 pass
+                $('.mhc-chat-column').show();
+                stageChatHistories.adventure = [];
+                await runStageAutoPass('adventure', 'Please draft our Episode 1 starting crisis, locations, adversaries, and supporting NPCs from our Canon for this ruleset.');
+                return;
+            } else if (activeDossier.meta?.ruleset !== targetRuleset) {
+                // Case B: Switching rulesets after selection
+                const curAdapter = systemRegistry.get(activeDossier.meta?.ruleset || 'pbta');
+                const nextAdapter = systemRegistry.get(targetRuleset);
+                const oldLabel = `${curAdapter.label} (${curAdapter.diceEngine})`;
+                const newLabel = `${nextAdapter.label} (${nextAdapter.diceEngine})`;
+
+                const confirmed = await showConciergeConfirm({
+                    icon: '🔄',
+                    title: 'Switch Ruleset Engine?',
+                    message: `Switch from ${oldLabel} to ${newLabel}?\n\n• You will lose: ruleset-specific monster stat blocks, character stats, and progression codex.\n• Preserved: World Canon, Maps, Starting Crisis, Agnostic Dials, and NPC/Adversary names & descriptions.`,
+                    confirmLabel: '🔄 Switch & Rebuild',
+                    confirmColor: '#2563eb',
+                });
+
+                if (!confirmed) return;
+
+                const bones = extractAgnosticAdventureBones(activeDossier);
+                const preservedMeta = {
+                    title: activeDossier.meta?.title,
+                    premise: activeDossier.meta?.premise,
+                    focalLens: activeDossier.meta?.focalLens,
+                    tone: activeDossier.meta?.tone,
+                    framingComplete: true,
+                    rulesetConfirmed: true,
+                };
+                const preservedWorldRules = JSON.parse(JSON.stringify(activeDossier.worldRules || { axioms: [], customModule: null }));
+
+                activeDossier = createEmptyDossier(targetRuleset);
+                Object.assign(activeDossier.meta, preservedMeta);
+                activeDossier.worldRules = preservedWorldRules;
+                if (bones.agnosticConfig) Object.assign(activeDossier.config, bones.agnosticConfig);
+                if (bones.theKick) activeDossier.theKick = bones.theKick;
+                if (bones.maps) activeDossier.maps = bones.maps;
+                if (bones.npcs) activeDossier.npcs = bones.npcs;
+                if (bones.monsters) activeDossier.monsters = bones.monsters;
+
+                stageChatHistories.adventure = [];
+                stageChatHistories.character = [];
+                chatHistory = [];
+
+                updateBlueprintDeck();
+                evaluateStepUnlocks();
+                saveDraft();
+
+                await runStageAutoPass('adventure', `Please restat and adapt the Episode 1 adventure for ${newLabel}.`, { agnosticBones: bones });
+                return;
+            }
         }
+
+        switchRulesetMode(targetRuleset);
     });
 
     // Ruleset Switch interaction on system badge click (cycles through all registered adapters)
@@ -2835,6 +3627,12 @@ function bindModalEvents() {
                 const { launchLevelUpOrRespecDesk } = await import('./index.js');
                 await launchLevelUpOrRespecDesk({ isRespec: true });
             } else if (mode === 'living-world') {
+                currentNavMode = 'living-world';
+                $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+                $(this).addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+                $('#mhc_new_adventure_stepper').hide();
+                $('.mhc-chat-column').show();
+
                 const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
                 const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
                     || ctx?.getCurrentChatId?.()
@@ -2843,10 +3641,25 @@ function bindModalEvents() {
                 if (currentChatId) {
                     const campaignDossier = await loadActiveCampaignDossier(currentChatId);
                     if (campaignDossier) {
-                        activeDossier = campaignDossier;
+                        activeDossier = healAndNormalizeDossier(campaignDossier);
+                        activeDossier.meta.rulesetConfirmed = true;
+                        loadedCampaignOriginChatId = currentChatId;
+                        loadedCampaignOriginTitle = (activeDossier.meta?.title || '').trim();
+                        activeDossier._originChatId = loadedCampaignOriginChatId;
+                        activeDossier._originCampaignTitle = loadedCampaignOriginTitle;
+
                         updateBlueprintDeck();
                         setConciergeTab('cards');
-                        toastr?.info(`Loaded Living World Dossier for "${campaignDossier.meta?.title || 'Active Campaign'}"`, 'Living World');
+                        await updateSyncButtonState();
+
+                        if (!chatHistory.length) {
+                            const isFae = activeDossier.meta?.ruleset === 'fae';
+                            const vitalityTerm = isFae ? 'resource pools' : 'Harm capacity';
+                            const greet = `📂 Loaded active campaign **"${activeDossier.meta?.title || 'Active Adventure'}"**! You can adjust campaign calibration dials, scale ${vitalityTerm}, manage supporting NPCs, or evolve the blueprint below. Changes can be synced directly back to your running game with **🔄 Sync to Active Game**.`;
+                            appendChatBubble('assistant', greet);
+                            chatHistory.push({ role: 'assistant', content: greet });
+                        }
+                        toastr?.info(`Loaded Living World Dossier for "${activeDossier.meta?.title || 'Active Campaign'}"`, 'Living World');
                     } else {
                         toastr?.warning('No active campaign dossier found for the current chat.', 'Living World');
                     }
@@ -2854,6 +3667,27 @@ function bindModalEvents() {
                     toastr?.warning('No active chat selected.', 'Living World');
                 }
             } else if (mode === 'new-adventure') {
+                currentNavMode = 'new-adventure';
+                $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+                $(this).addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+                $('#mhc_new_adventure_stepper').show();
+
+                const draftRes = loadValidatedDraft();
+                if (draftRes?.draft) {
+                    const { draft } = draftRes;
+                    activeDossier = draft.dossier;
+                    if (draft.stagedCanonEntries) setStagedCanonEntries(draft.stagedCanonEntries);
+                    if (draft.currentAdventureStep) currentAdventureStep = draft.currentAdventureStep;
+                    if (draft.unlockedSteps) unlockedSteps = { ...unlockedSteps, ...draft.unlockedSteps };
+                    if (draft.stageChatHistories) stageChatHistories = { ...stageChatHistories, ...draft.stageChatHistories };
+                    if (draft.lastSyncedSnapshots) lastSyncedSnapshots = { ...lastSyncedSnapshots, ...draft.lastSyncedSnapshots };
+                    if (draft.attachedSources) attachedSources = [...draft.attachedSources];
+                    chatHistory = draft.chatHistory || [];
+                    renderChatHistoryFromState();
+                }
+
+                evaluateStepUnlocks();
+                updateBlueprintDeck();
                 setConciergeTab('cards');
             }
         } finally {
@@ -3276,25 +4110,19 @@ export async function openConciergeModal({ ruleset = null, genreKey = null } = {
         loadedCampaignOriginTitle = draft.originCampaignTitle || draft.dossier?._originCampaignTitle || null;
         if (!chatHistory.length) {
             activeDossier = draft.dossier;
-            chatHistory = draft.chatHistory;
+            if (draft.stagedCanonEntries && Array.isArray(draft.stagedCanonEntries)) {
+                setStagedCanonEntries(draft.stagedCanonEntries);
+            }
+            if (draft.currentNavMode) currentNavMode = draft.currentNavMode;
+            if (draft.currentAdventureStep) currentAdventureStep = draft.currentAdventureStep;
+            if (draft.unlockedSteps) unlockedSteps = { ...unlockedSteps, ...draft.unlockedSteps };
+            if (draft.stageChatHistories) stageChatHistories = { ...stageChatHistories, ...draft.stageChatHistories };
+            if (draft.lastSyncedSnapshots) lastSyncedSnapshots = { ...lastSyncedSnapshots, ...draft.lastSyncedSnapshots };
+            if (draft.attachedSources) attachedSources = [...draft.attachedSources];
+            chatHistory = draft.chatHistory || [];
             changelog = draft.changelog || [];
-            $('#mhc_chat_messages').empty();
-            chatHistory.forEach(msg => {
-                const displayStr = msg.displayContent || (typeof msg.content === 'string' ? msg.content : '');
-                if (displayStr) {
-                    const isAssistant = msg.role === 'assistant';
-                    const text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
-                    appendChatBubble(msg.role, text, msg.imageSrc || null);
-                } else if (Array.isArray(msg.content)) {
-                    let text = '';
-                    let imgSrc = null;
-                    msg.content.forEach(p => {
-                        if (p.type === 'text') text += p.text;
-                        if (p.type === 'image_url') imgSrc = p.image_url?.url;
-                    });
-                    appendChatBubble(msg.role, text, imgSrc || msg.imageSrc || null);
-                }
-            });
+            renderChatHistoryFromState();
+            evaluateStepUnlocks();
             toastr?.info('Resumed previous Session Zero draft in progress.', 'Session Zero');
         }
     } else {

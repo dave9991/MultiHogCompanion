@@ -102,7 +102,7 @@ export const stripSillyTavernMacros = resolveCardMacros;
  * @param {string|null} [avatarDataUrl=null]
  * @returns {object|null}
  */
-export function normalizeCharacterCard(raw, avatarDataUrl = null) {
+export function normalizeCharacterCard(raw, _avatarDataUrl = null) {
     if (!raw || typeof raw !== 'object') return null;
 
     // Check V2/V3 wrapper vs V1 flat
@@ -118,7 +118,7 @@ export function normalizeCharacterCard(raw, avatarDataUrl = null) {
         firstMessage: resolveCardMacros(String(data.first_mes || raw.first_mes || ''), name),
         creatorNotes: resolveCardMacros(String(data.creator_notes || raw.creator_notes || ''), name),
         tags: Array.isArray(data.tags) ? data.tags : (Array.isArray(raw.tags) ? raw.tags : []),
-        avatar: avatarDataUrl || null,
+        avatar: null,
         characterBook: data.character_book || raw.character_book || null,
         spec: raw.spec || (raw.data ? 'chara_card_v2' : 'chara_card_v1'),
     };
@@ -163,15 +163,7 @@ export async function parseCharacterFile(file) {
 
             const parsed = JSON.parse(rawJsonStr);
 
-            // Create base64 data URL for avatar
-            const blob = new Blob([buffer], { type: 'image/png' });
-            const avatarDataUrl = await new Promise(res => {
-                const reader = new FileReader();
-                reader.onload = () => res(reader.result);
-                reader.readAsDataURL(blob);
-            });
-
-            return normalizeCharacterCard(parsed, avatarDataUrl);
+            return normalizeCharacterCard(parsed, null);
         } catch (err) {
             console.warn('[PbtA Concierge] Failed to parse PNG character chunk:', err);
             return null;

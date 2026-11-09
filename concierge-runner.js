@@ -427,6 +427,10 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
     const { applyPbtACartridge, applyFaeCartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
     const dossier = healAndNormalizeDossier(rawDossier);
+    dossier.meta = dossier.meta || {};
+    dossier.meta.conciergeCreated = true;
+    dossier.meta.isStub = false;
+    delete dossier.meta.autoScaffolded;
     const systemKey = dossier.meta?.systemKey || 'fantasy';
     const charName = (dossier.protagonist?.name || '').trim();
     let adventureTitle = (dossier.meta?.title || '').trim();
@@ -950,6 +954,10 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
     const { normalizePbtaMemo, syncLivePbtaMemoVitality } = await import('./pbta-vitality-sync.js');
 
     const dossier = healAndNormalizeDossier(rawDossier);
+    dossier.meta = dossier.meta || {};
+    dossier.meta.conciergeCreated = true;
+    dossier.meta.isStub = false;
+    delete dossier.meta.autoScaffolded;
     const systemKey = dossier.meta?.systemKey || 'fantasy';
     const charName = (dossier.protagonist?.name || '').trim();
     let adventureTitle = (dossier.meta?.title || '').trim();

@@ -144,7 +144,7 @@ export function chunkLoreSource(source) {
         if (out.length) return out;
     }
 
-    const text = normalizePdfText(String(source.text || ''));
+    const text = normalizePdfText(String(source.text || source.rawText || ''));
     const lines = text.split(/\r?\n/);
     const headings = [];
 
@@ -383,7 +383,7 @@ function estimateSourceTokens(source) {
     if (Array.isArray(source.entries)) {
         return source.entries.reduce((a, e) => a + estimateTokens(e.content), 0);
     }
-    if (source.text) return estimateTokens(source.text);
+    if (source.text || source.rawText) return estimateTokens(source.text || source.rawText);
     if (source.card) {
         return estimateTokens([source.card.description, source.card.personality, source.card.scenario].filter(Boolean).join('\n\n'));
     }

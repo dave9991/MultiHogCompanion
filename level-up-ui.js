@@ -17,6 +17,7 @@ import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBloc
 import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
 import { FAE_GENRES, sanitizeFaePositiveTags } from './fae-ruleset.js';
 import { normalizeFaePill } from './fae-state-sync.js';
+import { isConciergeCreatedDossier, loadActiveCampaignDossier } from './concierge-ui.js';
 
 let _activeModalElement = null;
 
@@ -647,6 +648,7 @@ export function openLevelUpModal({
     // ─────────────────────────────────────────────────────────────
 
     const stage1Title = `⚔️ Class Definition & Progression Codex — ${proposal.characterName}`;
+    const showLivingWorldInitially = isConciergeCreatedDossier(dossier);
 
     modal.innerHTML = `
     <div class="mhc-modal-dialog">
@@ -658,7 +660,7 @@ export function openLevelUpModal({
                         <div class="mhc-modal-title">${escapeHtml(stage1Title)}</div>
                         <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 2px; gap: 2px;">
                             <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="character" style="border: none; background: rgba(59,130,246,0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
-                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer; ${showLivingWorldInitially ? '' : 'display: none;'}" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
                             <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
                         </div>
                     </div>
@@ -761,7 +763,7 @@ export function openLevelUpModal({
                         <div class="mhc-modal-title">${escapeHtml(stage2Title)}</div>
                         <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 2px; gap: 2px;">
                             <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="character" style="border: none; background: rgba(59,130,246,0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
-                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer; ${showLivingWorldInitially ? '' : 'display: none;'}" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
                             <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
                         </div>
                     </div>
@@ -849,6 +851,12 @@ export function openLevelUpModal({
 
     document.body.appendChild(modal);
     _activeModalElement = modal;
+
+    loadActiveCampaignDossier(chatId).then(found => {
+        modal.querySelectorAll('.mhc-mode-nav-btn[data-nav-mode="living-world"]').forEach(btn => {
+            btn.style.display = found ? '' : 'none';
+        });
+    }).catch(() => {});
 
     // ─────────────────────────────────────────────────────────────
     // STAGE 1: 1–20 PROGRESSION TABLE RENDERER
@@ -2063,16 +2071,11 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             _isLevelUpNavigating = true;
             try {
                 closeLevelUpModal();
-                const { openConciergeModal, loadActiveCampaignDossier, setConciergeTab } = await import('./concierge-ui.js');
-                if (mode === 'living-world') {
-                    await openConciergeModal({ ruleset: isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e') });
-                    const campaignDossier = await loadActiveCampaignDossier(chatId);
-                    if (campaignDossier) {
-                        setConciergeTab('cards');
-                    }
-                } else if (mode === 'new-adventure') {
-                    await openConciergeModal({ ruleset: isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e') });
-                }
+                const { openConciergeModal } = await import('./concierge-ui.js');
+                await openConciergeModal({
+                    ruleset: isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e'),
+                    navMode: mode,
+                });
             } finally {
                 setTimeout(() => { _isLevelUpNavigating = false; }, 300);
             }

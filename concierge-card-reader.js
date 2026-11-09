@@ -12,13 +12,15 @@
  * @returns {string}
  */
 function decodeBase64Utf8(b64) {
-    const binString = atob(b64);
+    if (!b64 || typeof b64 !== 'string') return '';
+    const cleanB64 = b64.trim().replace(/\s+/g, '');
+    const binString = atob(cleanB64);
     const bytes = Uint8Array.from(binString, c => c.charCodeAt(0));
     return new TextDecoder().decode(bytes);
 }
 
 /**
- * Scans a PNG buffer and extracts all text chunks (tEXt).
+ * Scans a PNG buffer and extracts all text chunks (tEXt and iTXt).
  * @param {ArrayBuffer} buffer
  * @returns {Record<string, string>} Map of keyword -> text
  */
@@ -35,6 +37,7 @@ export function extractPngTextChunks(buffer) {
 
     let offset = 8;
     const decoder = new TextDecoder('latin1');
+    const utf8Decoder = new TextDecoder('utf-8');
 
     while (offset < view.byteLength) {
         if (offset + 8 > view.byteLength) break;
@@ -57,6 +60,35 @@ export function extractPngTextChunks(buffer) {
                 const keyword = chunkStr.slice(0, nullIdx);
                 const text = chunkStr.slice(nullIdx + 1);
                 textMap[keyword.toLowerCase()] = text;
+            }
+        } else if (type === 'iTXt') {
+            const chunkBytes = new Uint8Array(buffer, offset, length);
+            let kEnd = 0;
+            while (kEnd < chunkBytes.length && chunkBytes[kEnd] !== 0) {
+                kEnd++;
+            }
+            if (kEnd + 2 < chunkBytes.length) {
+                const keyword = decoder.decode(chunkBytes.subarray(0, kEnd));
+                const compressionFlag = chunkBytes[kEnd + 1];
+                // chunkBytes[kEnd + 2] is compressionMethod
+                let langEnd = kEnd + 3;
+                while (langEnd < chunkBytes.length && chunkBytes[langEnd] !== 0) {
+                    langEnd++;
+                }
+                if (langEnd < chunkBytes.length) {
+                    let transEnd = langEnd + 1;
+                    while (transEnd < chunkBytes.length && chunkBytes[transEnd] !== 0) {
+                        transEnd++;
+                    }
+                    if (transEnd < chunkBytes.length) {
+                        const textStart = transEnd + 1;
+                        if (compressionFlag === 0 && textStart <= chunkBytes.length) {
+                            const textBytes = chunkBytes.subarray(textStart);
+                            const text = utf8Decoder.decode(textBytes);
+                            textMap[keyword.toLowerCase()] = text;
+                        }
+                    }
+                }
             }
         }
 

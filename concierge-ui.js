@@ -1441,7 +1441,7 @@ function updateBlueprintDeck() {
             $('#mhc_card_initial_sources').show();
             $('#mhc_tab_progression_btn').hide();
             $('.mhc-chat-column').show();
-            $('#mhc_attachment_tray').hide();
+            renderAttachmentTray();
         } else if (currentAdventureStep === 'canon') {
             $('#mhc_deck_world_rules_card').show();
             $('#mhc_card_canon_entries').show();
@@ -1654,16 +1654,59 @@ async function stageDocForCanon(name, text) {
 }
 
 /**
+ * Attaches a SillyTavern character card to the Session Zero session.
+ * Stages the card into Canon sources (for Step 1 outline & Step 2 Canon build),
+ * records it in attachedSources, queues it in pendingAttachments, and refreshes the deck.
+ *
+ * @param {object} card Normalized character card object
+ * @param {File|null} [file=null] Optional uploaded File object
+ */
+export function attachCharacterCardToSession(card, file = null) {
+    if (!card?.name) return;
+    const promptAddition = formatCharacterInspirationBlock(card);
+    const sourceName = `${card.name} (Character Card)`;
+
+    // Stage raw source for Canon / Step 1 framing outline
+    stageRawCanonSource({
+        name: sourceName,
+        type: 'char',
+        rawText: promptAddition,
+        text: promptAddition,
+        card,
+        entries: null,
+    });
+
+    // Update attachedSources
+    const tokens = estimateTokens(promptAddition);
+    const existingIdx = attachedSources.findIndex(s => s.name === sourceName || s.name === card.name);
+    const sourceRecord = { name: sourceName, type: 'char', tokens, cardName: card.name };
+    if (existingIdx >= 0) attachedSources[existingIdx] = sourceRecord;
+    else attachedSources.push(sourceRecord);
+
+    // Push/update pendingAttachments so next chat turn receives promptAddition
+    pendingAttachments = pendingAttachments.filter(a => !(a.type === 'char' && a.name === card.name));
+    pendingAttachments.push({
+        type: 'char',
+        file,
+        name: card.name,
+        sourceName,
+        card,
+        promptAddition,
+        avatar: null,
+    });
+
+    renderAttachmentTray();
+    evaluateStepUnlocks();
+    updateBlueprintDeck();
+    saveDraft();
+}
+
+/**
  * Render the attachment tray chips.
  */
 function renderAttachmentTray() {
     const tray = $('#mhc_attachment_tray');
     tray.empty();
-
-    if (currentNavMode === 'new-adventure' && currentAdventureStep === 'initial') {
-        tray.hide();
-        return;
-    }
 
     if (!pendingAttachments.length && !activeImports.length) {
         tray.hide();
@@ -1764,7 +1807,19 @@ function renderAttachmentTray() {
     $('.mhc-chip-remove').on('click', function () {
         const idx = parseInt($(this).attr('data-index'), 10);
         const removed = pendingAttachments.splice(idx, 1)[0];
-        if (removed && (removed.type === 'lore' || removed.type === 'doc')) unstageCanonSource(removed.name);
+        if (removed) {
+            const targetName = removed.sourceName || removed.name;
+            if (targetName) {
+                unstageCanonSource(targetName);
+                attachedSources = attachedSources.filter(s => s.name !== targetName && s.name !== removed.name && s.cardName !== removed.name);
+            }
+            if (removed.type === 'lore' || removed.type === 'doc') {
+                unstageCanonSource(removed.name);
+            }
+            evaluateStepUnlocks();
+            updateBlueprintDeck();
+            saveDraft();
+        }
         renderAttachmentTray();
     });
 
@@ -2588,13 +2643,7 @@ async function handleFilesSelected(files) {
                 const card = await parseCharacterFile(file);
                 if (card) {
                     handledAsCard = true;
-                    pendingAttachments.push({
-                        type: 'char',
-                        name: card.name,
-                        card,
-                        promptAddition: formatCharacterInspirationBlock(card),
-                        avatar: card.avatar,
-                    });
+                    attachCharacterCardToSession(card, file);
                     toastr?.success(`Imported character: "${card.name}".`);
 
                     // If character card embeds a world book, import that too!
@@ -2709,6 +2758,37 @@ async function handleFilesSelected(files) {
         }
     }
     renderAttachmentTray();
+    evaluateStepUnlocks();
+    updateBlueprintDeck();
+    saveDraft();
+}
+
+/**
+ * Determines whether a campaign dossier was genuinely created via Session Zero Concierge
+ * (as opposed to an auto-scaffolded stub from the Level-Up/Character Desk).
+ *
+ * @param {object} dossier
+ * @returns {boolean}
+ */
+export function isConciergeCreatedDossier(dossier) {
+    if (!dossier || typeof dossier !== 'object') return false;
+    if (dossier.meta?.isStub === true || dossier.meta?.autoScaffolded === true) return false;
+    if (dossier.meta?.conciergeCreated === true) return true;
+    if (isDossierEmptyOrUntouched(dossier)) return false;
+    // For legacy Concierge dossiers created prior to the conciergeCreated flag:
+    // Must have genuine Session Zero world/adventure structure (not just a protagonist + progressionBlueprint stub)
+    const hasWorldOrAdventure = Boolean(
+        (dossier.meta?.premise && dossier.meta.premise.trim()) ||
+        (dossier.theKick?.startingLocation && dossier.theKick.startingLocation.trim()) ||
+        (dossier.theKick?.incitingIncident && dossier.theKick.incitingIncident.trim()) ||
+        (Array.isArray(dossier.npcs) && dossier.npcs.length > 0) ||
+        (Array.isArray(dossier.maps) && dossier.maps.length > 0) ||
+        (Array.isArray(dossier.monsters) && dossier.monsters.length > 0) ||
+        (Array.isArray(dossier.factions) && dossier.factions.length > 0) ||
+        (Array.isArray(dossier.worldRules?.axioms) && dossier.worldRules.axioms.length > 0) ||
+        (dossier.world?.overview && dossier.world.overview.trim())
+    );
+    return hasWorldOrAdventure;
 }
 
 /**
@@ -2729,17 +2809,19 @@ export async function loadActiveCampaignDossier(targetChatId = null) {
 
     // 1. Primary Source: Check explicit CompanionActiveCartridge record (persisted in line 1 of chat .jsonl)
     const activeCart = getCompanionActiveCartridge(currentChatId, rpgSettings);
-    if (activeCart?.dossier) {
+    if (activeCart?.dossier && isConciergeCreatedDossier(activeCart.dossier)) {
         return healAndNormalizeDossier(activeCart.dossier);
     }
 
     // 2. Check candidate chatStates partitions in memory
     for (const cid of candidateIds) {
-        if (rpgSettings?.chatStates?.[cid]?.companionDossier) {
-            return healAndNormalizeDossier(rpgSettings.chatStates[cid].companionDossier);
-        }
-        if (rpgSettings?.chatStates?.[cid]?.pbtaCampaignDossier) {
-            return healAndNormalizeDossier(rpgSettings.chatStates[cid].pbtaCampaignDossier);
+        const part = rpgSettings?.chatStates?.[cid];
+        if (part) {
+            for (const key of ['pbtaCampaignDossier', 'faeCampaignDossier', 'campaignDossier', 'companionDossier']) {
+                if (part[key] && isConciergeCreatedDossier(part[key])) {
+                    return healAndNormalizeDossier(part[key]);
+                }
+            }
         }
     }
 
@@ -2747,8 +2829,13 @@ export async function loadActiveCampaignDossier(targetChatId = null) {
         || globalThis.extension_settings?.multihog_companion;
     if (compSettings?.chatStates) {
         for (const cid of candidateIds) {
-            if (compSettings.chatStates[cid]?.companionDossier) {
-                return healAndNormalizeDossier(compSettings.chatStates[cid].companionDossier);
+            const part = compSettings.chatStates[cid];
+            if (part) {
+                for (const key of ['pbtaCampaignDossier', 'faeCampaignDossier', 'campaignDossier', 'companionDossier']) {
+                    if (part[key] && isConciergeCreatedDossier(part[key])) {
+                        return healAndNormalizeDossier(part[key]);
+                    }
+                }
             }
         }
     }
@@ -2758,7 +2845,7 @@ export async function loadActiveCampaignDossier(targetChatId = null) {
     const bookCandidates = [
         ctx?.chatMetadata?.world_info,
         cleanId ? `Campaign_${cleanId}` : null,
-        'Campaign_PbtA',
+        (!cleanId && !ctx?.chatMetadata?.world_info) ? 'Campaign_PbtA' : null,
     ].filter(Boolean);
 
     for (const book of bookCandidates) {
@@ -2769,10 +2856,9 @@ export async function loadActiveCampaignDossier(targetChatId = null) {
                 if (entry?.comment?.includes('CAMPAIGN_DOSSIER') ||
                     entry?.comment?.includes('PbtA Concierge') ||
                     entry?.key?.includes('campaign_dossier') ||
-                    entry?.content?.includes('CAMPAIGN DOSSIER') ||
-                    entry?.content?.includes('Protagonist:')) {
+                    entry?.content?.includes('CAMPAIGN DOSSIER')) {
                     const parsed = parseMarkdownToDossier(entry.content);
-                    if (parsed) return parsed;
+                    if (parsed && isConciergeCreatedDossier(parsed)) return parsed;
                 }
             }
         } catch (_) {}
@@ -2859,15 +2945,28 @@ export async function updateSyncButtonState(targetChatId = null) {
 export async function refreshConciergeActiveContext(targetChatId = null) {
     try {
         const activeRunning = await loadActiveCampaignDossier(targetChatId);
-        if (activeRunning?.meta?.title && !isDefaultUntitledCampaignTitle(activeRunning.meta.title)) {
-            const shortTitle = activeRunning.meta.title.length > 20 ? `${activeRunning.meta.title.slice(0, 18)}...` : activeRunning.meta.title;
-            $('#mhc_load_active_campaign_btn')
-                .attr('title', `Active campaign "${activeRunning.meta.title}" detected in this chat! Click to pull into Session Zero.`)
-                .html(`📂 Load "${shortTitle}"`);
+        if (activeRunning) {
+            $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').show();
+            $('#mhc_load_active_campaign_btn').show();
+            if (activeRunning.meta?.title && !isDefaultUntitledCampaignTitle(activeRunning.meta.title)) {
+                const shortTitle = activeRunning.meta.title.length > 20 ? `${activeRunning.meta.title.slice(0, 18)}...` : activeRunning.meta.title;
+                $('#mhc_load_active_campaign_btn')
+                    .attr('title', `Active campaign "${activeRunning.meta.title}" detected in this chat! Click to pull into Session Zero.`)
+                    .html(`📂 Load "${shortTitle}"`);
+            } else {
+                $('#mhc_load_active_campaign_btn')
+                    .attr('title', 'Pull the active chat\'s Campaign Dossier into Session Zero to view or edit')
+                    .html('📂 Load Active Campaign');
+            }
         } else {
-            $('#mhc_load_active_campaign_btn')
-                .attr('title', 'Pull the active chat\'s Campaign Dossier into Session Zero to view or edit')
-                .html('📂 Load Active Campaign');
+            $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').hide();
+            $('#mhc_load_active_campaign_btn').hide();
+            if (currentNavMode === 'living-world') {
+                currentNavMode = 'new-adventure';
+                $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+                $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+                $('#mhc_new_adventure_stepper').show();
+            }
         }
 
         await updateSyncButtonState(targetChatId);
@@ -2950,7 +3049,7 @@ export function renderProgressionTabView() {
 /**
  * Bind modal DOM events.
  */
-function bindModalEvents() {
+export function bindModalEvents() {
     if (modalInitialized) return;
     modalInitialized = true;
 
@@ -2993,14 +3092,7 @@ function bindModalEvents() {
             const card = normalizeCharacterCard(rawChar, avatarUrl);
             if (!card) return;
 
-            pendingAttachments.push({
-                type: 'char',
-                name: card.name,
-                card,
-                promptAddition: formatCharacterInspirationBlock(card),
-                avatar: card.avatar,
-            });
-            renderAttachmentTray();
+            attachCharacterCardToSession(card, null);
             toastr?.success(`Imported character: "${card.name}".`);
 
             if (card.characterBook) {
@@ -3289,7 +3381,13 @@ function bindModalEvents() {
         const name = $(this).attr('data-name');
         if (!name) return;
         unstageCanonSource(name);
-        attachedSources = attachedSources.filter(s => s.name !== name);
+        attachedSources = attachedSources.filter(s => s.name !== name && s.cardName !== name);
+        pendingAttachments = pendingAttachments.filter(a => !(
+            a.sourceName === name ||
+            a.name === name ||
+            `${a.name} (Character Card)` === name
+        ));
+        renderAttachmentTray();
         evaluateStepUnlocks();
         updateBlueprintDeck();
         saveDraft();
@@ -4090,7 +4188,7 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
 /**
  * Open the PbtA Concierge modal window.
  */
-export async function openConciergeModal({ ruleset = null, genreKey = null } = {}) {
+export async function openConciergeModal({ ruleset = null, genreKey = null, navMode = null } = {}) {
     await ensureModalMounted();
     bindModalEvents();
     updateConnectionDropdowns();
@@ -4138,6 +4236,47 @@ export async function openConciergeModal({ ruleset = null, genreKey = null } = {
 
     // Refresh active chat context indicators and sync button visibility
     await refreshConciergeActiveContext();
+
+    if (navMode === 'living-world') {
+        const campaignDossier = await loadActiveCampaignDossier();
+        if (campaignDossier) {
+            currentNavMode = 'living-world';
+            activeDossier = healAndNormalizeDossier(campaignDossier);
+            activeDossier.meta = activeDossier.meta || {};
+            activeDossier.meta.rulesetConfirmed = true;
+            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+            const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+                || ctx?.getCurrentChatId?.()
+                || ctx?.chatId
+                || '';
+            loadedCampaignOriginChatId = currentChatId;
+            loadedCampaignOriginTitle = (activeDossier.meta?.title || '').trim();
+            activeDossier._originChatId = loadedCampaignOriginChatId;
+            activeDossier._originCampaignTitle = loadedCampaignOriginTitle;
+            $('#mhc_new_adventure_stepper').hide();
+            $('.mhc-chat-column').show();
+            $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+            $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+        } else {
+            currentNavMode = 'new-adventure';
+            $('#mhc_new_adventure_stepper').show();
+            $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+            $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+        }
+    } else if (navMode === 'new-adventure') {
+        currentNavMode = 'new-adventure';
+        $('#mhc_new_adventure_stepper').show();
+        $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+        $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+    } else {
+        $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+        $(`.mhc-mode-nav-btn[data-nav-mode="${currentNavMode}"]`).addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+        if (currentNavMode === 'living-world') {
+            $('#mhc_new_adventure_stepper').hide();
+        } else {
+            $('#mhc_new_adventure_stepper').show();
+        }
+    }
 
     updateBlueprintDeck();
     renderDebugInspectorView();

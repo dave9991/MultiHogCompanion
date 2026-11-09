@@ -91,7 +91,7 @@
     object-position: center 20% !important;
 }
 
-/* ── PbtA Concierge "Session Zero" Styles (Theme Adaptive Harmonizer) ───────── */
+/* ── PbtA Concierge "Session Zero" Styles (Character View Unified Styling) ── */
 
 .mhc-concierge-overlay {
     position: fixed;
@@ -99,7 +99,7 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.72);
+    background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(4px);
     z-index: 99999;
     display: flex;
@@ -115,28 +115,25 @@
     height: 90vh;
     max-height: 860px;
 
-    /* ── Harmonized Adaptive Theme Tokens ──
-       Hooks into MultiHog's custom variables, SillyTavern's smart theme variables,
-       and provides resilient fallbacks. Seamlessly transitions between
-       Slate Clarity (dark slate), Daylight Crisp (light crisp), and custom themes. */
-    --mhc-bg: var(--rt-custom-bg, var(--SmartThemeBlurTrans, var(--SmartThemeBlurTintColor, #111622)));
-    --mhc-card-bg: var(--rt-custom-card-bg, var(--SmartThemeBotMesBlurTintColor, rgba(128, 128, 128, 0.08)));
-    --mhc-header-bg: var(--rt-custom-header-bg, var(--SmartThemeUserMesBlurTintColor, rgba(0, 0, 0, 0.08)));
-    --mhc-fg: var(--rt-custom-text, var(--SmartThemeBodyColorText, var(--SmartThemeBodyColor, #f1f5f9)));
-    --mhc-fg-muted: var(--rt-custom-text-muted, var(--SmartThemeBodyColorTextMuted, var(--SmartThemeEmColor, #94a3b8)));
-    --mhc-border: var(--rt-custom-border, var(--smartThemeBorder, var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.2))));
-    --mhc-card-border: var(--rt-custom-card-border, var(--mhc-border));
-    --mhc-accent: var(--rt-custom-accent, var(--smartThemeMenuColorText, #38bdf8));
-    --mhc-accent-bg: var(--rt-custom-accent-bg, rgba(56, 189, 248, 0.15));
+    /* ── Character View Unified Design Tokens ── */
+    --mhc-bg: #18191c;
+    --mhc-header-bg: #1f2024;
+    --mhc-card-bg: rgba(255, 255, 255, 0.03);
+    --mhc-card-border: rgba(255, 255, 255, 0.07);
+    --mhc-border: rgba(255, 255, 255, 0.08);
+    --mhc-accent: #fbbf24;
+    --mhc-accent-bg: rgba(245, 158, 11, 0.15);
+    --mhc-fg: #e5e7eb;
+    --mhc-fg-muted: #9ca3af;
     --mhc-danger: #ef4444;
-    --mhc-shadow: var(--rt-custom-shadow, 0 16px 48px rgba(0, 0, 0, 0.5));
-    --mhc-user-bubble-bg: var(--rt-custom-accent, #0284c7);
+    --mhc-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(217, 119, 6, 0.3);
+    --mhc-user-bubble-bg: rgba(59, 130, 246, 0.15);
 
-    background: var(--mhc-bg);
-    color: var(--mhc-fg);
-    border: 1px solid var(--mhc-border);
+    background: #18191c;
+    color: #e5e7eb;
+    border: 1px solid #d97706;
     border-radius: 10px;
-    box-shadow: var(--mhc-shadow);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(217, 119, 6, 0.3);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -157,21 +154,28 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
-    background: var(--mhc-header-bg);
-    border-bottom: 1px solid var(--mhc-border);
+    padding: 12px 18px;
+    background: #1f2024;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     flex-shrink: 0;
+}
+
+#mhc_concierge_modal_title {
+    color: #fbbf24;
+    font-weight: bold;
+    font-size: 1.15em;
+    margin: 0;
 }
 
 .mhc-header-title {
     display: flex;
     align-items: center;
     gap: 10px;
-    color: var(--mhc-fg);
+    color: #e5e7eb;
 }
 
 .mhc-header-title small {
-    color: var(--mhc-fg-muted);
+    color: #9ca3af;
 }
 
 .mhc-header-icon {
@@ -197,34 +201,94 @@
 .mhc-system-badge {
     font-size: 0.8em;
     font-weight: bold;
-    padding: 0 9px;
-    border-radius: 5px;
-    background: var(--mhc-accent-bg);
-    border: 1px solid var(--mhc-accent);
-    color: var(--mhc-accent);
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #f59e0b;
     white-space: nowrap;
 }
 
+.mhc-badge-class {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-weight: 600;
+}
+
+.mhc-badge-hitdie {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+.mhc-badge-mode {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
 .mhc-concierge-header select.text_pole {
-    background: var(--mhc-card-bg);
-    color: var(--mhc-fg);
-    border: 1px solid var(--mhc-border);
+    background: rgba(0, 0, 0, 0.3);
+    color: #e5e7eb;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
 }
 
 .mhc-concierge-header #mhc_concierge_close {
     background: transparent !important;
-    border: 1px solid var(--mhc-border) !important;
-    color: var(--mhc-fg) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #9ca3af !important;
     cursor: pointer;
     transition: all 0.15s ease;
     justify-content: center;
     width: 28px !important;
     padding: 0 !important;
+    border-radius: 4px;
+    font-size: 1.1em;
 }
 .mhc-concierge-header #mhc_concierge_close:hover {
-    background: rgba(239, 68, 68, 0.18) !important;
-    border-color: #ef4444 !important;
-    color: #ef4444 !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    color: #fff !important;
+}
+
+/* ── Mode Switcher Bar ── */
+.mhc-mode-switcher-bar {
+    display: inline-flex;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+}
+
+.mhc-mode-nav-btn {
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 0.78em;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mhc-mode-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #e2e8f0 !important;
+}
+
+.mhc-mode-nav-btn.active {
+    background: rgba(59, 130, 246, 0.35) !important;
+    color: #93c5fd !important;
 }
 
 /* ── New Adventure Stepper Bar ── */
@@ -233,12 +297,12 @@
     align-items: center;
     gap: 6px;
     padding: 6px 14px;
-    background: rgba(0, 0, 0, 0.3);
-    border-bottom: 1px solid var(--mhc-border, rgba(255, 255, 255, 0.1));
+    background: #151619;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .mhc-step-btn {
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.04);
     color: #9ca3af;
     font-size: 0.8em;
@@ -315,7 +379,7 @@
     flex: 1.25;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--mhc-border);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
     min-width: 0;
 }
 
@@ -326,6 +390,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    background: rgba(0, 0, 0, 0.25);
 }
 
 .mhc-bubble {
@@ -339,18 +404,20 @@
 
 .mhc-bubble-assistant {
     align-self: flex-start;
-    background: var(--mhc-card-bg);
-    border: 1px solid var(--mhc-card-border);
-    color: var(--mhc-fg);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(168, 85, 247, 0.2);
+    color: #e5e7eb;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
 }
 
 .mhc-bubble-user {
     align-self: flex-end;
-    background: linear-gradient(135deg, #0284c7, #0369a1);
-    border: 1px solid rgba(56, 189, 248, 0.4);
-    color: #ffffff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #dbeafe;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
 }
 
 .mhc-bubble img.mhc-thumb-preview {
@@ -360,7 +427,7 @@
     margin-top: 6px;
     display: block;
     object-fit: cover;
-    border: 1px solid var(--mhc-border);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* Inspiration Quick Toolbar */
@@ -369,8 +436,8 @@
     align-items: center;
     gap: 8px;
     padding: 6px 14px;
-    background: var(--mhc-header-bg);
-    border-top: 1px solid var(--mhc-border);
+    background: #1f2024;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     flex-wrap: wrap;
     min-height: 40px;
     box-sizing: border-box;
@@ -379,10 +446,10 @@
 .mhc-bar-btn {
     font-size: 0.78em !important;
     padding: 4px 10px !important;
-    background: var(--mhc-card-bg) !important;
-    border: 1px solid var(--mhc-border) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
     border-radius: 4px !important;
-    color: var(--mhc-fg) !important;
+    color: #e5e7eb !important;
     cursor: pointer;
     transition: all 0.15s ease;
     display: inline-flex;
@@ -392,12 +459,16 @@
     box-sizing: border-box;
 }
 .mhc-bar-btn:hover {
-    background: var(--mhc-accent-bg) !important;
-    border-color: var(--mhc-accent) !important;
-    color: var(--mhc-accent) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    color: #fff !important;
 }
 
 .mhc-inspiration-bar select.text_pole {
+    background: rgba(0, 0, 0, 0.3);
+    color: #e5e7eb;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
     height: 26px;
     box-sizing: border-box;
     margin: 0;
@@ -406,8 +477,8 @@
 /* Attachment Tray */
 .mhc-attachment-tray {
     padding: 6px 14px;
-    background: var(--mhc-header-bg);
-    border-top: 1px solid var(--mhc-border);
+    background: #1f2024;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -419,12 +490,20 @@
     align-items: center;
     gap: 6px;
     padding: 3px 8px;
-    border-radius: 4px;
+    border-radius: 12px;
     font-size: 0.78em;
-    background: var(--mhc-card-bg);
-    border: 1px solid var(--mhc-border);
-    color: var(--mhc-fg);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #9ca3af;
     white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mhc-chip:hover {
+    background: rgba(168, 85, 247, 0.15);
+    border-color: #a855f7;
+    color: #f3e8ff;
 }
 
 .mhc-chip-remove {
@@ -433,12 +512,12 @@
 }
 .mhc-chip-remove:hover {
     opacity: 1;
-    color: var(--mhc-danger);
+    color: #ef4444;
 }
 
 .mhc-chip-loading {
-    border-color: var(--mhc-accent);
-    color: var(--mhc-accent);
+    border-color: #3b82f6;
+    color: #93c5fd;
     background: rgba(59, 130, 246, 0.08);
     font-style: italic;
     animation: mhc-chip-pulse 1.6s infinite ease-in-out;
@@ -465,8 +544,8 @@
     align-items: center;
     gap: 8px;
     padding: 10px 14px;
-    background: var(--mhc-header-bg);
-    border-top: 1px solid var(--mhc-border);
+    background: #1f2024;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .mhc-chat-input-row textarea {
@@ -478,33 +557,33 @@
     font-size: 0.9em;
     padding: 8px 10px;
     border-radius: 6px;
-    background: var(--mhc-card-bg);
-    color: var(--mhc-fg);
-    border: 1px solid var(--mhc-border);
+    background: rgba(0, 0, 0, 0.3);
+    color: #e5e7eb;
+    border: 1px solid rgba(255, 255, 255, 0.12);
 }
 .mhc-chat-input-row textarea:focus {
-    border-color: var(--mhc-accent) !important;
+    border-color: #3b82f6 !important;
     outline: none;
 }
 
 .mhc-attach-btn {
-    background: var(--mhc-card-bg) !important;
-    border: 1px solid var(--mhc-border) !important;
-    color: var(--mhc-fg) !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    color: #e5e7eb !important;
     padding: 6px 10px !important;
     border-radius: 6px !important;
     cursor: pointer;
     transition: all 0.15s ease;
 }
 .mhc-attach-btn:hover {
-    background: var(--mhc-accent-bg) !important;
-    border-color: var(--mhc-accent) !important;
-    color: var(--mhc-accent) !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    color: #fff !important;
 }
 
 .mhc-send-btn {
-    background: var(--mhc-accent) !important;
-    border: 1px solid var(--mhc-accent) !important;
+    background: #2563eb !important;
+    border: 1px solid #3b82f6 !important;
     color: #ffffff !important;
     padding: 6px 12px !important;
     border-radius: 6px !important;
@@ -521,8 +600,8 @@
     flex-direction: column;
     gap: 8px;
     padding: 10px 14px;
-    background: var(--mhc-header-bg);
-    border-top: 1px solid var(--mhc-accent);
+    background: #1f2024;
+    border-top: 1px solid #fbbf24;
 }
 
 .mhc-import-commit-status-row {
@@ -530,7 +609,7 @@
     align-items: center;
     gap: 8px;
     font-size: 0.85em;
-    color: var(--mhc-fg);
+    color: #e5e7eb;
     font-weight: 500;
 }
 
@@ -577,22 +656,22 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    background: var(--mhc-header-bg);
+    background: #18191c;
     min-width: 0;
 }
 
 .mhc-dossier-tabs {
     display: flex;
-    border-bottom: 1px solid var(--mhc-border);
-    background: var(--mhc-header-bg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: #18191c;
 }
 
-.mhc-tab-btn {
+.mhc-dossier-tabs .mhc-tab-btn {
     flex: 1;
     padding: 8px;
     background: transparent;
     border: none;
-    color: var(--mhc-fg-muted);
+    color: #9ca3af;
     font-size: 0.84em;
     cursor: pointer;
     opacity: 0.85;
@@ -600,12 +679,18 @@
     transition: all 0.15s ease;
 }
 
-.mhc-tab-btn.active {
+.mhc-dossier-tabs .mhc-tab-btn:hover {
+    color: #e5e7eb;
+    background: rgba(255, 255, 255, 0.03);
+    opacity: 1;
+}
+
+.mhc-dossier-tabs .mhc-tab-btn.active {
     opacity: 1;
     font-weight: bold;
-    border-bottom: 2px solid var(--mhc-accent);
-    color: var(--mhc-accent);
-    background: var(--mhc-accent-bg);
+    border-bottom: 2px solid #fbbf24;
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.08);
 }
 
 .mhc-tab-content {
@@ -635,21 +720,21 @@
     padding: 10px;
     line-height: 1.45;
     resize: none;
-    background: var(--mhc-card-bg);
-    color: var(--mhc-fg);
-    border: 1px solid var(--mhc-border);
+    background: rgba(0, 0, 0, 0.25);
+    color: #e5e7eb;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
 }
 
 /* ── Blueprint Cards ── */
 .mhc-card {
-    background: var(--mhc-card-bg);
-    border: 1px solid var(--mhc-card-border);
-    border-radius: 6px;
-    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    padding: 12px;
     font-size: 0.88em;
-    color: var(--mhc-fg);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    color: #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .mhc-card-header {
@@ -660,28 +745,28 @@
 }
 
 .mhc-card-title {
-    font-weight: 700;
-    color: var(--mhc-accent);
+    font-weight: bold;
+    color: #93c5fd;
     font-size: 0.9em;
 }
 
 .mhc-card-desc {
-    color: var(--mhc-fg);
+    color: #d1d5db;
     line-height: 1.45;
 }
 
 .mhc-moves-list {
-    color: var(--mhc-fg-muted);
+    color: #9ca3af;
     line-height: 1.4;
 }
 
 .mhc-pill {
     font-size: 0.75em;
     padding: 2px 6px;
-    border-radius: 3px;
-    background: var(--mhc-header-bg);
-    border: 1px solid var(--mhc-border);
-    color: var(--mhc-fg-muted);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #9ca3af;
 }
 
 .mhc-stat-row {
@@ -694,18 +779,18 @@
 .mhc-stat-pill {
     font-size: 0.74em;
     padding: 2px 6px;
-    border-radius: 3px;
-    background: var(--mhc-accent-bg);
-    color: var(--mhc-accent);
-    border: 1px solid var(--mhc-accent);
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.3);
     font-weight: 600;
 }
 
 .mhc-badge-count {
     font-size: 0.74em;
-    background: var(--mhc-accent-bg);
-    color: var(--mhc-accent);
-    border: 1px solid var(--mhc-accent);
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
     padding: 1px 6px;
     border-radius: 10px;
     font-weight: bold;
@@ -720,10 +805,10 @@
 
 .mhc-deck-item {
     padding: 6px 8px;
-    border-radius: 4px;
-    background: var(--mhc-bg);
-    border: 1px solid var(--mhc-border);
-    color: var(--mhc-fg);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    color: #e5e7eb;
     font-size: 0.85em;
 }
 
@@ -738,10 +823,10 @@
 .mhc-dial-pill {
     font-size: 0.76em;
     padding: 3px 8px;
-    border-radius: 4px;
-    background: var(--mhc-bg);
-    border: 1px solid var(--mhc-border);
-    color: var(--mhc-fg);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #9ca3af;
     cursor: pointer;
     user-select: none;
     transition: all 0.15s ease;
@@ -752,9 +837,9 @@
 
 .mhc-dial-pill:hover,
 .mhc-clickable-pill:hover {
-    filter: brightness(1.2);
-    border-color: var(--mhc-accent);
-    color: var(--mhc-accent);
+    background: rgba(168, 85, 247, 0.15);
+    border-color: #a855f7;
+    color: #f3e8ff;
 }
 
 .mhc-clickable-pill {
@@ -813,12 +898,13 @@
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     font-size: 0.9em;
     line-height: 1.45;
-    background: rgba(0, 0, 0, 0.1);
+    background: rgba(0, 0, 0, 0.25);
+    color: #e5e7eb;
 }
 
 .mhc-empty-hint {
     font-size: 0.8em;
-    color: var(--mhc-fg-muted);
+    color: #9ca3af;
     font-style: italic;
 }
 
@@ -861,9 +947,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px;
-    background: var(--mhc-header-bg);
-    border-top: 1px solid var(--mhc-border);
+    padding: 10px 18px;
+    background: #1f2024;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
     flex-shrink: 0;
     min-height: 48px;
     box-sizing: border-box;
@@ -876,9 +962,9 @@
 }
 
 .mhc-concierge-footer .menu_button {
-    background: var(--mhc-card-bg);
-    border: 1px solid var(--mhc-border);
-    color: var(--mhc-fg);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #e5e7eb;
     padding: 5px 12px;
     border-radius: 6px;
     transition: all 0.15s ease;
@@ -890,18 +976,18 @@
     box-sizing: border-box;
 }
 .mhc-concierge-footer .menu_button:hover {
-    background: var(--mhc-accent-bg);
-    border-color: var(--mhc-accent);
-    color: var(--mhc-accent);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #fff;
 }
 
 .mhc-launch-btn {
-    background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+    background: #2563eb !important;
+    border: 1px solid #3b82f6 !important;
     color: #ffffff !important;
     font-weight: bold !important;
     padding: 6px 16px !important;
     border-radius: 6px !important;
-    border: 1px solid rgba(255, 255, 255, 0.25) !important;
     box-shadow: 0 2px 10px rgba(37, 99, 235, 0.45);
     cursor: pointer;
     transition: filter 0.15s ease;
@@ -931,14 +1017,14 @@
 }
 
 .mhc-launch-card {
-    background: var(--mhc-bg);
-    color: var(--mhc-fg);
-    border: 1px solid var(--mhc-accent);
-    border-radius: 8px;
+    background: #18191c;
+    color: #e5e7eb;
+    border: 1px solid #d97706;
+    border-radius: 10px;
     padding: 24px;
     width: 380px;
     text-align: center;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(217, 119, 6, 0.3);
 }
 
 .mhc-progress-track {
@@ -1612,7 +1698,8 @@
     color: #93c5fd !important;
 }
 
-#mhc-level-up-modal .mhc-table-milestone {
+#mhc-level-up-modal .mhc-table-milestone,
+#mhc_concierge_modal .mhc-table-milestone {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -1624,19 +1711,22 @@
     margin-bottom: 2px;
 }
 
-#mhc-level-up-modal .mhc-milestone-archetype {
+#mhc-level-up-modal .mhc-milestone-archetype,
+#mhc_concierge_modal .mhc-milestone-archetype {
     background: rgba(168, 85, 247, 0.2);
     color: #d8b4fe;
     border: 1px solid rgba(168, 85, 247, 0.4);
 }
 
-#mhc-level-up-modal .mhc-milestone-asi {
+#mhc-level-up-modal .mhc-milestone-asi,
+#mhc_concierge_modal .mhc-milestone-asi {
     background: rgba(56, 189, 248, 0.2);
     color: #7dd3fc;
     border: 1px solid rgba(56, 189, 248, 0.4);
 }
 
-#mhc-level-up-modal .mhc-milestone-capstone {
+#mhc-level-up-modal .mhc-milestone-capstone,
+#mhc_concierge_modal .mhc-milestone-capstone {
     background: rgba(234, 179, 8, 0.2);
     color: #fde047;
     border: 1px solid rgba(234, 179, 8, 0.4);

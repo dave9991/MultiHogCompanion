@@ -263,6 +263,7 @@ export function scaffoldDossierStubForChat(chatId, stateMemo, chatTitle = '') {
             systemKey,
             systemLabel,
             isStub: true,
+            autoScaffolded: true,
             createdAt: new Date().toISOString(),
         },
         protagonist: {
@@ -600,7 +601,10 @@ export async function syncDossierToWorldInfoBook(chatId, dossier) {
     const bookName = cleanTitle.startsWith('Campaign_') ? cleanTitle : `Campaign_${cleanTitle || cleanId || 'Adventure'}`;
 
     // Format dossier to Markdown
-    let md = `# 📜 CAMPAIGN DOSSIER: ${dossier.meta?.title || cleanTitle}\n\n`;
+    const isStubCodex = Boolean(dossier.meta?.autoScaffolded || dossier.meta?.isStub);
+    let md = isStubCodex
+        ? `# 📜 CHARACTER PROGRESSION CODEX: ${dossier.meta?.title || cleanTitle}\n\n`
+        : `# 📜 CAMPAIGN DOSSIER: ${dossier.meta?.title || cleanTitle}\n\n`;
     md += `* **System Engine:** ${dossier.meta?.systemLabel || 'D&D 5e Standard'} (\`${dossier.meta?.systemKey || 'dnd5e'}\`)\n`;
     md += `* **Status:** Active Campaign\n\n---\n\n`;
 
@@ -634,9 +638,13 @@ export async function syncDossierToWorldInfoBook(chatId, dossier) {
 
     const entry = {
         uid: Date.now(),
-        key: ['campaign', 'dossier', 'setting overview', 'blueprint', 'campaign dossier', p.name || 'hero', p.class || 'adventurer'],
+        key: isStubCodex
+            ? ['progression', 'codex', 'blueprint', 'level up', p.name || 'hero', p.class || 'adventurer']
+            : ['campaign', 'dossier', 'setting overview', 'blueprint', 'campaign dossier', p.name || 'hero', p.class || 'adventurer'],
         keysecondary: [],
-        comment: 'Campaign Dossier & 1–20 Progression Codex Artifact',
+        comment: isStubCodex
+            ? 'Character Progression Codex & Level-Up Artifact'
+            : 'Campaign Dossier & 1–20 Progression Codex Artifact',
         content: md,
         constant: false,
         selective: false,

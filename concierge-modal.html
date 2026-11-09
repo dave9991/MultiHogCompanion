@@ -6,16 +6,16 @@
             <div class="mhc-header-title">
                 <span class="mhc-header-icon">🎩</span>
                 <div>
-                    <h3 id="mhc_concierge_modal_title" style="margin: 0; font-size: 1.25em;">PbtA Concierge</h3>
+                    <h3 id="mhc_concierge_modal_title" style="margin: 0;">PbtA Concierge</h3>
                     <small style="opacity: 0.75; font-size: 0.78em;">Conversational Session Zero &amp; Campaign Architect</small>
                 </div>
             </div>
             
             <div class="mhc-header-controls">
-                <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px;" title="Switch between Character Desk, Living World Dossier, and New Adventure">
-                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="character" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Open Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
-                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
-                    <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="new-adventure" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Conversational Session Zero Draft"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
+                <div class="mhc-mode-switcher-bar" title="Switch between Character Desk, Living World Dossier, and New Adventure">
+                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="character" title="Open Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
+                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
+                    <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="new-adventure" title="Conversational Session Zero Draft"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
                 </div>
                 <div id="mhc_header_system_badge" class="mhc-system-badge" title="Active Genre / System (Concierge can use any preset or create a custom setting)">
                     ✨ Any Genre / Custom
@@ -34,12 +34,12 @@
                 </select>
 
                 <!-- Window Close Button -->
-                <button type="button" id="mhc_concierge_close" class="menu_button" style="padding: 4px 8px; font-size: 1.1em;" title="Close &amp; Save Draft">✕</button>
+                <button type="button" id="mhc_concierge_close" class="menu_button" title="Close &amp; Save Draft">✕</button>
             </div>
         </div>
 
         <!-- New Adventure 4-Step Stepper Bar -->
-        <div id="mhc_new_adventure_stepper" class="mhc-adventure-stepper-bar" style="display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: rgba(0,0,0,0.3); border-bottom: 1px solid var(--mhc-border, rgba(255,255,255,0.1));">
+        <div id="mhc_new_adventure_stepper" class="mhc-adventure-stepper-bar">
             <button type="button" class="mhc-step-btn active" data-step="initial" id="mhc_step_btn_initial">1. 🧭 Initial</button>
             <span class="mhc-step-arrow" id="mhc_step_arrow_canon" style="display: none; opacity: 0.45;">➔</span>
             <button type="button" class="mhc-step-btn" data-step="canon" id="mhc_step_btn_canon" style="display: none;">2. 📚 Canon</button>
@@ -64,7 +64,7 @@
 
                 <!-- Inspiration Quick Toolbar -->
                 <div class="mhc-inspiration-bar">
-                    <button type="button" id="mhc_load_active_campaign_btn" class="menu_button mhc-bar-btn" style="display: none; background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #7dd3fc;" title="Pull the active chat's Campaign Dossier into Session Zero to view or edit">
+                    <button type="button" id="mhc_load_active_campaign_btn" class="menu_button mhc-bar-btn" style="display: none;" title="Pull the active chat's Campaign Dossier into Session Zero to view or edit">
                         📂 Load Active Campaign
                     </button>
 
@@ -85,7 +85,7 @@
                     <button type="button" id="mhc_import_world_lore_btn" class="menu_button mhc-bar-btn" title="Import a world document or lorebook directly into a Campaign Canon Lorebook (forces Archivist mode)">
                         🗃️ Import World Lore
                     </button>
-                    <input type="file" id="mhc_import_lore_file_input" multiple accept=".pdf,.docx,.txt,.md,.epub,.json" style="display: none;">
+                    <input type="file" id="mhc_import_lore_file_input" multiple accept=".png,image/png,.pdf,.docx,.txt,.md,.epub,.json" style="display: none;">
                 </div>
 
                 <!-- Import & Commit Box (Replaces chat input during/after Archivist LLM Import until Committed) -->
@@ -115,7 +115,7 @@
                     <button type="button" id="mhc_attach_btn" class="menu_button mhc-attach-btn" title="Upload images, lorebooks, documents (PDF, DOCX, TXT, MD), or prior chat logs (.jsonl)">
                         📎
                     </button>
-                    <input type="file" id="mhc_file_input" multiple accept="image/*,.pdf,.docx,.txt,.md,.epub,.json,.jsonl" style="display: none;">
+                    <input type="file" id="mhc_file_input" multiple accept=".png,image/png,image/*,.pdf,.docx,.txt,.md,.epub,.json,.jsonl" style="display: none;">
 
                     <textarea id="mhc_chat_input" class="text_pole" rows="1" placeholder="Describe your dream campaign, or upload images/documents/chat logs..."></textarea>
                     
@@ -146,7 +146,7 @@
                             <span id="mhc_initial_framing_status" class="mhc-pill" style="border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;">In Progress</span>
                         </div>
                         <div class="mhc-card-desc" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
-                            <div><b>Campaign Title:</b> <span id="mhc_initial_title" style="color: var(--mhc-accent, #38bdf8); font-weight: 600;">Untitled Campaign</span></div>
+                            <div><b>Campaign Title:</b> <span id="mhc_initial_title" style="color: #fbbf24; font-weight: 600;">Untitled Campaign</span></div>
                             <div><b>Premise:</b> <span id="mhc_initial_premise" style="opacity: 0.9;">(Waiting for premise...)</span></div>
                             <div><b>Focal Lens / Pivot:</b> <span id="mhc_initial_focal_lens" style="opacity: 0.9;">(Waiting for focal lens/pivot...)</span></div>
                             <div><b>Tone:</b> <span id="mhc_initial_tone" style="opacity: 0.9;">(Waiting for tone...)</span></div>
@@ -192,16 +192,16 @@
                             <span id="mhc_deck_engine_title" class="mhc-card-title">🎲 PbtA Engine</span>
                             <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
                         </div>
-                        <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px; gap: 2px; margin: 8px 0;" title="Switch Session Zero Ruleset Engine between D&D 5e, PbtA, and FAE">
-                            <button type="button" class="mhc-ruleset-btn" data-ruleset="dnd5e" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">⚔️ D&D Lite (d20)</button>
-                            <button type="button" class="mhc-ruleset-btn active" data-ruleset="pbta" style="border: none; background: rgba(59, 130, 246, 0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🎲 PbtA (2d6)</button>
-                            <button type="button" class="mhc-ruleset-btn" data-ruleset="fae" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer;">🕯️ FAE (4dF)</button>
+                        <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" title="Switch Session Zero Ruleset Engine between D&D 5e, PbtA, and FAE">
+                            <button type="button" class="mhc-ruleset-btn" data-ruleset="dnd5e">⚔️ D&D Lite (d20)</button>
+                            <button type="button" class="mhc-ruleset-btn active" data-ruleset="pbta">🎲 PbtA (2d6)</button>
+                            <button type="button" class="mhc-ruleset-btn" data-ruleset="fae">🕯️ FAE (4dF)</button>
                         </div>
                         <div id="mhc_adventure_ruleset_gate_hint" class="mhc-gate-hint-banner" style="display: none; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; padding: 6px 10px; border-radius: 6px; font-size: 0.82em; margin-bottom: 6px;">
                             👆 Choose a ruleset engine above to unlock the Episode 1 Adventure builder &amp; chat.
                         </div>
                         <div class="mhc-deck-title-row" style="margin: 6px 0 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                            <div style="font-size: 1.05em; font-weight: 700; color: var(--mhc-accent, #38bdf8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            <div style="font-size: 1.05em; font-weight: 700; color: #fbbf24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 📖 <span id="mhc_deck_campaign_title" title="Campaign Title">Untitled Campaign</span>
                             </div>
                             <button type="button" id="mhc_deck_edit_title_btn" class="menu_button" style="padding: 1px 6px; font-size: 0.75em; opacity: 0.8;" title="Rename Campaign Title">✏️</button>
@@ -361,15 +361,15 @@
                         </div>
 
                         <!-- Extracted Summary & Report -->
-                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
-                            <div style="font-size: 0.8em; font-weight: 700; color: #88ccff; margin-bottom: 4px;">📋 Parser Result &amp; Summary</div>
+                        <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
+                            <div style="font-size: 0.8em; font-weight: 700; color: #93c5fd; margin-bottom: 4px;">📋 Parser Result &amp; Summary</div>
                             <div id="mhc_debug_summary_text" style="font-size: 0.82em; font-style: italic; opacity: 0.85; margin-bottom: 6px;">No build transactions recorded yet.</div>
                             <div id="mhc_debug_changes_list" style="font-size: 0.78em; opacity: 0.8;"></div>
                             <div id="mhc_debug_errors_list" style="font-size: 0.78em; color: #ef4444; margin-top: 4px;"></div>
                         </div>
 
                         <!-- Contemplative Judge & Architectural Scratchpad -->
-                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
+                        <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                                 <div style="font-size: 0.8em; font-weight: 700; color: #c084fc;">🧠 Contemplative Judge &amp; Architectural Scratchpad</div>
                                 <span id="mhc_debug_critique_badge" class="mhc-pill" style="font-size: 0.75em; padding: 1px 6px;">Not Evaluated</span>
@@ -380,9 +380,9 @@
                         </div>
 
                         <!-- Name Diversity Engine (NameRAG) Trace -->
-                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
+                        <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                                <div style="font-size: 0.8em; font-weight: 700; color: #38bdf8;">📇 Name Diversity Engine (NameRAG) Trace</div>
+                                <div style="font-size: 0.8em; font-weight: 700; color: #93c5fd;">📇 Name Diversity Engine (NameRAG) Trace</div>
                                 <span id="mhc_debug_namerag_count" class="mhc-pill" style="font-size: 0.75em; padding: 1px 6px;">0 resolved</span>
                             </div>
                             <div id="mhc_debug_namerag_list" style="font-size: 0.78em; display: flex; flex-direction: column; gap: 6px;">
@@ -391,24 +391,24 @@
                         </div>
 
                         <!-- Raw Builder LLM Output -->
-                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
+                        <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                                <span style="font-size: 0.8em; font-weight: 700; color: #ffcc66;">🤖 Last Raw Output from Builder LLM</span>
+                                <span style="font-size: 0.8em; font-weight: 700; color: #fbbf24;">🤖 Last Raw Output from Builder LLM</span>
                                 <span id="mhc_debug_attempt_count" style="font-size: 0.75em; opacity: 0.7;">Attempt 0/2</span>
                             </div>
-                            <pre id="mhc_debug_raw_output" class="text_pole" style="font-family: monospace; font-size: 0.75em; white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; margin: 0; border-radius: 4px;">(No raw Builder response captured yet)</pre>
+                            <pre id="mhc_debug_raw_output" class="text_pole" style="font-family: monospace; font-size: 0.75em; white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); padding: 6px; margin: 0; border-radius: 4px; color: #e5e7eb;">(No raw Builder response captured yet)</pre>
                         </div>
 
                         <!-- Prompt Sent to Builder (Collapsible) -->
                         <div class="mhc-deck-item collapsible">
                             <div class="mhc-deck-item-header" style="padding: 6px 8px;">
-                                <div class="mhc-deck-item-title" style="font-size: 0.8em; font-weight: 700; color: #a3e635;">
+                                <div class="mhc-deck-item-title" style="font-size: 0.8em; font-weight: 700; color: #34d399;">
                                     📤 Prompt Sent to Builder (Input)
                                 </div>
                                 <span class="mhc-deck-item-toggle">▼</span>
                             </div>
                             <div class="mhc-deck-item-detail" style="padding: 6px 8px;">
-                                <pre id="mhc_debug_prompt_input" style="font-family: monospace; font-size: 0.73em; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; margin: 0; border-radius: 4px;">(No prompt recorded yet)</pre>
+                                <pre id="mhc_debug_prompt_input" style="font-family: monospace; font-size: 0.73em; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); padding: 6px; margin: 0; border-radius: 4px; color: #e5e7eb;">(No prompt recorded yet)</pre>
                             </div>
                         </div>
 
@@ -421,7 +421,7 @@
                                 <span class="mhc-deck-item-toggle">▼</span>
                             </div>
                             <div class="mhc-deck-item-detail" style="padding: 6px 8px;">
-                                <pre id="mhc_debug_dossier_json" style="font-family: monospace; font-size: 0.73em; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; margin: 0; border-radius: 4px;">{}</pre>
+                                <pre id="mhc_debug_dossier_json" style="font-family: monospace; font-size: 0.73em; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); padding: 6px; margin: 0; border-radius: 4px; color: #e5e7eb;">{}</pre>
                             </div>
                         </div>
 
@@ -441,10 +441,10 @@
             <div class="mhc-footer-left">
                 <button type="button" id="mhc_save_draft_btn" class="menu_button" title="Save conversation and dossier draft">💾 Save Draft</button>
                 <button type="button" id="mhc_export_dossier_btn" class="menu_button" title="Download Campaign Dossier markdown file">📥 Export Dossier</button>
-                <button type="button" id="mhc_reset_session_btn" class="menu_button" style="color: #ff8888;" title="Reset session zero and start fresh">↺ Reset</button>
+                <button type="button" id="mhc_reset_session_btn" class="menu_button" style="color: #f87171;" title="Reset session zero and start fresh">↺ Reset</button>
             </div>
             <div class="mhc-footer-right" style="display: flex; gap: 8px;">
-                <button type="button" id="mhc_sync_active_campaign_btn" class="menu_button" style="display: none; background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(56, 189, 248, 0.25)); border: 1px solid rgba(52, 211, 153, 0.6); color: #a7f3d0; font-weight: bold; padding: 6px 14px;" title="Sync modified rules, Harm scaling, and blueprint back to the ongoing chat without resetting messages">
+                <button type="button" id="mhc_sync_active_campaign_btn" class="menu_button" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-weight: bold; padding: 6px 14px;" title="Sync modified rules, Harm scaling, and blueprint back to the ongoing chat without resetting messages">
                     🔄 Sync to Active Game
                 </button>
                 <button type="button" id="mhc_launch_campaign_btn" class="menu_button mhc-launch-btn">

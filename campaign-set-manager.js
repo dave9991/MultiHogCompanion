@@ -377,12 +377,30 @@ export async function alignCampaignSetInPlace(misalignedRecord, ctx = null) {
             }
 
             if (sourceBook && typeof sourceBook === 'object') {
-                // Save as targetDossierName
-                await fetch('/api/worldinfo/save', {
-                    method: 'POST',
-                    headers: await getSafeHeaders(effectiveCtx),
-                    body: JSON.stringify({ name: targetDossierName, data: sourceBook }),
-                });
+                // Ensure proper entries structure required by SillyTavern
+                if (!sourceBook.entries || typeof sourceBook.entries !== 'object') {
+                    sourceBook.entries = {};
+                }
+
+                let saved = false;
+                try {
+                    const wiMod = await import('../../../world-info.js');
+                    if (typeof wiMod?.saveWorldInfo === 'function') {
+                        await wiMod.saveWorldInfo(targetDossierName, sourceBook, true);
+                        saved = true;
+                    }
+                } catch (_) {}
+
+                if (!saved) {
+                    const editRes = await fetch('/api/worldinfo/edit', {
+                        method: 'POST',
+                        headers: await getSafeHeaders(effectiveCtx),
+                        body: JSON.stringify({ name: targetDossierName, data: sourceBook }),
+                    });
+                    if (!editRes.ok) {
+                        throw new Error(`Failed to save lorebook "${targetDossierName}" (status ${editRes.status})`);
+                    }
+                }
 
                 // Verify target book exists
                 const verify = await verifyClonedLorebooks({ [boundDossier]: targetDossierName }, effectiveCtx);
@@ -390,16 +408,54 @@ export async function alignCampaignSetInPlace(misalignedRecord, ctx = null) {
                     // Safely clean up old misaligned dossier
                     await deleteOldLorebooks([boundDossier], effectiveCtx);
                 }
+
+                // Refresh SillyTavern world info list dropdowns
+                if (typeof effectiveCtx?.updateWorldInfoList === 'function') {
+                    try { await effectiveCtx.updateWorldInfoList(); } catch (_) {}
+                }
             }
         }
 
-        // 3. Update chat metadata world_info if active
+        // 3. Update chat metadata world_info
         const currId = effectiveCtx?.getCurrentChatId?.() || effectiveCtx?.chatId || '';
         const isCurrent = currId === chatId || currId.replace(/\.jsonl$/i, '') === chatId;
         if (isCurrent && effectiveCtx?.chat_metadata) {
             effectiveCtx.chat_metadata.world_info = targetDossierName;
             if (typeof effectiveCtx.saveChat === 'function') {
                 await effectiveCtx.saveChat();
+            }
+        } else {
+            // Update non-active chat file on disk via ST chats API
+            try {
+                let avatarUrl = 'Game Master.png';
+                if (effectiveCtx?.characterId !== undefined && effectiveCtx?.characters) {
+                    const charObj = effectiveCtx.characters[effectiveCtx.characterId];
+                    if (charObj?.avatar) avatarUrl = charObj.avatar;
+                }
+                const chatGetRes = await fetch('/api/chats/get', {
+                    method: 'POST',
+                    headers: await getSafeHeaders(effectiveCtx),
+                    body: JSON.stringify({ avatar_url: avatarUrl, file_name: chatId }),
+                });
+                if (chatGetRes.ok) {
+                    const chatData = await chatGetRes.json();
+                    if (Array.isArray(chatData) && chatData[0]?.chat_metadata) {
+                        chatData[0].chat_metadata.world_info = targetDossierName;
+                        await fetch('/api/chats/save', {
+                            method: 'POST',
+                            headers: await getSafeHeaders(effectiveCtx),
+                            body: JSON.stringify({
+                                avatar_url: avatarUrl,
+                                file_name: chatId,
+                                chat: chatData,
+                                force: true,
+                            }),
+                        });
+                        console.log(`[MultiHog Companion] Updated world_info for "${chatId}" -> "${targetDossierName}"`);
+                    }
+                }
+            } catch (chatErr) {
+                console.warn('[MultiHog Companion] Could not update background chat metadata:', chatErr);
             }
         }
 

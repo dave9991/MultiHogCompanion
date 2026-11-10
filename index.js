@@ -3448,6 +3448,14 @@ if (typeof jQuery !== 'undefined') {
         handleLocationRerollClick(this);
     });
 
+    $(document).off('click.mhc_manage_campaign_sets', '#mhc_lorebook_manage_sets');
+    // [CATALOG: DOM-11] See LISTENERS.md — Open Campaign Set Manager modal
+    $(document).on('click.mhc_manage_campaign_sets', '#mhc_lorebook_manage_sets', async function (e) {
+        e.preventDefault();
+        const { openCampaignSetManagerModal } = await import('./campaign-set-manager.js');
+        await openCampaignSetManagerModal(SillyTavern?.getContext?.());
+    });
+
 
     let _chatRenamedTimer = null;
     // [CATALOG: EVT-03]

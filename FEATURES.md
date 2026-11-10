@@ -44,6 +44,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 | **FEAT-08** | **Partition History Integrity Guard** | [`history-integrity-guard.js`](./history-integrity-guard.js) | None | Slash Command `/mhc-history-check` | None (Direct File / Storage Inspection) |
 | **FEAT-09** | **D&D 5e & PbtA Unified Subfooter Alignment Engine** | [`dnd-fixes.js`](./dnd-fixes.js)<br>[`pbta-ruleset.js`](./pbta-ruleset.js) | None | [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled) | None (Pure MultiHog Settings API) |
 | **FEAT-10** | **Autonomous Level-Up Concierge & Class Progression Codex** | [`level-up-runner.js`](./level-up-runner.js)<br>[`level-up-ui.js`](./level-up-ui.js)<br>[`level-up-blueprint.js`](./level-up-blueprint.js)<br>[`level-up-scaffold.js`](./level-up-scaffold.js) | [`WRK-08`](./WORKAROUNDS.md#wrk-08-level-up--permadeath-pause-protocol-shield) | [`DOM-08`](./LISTENERS.md#dom-08)<br>[`DOM-09`](./LISTENERS.md#dom-09) | None (Pure MultiHog Settings & State Memo API) |
+| **FEAT-11** | **Campaign Set Manager & Orphan Cleanup** | [`campaign-set-manager.js`](./campaign-set-manager.js)<br>[`campaign-lore-sync.js`](./campaign-lore-sync.js) | None | [`DOM-11`](./LISTENERS.md#dom-11) | None (Pure ST World Info & Chat Metadata API) |
 
 ---
 
@@ -207,4 +208,17 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
     * **Bracket-Safe Move Parsing & Empty/Missing `Moves:` Commit Safety (`splitPbtaMovesLine`):** Preserves commas inside parenthetical move descriptions even when `[...]` stat/roll tags are nested inside `(...)`, formats added moves via `formatMoveAsPill`, writes `((PILLS)) Moves:` even when the memo's `Moves:` line is empty or missing, updates descending tandem HP (`cur/max HP`) when Max Harm increases, and honors custom `dossier.config.pacingXp` thresholds.
   * **FAE Milestone Advancement Desk:** In Freeform Attrition Engine campaigns, evaluates scene milestones (`Scenes: X/Y` & `XP: X/Y`), opening the Milestone Concierge to increase pool maximums, acquire new positive tags, attune signature gear, or heal trauma scars without D&D level bloat.
 * **Associated Mechanisms:** [`DOM-08`](./LISTENERS.md#dom-08), [`DOM-09`](./LISTENERS.md#dom-09), and [`WRK-08`](./WORKAROUNDS.md#wrk-08-level-up--permadeath-pause-protocol-shield).
+
+### FEAT-11: Campaign Set Manager & Orphan Cleanup
+<a id="feat-11-campaign-set-manager--orphan-cleanup"></a>
+* **Overview:** Provides an interactive auditing and maintenance interface to organize global SillyTavern lorebooks into structured Campaign Sets, identify misaligned chat stacks, safely purge orphaned MultiHog partitions, and safeguard non-campaign world info.
+* **Core Capabilities:**
+  * **Campaign Set Categorization:** Automatically groups lorebooks into 4 quadrants:
+    1. **Active Campaign Sets:** Healthy stacks where the bound dossier (`Campaign_{Title}`) and partition lorebooks (`{Prefix}_{Partition}`) match the current Game Master's adventure chats.
+    2. **Misaligned Sets:** Adventures where chat renames or earlier protagonist-based dossiers left mismatched book names or duplicate dossiers. Offers an in-place **Align Set Now** action with verified cloning.
+    3. **Orphaned Sets:** MultiHog campaign stacks (`{Prefix}_{Partition}`) and stale dossiers with zero matching chats across any character card in SillyTavern. Supports group-level deletion, selective item checkboxes, and bulk deletion.
+    4. **Protected External & Standalone:** Lorebooks bound to other character cards (via `extensions.world` or `character_book`) or standalone non-campaign lorebooks (e.g. `Eldoria`), which are safeguarded from deletion.
+  * **Verified In-Place Alignment:** Clones and re-links campaign stacks using `verifyClonedLorebooks` before deleting older source books, ensuring zero data loss during chat renames.
+  * **Surgical & Safe Deletion:** Purges confirmed orphans via `deleteOldLorebooks`, unbinding active ST world activation, clearing world info caches, and refreshing client-side UI lists.
+* **Associated Mechanisms:** [`DOM-11`](./LISTENERS.md#dom-11).
 

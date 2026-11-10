@@ -14,7 +14,7 @@
 
 import { isAdventureActive } from './adventure-chat.js';
 
-async function getSafeHeaders(ctx = null) {
+export async function getSafeHeaders(ctx = null) {
     if (typeof ctx?.getRequestHeaders === 'function') {
         return ctx.getRequestHeaders();
     }

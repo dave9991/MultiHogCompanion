@@ -1,0 +1,122 @@
+import assert from 'node:assert';
+import {
+    sanitizeCampaignPrefix,
+    parsePartitionBookName,
+    classifyLorebooks,
+    MULTIHOG_PARTITIONS,
+} from '../campaign-set-manager.js';
+
+console.log('--- Testing Campaign Set Manager & Classification Engine ---');
+
+// 1. Test sanitizeCampaignPrefix
+assert.strictEqual(sanitizeCampaignPrefix('The Sunken Vault'), 'The_Sunken_Vault');
+assert.strictEqual(sanitizeCampaignPrefix('Lou - FAE Gritty OSR Dungeon Crawl (Dark Fantasy Delve)'), 'Lou_FAE_Gritty_OSR_Dungeon_Crawl_Dark_Fantasy_Delve');
+assert.strictEqual(sanitizeCampaignPrefix('Donald\'s First Stand'), 'Donald_s_First_Stand');
+assert.strictEqual(sanitizeCampaignPrefix('___Triple__Underscore___'), 'Triple_Underscore');
+console.log('✓ sanitizeCampaignPrefix tests passed');
+
+// 2. Test parsePartitionBookName
+const parsedLocations = parsePartitionBookName('The_Sunken_Vault_Locations');
+assert.strictEqual(parsedLocations.isPartition, true);
+assert.strictEqual(parsedLocations.prefix, 'The_Sunken_Vault');
+assert.strictEqual(parsedLocations.partition, 'locations');
+
+const parsedNPCs = parsePartitionBookName('Mariposa_Mutiny_NPCs');
+assert.strictEqual(parsedNPCs.isPartition, true);
+assert.strictEqual(parsedNPCs.prefix, 'Mariposa_Mutiny');
+assert.strictEqual(parsedNPCs.partition, 'npcs');
+
+const parsedNotPartition = parsePartitionBookName('Eldoria');
+assert.strictEqual(parsedNotPartition.isPartition, false);
+
+const parsedCampaignDossier = parsePartitionBookName('Campaign_The Sunken Vault');
+assert.strictEqual(parsedCampaignDossier.isPartition, false);
+console.log('✓ parsePartitionBookName tests passed');
+
+// 3. Test classifyLorebooks
+const mockWorldNames = [
+    // The Sunken Vault (Healthy Set)
+    'Campaign_The Sunken Vault',
+    'The_Sunken_Vault_Locations',
+    'The_Sunken_Vault_NPCs',
+    'The_Sunken_Vault_Quests',
+
+    // Lou - FAE (Misaligned Set)
+    'Campaign_Lou\'s Adventure',
+    'Lou_FAE_Gritty_OSR_Dungeon_Crawl_Dark_Fantasy_Delve_Locations',
+    'Lou_FAE_Gritty_OSR_Dungeon_Crawl_Dark_Fantasy_Delve_NPCs',
+
+    // Mariposa Mutiny (True Orphan Set)
+    'Campaign_Mariposa Mutiny',
+    'Mariposa_Mutiny_Canon',
+    'Mariposa_Mutiny_Locations',
+    'Mariposa_Mutiny_NPCs',
+    'Mariposa_Mutiny_Quests',
+    'Mariposa_Mutiny_Skeleton',
+
+    // Stale Protagonist Dossiers (Orphans)
+    'Campaign_Aelion Crown-Guard\'s Adventure',
+
+    // Supergirl Character Book (Protected)
+    'Supergirl\'s Lorebook',
+
+    // Standalone Custom World (Protected)
+    'Eldoria',
+];
+
+const mockGmChats = [
+    {
+        chatId: 'The Sunken Vault',
+        chatTitle: 'The Sunken Vault',
+        worldInfo: 'Campaign_The Sunken Vault',
+    },
+    {
+        chatId: 'Lou - FAE Gritty OSR Dungeon Crawl (Dark Fantasy Delve)',
+        chatTitle: 'Lou - FAE Gritty OSR Dungeon Crawl (Dark Fantasy Delve)',
+        worldInfo: 'Campaign_Lou\'s Adventure', // Mismatched bound dossier
+    },
+];
+
+const mockCharBoundBooks = [
+    'Supergirl\'s Lorebook',
+];
+
+const report = classifyLorebooks({
+    allWorldNames: mockWorldNames,
+    gmChats: mockGmChats,
+    characterBoundBooks: mockCharBoundBooks,
+    otherCharChats: [],
+});
+
+// Verify Active Sets
+assert.strictEqual(report.activeSets.length, 1, 'Should find 1 active healthy set');
+const sunkenVault = report.activeSets[0];
+assert.strictEqual(sunkenVault.chatTitle, 'The Sunken Vault');
+assert.strictEqual(sunkenVault.dossierBooks.length, 1);
+assert.strictEqual(sunkenVault.partitionBooks.length, 3);
+
+// Verify Misaligned Sets
+assert.strictEqual(report.misalignedSets.length, 1, 'Should find 1 misaligned set');
+const louChat = report.misalignedSets[0];
+assert.strictEqual(louChat.chatTitle, 'Lou - FAE Gritty OSR Dungeon Crawl (Dark Fantasy Delve)');
+assert.strictEqual(louChat.isMisaligned, true);
+assert.strictEqual(louChat.boundDossier, 'Campaign_Lou\'s Adventure');
+
+// Verify Orphan Sets
+const mariposa = report.orphanSets.find(o => o.prefix === 'Mariposa_Mutiny');
+assert.ok(mariposa, 'Mariposa Mutiny orphan group must be identified');
+assert.strictEqual(mariposa.books.length, 6, 'Mariposa Mutiny must include dossier and all partitions');
+
+const aelion = report.orphanSets.find(o => o.prefix === 'Aelion_Crown_Guard_s_Adventure');
+assert.ok(aelion, 'Stale protagonist dossier must be identified as orphan');
+
+// Verify Protected Books
+const supergirlProtected = report.protectedBooks.find(b => b.name === 'Supergirl\'s Lorebook');
+assert.ok(supergirlProtected, 'Supergirl\'s Lorebook must be marked protected');
+assert.strictEqual(supergirlProtected.reason, 'Bound to Character Card');
+
+const eldoriaProtected = report.protectedBooks.find(b => b.name === 'Eldoria');
+assert.ok(eldoriaProtected, 'Eldoria must be marked protected as custom world');
+
+console.log('✓ classifyLorebooks correctly grouped active, misaligned, orphaned, and protected books');
+console.log('--- ALL CAMPAIGN SET MANAGER TESTS PASSED CLEANLY! ---');

@@ -362,12 +362,18 @@
                         </div>
 
                         <!-- Action Row -->
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
                             <span id="mhc_lorebook_sync_msg" style="font-size: 0.75em; opacity: 0.7;"></span>
-                            <button id="mhc_lorebook_sync_now" class="menu_button interactable" style="font-size: 0.78em; padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px; background: rgba(90,160,250,0.18); border-color: rgba(90,160,250,0.35); color: #88ccff; white-space: nowrap;" title="Manually sync campaign lorebooks to match this chat right now">
-                                <i class="fa-solid fa-arrows-rotate"></i>
-                                <span>Sync Lorebooks Now</span>
-                            </button>
+                            <div style="display: inline-flex; gap: 6px; align-items: center;">
+                                <button id="mhc_lorebook_manage_sets" class="menu_button interactable" style="font-size: 0.78em; padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px; background: rgba(160,120,240,0.18); border-color: rgba(160,120,240,0.35); color: #cc99ff; white-space: nowrap;" title="Audit all campaign lorebooks, organize into Campaign Sets, and clean up orphaned files">
+                                    <i class="fa-solid fa-boxes-stacked"></i>
+                                    <span>Manage Campaign Sets</span>
+                                </button>
+                                <button id="mhc_lorebook_sync_now" class="menu_button interactable" style="font-size: 0.78em; padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px; background: rgba(90,160,250,0.18); border-color: rgba(90,160,250,0.35); color: #88ccff; white-space: nowrap;" title="Manually sync campaign lorebooks to match this chat right now">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                    <span>Sync Lorebooks Now</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -1810,3 +1810,47 @@
     margin-bottom: 2px !important;
 }
 
+/* ── Campaign Set Manager Modal (FEAT-11) ─────────────────────────────────── */
+#mhc-campaign-set-modal.mhc-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+#mhc-campaign-set-modal .mhc-modal-dialog {
+    background: #18191c;
+    color: #e5e7eb;
+    border: 1px solid rgba(160, 120, 240, 0.45);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(160, 120, 240, 0.25);
+    border-radius: 10px;
+    width: 95%;
+    max-width: 860px;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#mhc-campaign-set-modal .menu_button {
+    width: auto !important;
+    white-space: nowrap !important;
+    height: auto !important;
+    min-height: 30px;
+    padding: 4px 12px !important;
+    box-sizing: border-box;
+}
+
+#mhc-campaign-set-modal input[type="checkbox"] {
+    accent-color: #cc99ff;
+    cursor: pointer;
+}
+
+

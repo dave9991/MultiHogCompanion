@@ -1848,6 +1848,22 @@
     box-sizing: border-box;
 }
 
+#mhc-campaign-set-modal .mhc-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 75vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 20px;
+}
+
+#mhc-campaign-set-modal .mhc-set-section {
+    flex-shrink: 0;
+    width: 100%;
+}
+
 #mhc-campaign-set-modal input[type="checkbox"] {
     accent-color: #cc99ff;
     cursor: pointer;

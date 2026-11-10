@@ -500,16 +500,16 @@ function renderModalContent(dialog, audit, ctx) {
         <div class="mhc-modal-body" style="padding: 16px 20px; max-height: 75vh; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;">
             
             <!-- SECTION 1: ACTIVE HEALTHY SETS -->
-            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; overflow: hidden;">
+            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; overflow: hidden; flex-shrink: 0;">
                 <div class="mhc-set-section-hdr" style="padding: 10px 14px; background: rgba(52, 211, 153, 0.08); border-bottom: 1px solid rgba(52, 211, 153, 0.2); display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                     <div style="font-weight: 600; color: #6ee7b7; display: flex; align-items: center; gap: 8px;">
                         <i class="fa-solid fa-circle-check"></i>
                         <span>Active Campaign Sets</span>
                         <span style="font-size: 0.8em; opacity: 0.8; font-weight: normal;">(${audit.activeSets.length} chats · ${totalActiveBooks} books)</span>
                     </div>
-                    <i class="fa-solid fa-chevron-down" style="font-size: 0.8em; opacity: 0.7;"></i>
+                    <i class="fa-solid fa-chevron-right" style="font-size: 0.8em; opacity: 0.7;"></i>
                 </div>
-                <div class="mhc-set-section-content" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div class="mhc-set-section-content" style="padding: 10px 14px; display: none; flex-direction: column; gap: 8px;">
                     ${audit.activeSets.length === 0 ? '<div style="font-size: 0.85em; opacity: 0.6; font-style: italic;">No active campaign sets found.</div>' : ''}
                     ${audit.activeSets.map(chat => `
                         <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 8px 12px;">
@@ -528,7 +528,7 @@ function renderModalContent(dialog, audit, ctx) {
 
             <!-- SECTION 2: MISALIGNED SETS -->
             ${audit.misalignedSets.length > 0 ? `
-            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; overflow: hidden;">
+            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; overflow: hidden; flex-shrink: 0;">
                 <div class="mhc-set-section-hdr" style="padding: 10px 14px; background: rgba(245, 158, 11, 0.1); border-bottom: 1px solid rgba(245, 158, 11, 0.25); display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                     <div style="font-weight: 600; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
                         <i class="fa-solid fa-triangle-exclamation"></i>
@@ -559,7 +559,7 @@ function renderModalContent(dialog, audit, ctx) {
             ` : ''}
 
             <!-- SECTION 3: ORPHANED SETS -->
-            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; overflow: hidden;">
+            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; overflow: hidden; flex-shrink: 0;">
                 <div class="mhc-set-section-hdr" style="padding: 10px 14px; background: rgba(239, 68, 68, 0.08); border-bottom: 1px solid rgba(239, 68, 68, 0.2); display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                     <div style="font-weight: 600; color: #f87171; display: flex; align-items: center; gap: 8px;">
                         <i class="fa-solid fa-trash-can"></i>
@@ -609,16 +609,29 @@ function renderModalContent(dialog, audit, ctx) {
             </div>
 
             <!-- SECTION 4: PROTECTED / EXTERNAL -->
-            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; overflow: hidden;">
+            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; overflow: hidden; flex-shrink: 0;">
                 <div class="mhc-set-section-hdr" style="padding: 10px 14px; background: rgba(90, 160, 250, 0.08); border-bottom: 1px solid rgba(90, 160, 250, 0.2); display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                     <div style="font-weight: 600; color: #93c5fd; display: flex; align-items: center; gap: 8px;">
                         <i class="fa-solid fa-shield-halved"></i>
                         <span>Protected External & Standalone Lorebooks</span>
                         <span style="font-size: 0.8em; opacity: 0.8; font-weight: normal;">(${audit.protectedBooks.length} books)</span>
                     </div>
-                    <i class="fa-solid fa-chevron-down" style="font-size: 0.8em; opacity: 0.7;"></i>
+                    <i class="fa-solid fa-chevron-right" style="font-size: 0.8em; opacity: 0.7;"></i>
                 </div>
-                <div class="mhc-set-section-content" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 6px;">
+                <div class="mhc-set-section-content" style="padding: 10px 14px; display: none; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 0.8em; opacity: 0.75; margin-bottom: 4px;">These lorebooks are preserved and locked because they belong to other character cards or standalone custom worlds.</div>
+                    ${audit.protectedBooks.length === 0 ? '<div style="font-size: 0.85em; opacity: 0.6; font-style: italic;">No protected external books found.</div>' : ''}
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        ${audit.protectedBooks.map(b => `
+                            <span style="background: rgba(90,160,250,0.12); border: 1px solid rgba(90,160,250,0.25); color: #bfdbfe; font-size: 0.78em; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px;">
+                                <i class="fa-solid fa-lock" style="font-size: 0.75em; opacity: 0.7;"></i>
+                                <span style="font-family: monospace;">${b.name}</span>
+                                <span style="font-size: 0.85em; opacity: 0.6;">(${b.reason})</span>
+                            </span>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
                     <div style="font-size: 0.8em; opacity: 0.75; margin-bottom: 4px;">These lorebooks are preserved and locked because they belong to other character cards or standalone custom worlds.</div>
                     ${audit.protectedBooks.length === 0 ? '<div style="font-size: 0.85em; opacity: 0.6; font-style: italic;">No protected external books found.</div>' : ''}
                     <div style="display: flex; flex-wrap: wrap; gap: 6px;">

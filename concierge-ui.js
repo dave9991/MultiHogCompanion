@@ -837,6 +837,7 @@ export async function setAdventureStep(targetStep, opts = {}) {
                 }, {
                     send: (msgs, sig) => sendConciergeRequest(msgs, sig),
                     onStatus: msg => toastr?.info(msg),
+                    activeDossier,
                 });
             } catch (err) {
                 console.error('[MultiHog Companion] Canon build error:', err);
@@ -4284,13 +4285,15 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
     const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null;
     const rawText = lastAttempt?.rawResponse || '(empty)';
     const status = tx.finalStatus || 'UNKNOWN';
-    const timeFormatted = tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString() : '--:--:--';
+    const timeFormatted = tx.timestamp
+        ? (typeof tx.timestamp === 'string' && tx.timestamp.includes(':') && !tx.timestamp.includes('T') ? tx.timestamp : new Date(tx.timestamp).toLocaleTimeString())
+        : '--:--:--';
 
     let badgeColor = '#ccc';
     let badgeBg = 'rgba(150,150,150,0.2)';
     let badgeBorder = 'rgba(255,255,255,0.15)';
 
-    if (status === 'MUTATED') {
+    if (status === 'MUTATED' || status === 'CANON_INGEST') {
         badgeColor = '#4ade80';
         badgeBg = 'rgba(34, 197, 94, 0.2)';
         badgeBorder = 'rgba(34, 197, 94, 0.4)';
@@ -4310,12 +4313,19 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
 
     modalBadge.text(status).css({ color: badgeColor, background: badgeBg, borderColor: badgeBorder });
     modalTime.text(timeFormatted);
-    modalSummary.text(tx.builderSummary || 'No summary available');
+    modalSummary.text(tx.builderSummary || tx.summary || 'No summary available');
 
     modalChanges.empty();
     const changes = lastAttempt?.report?.changes || [];
     if (changes.length) {
         modalChanges.html(`<b>Mutations:</b> ${changes.map(c => `• ${escapeHtml(c)}`).join(' ')}`);
+    } else if (lastAttempt?.deduplication?.length) {
+        const dedupHtml = lastAttempt.deduplication.map(d =>
+            d.action === 'separate'
+                ? `• Kept separate: <b>${escapeHtml(d.nameA)}</b> & <b>${escapeHtml(d.nameB)}</b> <i>(${escapeHtml(d.reason)})</i>`
+                : `• Linked: <b>${escapeHtml(d.canonical)}</b> ← <b>${escapeHtml(d.absorbed)}</b> <i>(${escapeHtml(d.reason)})</i>`
+        ).join('<br>');
+        modalChanges.html(`<b>Deduplication / Entity Consolidation:</b><br>${dedupHtml}`);
     }
 
     modalErrors.empty();
@@ -4403,12 +4413,15 @@ export function renderDebugInspectorView(tx = (window._mhcLastBuilderTransaction
         modalNameRagList.html(itemsHtml);
     } else {
         modalNameRagCount.text('0 resolved').css({ background: 'rgba(156,163,175,0.2)', color: '#ccc' });
-        modalNameRagList.html('<div style="opacity: 0.6; font-style: italic;">No name placeholders resolved in this transaction.</div>');
+        const zeroMsg = tx.stage === 'canon'
+            ? '0 NameRAG resolved (Entities preserved verbatim from imported source document).'
+            : 'No name placeholders resolved in this transaction.';
+        modalNameRagList.html(`<div style="opacity: 0.6; font-style: italic;">${zeroMsg}</div>`);
     }
 
-    modalRaw.text(rawText);
-    modalAttempts.text(`Attempt ${attempts.length}/2`);
-    modalPrompt.text(JSON.stringify(tx.builderRequest?.messages || [], null, 2));
+    modalRaw.text(rawText || tx.rawOutput || '(empty)');
+    modalAttempts.text(tx.stage === 'canon' ? 'Attempt 1/1 (Ingest Pass)' : `Attempt ${attempts.length}/2`);
+    modalPrompt.text(tx.promptInput ? String(tx.promptInput) : JSON.stringify(tx.builderRequest?.messages || [], null, 2));
     modalDossier.text(JSON.stringify(tx.activeDossierSnapshot || tx.currentDossierSnapshot || activeDossier || {}, null, 2));
 }
 

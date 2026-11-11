@@ -9,6 +9,7 @@ import {
     toggleCanonEntryDisabled, upsertCanonEntry, removeCanonEntry,
     snapshotFraming, computeFramingDiff, snapshotCanon, computeCanonDiff,
     snapshotAdventure, computeAdventureDiff, extractAgnosticAdventureBones,
+    normalizeEntityName, detectDuplicateCandidates, arbitrateDuplicateCandidates,
 } from '../concierge-canon.js';
 import { normalizeCharacterCard } from '../concierge-card-reader.js';
 
@@ -544,5 +545,101 @@ const rawCardWithAvatar = {
 const normalized = normalizeCharacterCard(rawCardWithAvatar, 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
 assert.strictEqual(normalized.name, 'Hero Protagonist');
 assert.strictEqual(normalized.avatar, null, 'Character card avatar must be null unconditionally to avoid portrait hijacking');
+
+// 11. Deduplication & Step 2 Debug Telemetry Tests
+console.log('11. Testing 2-Tier Entity Deduplication & Step 2 Debug Telemetry...');
+
+// 11a. normalizeEntityName
+assert.strictEqual(normalizeEntityName('The Horrigan'), 'horrigan');
+assert.strictEqual(normalizeEntityName('Dr. Aris Thorne'), 'aris thorne');
+assert.strictEqual(normalizeEntityName('Captain Vance'), 'vance');
+assert.strictEqual(normalizeEntityName('Vault-13'), 'vault 13');
+assert.strictEqual(normalizeEntityName('The Enclave'), 'enclave');
+
+// 11b. detectDuplicateCandidates
+const sampleEntries = [
+    { id: '1', kind: 'NPC', name: 'Frank Horrigan', content: 'Secret Service agent turned mutant.' },
+    { id: '2', kind: 'NPC', name: 'The Horrigan', content: 'Mutant experiment loyal to president.' },
+    { id: '3', kind: 'NPC', name: 'Jane Smith', content: 'Pioneer engineer from Vault 13.' },
+    { id: '4', kind: 'NPC', name: 'John Smith', content: 'Vault 13 security officer, Jane\'s husband.' },
+    { id: '5', kind: 'LOCATION', name: 'Vault 13', content: 'Subterranean shelter.' },
+    { id: '6', kind: 'LOCATION', name: 'Vault-13', content: 'Secondary fallout shelter bunker.' },
+    { id: '7', kind: 'FACTION', name: 'The Silica Cartel', content: 'Glass merchants.' },
+    { id: '8', kind: 'LOCATION', name: 'The Rust Wastes', content: 'Irradiated desert.' },
+];
+
+const candidates = detectDuplicateCandidates(sampleEntries);
+assert.ok(candidates.some(c => c.type === 'token_containment' && (c.nameA.includes('Horrigan') && c.nameB.includes('Horrigan'))), 'Must detect Frank Horrigan vs The Horrigan as token containment');
+assert.ok(candidates.some(c => c.type === 'shared_surname' && (c.nameA === 'Jane Smith' && c.nameB === 'John Smith')), 'Must detect Jane Smith vs John Smith as shared surname');
+assert.ok(candidates.some(c => c.type === 'exact_match' && (c.nameA.includes('Vault') && c.nameB.includes('Vault'))), 'Must detect Vault 13 vs Vault-13 as exact match');
+assert.ok(!candidates.some(c => c.nameA === 'The Silica Cartel' || c.nameB === 'The Rust Wastes'), 'Unrelated entries across or within categories must not be flagged');
+
+// 11c. arbitrateDuplicateCandidates
+// Auto-link exact match without LLM
+const autoLinkCandidates = candidates.filter(c => c.type === 'exact_match');
+const autoLinkResult = await arbitrateDuplicateCandidates(autoLinkCandidates, sampleEntries.slice(4, 6));
+assert.strictEqual(autoLinkResult.entries.length, 1, 'Exact match must consolidate 2 entries into 1');
+assert.ok(autoLinkResult.entries[0].aliases.includes('Vault-13') || autoLinkResult.entries[0].aliases.includes('Vault 13'));
+assert.ok(autoLinkResult.entries[0].content.includes('Subterranean shelter'));
+assert.ok(autoLinkResult.entries[0].content.includes('Secondary fallout shelter bunker'));
+assert.strictEqual(autoLinkResult.auditLog[0].action, 'autoLink');
+
+// Arbitrate with mock LLM: link Horrigan, separate Smith
+const mockLlmSend = async (messages) => {
+    return JSON.stringify([
+        {
+            id: candidates.find(c => c.type === 'token_containment').id,
+            action: 'link',
+            canonicalName: 'Frank Horrigan',
+            reason: 'Same individual described across multiple excerpts',
+        },
+        {
+            id: candidates.find(c => c.type === 'shared_surname').id,
+            action: 'separate',
+            canonicalName: 'Jane Smith',
+            reason: 'Married couple sharing surname, distinct NPCs',
+        },
+    ]);
+};
+
+clearStagedCanon();
+setStagedCanonEntries(sampleEntries.slice(0, 4));
+const initialStaged = getStagedCanonEntries();
+const horriSmithCandidates = detectDuplicateCandidates(initialStaged);
+const arbitrated = await arbitrateDuplicateCandidates(horriSmithCandidates, initialStaged, { send: mockLlmSend });
+
+// Frank Horrigan consolidated
+assert.ok(arbitrated.entries.some(e => e.name === 'Frank Horrigan'), 'Frank Horrigan canonical entry must exist');
+assert.ok(!arbitrated.entries.some(e => e.name === 'The Horrigan'), 'The Horrigan must be absorbed into Frank Horrigan');
+const frank = arbitrated.entries.find(e => e.name === 'Frank Horrigan');
+assert.ok(frank.aliases.includes('The Horrigan'), 'The Horrigan must be retained as an alias');
+assert.ok(frank.content.includes('Secret Service agent'));
+assert.ok(frank.content.includes('Mutant experiment'));
+
+// Jane Smith and John Smith preserved as distinct cards
+assert.ok(arbitrated.entries.some(e => e.name === 'Jane Smith'), 'Jane Smith must be preserved');
+assert.ok(arbitrated.entries.some(e => e.name === 'John Smith'), 'John Smith must be preserved');
+assert.strictEqual(arbitrated.entries.length, 3, 'Must have exactly 3 entries: Frank Horrigan, Jane Smith, John Smith');
+
+// 11d. Step 2 Debug Telemetry in buildCanonFromFraming
+globalThis.window = {};
+clearStagedCanon();
+const telemetryFraming = {
+    title: 'Ash Wastes',
+    premise: 'Survival in irradiated ruins',
+    focalLens: 'Enclave Outpost',
+    tone: 'Post-apocalyptic',
+};
+const telemetryResult = await buildCanonFromFraming(telemetryFraming, {
+    send: async () => JSON.stringify([
+        { kind: 'NPC', name: 'Outpost Guard', aliases: [], importance: 3, content: 'Guards the perimeter.' },
+        { kind: 'LOCATION', name: 'Irradiated Crater', aliases: [], importance: 4, content: 'Deep nuclear crater.' },
+    ]),
+});
+assert.ok(globalThis.window._mhcLastBuilderTransaction, 'Transaction must be recorded on window');
+assert.strictEqual(globalThis.window._mhcLastBuilderTransaction.stage, 'canon');
+assert.strictEqual(globalThis.window._mhcLastBuilderTransaction.finalStatus, 'CANON_INGEST');
+assert.ok(globalThis.window._mhcLastBuilderTransaction.summary.includes('Series Bible generated'));
+assert.ok(globalThis.window._mhcLastBuilderTransaction.attempts[0].deduplication, 'Deduplication audit must be present in transaction');
 
 console.log('✅ Concierge Canon test suite passed.');

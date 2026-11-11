@@ -350,6 +350,304 @@ export function buildCanonEntry({ chunk, label }) {
     };
 }
 
+const HONORIFIC_PREFIX_REGEX = /^(the|dr\.?|doctor|commander|agent|captain|lord|lady|sir|madam|officer|chief|sergeant|sgt\.?|general|gen\.?|colonel|col\.?|lieutenant|lt\.?)\s+/i;
+
+/**
+ * Normalizes an entity name by stripping common titles/honorifics, punctuation, and extra whitespace.
+ * @param {string} name
+ * @returns {string}
+ */
+export function normalizeEntityName(name = '') {
+    if (!name || typeof name !== 'string') return '';
+    return name
+        .trim()
+        .toLowerCase()
+        .replace(HONORIFIC_PREFIX_REGEX, '')
+        .replace(/[-_]/g, ' ')
+        .replace(/[^\w\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
+ * Detects potential duplicate or split-chunk entity candidates within the same category.
+ * - Exact normalized matches (e.g. "Vault 13" vs "Vault-13") are marked 'exact_match' (auto-linkable).
+ * - Core token containment (e.g. "The Horrigan" vs "Frank Horrigan") are marked 'token_containment'.
+ * - Shared surnames with distinct given names (e.g. "Jane Smith" vs "John Smith") are marked 'shared_surname'.
+ *
+ * @param {Array<object>} entries Staged canon entries
+ * @returns {Array<object>} Candidate clusters
+ */
+export function detectDuplicateCandidates(entries = []) {
+    if (!Array.isArray(entries) || entries.length < 2) return [];
+
+    const candidates = [];
+    const seenPairs = new Set();
+
+    for (let i = 0; i < entries.length; i++) {
+        const a = entries[i];
+        if (!a || !a.name) continue;
+        const normA = normalizeEntityName(a.name);
+        if (!normA) continue;
+        const wordsA = normA.split(' ').filter(Boolean);
+
+        for (let j = i + 1; j < entries.length; j++) {
+            const b = entries[j];
+            if (!b || !b.name) continue;
+            // Only compare entities of the same kind (NPC to NPC, LOCATION to LOCATION, etc.)
+            if ((a.kind || 'LORE').toUpperCase() !== (b.kind || 'LORE').toUpperCase()) continue;
+
+            const normB = normalizeEntityName(b.name);
+            if (!normB) continue;
+            const wordsB = normB.split(' ').filter(Boolean);
+
+            const pairKey = [a.id || a.name, b.id || b.name].sort().join('::');
+            if (seenPairs.has(pairKey)) continue;
+
+            // 1. Exact normalized match (e.g. "Vault 13" vs "Vault-13", "The Enclave" vs "Enclave")
+            if (normA === normB) {
+                seenPairs.add(pairKey);
+                candidates.push({
+                    id: `cand_${i}_${j}`,
+                    kind: a.kind,
+                    type: 'exact_match',
+                    entryA: a,
+                    entryB: b,
+                    nameA: a.name,
+                    nameB: b.name,
+                    excerptA: (a.content || '').slice(0, 300),
+                    excerptB: (b.content || '').slice(0, 300),
+                });
+                continue;
+            }
+
+            // 2. Token containment / Stem overlap (e.g. "The Horrigan" ['horrigan'] vs "Frank Horrigan" ['frank', 'horrigan'])
+            const isASubsetOfB = wordsA.length > 0 && wordsA.every(w => wordsB.includes(w));
+            const isBSubsetOfA = wordsB.length > 0 && wordsB.every(w => wordsA.includes(w));
+
+            if (isASubsetOfB || isBSubsetOfA) {
+                seenPairs.add(pairKey);
+                candidates.push({
+                    id: `cand_${i}_${j}`,
+                    kind: a.kind,
+                    type: 'token_containment',
+                    entryA: a,
+                    entryB: b,
+                    nameA: a.name,
+                    nameB: b.name,
+                    excerptA: (a.content || '').slice(0, 300),
+                    excerptB: (b.content || '').slice(0, 300),
+                });
+                continue;
+            }
+
+            // 3. Shared surname with distinct given names for NPCs (e.g. "Jane Smith" vs "John Smith")
+            if ((a.kind || '').toUpperCase() === 'NPC' && wordsA.length >= 2 && wordsB.length >= 2) {
+                const surnameA = wordsA[wordsA.length - 1];
+                const surnameB = wordsB[wordsB.length - 1];
+                const givenA = wordsA[0];
+                const givenB = wordsB[0];
+
+                if (surnameA === surnameB && givenA !== givenB) {
+                    seenPairs.add(pairKey);
+                    candidates.push({
+                        id: `cand_${i}_${j}`,
+                        kind: a.kind,
+                        type: 'shared_surname',
+                        entryA: a,
+                        entryB: b,
+                        nameA: a.name,
+                        nameB: b.name,
+                        excerptA: (a.content || '').slice(0, 300),
+                        excerptB: (b.content || '').slice(0, 300),
+                    });
+                }
+            }
+        }
+    }
+
+    return candidates;
+}
+
+/**
+ * Arbitrates duplicate candidates using automatic alias linking for exact matches,
+ * and a single fast LLM pass for semantic ambiguities.
+ *
+ * @param {Array<object>} candidates Detected candidate pairs
+ * @param {Array<object>} entries All staged entries
+ * @param {object} [opts]
+ * @param {Function} [opts.send] LLM send function
+ * @param {AbortSignal} [opts.signal]
+ * @param {number} [opts.timeoutMs=15000]
+ * @returns {Promise<{ entries: Array<object>, auditLog: Array<object> }>}
+ */
+export async function arbitrateDuplicateCandidates(candidates = [], entries = [], opts = {}) {
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+        return { entries, auditLog: [] };
+    }
+
+    const { send = null, signal = null, timeoutMs = 15000 } = opts;
+    const auditLog = [];
+    const entriesToAbsorb = new Set();
+    const needsLlmCandidates = [];
+
+    // 1. Process exact matches immediately without LLM overhead
+    for (const cand of candidates) {
+        if (cand.type === 'exact_match') {
+            const canonicalEntry = cand.entryA.name.length >= cand.entryB.name.length ? cand.entryA : cand.entryB;
+            const absorbedEntry = canonicalEntry === cand.entryA ? cand.entryB : cand.entryA;
+
+            if (entriesToAbsorb.has(canonicalEntry.id || canonicalEntry.name) || entriesToAbsorb.has(absorbedEntry.id || absorbedEntry.name)) {
+                continue;
+            }
+
+            canonicalEntry.aliases = [...new Set([...(canonicalEntry.aliases || []), ...(absorbedEntry.aliases || []), absorbedEntry.name])].filter(a => a && a.toLowerCase() !== canonicalEntry.name.toLowerCase());
+            canonicalEntry.keys = [...new Set([...(canonicalEntry.keys || []), ...(absorbedEntry.keys || []), absorbedEntry.name, ...(canonicalEntry.aliases || [])])];
+            canonicalEntry.content = `${canonicalEntry.content.trim()}\n\n---\n[Additional Lore Excerpt]\n${absorbedEntry.content.trim()}`;
+            canonicalEntry.importance = Math.max(canonicalEntry.importance || 3, absorbedEntry.importance || 3);
+            entriesToAbsorb.add(absorbedEntry.id || absorbedEntry.name);
+
+            auditLog.push({
+                action: 'autoLink',
+                canonical: canonicalEntry.name,
+                absorbed: absorbedEntry.name,
+                kind: canonicalEntry.kind,
+                reason: 'Exact normalized name match (e.g. casing/punctuation)',
+            });
+        } else {
+            needsLlmCandidates.push(cand);
+        }
+    }
+
+    // 2. If there are ambiguous candidates (token containment or shared surname), query LLM if available
+    if (needsLlmCandidates.length > 0 && typeof send === 'function') {
+        try {
+            const systemPrompt = `You are a Tabletop RPG lore archivist and entity deduplication arbiter.
+Examine the following candidate entity pairs from imported campaign notes. For each candidate pair, decide whether they refer to the EXACT SAME entity across different document sections, or are DISTINCT entities (such as family members sharing a surname, or different sub-locations), or are REDUNDANT.
+
+Actions:
+- "link": They are the exact same individual or place (e.g., "The Horrigan" and "Frank Horrigan"). Provide preferred "canonicalName". Both passages will be preserved under this one entity.
+- "separate": They are distinct individuals or places (e.g., "Jane Smith" and "John Smith" who are husband and wife). Keep both as separate cards.
+- "merge": Nearly identical redundant text. Combine into one.
+
+Reply ONLY with a JSON array:
+[
+  {
+    "id": "<candidate id>",
+    "action": "link" | "separate" | "merge",
+    "canonicalName": "<Preferred Name>",
+    "reason": "<1-sentence reason>"
+  }
+]`;
+
+            const userPrompt = needsLlmCandidates.map(c =>
+                `ID: ${c.id}\nKind: ${c.kind}\nCandidate A: "${c.nameA}"\nExcerpt A: ${c.excerptA}\nCandidate B: "${c.nameB}"\nExcerpt B: ${c.excerptB}`
+            ).join('\n\n---\n\n');
+
+            const reply = await withTimeout(
+                send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], signal),
+                timeoutMs,
+                signal
+            );
+
+            let s = String(reply || '')
+                .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+                .replace(/<think(?:ing)?>[\s\S]*$/gi, '')
+                .trim();
+            const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+            if (fence) s = fence[1].trim();
+            const start = s.indexOf('[');
+            const end = s.lastIndexOf(']');
+            let verdicts = [];
+            if (start !== -1 && end > start) {
+                try {
+                    const parsed = JSON.parse(s.slice(start, end + 1));
+                    if (Array.isArray(parsed)) verdicts = parsed;
+                } catch (_) {}
+            }
+            const verdictMap = new Map((verdicts || []).map(v => [v.id, v]));
+
+            for (const cand of needsLlmCandidates) {
+                const v = verdictMap.get(cand.id);
+                if (!v) {
+                    auditLog.push({ action: 'separate', nameA: cand.nameA, nameB: cand.nameB, kind: cand.kind, reason: 'No decision returned (kept separate by default)' });
+                    continue;
+                }
+
+                if (v.action === 'link' || v.action === 'merge') {
+                    const canonicalName = v.canonicalName?.trim() || cand.nameA;
+                    const canonicalEntry = (cand.nameA === canonicalName || normalizeEntityName(cand.nameA) === normalizeEntityName(canonicalName))
+                        ? cand.entryA
+                        : cand.entryB;
+                    const absorbedEntry = canonicalEntry === cand.entryA ? cand.entryB : cand.entryA;
+
+                    if (entriesToAbsorb.has(canonicalEntry.id || canonicalEntry.name) || entriesToAbsorb.has(absorbedEntry.id || absorbedEntry.name)) {
+                        continue;
+                    }
+
+                    canonicalEntry.name = canonicalName;
+                    canonicalEntry.comment = `[${canonicalEntry.kind}] ${canonicalName}`;
+                    canonicalEntry.aliases = [...new Set([...(canonicalEntry.aliases || []), ...(absorbedEntry.aliases || []), absorbedEntry.name])].filter(a => a && a.toLowerCase() !== canonicalName.toLowerCase());
+                    canonicalEntry.keys = [...new Set([...(canonicalEntry.keys || []), ...(absorbedEntry.keys || []), absorbedEntry.name, ...(canonicalEntry.aliases || [])])];
+                    canonicalEntry.content = `${canonicalEntry.content.trim()}\n\n---\n[Additional Lore Excerpt]\n${absorbedEntry.content.trim()}`;
+                    canonicalEntry.importance = Math.max(canonicalEntry.importance || 3, absorbedEntry.importance || 3);
+                    entriesToAbsorb.add(absorbedEntry.id || absorbedEntry.name);
+
+                    auditLog.push({
+                        action: v.action,
+                        canonical: canonicalName,
+                        absorbed: absorbedEntry.name,
+                        kind: canonicalEntry.kind,
+                        reason: v.reason || 'Identified as the same entity across excerpts',
+                    });
+                } else {
+                    auditLog.push({
+                        action: 'separate',
+                        nameA: cand.nameA,
+                        nameB: cand.nameB,
+                        kind: cand.kind,
+                        reason: v.reason || 'Distinct entities confirmed by arbiter',
+                    });
+                }
+            }
+        } catch (llmErr) {
+            console.warn('[concierge-canon] Semantic deduplication arbitration failed or timed out:', llmErr);
+            for (const cand of needsLlmCandidates) {
+                auditLog.push({
+                    action: 'separate',
+                    nameA: cand.nameA,
+                    nameB: cand.nameB,
+                    kind: cand.kind,
+                    reason: `Arbitration skipped (${llmErr.message || 'offline'}), safely kept separate`,
+                });
+            }
+        }
+    } else {
+        // Without active LLM, safely default ambiguous candidates to separate
+        for (const cand of needsLlmCandidates) {
+            auditLog.push({
+                action: 'separate',
+                nameA: cand.nameA,
+                nameB: cand.nameB,
+                kind: cand.kind,
+                reason: 'Heuristic candidate flagged; kept separate (no active LLM send provided)',
+            });
+        }
+    }
+
+    // Filter out absorbed entries across _sources
+    if (entriesToAbsorb.size > 0) {
+        for (const rec of _sources.values()) {
+            if (Array.isArray(rec.labeled)) {
+                rec.labeled = rec.labeled.filter(e => !entriesToAbsorb.has(e.id || e.name));
+            }
+        }
+    }
+
+    const finalEntries = entries.filter(e => !entriesToAbsorb.has(e.id || e.name));
+    return { entries: finalEntries, auditLog };
+}
+
 /**
  * Summarise labeled entries for the Stage 2 briefing.
  * @param {Array<{ kind: string, name: string, importance: number }>} entries
@@ -695,6 +993,7 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
 
     const totalTokens = getStagedTokenTotal();
     const bucket = detectCanonBucket(totalTokens);
+    const allNameRagResolutions = [];
 
     if (bucket === 'big') {
         const chunkSourceMap = new Map();
@@ -732,7 +1031,9 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
                 const bridgeUser = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens}\nTone: ${framingBrief.tone || ''}\n\nSynthesize 2 to 4 bridge entries that anchor this focal lens to the campaign setting.`;
                 let bridgeReply = await withTimeout(send([{ role: 'system', content: bridgeSystem }, { role: 'user', content: bridgeUser }], signal), timeoutMs, signal);
                 try {
-                    bridgeReply = await resolveDossierNamePlaceholders(bridgeReply, { meta: framingBrief });
+                    const res = await resolveDossierNamePlaceholders(bridgeReply, { meta: framingBrief }, { returnDetails: true });
+                    bridgeReply = res.text;
+                    if (res.resolutions?.length) allNameRagResolutions.push(...res.resolutions);
                 } catch (nameErr) {
                     console.warn('[concierge-canon] NameRAG resolution error in bridge synthesis:', nameErr);
                 }
@@ -784,7 +1085,9 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
         const userContent = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens || ''}\nTone: ${framingBrief.tone || ''}\nPillars: ${Array.isArray(framingBrief.pillars) ? framingBrief.pillars.join(', ') : (framingBrief.pillars || '')}\n\nImported Notes Summary:\n${extractSourcesStructuralOutline(800)}`;
         let reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
         try {
-            reply = await resolveDossierNamePlaceholders(reply, { meta: framingBrief });
+            const res = await resolveDossierNamePlaceholders(reply, { meta: framingBrief }, { returnDetails: true });
+            reply = res.text;
+            if (res.resolutions?.length) allNameRagResolutions.push(...res.resolutions);
         } catch (nameErr) {
             console.warn('[concierge-canon] NameRAG resolution error in middle expansion:', nameErr);
         }
@@ -800,7 +1103,9 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
         const userContent = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens || ''}\nTone: ${framingBrief.tone || ''}\nPillars: ${Array.isArray(framingBrief.pillars) ? framingBrief.pillars.join(', ') : (framingBrief.pillars || '')}`;
         let reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
         try {
-            reply = await resolveDossierNamePlaceholders(reply, { meta: framingBrief });
+            const res = await resolveDossierNamePlaceholders(reply, { meta: framingBrief }, { returnDetails: true });
+            reply = res.text;
+            if (res.resolutions?.length) allNameRagResolutions.push(...res.resolutions);
         } catch (nameErr) {
             console.warn('[concierge-canon] NameRAG resolution error in foundational sketch:', nameErr);
         }
@@ -815,7 +1120,58 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
         });
     }
 
-    return { bucket, entries: getStagedCanonEntries() };
+    // Deduplication & Entity Consolidation pass
+    const rawStaged = getStagedCanonEntries();
+    const candidatePairs = detectDuplicateCandidates(rawStaged);
+    let dedupAuditLog = [];
+
+    if (candidatePairs.length > 0) {
+        onStatus(`Analyzing ${candidatePairs.length} potential duplicate entity candidate(s)…`);
+        const arbitrated = await arbitrateDuplicateCandidates(candidatePairs, rawStaged, { send, signal, timeoutMs });
+        dedupAuditLog = arbitrated.auditLog;
+    }
+
+    const finalEntries = getStagedCanonEntries();
+    const totalChunkCount = [..._sources.values()].reduce((acc, r) => acc + (r.chunks?.length || 0), 0);
+
+    // Record formal Step 2 transaction for Debug Inspector
+    if (typeof window !== 'undefined') {
+        const linkedCount = dedupAuditLog.filter(d => d.action === 'link' || d.action === 'autoLink').length;
+        const canonTxRecord = {
+            id: 'tx_canon_' + Date.now(),
+            timestamp: new Date().toLocaleTimeString(),
+            stage: 'canon',
+            finalStatus: 'CANON_INGEST',
+            builderSummary: `Series Bible generated: ${finalEntries.length} entries (${bucket.toUpperCase()} mode). Chunks: ${totalChunkCount}, Deduplicated/Linked: ${linkedCount}, NameRAG: ${allNameRagResolutions.length}`,
+            promptInput: `Step 2 Series Bible Ingest: "${framingBrief.title || 'Untitled'}" [${bucket.toUpperCase()} MODE]`,
+            summary: `Series Bible generated: ${finalEntries.length} entries (${bucket.toUpperCase()} mode).`,
+            attempts: [{
+                attempt: 1,
+                rawResponse: JSON.stringify(finalEntries, null, 2),
+                mode: bucket,
+                totalChunks: totalChunkCount,
+                labeledEntries: finalEntries.length,
+                deduplication: dedupAuditLog,
+                nameRagResolutions: allNameRagResolutions,
+                errors: [],
+                report: {
+                    changes: [
+                        `Ingested ${finalEntries.length} entries via ${bucket.toUpperCase()} mode.`,
+                        ...(dedupAuditLog.map(d => d.action === 'separate' ? `Kept separate: ${d.nameA} & ${d.nameB}` : `Linked: ${d.canonical} ← ${d.absorbed} (${d.reason})`)),
+                    ],
+                    errors: [],
+                    hasMutations: true,
+                },
+            }],
+            hasMutations: true,
+            updatedDossier: opts.activeDossier || framingBrief,
+            rawOutput: JSON.stringify(finalEntries, null, 2),
+            nameRagResolutions: allNameRagResolutions,
+        };
+        window._mhcLastBuilderTransaction = canonTxRecord;
+    }
+
+    return { bucket, entries: finalEntries, dedupAuditLog, nameRagResolutions: allNameRagResolutions };
 }
 
 /**

@@ -193,9 +193,32 @@
                             <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
                         </div>
                         <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" title="Switch Session Zero Ruleset Engine between D&D 5e, PbtA, and FAE">
-                            <button type="button" class="mhc-ruleset-btn" data-ruleset="dnd5e">⚔️ D&D Lite (d20)</button>
-                            <button type="button" class="mhc-ruleset-btn active" data-ruleset="pbta">🎲 PbtA (2d6)</button>
-                            <button type="button" class="mhc-ruleset-btn" data-ruleset="fae">🕯️ FAE (4dF)</button>
+                            <div class="mhc-ruleset-grid">
+                                <div class="mhc-ruleset-card" data-ruleset="dnd5e" title="Click to choose D&D Lite engine">
+                                    <div class="mhc-ruleset-card-head">
+                                        <span class="mhc-ruleset-card-title">⚔️ D&amp;D Lite</span>
+                                        <span class="mhc-ruleset-card-dice">d20 Modifier</span>
+                                    </div>
+                                    <div class="mhc-ruleset-card-desc">Classic tactical checks, AC, HP, spell slots &amp; challenge ratings.</div>
+                                    <button type="button" class="mhc-ruleset-btn" data-ruleset="dnd5e">Select D&amp;D Lite</button>
+                                </div>
+                                <div class="mhc-ruleset-card" data-ruleset="pbta" title="Click to choose PbtA engine">
+                                    <div class="mhc-ruleset-card-head">
+                                        <span class="mhc-ruleset-card-title">🎲 PbtA</span>
+                                        <span class="mhc-ruleset-card-dice">2d6 Narrative</span>
+                                    </div>
+                                    <div class="mhc-ruleset-card-desc">Fiction-first story moves, partial successes (7–9) &amp; secret rolls.</div>
+                                    <button type="button" class="mhc-ruleset-btn" data-ruleset="pbta">Select PbtA</button>
+                                </div>
+                                <div class="mhc-ruleset-card" data-ruleset="fae" title="Click to choose FAE engine">
+                                    <div class="mhc-ruleset-card-head">
+                                        <span class="mhc-ruleset-card-title">🕯️ FAE</span>
+                                        <span class="mhc-ruleset-card-dice">4dF Fate Fudge</span>
+                                    </div>
+                                    <div class="mhc-ruleset-card-desc">Cinematic play using 6 Approaches (Sneaky, Clever, etc.) &amp; stress tracks.</div>
+                                    <button type="button" class="mhc-ruleset-btn" data-ruleset="fae">Select FAE</button>
+                                </div>
+                            </div>
                         </div>
                         <div id="mhc_adventure_ruleset_gate_hint" class="mhc-gate-hint-banner" style="display: none; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; padding: 6px 10px; border-radius: 6px; font-size: 0.82em; margin-bottom: 6px;">
                             👆 Choose a ruleset engine above to unlock the Episode 1 Adventure builder &amp; chat.

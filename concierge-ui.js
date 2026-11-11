@@ -974,44 +974,43 @@ export function updateBlueprintDeck() {
     } else {
         $('#mhc_concierge_modal_title').text('Session Zero Concierge');
     }
-    $('#mhc_deck_engine_title').text(`${adapter.badgeIcon} ${titlePrefix} Engine`);
+    const isStep3Unconfirmed = currentNavMode === 'new-adventure' && currentAdventureStep === 'adventure' && !activeDossier?.meta?.rulesetConfirmed;
+    if (isStep3Unconfirmed) {
+        $('#mhc_deck_engine_title').text('⚙️ Choose Ruleset Engine');
+        $('#mhc_deck_system_tag').text('REQUIRED FOR EPISODE 1').addClass('mhc-tag-required');
+    } else {
+        $('#mhc_deck_engine_title').text(`${adapter.badgeIcon} ${titlePrefix} Engine`);
+        $('#mhc_deck_system_tag').removeClass('mhc-tag-required');
+    }
 
     const toggleContainer = $('#mhc_header_ruleset_toggle');
     if (toggleContainer.length && typeof toggleContainer.find === 'function') {
-        let existingBtns = toggleContainer.find('.mhc-ruleset-btn');
-        const registeredList = systemRegistry.list();
-        if (existingBtns && typeof existingBtns.each === 'function') {
-            if (existingBtns.length !== registeredList.length && typeof toggleContainer.empty === 'function') {
-                toggleContainer.empty();
-                for (const ad of registeredList) {
-                    if (typeof globalThis.$ === 'function') {
-                        const btn = $('<button type="button" class="mhc-ruleset-btn"></button>')
-                            .attr('data-ruleset', ad.id)
-                            .css({ border: 'none', 'font-size': '0.78em', 'font-weight': '600', padding: '4px 10px', 'border-radius': '4px', cursor: 'pointer' })
-                            .text(`${ad.badgeIcon} ${ad.id.toUpperCase()} (${ad.diceEngine.split(' ')[0]})`);
-                        if (typeof toggleContainer.append === 'function') toggleContainer.append(btn);
+        const rulesetCards = toggleContainer.find('.mhc-ruleset-card');
+        if (rulesetCards.length && typeof rulesetCards.each === 'function') {
+            rulesetCards.each(function () {
+                const cardRuleset = $(this).attr('data-ruleset');
+                const isActive = !isStep3Unconfirmed && (cardRuleset === adapter.id);
+                if (typeof $(this).toggleClass === 'function') $(this).toggleClass('active', isActive);
+                const btn = $(this).find('.mhc-ruleset-btn');
+                if (btn.length) {
+                    if (isActive) {
+                        btn.text('✓ Active Engine').addClass('active');
+                    } else if (isStep3Unconfirmed) {
+                        const name = cardRuleset === 'dnd5e' ? 'D&D Lite' : cardRuleset === 'fae' ? 'FAE' : 'PbtA';
+                        btn.text(`Select ${name}`).removeClass('active');
+                    } else {
+                        const name = cardRuleset === 'dnd5e' ? 'D&D' : cardRuleset === 'fae' ? 'FAE' : 'PbtA';
+                        btn.text(`Switch to ${name}`).removeClass('active');
                     }
                 }
-                existingBtns = toggleContainer.find('.mhc-ruleset-btn');
-            }
+            });
+        } else {
+            let existingBtns = toggleContainer.find('.mhc-ruleset-btn');
             if (existingBtns && typeof existingBtns.each === 'function') {
                 existingBtns.each(function () {
                     const btnRuleset = $(this).attr('data-ruleset');
-                    const active = btnRuleset === adapter.id;
+                    const active = isStep3Unconfirmed ? false : (btnRuleset === adapter.id);
                     if (typeof $(this).toggleClass === 'function') $(this).toggleClass('active', active);
-                    if (typeof $(this).css === 'function') {
-                        if (active) {
-                            let activeStyle = { background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' };
-                            if (adapter.id === 'fae') {
-                                activeStyle = { background: 'rgba(245, 158, 11, 0.35)', color: '#fde68a' };
-                            } else if (adapter.id === 'dnd5e') {
-                                activeStyle = { background: 'rgba(217, 119, 6, 0.35)', color: '#fbbf24' };
-                            }
-                            $(this).css(activeStyle);
-                        } else {
-                            $(this).css({ background: 'transparent', color: '#9ca3af' });
-                        }
-                    }
                 });
             }
         }
@@ -1603,7 +1602,7 @@ export function updateBlueprintDeck() {
                 $('#mhc_adventure_ruleset_gate_hint').hide();
                 $('.mhc-chat-column').show();
             } else {
-                $('#mhc_adventure_ruleset_gate_hint').show();
+                $('#mhc_adventure_ruleset_gate_hint').hide();
                 $('#mhc_dial_harm_btn').hide();
                 $('#mhc_dial_downed_btn').hide();
                 $('#mhc_dial_heroic_btn').hide();
@@ -3670,34 +3669,44 @@ export function bindModalEvents() {
         toastr?.info(`Removed source "${name}".`);
     });
 
-    // Ruleset Switch segmented buttons
-    $('#mhc_concierge_modal').on('click', '.mhc-ruleset-btn', async function (e) {
+    // Ruleset Switch segmented buttons & interactive cards
+    $('#mhc_concierge_modal').on('click', '.mhc-ruleset-card, .mhc-ruleset-btn', async function (e) {
         e.stopPropagation();
-        const targetRuleset = $(this).attr('data-ruleset');
+        const targetRuleset = $(this).attr('data-ruleset') || $(this).closest('[data-ruleset]').attr('data-ruleset');
         if (!targetRuleset || !systemRegistry.has(targetRuleset)) return;
 
         if (currentNavMode === 'new-adventure' && currentAdventureStep === 'adventure') {
             const rulesetConfirmed = Boolean(activeDossier?.meta?.rulesetConfirmed);
             if (!rulesetConfirmed) {
-                // Case A: First selection in Step 3
-                activeDossier.meta.ruleset = targetRuleset;
-                activeDossier.meta.rulesetConfirmed = true;
-                const adapter = systemRegistry.get(targetRuleset);
-                const defaultGenre = adapter.getDefaultGenre();
-                activeDossier.meta.systemKey = defaultGenre;
-                activeDossier.meta.systemLabel = adapter.getGenre(defaultGenre)?.label || defaultGenre;
+                try {
+                    // Case A: First selection in Step 3
+                    activeDossier.meta.ruleset = targetRuleset;
+                    activeDossier.meta.rulesetConfirmed = true;
+                    const adapter = systemRegistry.get(targetRuleset);
+                    const defaultGenre = adapter.getDefaultGenre();
+                    activeDossier.meta.systemKey = defaultGenre;
+                    activeDossier.meta.systemLabel = adapter.getGenre(defaultGenre)?.label || defaultGenre;
 
-                // Re-initialize ruleset-specific protagonist defaults
-                adapter.initializeProtagonist(activeDossier.protagonist, activeDossier);
+                    // Re-initialize ruleset-specific protagonist defaults safely
+                    const emptyProto = adapter.createEmptyProtagonist(defaultGenre);
+                    activeDossier.protagonist = Object.assign(emptyProto, {
+                        name: activeDossier.protagonist?.name || '',
+                        concept: activeDossier.protagonist?.concept || '',
+                        backstory: activeDossier.protagonist?.backstory || '',
+                    });
 
-                updateBlueprintDeck();
-                evaluateStepUnlocks();
-                saveDraft();
+                    updateBlueprintDeck();
+                    evaluateStepUnlocks();
+                    saveDraft();
 
-                // Reveal chat column and run initial Stage 3 pass
-                $('.mhc-chat-column').show();
-                stageChatHistories.adventure = [];
-                await runStageAutoPass('adventure', 'Please draft our Episode 1 starting crisis, locations, adversaries, and supporting NPCs from our Canon for this ruleset.');
+                    // Reveal chat column and run initial Stage 3 pass
+                    $('.mhc-chat-column').show();
+                    stageChatHistories.adventure = [];
+                    await runStageAutoPass('adventure', 'Please draft our Episode 1 starting crisis, locations, adversaries, and supporting NPCs from our Canon for this ruleset.');
+                } catch (err) {
+                    console.error('[MultiHog Companion] Ruleset confirmation error:', err);
+                    toastr?.error(`Failed to initialize ruleset: ${err.message}`);
+                }
                 return;
             } else if (activeDossier.meta?.ruleset !== targetRuleset) {
                 // Case B: Switching rulesets after selection

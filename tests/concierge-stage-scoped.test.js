@@ -16,6 +16,10 @@ import {
     buildStage4CharacterBuilderPrompt,
     buildStage4CharacterTalkerPrompt,
 } from '../concierge-prompt.js';
+import { systemRegistry } from '../concierge-system-registry.js';
+import '../concierge-system-pbta.js';
+import '../concierge-system-dnd5e.js';
+import '../concierge-system-fae.js';
 
 console.log('--- Running Concierge Stage-Scoped Prompts & Directives Test Suite ---');
 
@@ -256,5 +260,36 @@ assert.ok(s4TalkerPrompt.includes('Progression Codex'));
 assert.ok(s4TalkerPrompt.includes('🚀 Finalize & Launch Campaign'));
 assert.ok(s4TalkerPrompt.includes('🗺️ Adventure'));
 assert.ok(s4TalkerPrompt.includes('📚 Canon'));
+
+console.log('13. Testing Ruleset Engine Confirmation & Protagonist Initialization...');
+for (const rulesetId of ['dnd5e', 'pbta', 'fae']) {
+    const adapter = systemRegistry.get(rulesetId);
+    assert.ok(adapter, `Adapter ${rulesetId} must be registered`);
+    const defaultGenre = adapter.getDefaultGenre();
+    assert.ok(defaultGenre, `Adapter ${rulesetId} must have default genre`);
+    const emptyProto = adapter.createEmptyProtagonist(defaultGenre);
+    assert.ok(emptyProto, `Adapter ${rulesetId} must create empty protagonist`);
+
+    // Simulate active dossier protagonist retention
+    const activeDossier = createEmptyDossier('pbta');
+    activeDossier.protagonist.name = 'Commander Shepard';
+    activeDossier.protagonist.concept = 'Vanguard N7';
+    activeDossier.protagonist.backstory = 'Survivor of Akuze';
+
+    activeDossier.meta.ruleset = rulesetId;
+    activeDossier.meta.rulesetConfirmed = true;
+
+    activeDossier.protagonist = Object.assign(emptyProto, {
+        name: activeDossier.protagonist?.name || '',
+        concept: activeDossier.protagonist?.concept || '',
+        backstory: activeDossier.protagonist?.backstory || '',
+    });
+
+    assert.strictEqual(activeDossier.protagonist.name, 'Commander Shepard');
+    assert.strictEqual(activeDossier.protagonist.concept, 'Vanguard N7');
+    assert.strictEqual(activeDossier.protagonist.backstory, 'Survivor of Akuze');
+    assert.strictEqual(activeDossier.meta.rulesetConfirmed, true);
+    assert.strictEqual(activeDossier.meta.ruleset, rulesetId);
+}
 
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

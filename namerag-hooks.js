@@ -219,7 +219,7 @@ export function extractContextForPlaceholder(rawText, token) {
     const isCompanionToken = /\[\[NAME:\s*companion\s*\]\]/i.test(token);
 
     // Find the enclosing block containing this token
-    const blockRegex = /\[(PROTAGONIST|NPC|MONSTER)(?::\s*[^\]]+)?\]([\s\S]*?)(?:\[\/\1\]|$)/gi;
+    const blockRegex = /\[(PROTAGONIST|NPC|MONSTER|CANON_ENTRY|UPSERT_CANON_ENTRY)(?::\s*[^\]]+)?\]([\s\S]*?)(?:\[\/\1\]|$)/gi;
     let bMatch;
     while ((bMatch = blockRegex.exec(rawText)) !== null) {
         let blockType = bMatch[1].toUpperCase();
@@ -293,6 +293,38 @@ export function extractContextForPlaceholder(rawText, token) {
                 };
             }
 
+            // Canon Series Bible entry placeholder context extraction
+            if (blockType === 'CANON_ENTRY' || blockType === 'UPSERT_CANON_ENTRY') {
+                const kindMatch = blockContent.match(/^\s*kind\s*:\s*([^\n\r]+)/mi);
+                const canonKind = kindMatch ? kindMatch[1].trim().toUpperCase() : 'CANON';
+                let explicitGender = undefined;
+                const gMatch = blockContent.match(/^\s*gender\s*:\s*([^\n\r]+)/mi);
+                if (gMatch && gMatch[1]) {
+                    explicitGender = normalizeGenderFilter(gMatch[1].trim());
+                } else {
+                    explicitGender = detectGenderFromText(blockContent);
+                }
+
+                const contentMatch = blockContent.match(/^\s*content\s*:\s*([^\n\r]+(?:\n(?!\s*(?:kind|name|importance|aliases|disabled)\s*:)[^\n\r]+)*)/mi);
+                let contextSummary = '';
+                if (contentMatch && contentMatch[1]) {
+                    contextSummary = contentMatch[1].replace(token, '').trim();
+                } else {
+                    const lines = blockContent.split(/\r?\n/)
+                        .map(l => l.trim())
+                        .filter(l => l && !/^(kind|importance|aliases|disabled|gender):/i.test(l))
+                        .map(l => l.replace(token, '').trim())
+                        .filter(Boolean);
+                    contextSummary = lines.slice(0, 8).join(' ');
+                }
+
+                return {
+                    blockType: canonKind === 'NPC' ? 'NPC' : (canonKind === 'FACTION' ? 'FACTION' : 'CANON_ENTRY'),
+                    contextSummary,
+                    gender: explicitGender,
+                };
+            }
+
             // Normal entity placeholder context extraction
             let explicitGender = undefined;
             const gMatch = blockContent.match(/^\s*gender\s*:\s*([^\n\r]+)/mi);
@@ -321,6 +353,35 @@ export function extractContextForPlaceholder(rawText, token) {
                 contextSummary: lines.slice(0, 8).join(' '),
                 gender: explicitGender,
             };
+        }
+    }
+
+    // Check if token is inside a JSON object (e.g. from buildCanonFromFraming or raw JSON array)
+    const tokenIdx = rawText.indexOf(token);
+    if (tokenIdx !== -1) {
+        const preSlice = rawText.slice(Math.max(0, tokenIdx - 2000), tokenIdx);
+        const postSlice = rawText.slice(tokenIdx, Math.min(rawText.length, tokenIdx + 2000));
+        const lastBrace = preSlice.lastIndexOf('{');
+        const nextBrace = postSlice.indexOf('}');
+        if (lastBrace !== -1 && nextBrace !== -1) {
+            const jsonCandidate = preSlice.slice(lastBrace) + postSlice.slice(0, nextBrace + 1);
+            const kindMatch = jsonCandidate.match(/"kind"\s*:\s*"([^"]+)"/i);
+            const contentMatch = jsonCandidate.match(/"content"\s*:\s*"([^"]+)"/i);
+            const genderMatch = jsonCandidate.match(/"gender"\s*:\s*"([^"]+)"/i);
+
+            if (kindMatch || contentMatch) {
+                const canonKind = kindMatch ? kindMatch[1].trim().toUpperCase() : 'CANON';
+                let gender = genderMatch ? normalizeGenderFilter(genderMatch[1]) : undefined;
+                const contextSummary = contentMatch ? contentMatch[1].replace(token, '').trim() : '';
+                if (!gender && contextSummary) {
+                    gender = detectGenderFromText(contextSummary);
+                }
+                return {
+                    blockType: canonKind === 'NPC' ? 'NPC' : (canonKind === 'FACTION' ? 'FACTION' : 'CANON_ENTRY'),
+                    contextSummary,
+                    gender,
+                };
+            }
         }
     }
 
@@ -390,6 +451,16 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
         }
     } else if (genre === 'fantasy' && /ruleset\s*:\s*fae/i.test(rawBuilderOutput)) {
         genre = activeDossier?.meta?.systemKey || 'fae';
+    }
+
+    if (genre === 'fantasy') {
+        const toneOrPremise = `${activeDossier?.meta?.tone || activeDossier?.tone || ''} ${activeDossier?.meta?.premise || activeDossier?.premise || ''} ${rawBuilderOutput}`.toLowerCase();
+        for (const [key, val] of Object.entries(GENRE_QUERY_MAP)) {
+            if (key !== 'fantasy' && toneOrPremise.includes(key.replace(/_/g, ' '))) {
+                genre = key;
+                break;
+            }
+        }
     }
 
     // Check NameRAG availability

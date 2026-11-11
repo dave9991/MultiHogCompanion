@@ -692,7 +692,15 @@ async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBon
         { role: 'system', name: 'System', content: builderSys },
         { role: 'user', name: 'Player', content: upstreamDiff ? `[UPSTREAM_DIFF]:\n${upstreamDiff}\nPlease harmonize this stage with upstream updates.` : 'Please harmonize this stage with upstream updates.' },
     ];
-    const builderRaw = await sendConciergeRequest(builderMsgs);
+    let builderRaw = await sendConciergeRequest(builderMsgs);
+    if (extension_settings?.multihog_companion?.enableNameRag !== false) {
+        try {
+            const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true });
+            builderRaw = resolved.text;
+        } catch (resErr) {
+            console.warn('[MultiHog Companion] Placeholder name resolution error in harmonization:', resErr);
+        }
+    }
     const builderReport = applyDossierUpdates(builderRaw, activeDossier);
 
     if (stage === 'canon' && builderReport?.canonMutations?.length > 0) {
@@ -1534,7 +1542,7 @@ export function updateBlueprintDeck() {
                             <span class="mhc-deck-item-toggle">▼</span>
                         </div>
                         <div class="mhc-deck-item-detail">
-                            <div style="font-size: 0.82em; opacity: 0.85; white-space: pre-wrap; line-height: 1.35;">${escapeHtml(entry.content || '')}</div>
+                            <div class="mhc-canon-entry-content">${escapeHtml(entry.content || '')}</div>
                         </div>
                     </div>
                 `);

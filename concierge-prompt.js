@@ -1487,6 +1487,7 @@ You emit an [UPDATE_DOSSIER] block containing ONLY:
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
 * 🚫 **NEVER output Episode 1 stat blocks here:** NEVER emit [MONSTER], [MAP], [KICK], or [PROTAGONIST] cards in Step 2. Those belong in Step 3 (\`🗺️ Adventure\`) and Step 4 (\`👤 Character\`).
+* 🏷️ **Name Diversity & Targeted Placeholders:** For named NPCs, faction leaders, or distinct characters, NEVER invent generic placeholder names (e.g., "Dr. Thorne", "Commander Vance"). Instead, emit 'name' using a targeted placeholder tag: \`name: [[NAME: evocative role or concept]]\` (e.g., \`[[NAME: grizzled wasteland doctor]]\`, \`[[NAME: nomadic raider matriarch]]\`). NameRAG will automatically inject authentic, culturally resonant names.
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Canon & World Rule updates>
 * If no updates were requested:
@@ -1501,7 +1502,7 @@ summary: Added House Baratheon faction and ironwood ecology axiom
 
 [CANON_ENTRY]
 kind: FACTION | LOCATION | NPC | RULE | EVENT | LORE
-name: Name of Entity or Fact
+name: Name of Entity or Fact (or [[NAME: evocative role or concept]])
 importance: 1-5 (default 4)
 aliases: alias 1, alias 2
 disabled: false
@@ -1741,6 +1742,7 @@ Your ONLY job is to assemble or update the Episode 1 starting stage set:
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Adventure changes>
 * Ground every adversary, location, and NPC in the established active Canon entries.
+* 🏷️ **Name Diversity & Targeted Placeholders:** For newly introduced NPCs, adversaries, or distinct characters in Episode 1, emit targeted placeholders: \`name: [[NAME: evocative role or concept]]\` (e.g. \`[NPC] name: [[NAME: eccentric scrap merchant]]\`). NameRAG will resolve authentic names automatically. Do NOT invent generic cliché names.
 
 ${rulesetDirectives}${canonSection}${diffSection}${bonesSection}`;
 }
@@ -1861,6 +1863,7 @@ Your ONLY job is to assemble or update the Protagonist character sheet and optio
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
 * 🚫 **FORBIDDEN IN STEP 4:** Focus strictly on [PROTAGONIST] (and optional [CUSTOM_MODULE]). Do NOT re-emit or alter [MAP], [MONSTER], or [KICK] blocks here.
 * Ground the protagonist's bonds, gear, and motivations in the established Canon and Episode 1 Adventure.
+* 🏷️ **Name Diversity & Targeted Placeholders:** If the player did not specify an exact character name, emit \`name: [[NAME: evocative role or concept]]\` (e.g. \`name: [[NAME: cybernetic street samurai]]\`). NEVER invent cliché placeholder names.
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Protagonist updates>
 

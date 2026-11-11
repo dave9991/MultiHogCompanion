@@ -11,6 +11,8 @@
  * Pure helpers are exported for unit testing; network/LLM access is injected.
  */
 
+import { resolveDossierNamePlaceholders } from './namerag-hooks.js';
+
 export const ARCHIVIST_TOKEN_THRESHOLD = 6000;
 export const MIDDLE_IMPORT_TOKEN_THRESHOLD = 300;
 export const CHUNK_TOKEN_TARGET = 600;
@@ -726,9 +728,14 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
         if (opts.synthesizeBridge !== false && framingBrief.focalLens?.trim()) {
             try {
                 onStatus('Synthesizing focal bridge Canon entries…');
-                const bridgeSystem = `You are a tabletop RPG lore archivist. The user provided imported campaign lore notes, but needs 2-4 focal bridge Canon entries connecting the broad lore to the campaign focal lens: "${framingBrief.focalLens.trim()}". Return ONLY a JSON array of 2-4 entries: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of specific local canon connecting to the focal lens"}]`;
+                const bridgeSystem = `You are a tabletop RPG lore archivist. The user provided imported campaign lore notes, but needs 2-4 focal bridge Canon entries connecting the broad lore to the campaign focal lens: "${framingBrief.focalLens.trim()}". Return ONLY a JSON array of 2-4 entries: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of specific local canon connecting to the focal lens"}]\n\nIMPORTANT FOR NAMES: For named NPCs, characters, or faction leaders, emit "name" as a targeted placeholder: "name": "[[NAME: evocative role or concept]]" (e.g. "[[NAME: grizzled wasteland doctor]]", "[[NAME: nomadic raider matriarch]]"). Do NOT invent generic trope names; NameRAG will inject targeted authentic names.`;
                 const bridgeUser = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens}\nTone: ${framingBrief.tone || ''}\n\nSynthesize 2 to 4 bridge entries that anchor this focal lens to the campaign setting.`;
-                const bridgeReply = await withTimeout(send([{ role: 'system', content: bridgeSystem }, { role: 'user', content: bridgeUser }], signal), timeoutMs, signal);
+                let bridgeReply = await withTimeout(send([{ role: 'system', content: bridgeSystem }, { role: 'user', content: bridgeUser }], signal), timeoutMs, signal);
+                try {
+                    bridgeReply = await resolveDossierNamePlaceholders(bridgeReply, { meta: framingBrief });
+                } catch (nameErr) {
+                    console.warn('[concierge-canon] NameRAG resolution error in bridge synthesis:', nameErr);
+                }
                 const bridgeEntries = parseSynthesizedCanonEntries(bridgeReply);
                 if (bridgeEntries.length) {
                     let synthRec = _sources.get('__synthesized_canon__');
@@ -773,9 +780,14 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
         }
 
         onStatus('Expanding background canon from framing Q&A…');
-        const systemPrompt = `You expand tabletop RPG campaign lore. Given the user's framing notes and imported notes, generate 5-8 expanded background Canon entries that fill in the missing world context around the imported notes and campaign framing. Reply with ONLY a JSON array: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of rich campaign canon"}]`;
+        const systemPrompt = `You expand tabletop RPG campaign lore. Given the user's framing notes and imported notes, generate 5-8 expanded background Canon entries that fill in the missing world context around the imported notes and campaign framing. Reply with ONLY a JSON array: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of rich campaign canon"}]\n\nIMPORTANT FOR NAMES: For named NPCs, characters, or faction leaders, emit "name" as a targeted placeholder: "name": "[[NAME: evocative role or concept]]" (e.g. "[[NAME: grizzled wasteland doctor]]", "[[NAME: nomadic raider matriarch]]"). Do NOT invent generic trope names; NameRAG will inject targeted authentic names.`;
         const userContent = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens || ''}\nTone: ${framingBrief.tone || ''}\nPillars: ${Array.isArray(framingBrief.pillars) ? framingBrief.pillars.join(', ') : (framingBrief.pillars || '')}\n\nImported Notes Summary:\n${extractSourcesStructuralOutline(800)}`;
-        const reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
+        let reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
+        try {
+            reply = await resolveDossierNamePlaceholders(reply, { meta: framingBrief });
+        } catch (nameErr) {
+            console.warn('[concierge-canon] NameRAG resolution error in middle expansion:', nameErr);
+        }
         const synthEntries = parseSynthesizedCanonEntries(reply);
         _sources.set('__synthesized_canon__', {
             source: { name: '__synthesized_canon__', type: 'doc' },
@@ -784,9 +796,14 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
         });
     } else {
         onStatus('Synthesizing foundational Canon Sketch…');
-        const systemPrompt = `You are a tabletop RPG world builder. Based on the campaign framing, generate 8-12 foundational Canon Sketch entries covering factions, locations, notable NPCs, world rules, historical events, and general lore. Reply with ONLY a JSON array: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of rich campaign canon"}]`;
+        const systemPrompt = `You are a tabletop RPG world builder. Based on the campaign framing, generate 8-12 foundational Canon Sketch entries covering factions, locations, notable NPCs, world rules, historical events, and general lore. Reply with ONLY a JSON array: [{"kind":"FACTION|LOCATION|NPC|RULE|EVENT|LORE","name":"...","aliases":["..."],"importance":4,"content":"2-4 sentences of rich campaign canon"}]\n\nIMPORTANT FOR NAMES: For named NPCs, characters, or faction leaders, emit "name" as a targeted placeholder: "name": "[[NAME: evocative role or concept]]" (e.g. "[[NAME: grizzled wasteland doctor]]", "[[NAME: nomadic raider matriarch]]"). Do NOT invent generic trope names; NameRAG will inject targeted authentic names.`;
         const userContent = `Campaign Title: ${framingBrief.title || 'Untitled'}\nPremise: ${framingBrief.premise || ''}\nFocal Lens: ${framingBrief.focalLens || ''}\nTone: ${framingBrief.tone || ''}\nPillars: ${Array.isArray(framingBrief.pillars) ? framingBrief.pillars.join(', ') : (framingBrief.pillars || '')}`;
-        const reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
+        let reply = await withTimeout(send([{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }], signal), timeoutMs, signal);
+        try {
+            reply = await resolveDossierNamePlaceholders(reply, { meta: framingBrief });
+        } catch (nameErr) {
+            console.warn('[concierge-canon] NameRAG resolution error in foundational sketch:', nameErr);
+        }
         const synthEntries = parseSynthesizedCanonEntries(reply);
         if (!synthEntries.length) {
             throw new Error('Canon synthesis returned invalid or empty JSON.');

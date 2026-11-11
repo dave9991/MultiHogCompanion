@@ -935,12 +935,20 @@
 
 .mhc-deck-item-detail {
     display: none;
-    padding: 6px 8px 8px 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    font-size: 0.9em;
-    line-height: 1.45;
-    background: rgba(0, 0, 0, 0.25);
-    color: #e5e7eb;
+    padding: 8px 10px 10px 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.35);
+    color: #e2e8f0;
+}
+
+.mhc-canon-entry-content {
+    font-size: 0.94em;
+    line-height: 1.55;
+    color: #e2e8f0;
+    letter-spacing: 0.01em;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .mhc-empty-hint {

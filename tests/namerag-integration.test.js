@@ -429,4 +429,59 @@ assert.ok(protoApiCall, 'NameRAG search_names must be called with gender: "M" fo
 
 console.log('✓ Companion dual-representation tokens, explicit Builder gender, and NameRAG arguments verified end-to-end');
 
+// 12. Test Canon Series Bible [CANON_ENTRY] card and JSON array context extraction & resolution
+console.log('Testing Canon Series Bible placeholder context extraction and resolution...');
+const canonEntryBlock = `[UPDATE_DOSSIER]
+[CANON_ENTRY]
+kind: NPC
+name: [[NAME: grizzled wasteland doctor]]
+importance: 4
+aliases: Doc, The Healer
+disabled: false
+content: A veteran field medic who survived the Great Fire and now runs a triage outpost in the Rust Wastes. She tends to irradiated nomads.
+[/CANON_ENTRY]
+[/UPDATE_DOSSIER]`;
+
+const canonCtx = extractContextForPlaceholder(canonEntryBlock, '[[NAME: grizzled wasteland doctor]]');
+assert.strictEqual(canonCtx.blockType, 'NPC', 'Block type for kind: NPC canon entry must resolve to NPC');
+assert.ok(canonCtx.contextSummary.includes('veteran field medic'), 'Context summary must include canon content');
+assert.strictEqual(canonCtx.gender, 'F', 'Gender must be detected as F from "She tends to irradiated nomads"');
+
+const rawJsonCanon = JSON.stringify([
+    {
+        kind: 'NPC',
+        name: '[[NAME: nomadic raider matriarch]]',
+        aliases: ['Iron Queen'],
+        importance: 4,
+        content: 'Fierce warlord who leads the Rust Riders across the ash wastes. She commands with an iron fist.',
+    },
+    {
+        kind: 'LOCATION',
+        name: 'The Obsidian Spires',
+        aliases: ['The Needle Peaks'],
+        importance: 4,
+        content: 'Towering crystalline structures that pierce the toxic clouds.',
+    },
+]);
+
+const jsonCtx = extractContextForPlaceholder(rawJsonCanon, '[[NAME: nomadic raider matriarch]]');
+assert.strictEqual(jsonCtx.blockType, 'NPC', 'JSON block type for kind: NPC must resolve to NPC');
+assert.ok(jsonCtx.contextSummary.includes('Fierce warlord'), 'JSON context summary must include content');
+assert.strictEqual(jsonCtx.gender, 'F', 'JSON gender must be detected as F from "She commands"');
+
+const resolvedJsonOutput = await resolveDossierNamePlaceholders(rawJsonCanon, {
+    meta: {
+        title: 'Ashen Horizons',
+        tone: 'post-apocalyptic wasteland',
+        premise: 'Survival in the irradiated desert',
+    },
+});
+
+assert.ok(!resolvedJsonOutput.includes('[[NAME:'), 'All JSON placeholder tokens must be resolved');
+assert.ok(resolvedJsonOutput.includes('The Obsidian Spires'), 'Non-placeholder JSON fields must remain intact');
+const parsedJson = JSON.parse(resolvedJsonOutput);
+assert.strictEqual(parsedJson.length, 2);
+assert.ok(parsedJson[0].name && !parsedJson[0].name.includes('[[NAME:'), 'Resolved name must be valid');
+console.log('✓ Series Bible Canon cards and JSON array placeholders extracted and resolved cleanly');
+
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

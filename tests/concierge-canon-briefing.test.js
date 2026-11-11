@@ -89,6 +89,9 @@ assert.ok(styleCss.includes('.mhc-canon-filter-bar'), 'style.css must have .mhc-
 assert.ok(styleCss.includes('.mhc-canon-filter-pill'), 'style.css must have .mhc-canon-filter-pill');
 assert.ok(styleCss.includes('.mhc-canon-group-header'), 'style.css must have .mhc-canon-group-header');
 assert.ok(styleCss.includes('flex-shrink: 0;'), 'style.css must have flex-shrink: 0;');
+assert.ok(styleCss.includes('.mhc-canon-entry-content'), 'style.css must have .mhc-canon-entry-content');
+assert.ok(styleCss.includes('line-height: 1.55;'), 'style.css must define comfortable line-height');
+assert.ok(styleCss.includes('word-break: break-word;'), 'style.css must enforce word-break');
 
 // 3. UI State Synchronization Mock Test
 const mockDomState = {

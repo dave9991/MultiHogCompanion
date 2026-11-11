@@ -74,6 +74,7 @@ globalThis.$ = (selector) => {
         on() { return this; },
         empty() { return this; },
         val() { return ''; },
+        prop() { return this; },
         fadeIn() { return this; },
         fadeOut() { return this; },
         css() { return this; },

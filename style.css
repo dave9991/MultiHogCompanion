@@ -624,6 +624,11 @@
 .mhc-send-btn:hover {
     filter: brightness(1.15);
 }
+.mhc-send-btn:disabled {
+    opacity: 0.45 !important;
+    cursor: not-allowed !important;
+    filter: grayscale(0.5) !important;
+}
 
 .mhc-import-commit-box {
     display: flex;

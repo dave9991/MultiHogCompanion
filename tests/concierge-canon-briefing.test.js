@@ -65,8 +65,9 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 
 // 1. Template Verification
 const modalHtml = fs.readFileSync(path.join(ROOT_DIR, 'concierge-modal.html'), 'utf8');
-assert.ok(modalHtml.includes('id="mhc_import_world_lore_btn"'), 'Modal must have #mhc_import_world_lore_btn');
-assert.ok(modalHtml.includes('id="mhc_import_lore_file_input"'), 'Modal must have #mhc_import_lore_file_input');
+assert.ok(modalHtml.includes('id="mhc_attach_btn"'), 'Modal must have #mhc_attach_btn');
+assert.ok(modalHtml.includes('id="mhc_file_input"'), 'Modal must have #mhc_file_input');
+assert.ok(modalHtml.includes('id="mhc_send_btn"'), 'Modal must have #mhc_send_btn');
 assert.ok(modalHtml.includes('id="mhc_import_commit_box"'), 'Modal must have #mhc_import_commit_box');
 assert.ok(modalHtml.includes('id="mhc_import_commit_icon"'), 'Modal must have #mhc_import_commit_icon');
 assert.ok(modalHtml.includes('id="mhc_import_commit_status_text"'), 'Modal must have #mhc_import_commit_status_text');
@@ -81,7 +82,7 @@ assert.ok(styleCss.includes('.mhc-import-commit-box'), 'style.css must have .mhc
 assert.ok(styleCss.includes('.mhc-import-commit-status-row'), 'style.css must have .mhc-import-commit-status-row');
 assert.ok(styleCss.includes('.mhc-import-commit-actions'), 'style.css must have .mhc-import-commit-actions');
 assert.ok(styleCss.includes('.mhc-commit-btn'), 'style.css must have .mhc-commit-btn');
-assert.ok(styleCss.includes('.mhc-upgrade-archivist-btn'), 'style.css must have .mhc-upgrade-archivist-btn');
+assert.ok(styleCss.includes('.mhc-send-btn:disabled'), 'style.css must have .mhc-send-btn:disabled');
 
 // 3. UI State Synchronization Mock Test
 const mockDomState = {
@@ -92,10 +93,15 @@ const mockDomState = {
     cancelBtnVisible: false,
     vibeBtnVisible: false,
     statusText: '',
+    sendBtnDisabled: true,
+    sendBtnText: '',
+    sendBtnTitle: '',
+    chatInputText: '',
 };
 
 globalThis.$ = (selector) => {
     return {
+        length: 1,
         show() {
             if (selector === '.mhc-chat-input-row') mockDomState.inputRowVisible = true;
             if (selector === '#mhc_import_commit_box') mockDomState.commitBoxVisible = true;
@@ -114,24 +120,54 @@ globalThis.$ = (selector) => {
             if (selector === '#mhc_import_commit_btn' && propName === 'disabled') {
                 mockDomState.commitBtnDisabled = val;
             }
+            if (selector === '#mhc_send_btn' && propName === 'disabled') {
+                mockDomState.sendBtnDisabled = val;
+            }
+            return this;
+        },
+        attr(attrName, val) {
+            if (selector === '#mhc_send_btn' && attrName === 'title') {
+                mockDomState.sendBtnTitle = val;
+            }
             return this;
         },
         text(t) {
             if (t !== undefined) {
                 if (selector === '#mhc_import_commit_btn') mockDomState.commitBtnText = t;
                 if (selector === '#mhc_import_commit_status_text') mockDomState.statusText = t;
+                if (selector === '#mhc_send_btn') mockDomState.sendBtnText = t;
+                return this;
             }
             return t;
         },
         html(h) {
             return this;
         },
-        val() { return ''; },
+        val(v) {
+            if (v !== undefined) {
+                if (selector === '#mhc_chat_input') mockDomState.chatInputText = v;
+                return this;
+            }
+            return selector === '#mhc_chat_input' ? mockDomState.chatInputText : '';
+        },
         on() { return this; },
     };
 };
 
-const { syncImportCommitBoxUI, setImportCommitPending, getImportCommitPending } = await import('../concierge-ui.js');
+const { syncImportCommitBoxUI, setImportCommitPending, getImportCommitPending, updateSendButtonState, getPendingAttachments } = await import('../concierge-ui.js');
+
+// Test 3a: updateSendButtonState across empty, text-only, attachment-only, and text+attachment states
+mockDomState.chatInputText = '';
+updateSendButtonState();
+assert.strictEqual(mockDomState.sendBtnDisabled, true, 'send button must be disabled when empty');
+assert.strictEqual(mockDomState.sendBtnText, '➤');
+assert.strictEqual(mockDomState.sendBtnTitle, 'Type a prompt or attach files to begin');
+
+mockDomState.chatInputText = 'Cyberpunk adventure';
+updateSendButtonState();
+assert.strictEqual(mockDomState.sendBtnDisabled, false, 'send button must be enabled with text');
+assert.strictEqual(mockDomState.sendBtnText, '➤');
+assert.strictEqual(mockDomState.sendBtnTitle, 'Send message to Concierge');
 
 // Test: when isImportCommitPending is false, normal chat input is visible
 setImportCommitPending(false);

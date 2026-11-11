@@ -25,7 +25,7 @@
                         <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="new-adventure" title="Session Zero: Forge a New Adventure"><i class="fa-solid fa-compass"></i> Session Zero Concierge</button>
                     </div>
                 </div>
-                <div id="mhc_header_system_badge" class="mhc-system-badge" title="Active Genre / System (Concierge can use any preset or create a custom setting)">
+                <div id="mhc_header_system_badge" class="mhc-system-badge" style="display: none;" title="Active Genre / System (Concierge can use any preset or create a custom setting)">
                     ✨ Any Genre / Custom
                 </div>
 
@@ -85,11 +85,6 @@
                     <select id="mhc_st_lore_select" class="text_pole" style="display: none; font-size: 0.8em; max-width: 160px; padding: 2px 6px;">
                         <option value="">-- Choose Lorebook --</option>
                     </select>
-
-                    <button type="button" id="mhc_import_world_lore_btn" class="menu_button mhc-bar-btn" title="Import a world document or lorebook directly into a Campaign Canon Lorebook (forces Archivist mode)">
-                        🗃️ Import World Lore
-                    </button>
-                    <input type="file" id="mhc_import_lore_file_input" multiple accept=".png,image/png,.pdf,.docx,.txt,.md,.epub,.json" style="display: none;">
                 </div>
 
                 <!-- Import & Commit Box (Replaces chat input during/after Archivist LLM Import until Committed) -->
@@ -121,12 +116,12 @@
                     </button>
                     <input type="file" id="mhc_file_input" multiple accept=".png,image/png,image/*,.pdf,.docx,.txt,.md,.epub,.json,.jsonl" style="display: none;">
 
-                    <textarea id="mhc_chat_input" class="text_pole" rows="1" placeholder="Describe your dream campaign, or upload images/documents/chat logs..."></textarea>
+                    <textarea id="mhc_chat_input" class="text_pole" rows="1" placeholder="Describe your dream campaign, attach files, or both..."></textarea>
                     
                     <button type="button" id="mhc_stop_btn" class="menu_button mhc-send-btn" title="Stop generation (message is restored for retry)" style="display: none;">
                         ⏹
                     </button>
-                    <button type="button" id="mhc_send_btn" class="menu_button mhc-send-btn" title="Send message">
+                    <button type="button" id="mhc_send_btn" class="menu_button mhc-send-btn" disabled title="Type a prompt or attach files to begin">
                         ➤
                     </button>
                 </div>

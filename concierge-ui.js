@@ -489,8 +489,6 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     isGenerating = false;
     const stopBtnEl = typeof document !== 'undefined' ? document.getElementById?.('mhc_stop_btn') : null;
     if (stopBtnEl) stopBtnEl.style.display = 'none';
-    const sendBtnEl = typeof document !== 'undefined' ? document.getElementById?.('mhc_send_btn') : null;
-    if (sendBtnEl) sendBtnEl.disabled = false;
     activeNameRagSeeds = '';
     activeNameRagKey = '';
     window._mhcLastBuilderTransaction = null;
@@ -1004,6 +1002,7 @@ export function updateBlueprintDeck() {
     const isSessionZeroAgnostic = currentNavMode === 'new-adventure' && (currentAdventureStep === 'initial' || currentAdventureStep === 'canon' || !meta.rulesetConfirmed);
     if (isSessionZeroAgnostic || isUntouchedAndUnestablished) {
         $('#mhc_header_system_badge')
+            .hide()
             .text('✨ Any Genre / Custom')
             .attr('title', isSessionZeroAgnostic
                 ? 'Ruleset and engine will be chosen in Step 3 (Adventure)'
@@ -1017,6 +1016,7 @@ export function updateBlueprintDeck() {
         const sysLabel = meta.systemLabel || adapter.getGenre(meta.systemKey)?.label || (isFae ? 'Custom FAE Setting' : PBTA_GENRES.fantasy.label);
         const badgeIcon = adapter.badgeIcon || (isFae ? '🕯️' : '🎲');
         $('#mhc_header_system_badge')
+            .show()
             .text(`${badgeIcon} ${sysLabel}`)
             .attr('title', `Active ${adapter.id.toUpperCase()} Genre: ${sysLabel} (${adapter.diceEngine})`);
         $('#mhc_deck_system_tag').text((meta.systemKey || (isFae ? 'CUSTOM' : 'FANTASY')).toUpperCase());
@@ -1726,6 +1726,7 @@ async function attachLoreSource(name, loreRes) {
         promptAddition: loreRes.block,
         mode: loreRes.mode,
         entries: loreRes.entries,
+        tokens: estimateTokens(loreRes.block),
     });
 }
 
@@ -1793,6 +1794,7 @@ export function attachCharacterCardToSession(card, file = null) {
         card,
         promptAddition,
         avatar: null,
+        tokens,
     });
 
     renderAttachmentTray();
@@ -1811,6 +1813,7 @@ function renderAttachmentTray() {
     if (!pendingAttachments.length && !activeImports.length) {
         tray.hide();
         syncImportCommitBoxUI();
+        updateSendButtonState();
         return;
     }
 
@@ -1824,40 +1827,15 @@ function renderAttachmentTray() {
         if (att.type === 'lore') icon = '📚';
         if (att.type === 'chat') icon = '💬';
 
+        const tokenBadge = att.tokens ? ` <span style="opacity:0.75;font-size:0.82em;">(~${att.tokens} tok)</span>` : '';
         const chip = $(`
             <div class="mhc-chip">
-                <span>${icon} ${att.name}</span>
+                <span>${icon} ${att.name}${tokenBadge}</span>
                 <span class="mhc-chip-remove" data-index="${idx}" title="Remove attachment">✕</span>
             </div>
         `);
         tray.append(chip);
     });
-
-    // 1b. Mode chip: Auto / Quick vibe / Big lore
-    if (pendingAttachments.some(a => a.type === 'lore' || a.type === 'doc')) {
-        const mode = getCurrentMode();
-        const ov = getModeOverride();
-        const modeChip = $(`
-            <div class="mhc-chip" title="Quick vibe: scaffold immediately. Big lore: catalogue everything into a Canon lorebook.">
-                <span>${mode === 'archivist' ? '🗃️ Big lore' : '✨ Quick vibe'} (~${getStagedTokenTotal()} tok)</span>
-                <select class="mhc-mode-override" style="margin-left:6px;">
-                    <option value="auto" ${ov === 'auto' ? 'selected' : ''}>Auto</option>
-                    <option value="vibe" ${ov === 'vibe' ? 'selected' : ''}>Quick vibe</option>
-                    <option value="archivist" ${ov === 'archivist' ? 'selected' : ''}>Big lore</option>
-                </select>
-            </div>
-        `);
-        tray.append(modeChip);
-
-        if (mode === 'vibe') {
-            const upgradeBtn = $(`
-                <button type="button" class="menu_button mhc-bar-btn mhc-upgrade-archivist-btn" title="Catalogue attached documents/lorebooks into a vectorized Campaign Canon Lorebook">
-                    🗃️ Build Canon Lorebook
-                </button>
-            `);
-            tray.append(upgradeBtn);
-        }
-    }
 
     // 2. Active in-progress import chips
     activeImports.forEach(label => {
@@ -1868,40 +1846,6 @@ function renderAttachmentTray() {
             </div>
         `);
         tray.append(loadingChip);
-    });
-
-    $('.mhc-upgrade-archivist-btn').on('click', async function () {
-        setModeOverride('archivist');
-        isImportCommitPending = true;
-        syncImportCommitBoxUI();
-        try {
-            for (const att of pendingAttachments) {
-                if (att.type === 'lore') await stageSourceForCanon({ name: att.name, type: 'lore', entries: att.entries || [] }, att.name);
-                if (att.type === 'doc') await stageSourceForCanon({ name: att.name, type: 'doc', text: att.text }, att.name);
-            }
-        } catch (_) {}
-        finally {
-            renderAttachmentTray();
-        }
-    });
-
-    $('.mhc-mode-override').on('change', async function () {
-        const newMode = $(this).val();
-        setModeOverride(newMode);
-        if (newMode === 'archivist') {
-            isImportCommitPending = true;
-            syncImportCommitBoxUI();
-        }
-        // Re-stage so an override to Big lore labels already-attached sources now.
-        try {
-            for (const att of pendingAttachments) {
-                if (att.type === 'lore') await stageSourceForCanon({ name: att.name, type: 'lore', entries: att.entries || [] }, att.name);
-                if (att.type === 'doc') await stageSourceForCanon({ name: att.name, type: 'doc', text: att.text }, att.name);
-            }
-        } catch (_) {}
-        finally {
-            renderAttachmentTray();
-        }
     });
 
     $('.mhc-chip-remove').on('click', function () {
@@ -1924,6 +1868,7 @@ function renderAttachmentTray() {
     });
 
     syncImportCommitBoxUI();
+    updateSendButtonState();
 }
 
 /**
@@ -2152,10 +2097,44 @@ export async function handleCommitImportedLore() {
 }
 
 /**
+ * Synchronize the Send / Commit button state, icon, and tooltip based on input & attachments.
+ */
+export function updateSendButtonState() {
+    const sendBtn = typeof $ !== 'undefined' ? $('#mhc_send_btn') : null;
+    if (!sendBtn || !sendBtn.length || typeof sendBtn.prop !== 'function') return;
+    if (isGenerating) {
+        sendBtn.prop('disabled', true);
+        return;
+    }
+    const inputEl = $('#mhc_chat_input');
+    const text = (typeof inputEl?.val === 'function' ? inputEl.val() : '')?.trim() || '';
+    const attCount = pendingAttachments.length;
+
+    if (!text && attCount === 0) {
+        sendBtn.prop('disabled', true);
+        if (typeof sendBtn.text === 'function') sendBtn.text('➤');
+        if (typeof sendBtn.attr === 'function') sendBtn.attr('title', 'Type a prompt or attach files to begin');
+    } else if (text && attCount === 0) {
+        sendBtn.prop('disabled', false);
+        if (typeof sendBtn.text === 'function') sendBtn.text('➤');
+        if (typeof sendBtn.attr === 'function') sendBtn.attr('title', 'Send message to Concierge');
+    } else if (!text && attCount > 0) {
+        sendBtn.prop('disabled', false);
+        if (typeof sendBtn.text === 'function') sendBtn.text('📥');
+        if (typeof sendBtn.attr === 'function') sendBtn.attr('title', `Commit ${attCount} attached source${attCount > 1 ? 's' : ''} to Concierge`);
+    } else {
+        sendBtn.prop('disabled', false);
+        if (typeof sendBtn.text === 'function') sendBtn.text('🚀');
+        if (typeof sendBtn.attr === 'function') sendBtn.attr('title', `Send message & commit ${attCount} attached source${attCount > 1 ? 's' : ''}`);
+    }
+}
+
+/**
  * Process a user submission.
  */
 async function handleUserSend() {
     if (isGenerating) return;
+    if ($('#mhc_send_btn').prop('disabled')) return;
 
     const input = $('#mhc_chat_input');
     const text = input.val().trim();
@@ -2725,7 +2704,7 @@ async function handleUserSend() {
             activeTurn = null;
             isGenerating = false;
             $('#mhc_stop_btn').hide();
-            $('#mhc_send_btn').prop('disabled', false);
+            updateSendButtonState();
         }
     }
 }
@@ -2836,6 +2815,7 @@ async function handleFilesSelected(files) {
                         file,
                         name: doc.chatData?.charName ? `${doc.chatData.charName} (Chat)` : doc.filename,
                         chatData: doc.chatData,
+                        tokens: estimateTokens(JSON.stringify(doc.chatData || '')),
                     });
                     toastr?.success(`Imported prior chat log: "${doc.chatData?.charName || doc.filename}" (${doc.chatData?.messages?.length || 0} messages).`);
                 } else {
@@ -2847,6 +2827,7 @@ async function handleFilesSelected(files) {
                             file,
                             name: doc.filename,
                             text: doc.text,
+                            tokens: estimateTokens(doc.text),
                         });
                     } catch (_) {
                         /* stageSourceForCanon already toasted the error */
@@ -3473,20 +3454,8 @@ export function bindModalEvents() {
         }
     });
 
-    // Inspiration Toolbar: Manual World Lore Import Trigger & Hidden Input
-    $('#mhc_import_world_lore_btn').on('click', () => $('#mhc_import_lore_file_input').click());
-    $('#mhc_import_lore_file_input').on('change', function () {
-        if (this.files && this.files.length) {
-            setModeOverride('archivist');
-            isImportCommitPending = true;
-            syncImportCommitBoxUI();
-            handleFilesSelected(this.files);
-            this.value = '';
-        }
-    });
-
     // Import & Commit Box actions
-    $('#mhc_import_add_more_btn').on('click', () => $('#mhc_import_lore_file_input').click());
+    $('#mhc_import_add_more_btn').on('click', () => $('#mhc_file_input').click());
     $('#mhc_import_commit_btn').on('click', handleCommitImportedLore);
     $('#mhc_import_cancel_btn').on('click', () => {
         if (activeTurn) {
@@ -3513,10 +3482,13 @@ export function bindModalEvents() {
     $('#mhc_stop_btn').on('click', () => {
         if (activeTurn) activeTurn.controller.abort();
     });
+    $('#mhc_chat_input').on('input propertychange', updateSendButtonState);
     $('#mhc_chat_input').on('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            handleUserSend();
+            if (!$('#mhc_send_btn').prop('disabled')) {
+                handleUserSend();
+            }
         }
     });
 
@@ -3692,6 +3664,9 @@ export function bindModalEvents() {
 
     // Ruleset Switch interaction on system badge click (cycles through all registered adapters)
     $('#mhc_header_system_badge').on('click', () => {
+        if (currentNavMode === 'new-adventure' && (currentAdventureStep === 'initial' || currentAdventureStep === 'canon')) {
+            return;
+        }
         const curRuleset = systemRegistry.detectRuleset(activeDossier);
         const list = systemRegistry.list();
         const curIdx = list.findIndex(a => a.id === curRuleset);
@@ -4405,5 +4380,6 @@ export async function openConciergeModal({ ruleset = null, genreKey = null, navM
     renderDebugInspectorView();
     const activeTab = $('#mhc_concierge_modal .mhc-dossier-tabs .mhc-tab-btn.active').attr('data-tab') || 'cards';
     setConciergeTab(activeTab);
+    updateSendButtonState();
     $('#mhc_concierge_modal').fadeIn(200);
 }

@@ -780,6 +780,10 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
         appendChatBubble('assistant', cleanTalker);
         chatHistory = [{ role: 'assistant', content: cleanTalker }];
         stageChatHistories[stage] = [...chatHistory];
+        if (stage === 'adventure') {
+            lastSyncedSnapshots.adventure = snapshotAdventure(activeDossier);
+            lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+        }
         evaluateStepUnlocks();
         updateBlueprintDeck();
         saveDraft();
@@ -918,7 +922,21 @@ export async function setAdventureStep(targetStep, opts = {}) {
             advDiff?.hasChanges ? advDiff.block : '',
         ].filter(Boolean).join('\n\n');
 
-        if (combinedDiff && !opts.skipHarmonization) {
+        if (!stageChatHistories.character || stageChatHistories.character.length === 0) {
+            // First visit: establish baseline snapshots so future edits are tracked accurately
+            lastSyncedSnapshots.adventure = snapshotAdventure(activeDossier);
+            lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+
+            chatHistory = [];
+            $('#mhc_chat_messages').empty();
+            const campTitle = activeDossier?.meta?.title ? ` for **${activeDossier.meta.title}**` : '';
+            const startLoc = activeDossier?.theKick?.startingLocation ? ` in *${activeDossier.theKick.startingLocation}*` : '';
+            const charGreeting = `👤 **Step 4: Character & Protagonist**\n\nNow let's forge your Protagonist${campTitle}! With our adventure beginning${startLoc}, who would you like to play?\n\n• Tell me your character concept, background, or archetype.\n• Or select an existing SillyTavern persona / character card from the toolbar below.\n• You can also inspect and customize your **📜 Progression Codex** in the side pane.`;
+            appendChatBubble('assistant', charGreeting);
+            chatHistory = [{ role: 'assistant', content: charGreeting }];
+            stageChatHistories.character = [...chatHistory];
+        } else if (combinedDiff && !opts.skipHarmonization) {
+            // Re-visit with upstream edits: run actual harmonization
             stageChatHistories.character = [];
             chatHistory = [];
             $('#mhc_chat_messages').empty();
@@ -932,13 +950,6 @@ export async function setAdventureStep(targetStep, opts = {}) {
                 console.error('[MultiHog Companion] Character harmonization error:', err);
                 toastr?.error(`Failed harmonizing Character: ${err.message}`);
             }
-        } else if (!stageChatHistories.character || stageChatHistories.character.length === 0) {
-            chatHistory = [];
-            $('#mhc_chat_messages').empty();
-            const charGreeting = "👤 **Step 4: Character & Protagonist**\n\nNow let's forge your Protagonist! Tell me who you want to play, or pick an existing SillyTavern character / persona inspiration from the toolbar below. You can also view and customize your **📜 Progression Codex** using the tab on the right.";
-            appendChatBubble('assistant', charGreeting);
-            chatHistory = [{ role: 'assistant', content: charGreeting }];
-            stageChatHistories.character = [...chatHistory];
         } else {
             chatHistory = [...(stageChatHistories.character || [])];
             renderChatHistoryFromState();

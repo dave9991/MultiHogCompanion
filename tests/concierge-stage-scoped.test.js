@@ -292,4 +292,9 @@ for (const rulesetId of ['dnd5e', 'pbta', 'fae']) {
     assert.strictEqual(activeDossier.meta.ruleset, rulesetId);
 }
 
+console.log('14. Testing Stage 4 First-Entry Prompt & Reactive Guardrails...');
+const s4TalkerReactive = buildStage4CharacterTalkerPrompt(createEmptyDossier('dnd5e'), sampleCanonEntries, {});
+assert.ok(s4TalkerReactive.includes('Strictly Reactive Navigation Assistance'), 'Talker prompt must instruct reactive-only navigation');
+assert.ok(s4TalkerReactive.includes('Never recite or quote this guidance unprompted'), 'Talker prompt must prohibit unprompted navigation recitation');
+
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

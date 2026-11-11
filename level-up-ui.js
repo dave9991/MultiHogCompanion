@@ -76,6 +76,12 @@ export function openLevelUpModal({
 }) {
     closeLevelUpModal();
 
+    try {
+        if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('mhc_last_concierge_desk', 'character');
+        }
+    } catch (_) {}
+
     const sysKeyLower = (dossier?.meta?.systemKey || '').toLowerCase();
     const isFae = Boolean(
         dossier?.meta?.ruleset === 'fae'
@@ -2069,6 +2075,11 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
             const mode = btn.getAttribute('data-nav-mode');
             if (mode === 'character') return;
             _isLevelUpNavigating = true;
+            try {
+                if (typeof sessionStorage !== 'undefined') {
+                    sessionStorage.setItem('mhc_last_concierge_desk', mode);
+                }
+            } catch (_) {}
             try {
                 closeLevelUpModal();
                 const { openConciergeModal } = await import('./concierge-ui.js');

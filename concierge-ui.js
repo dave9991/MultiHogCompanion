@@ -477,6 +477,11 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     currentNavMode = 'new-adventure';
     currentAdventureStep = 'initial';
     activeCanonFilter = 'all';
+    try {
+        if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.removeItem('mhc_last_concierge_desk');
+        }
+    } catch (_) {}
     unlockedSteps = { initial: true, canon: false, adventure: false, character: false };
     stageChatHistories = { initial: [], canon: [], adventure: [], character: [] };
     lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
@@ -3236,6 +3241,11 @@ export async function switchToTrack(targetMode) {
 
         currentNavMode = 'living-world';
         lastActiveConciergeMode = 'living-world';
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.setItem('mhc_last_concierge_desk', 'living-world');
+            }
+        } catch (_) {}
 
         $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
         $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
@@ -3287,6 +3297,11 @@ export async function switchToTrack(targetMode) {
 
         currentNavMode = 'new-adventure';
         lastActiveConciergeMode = 'new-adventure';
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.setItem('mhc_last_concierge_desk', 'new-adventure');
+            }
+        } catch (_) {}
 
         $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
         $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
@@ -3976,6 +3991,11 @@ export function bindModalEvents() {
             const mode = $(this).attr('data-nav-mode');
             if (mode === 'character') {
                 saveDraft();
+                try {
+                    if (typeof sessionStorage !== 'undefined') {
+                        sessionStorage.setItem('mhc_last_concierge_desk', 'character');
+                    }
+                } catch (_) {}
                 $('#mhc_concierge_modal').fadeOut(150);
                 const { launchLevelUpOrRespecDesk } = await import('./index.js');
                 await launchLevelUpOrRespecDesk({ isRespec: true });
@@ -4440,6 +4460,10 @@ export async function openConciergeModal({ ruleset = null, genreKey = null, navM
     }
     if (!switched) {
         await switchToTrack('new-adventure');
+    }
+
+    if (currentNavMode === 'new-adventure' && currentAdventureStep && currentAdventureStep !== 'initial') {
+        await setAdventureStep(currentAdventureStep, { skipCanonBuild: true, skipHarmonization: true, force: true });
     }
 
     updateBlueprintDeck();

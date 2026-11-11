@@ -134,6 +134,37 @@ console.log('Testing validateDraft integrity checks...');
     assert.ok(validBlueprintOnly, 'Modified blueprint with empty chatHistory must pass validation');
     assert.strictEqual(validBlueprintOnly.dossier.meta.title, 'Dungeon of Torment');
 
+    // Pipeline state preservation verification
+    const stageDraft = {
+        dossier: {
+            meta: { title: 'Fallout: The Sunken Vault', systemKey: 'post_apocalyptic' },
+            protagonist: { name: 'Vault Dweller' },
+        },
+        chatHistory: [{ role: 'assistant', content: 'Books structured.' }],
+        currentNavMode: 'new-adventure',
+        currentAdventureStep: 'canon',
+        unlockedSteps: { initial: true, canon: true, adventure: true, character: false },
+        stageChatHistories: {
+            initial: [{ role: 'user', content: 'Fallout please' }],
+            canon: [{ role: 'assistant', content: 'Books structured.' }],
+        },
+        stagedCanonEntries: [
+            { kind: 'FACTION', name: 'Brotherhood of Steel', importance: 5 },
+            { kind: 'LOCATION', name: 'Vault 13', importance: 4 },
+        ],
+        attachedSources: [{ name: 'Fallout Bible 0.pdf', size: 1000 }],
+        lastSyncedSnapshots: { framing: { title: 'Fallout' }, canon: null, adventure: null },
+    };
+    const validatedStage = validateDraft(stageDraft);
+    assert.ok(validatedStage, 'Stage draft must pass validation');
+    assert.strictEqual(validatedStage.currentAdventureStep, 'canon', 'Must preserve currentAdventureStep');
+    assert.strictEqual(validatedStage.unlockedSteps.canon, true, 'Must preserve unlockedSteps');
+    assert.strictEqual(validatedStage.unlockedSteps.adventure, true, 'Must preserve unlockedSteps.adventure');
+    assert.strictEqual(validatedStage.stagedCanonEntries.length, 2, 'Must preserve stagedCanonEntries');
+    assert.strictEqual(validatedStage.stagedCanonEntries[0].name, 'Brotherhood of Steel');
+    assert.strictEqual(validatedStage.attachedSources.length, 1, 'Must preserve attachedSources');
+    assert.strictEqual(validatedStage.stageChatHistories.initial.length, 1, 'Must preserve stageChatHistories');
+
     // Untouched blueprint with empty chatHistory must be rejected (not a real draft)
     const untouchedEmptyDraft = {
         dossier: createEmptyDossier(),
@@ -180,6 +211,10 @@ console.log('Testing concierge-ui.js integration...');
     // Load active campaign replacement guardrail
     assert.ok(uiJs.includes('hasExistingSessionProgress'), 'concierge-ui.js must check hasExistingSessionProgress before loading active campaign');
     assert.ok(uiJs.includes('resetConciergeState({ showGreeting: false })'), 'concierge-ui.js must reset state cleanly before loading active campaign');
+
+    // Desk and stage persistence
+    assert.ok(uiJs.includes('mhc_last_concierge_desk'), 'concierge-ui.js must track mhc_last_concierge_desk in sessionStorage');
+    assert.ok(uiJs.includes('skipCanonBuild: true'), 'concierge-ui.js must pass skipCanonBuild when resuming steps');
 
     console.log('✓ concierge-ui.js lifecycle wiring verified');
 }

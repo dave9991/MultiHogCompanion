@@ -178,6 +178,19 @@ export function validateDraft(draft) {
             originChatId: typeof draft.originChatId === 'string' ? draft.originChatId : (draft.originChatId || null),
             originCampaignTitle: typeof draft.originCampaignTitle === 'string' ? draft.originCampaignTitle : (draft.originCampaignTitle || null),
             timestamp: typeof draft.timestamp === 'number' ? draft.timestamp : Date.now(),
+            currentNavMode: draft.currentNavMode === 'living-world' ? 'living-world' : 'new-adventure',
+            currentAdventureStep: ['initial', 'canon', 'adventure', 'character'].includes(draft.currentAdventureStep) ? draft.currentAdventureStep : 'initial',
+            unlockedSteps: draft.unlockedSteps && typeof draft.unlockedSteps === 'object'
+                ? { ...draft.unlockedSteps, initial: true }
+                : { initial: true, canon: false, adventure: false, character: false },
+            stageChatHistories: draft.stageChatHistories && typeof draft.stageChatHistories === 'object'
+                ? draft.stageChatHistories
+                : { initial: [], canon: [], adventure: [], character: [] },
+            stagedCanonEntries: Array.isArray(draft.stagedCanonEntries) ? draft.stagedCanonEntries : [],
+            lastSyncedSnapshots: draft.lastSyncedSnapshots && typeof draft.lastSyncedSnapshots === 'object'
+                ? draft.lastSyncedSnapshots
+                : { framing: null, canon: null, adventure: null },
+            attachedSources: Array.isArray(draft.attachedSources) ? draft.attachedSources : [],
         };
     } catch (_) {
         return null;

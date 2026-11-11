@@ -3434,6 +3434,24 @@ if (typeof jQuery !== 'undefined') {
         if (isLevelUp) {
             await launchLevelUpOrRespecDesk({ isRespec: false });
         } else {
+            let lastDesk = null;
+            try {
+                if (typeof sessionStorage !== 'undefined') {
+                    lastDesk = sessionStorage.getItem('mhc_last_concierge_desk');
+                }
+            } catch (_) {}
+
+            if (lastDesk === 'new-adventure') {
+                const { openConciergeModal } = await import('./concierge-ui.js');
+                await openConciergeModal({ navMode: 'new-adventure' });
+                return;
+            }
+            if (lastDesk === 'living-world') {
+                const { openConciergeModal } = await import('./concierge-ui.js');
+                await openConciergeModal({ navMode: 'living-world' });
+                return;
+            }
+
             const rpgSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
                 || globalThis.extension_settings?.rpg_tracker
                 || {};

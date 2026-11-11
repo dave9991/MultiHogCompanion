@@ -172,6 +172,9 @@ let activeNameRagKey = '';
 let currentNavMode = 'new-adventure';
 let lastActiveConciergeMode = 'new-adventure';
 let currentAdventureStep = 'initial';
+let activeCanonFilter = 'all';
+export function getActiveCanonFilter() { return activeCanonFilter; }
+export function setActiveCanonFilter(filter) { activeCanonFilter = filter || 'all'; }
 let unlockedSteps = { initial: true, canon: false, adventure: false, character: false };
 let stageChatHistories = { initial: [], canon: [], adventure: [], character: [] };
 let lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
@@ -473,6 +476,7 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     importStatusText = '';
     currentNavMode = 'new-adventure';
     currentAdventureStep = 'initial';
+    activeCanonFilter = 'all';
     unlockedSteps = { initial: true, canon: false, adventure: false, character: false };
     stageChatHistories = { initial: [], canon: [], adventure: [], character: [] };
     lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
@@ -1448,6 +1452,7 @@ export function updateBlueprintDeck() {
     const stagedCanon = getStagedCanonEntries();
     $('#mhc_deck_canon_count').text(stagedCanon.length);
     const canonDeckList = $('#mhc_deck_canon_list');
+    const canonFilterBar = $('#mhc_canon_filter_bar');
     canonDeckList.empty();
     if (stagedCanon.length) {
         const grouped = {};
@@ -1456,14 +1461,47 @@ export function updateBlueprintDeck() {
             if (!grouped[kind]) grouped[kind] = [];
             grouped[kind].push(entry);
         }
-        const order = ['FACTION', 'LOCATION', 'NPC', 'RULE', 'EVENT', 'LORE'];
-        const allKinds = [...new Set([...order, ...Object.keys(grouped)])];
+        const kindMeta = {
+            FACTION: { icon: '🏛️', label: 'Factions' },
+            LOCATION: { icon: '🗺️', label: 'Locations' },
+            NPC: { icon: '👤', label: 'NPCs' },
+            EVENT: { icon: '📜', label: 'Events' },
+            RULE: { icon: '⚖️', label: 'Rules' },
+            MONSTER: { icon: '👹', label: 'Monsters' },
+            LORE: { icon: '📚', label: 'Lore' },
+        };
+        const order = ['FACTION', 'LOCATION', 'NPC', 'RULE', 'EVENT', 'MONSTER', 'LORE'];
+        const allKinds = [...new Set([...order, ...Object.keys(grouped)])].filter(k => grouped[k] && grouped[k].length);
+
+        if (activeCanonFilter !== 'all' && !grouped[activeCanonFilter]) {
+            activeCanonFilter = 'all';
+        }
+
+        canonFilterBar.empty().show();
+        canonFilterBar.append(`
+            <button type="button" class="mhc-canon-filter-pill ${activeCanonFilter === 'all' ? 'active' : ''}" data-filter="all">
+                All (${stagedCanon.length})
+            </button>
+        `);
+        for (const k of allKinds) {
+            const count = grouped[k].length;
+            const meta = kindMeta[k] || { icon: '📌', label: k };
+            const isActive = activeCanonFilter === k;
+            canonFilterBar.append(`
+                <button type="button" class="mhc-canon-filter-pill ${isActive ? 'active' : ''}" data-filter="${escapeHtml(k)}">
+                    ${meta.icon} ${meta.label} (${count})
+                </button>
+            `);
+        }
+
         for (const k of allKinds) {
             const entries = grouped[k];
             if (!entries || !entries.length) continue;
+            const meta = kindMeta[k] || { icon: '📌', label: k };
+            const isGroupHeaderVisible = (activeCanonFilter === 'all');
             canonDeckList.append(`
-                <div class="mhc-canon-group-header" style="font-size: 0.78em; font-weight: 700; color: #93c5fd; text-transform: uppercase; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08);">
-                    ${escapeHtml(k)} (${entries.length})
+                <div class="mhc-canon-group-header" data-kind-header="${escapeHtml(k)}" style="${isGroupHeaderVisible ? '' : 'display: none;'}">
+                    ${meta.icon} ${meta.label.toUpperCase()} (${entries.length})
                 </div>
             `);
             for (const entry of entries) {
@@ -1474,10 +1512,13 @@ export function updateBlueprintDeck() {
                     ? 'background: rgba(107, 114, 128, 0.25); border-color: rgba(156, 163, 175, 0.4); color: #9ca3af;'
                     : 'background: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.5); color: #4ade80;';
                 const impBadge = entry.importance !== undefined ? `<span class="mhc-pill" style="font-size: 0.7em;">Imp: ${entry.importance}</span>` : '';
+                const entryKind = (entry.kind || k).toUpperCase();
+                const isItemVisible = (activeCanonFilter === 'all' || activeCanonFilter === entryKind);
                 canonDeckList.append(`
-                    <div class="mhc-deck-item collapsible" style="opacity: ${isDisabled ? '0.6' : '1'};">
+                    <div class="mhc-deck-item collapsible" data-kind="${escapeHtml(entryKind)}" style="opacity: ${isDisabled ? '0.6' : '1'}; ${isItemVisible ? '' : 'display: none;'}">
                         <div class="mhc-deck-item-header" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
                             <div class="mhc-deck-item-title" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                <span style="margin-right: 2px;">${meta.icon}</span>
                                 <span style="font-weight: 600;">${escapeHtml(entry.name || 'Untitled')}</span>
                                 <span class="mhc-pill" style="font-size: 0.7em; margin-left: 4px;">${escapeHtml(entry.kind || k)}</span>
                                 ${impBadge}
@@ -1495,6 +1536,7 @@ export function updateBlueprintDeck() {
             }
         }
     } else {
+        canonFilterBar.empty().hide();
         canonDeckList.append('<div class="mhc-empty-hint">No Series Bible entries generated yet. Advance from Initial Framing to build Canon.</div>');
     }
 
@@ -3559,6 +3601,30 @@ export function bindModalEvents() {
         toggleCanonEntryDisabled(comment, newDisabled);
         updateBlueprintDeck();
         saveDraft();
+    });
+
+    // Series Bible Category Filter Pills
+    $('#mhc_concierge_modal').on('click', '.mhc-canon-filter-pill', function (e) {
+        e.preventDefault();
+        const filter = $(this).attr('data-filter') || 'all';
+        activeCanonFilter = filter;
+        $('#mhc_canon_filter_bar .mhc-canon-filter-pill').removeClass('active');
+        $(this).addClass('active');
+
+        if (filter === 'all') {
+            $('#mhc_deck_canon_list .mhc-canon-group-header').show();
+            $('#mhc_deck_canon_list .mhc-deck-item').show();
+        } else {
+            $('#mhc_deck_canon_list .mhc-canon-group-header').hide();
+            $('#mhc_deck_canon_list .mhc-deck-item').each(function () {
+                const itemKind = $(this).attr('data-kind');
+                if (itemKind === filter) {
+                    $(this).show();
+                } else {
+                    $(this).hide();
+                }
+            });
+        }
     });
 
     // Attached source remove buttons

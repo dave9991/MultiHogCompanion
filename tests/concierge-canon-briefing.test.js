@@ -75,6 +75,8 @@ assert.ok(modalHtml.includes('id="mhc_import_add_more_btn"'), 'Modal must have #
 assert.ok(modalHtml.includes('id="mhc_import_cancel_btn"'), 'Modal must have #mhc_import_cancel_btn');
 assert.ok(modalHtml.includes('id="mhc_import_use_vibe_btn"'), 'Modal must have #mhc_import_use_vibe_btn');
 assert.ok(modalHtml.includes('id="mhc_import_commit_btn"'), 'Modal must have #mhc_import_commit_btn');
+assert.ok(modalHtml.includes('id="mhc_canon_filter_bar"'), 'Modal must have #mhc_canon_filter_bar');
+assert.ok(modalHtml.includes('max-height: min(480px, calc(100vh - 340px));'), 'Canon list must have expanded max-height');
 
 // 2. CSS Verification
 const styleCss = fs.readFileSync(path.join(ROOT_DIR, 'style.css'), 'utf8');
@@ -83,6 +85,10 @@ assert.ok(styleCss.includes('.mhc-import-commit-status-row'), 'style.css must ha
 assert.ok(styleCss.includes('.mhc-import-commit-actions'), 'style.css must have .mhc-import-commit-actions');
 assert.ok(styleCss.includes('.mhc-commit-btn'), 'style.css must have .mhc-commit-btn');
 assert.ok(styleCss.includes('.mhc-send-btn:disabled'), 'style.css must have .mhc-send-btn:disabled');
+assert.ok(styleCss.includes('.mhc-canon-filter-bar'), 'style.css must have .mhc-canon-filter-bar');
+assert.ok(styleCss.includes('.mhc-canon-filter-pill'), 'style.css must have .mhc-canon-filter-pill');
+assert.ok(styleCss.includes('.mhc-canon-group-header'), 'style.css must have .mhc-canon-group-header');
+assert.ok(styleCss.includes('flex-shrink: 0;'), 'style.css must have flex-shrink: 0;');
 
 // 3. UI State Synchronization Mock Test
 const mockDomState = {
@@ -154,7 +160,7 @@ globalThis.$ = (selector) => {
     };
 };
 
-const { syncImportCommitBoxUI, setImportCommitPending, getImportCommitPending, updateSendButtonState, getPendingAttachments } = await import('../concierge-ui.js');
+const { syncImportCommitBoxUI, setImportCommitPending, getImportCommitPending, updateSendButtonState, getPendingAttachments, getActiveCanonFilter, setActiveCanonFilter } = await import('../concierge-ui.js');
 
 // Test 3a: updateSendButtonState across empty, text-only, attachment-only, and text+attachment states
 mockDomState.chatInputText = '';
@@ -197,6 +203,13 @@ setImportCommitPending(false);
 syncImportCommitBoxUI();
 assert.strictEqual(mockDomState.inputRowVisible, true);
 assert.strictEqual(mockDomState.commitBoxVisible, false);
+
+// Test 4: Series Bible Canon Category Filter State
+assert.strictEqual(getActiveCanonFilter(), 'all');
+setActiveCanonFilter('NPC');
+assert.strictEqual(getActiveCanonFilter(), 'NPC');
+setActiveCanonFilter('all');
+assert.strictEqual(getActiveCanonFilter(), 'all');
 
 // Clean up
 clearStagedCanon();

@@ -429,16 +429,17 @@ assert.strictEqual(loadedConcierge.meta.title, 'Sunken Citadel Delve');
 
 // 4. refreshConciergeActiveContext hides Living World button for stub
 const livingWorldNavBtn = getOrCreateMockElement('.mhc-mode-nav-btn[data-nav-mode="living-world"]');
-const loadActiveBtn = getOrCreateMockElement('#mhc_load_active_campaign_btn');
+const activeGameLabel = getOrCreateMockElement('#mhc_active_game_label');
 
 await refreshConciergeActiveContext('chat_stub_999');
 assert.strictEqual(livingWorldNavBtn.visible, false, 'Living World nav button must be hidden for stub chat');
-assert.strictEqual(loadActiveBtn.visible, false, 'Load Active Campaign button must be hidden for stub chat');
+assert.strictEqual(activeGameLabel.visible, false, 'Active Game label must be hidden for stub chat');
 
 // 5. refreshConciergeActiveContext shows Living World button for Concierge chat
 await refreshConciergeActiveContext('chat_concierge_100');
 assert.strictEqual(livingWorldNavBtn.visible, true, 'Living World nav button must be visible for Concierge chat');
-assert.strictEqual(loadActiveBtn.visible, true, 'Load Active Campaign button must be visible for Concierge chat');
+assert.strictEqual(activeGameLabel.visible, true, 'Active Game label must be visible for Concierge chat');
+assert.ok(!modalHtml.includes('id="mhc_load_active_campaign_btn"'), 'concierge-modal.html must NOT contain obsolete #mhc_load_active_campaign_btn');
 
 // 6. openConciergeModal with navMode: 'living-world' on stub falls back to new-adventure
 await openConciergeModal({ ruleset: 'pbta', navMode: 'living-world' });
@@ -464,8 +465,13 @@ assert.ok(css.includes('.mhc-track-group'), 'style.css must style .mhc-track-gro
 assert.ok(css.includes('.mhc-track-divider'), 'style.css must style .mhc-track-divider');
 
 // A. Start fresh in Session Zero
-resetConciergeState({ showGreeting: false });
+resetConciergeState({ showGreeting: true });
 assert.strictEqual(getConciergeStageState().currentNavMode, 'new-adventure');
+
+// Verify greeting has no "PbtA" mention
+const initialTitleEl = getOrCreateMockElement('#mhc_initial_title');
+updateBlueprintDeck();
+assert.strictEqual(initialTitleEl.attrs?.text || initialTitleEl.text?.(), 'Untitled Campaign', 'Step 1 framing title must display Untitled Campaign without ruleset suffix');
 
 // Setup a Session Zero draft with custom premise and step
 const sessionDossier = getActiveConciergeDossier();

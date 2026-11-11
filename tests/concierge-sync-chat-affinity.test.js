@@ -37,8 +37,7 @@ globalThis.fetch = async () => ({
 
 const domState = {
     syncBtnVisible: false,
-    loadBtnTitle: '',
-    loadBtnHtml: '',
+    activeGameTitle: '',
 };
 
 globalThis.$ = (selector) => {
@@ -53,22 +52,19 @@ globalThis.$ = (selector) => {
             return this;
         },
         attr(name, val) {
-            if (val !== undefined) {
-                if (selector === '#mhc_load_active_campaign_btn') {
-                    domState.loadBtnTitle = val;
-                }
-                return this;
-            }
-            return selector === '#mhc_load_active_campaign_btn' ? domState.loadBtnTitle : '';
+            return this;
         },
         html(val) {
+            return this;
+        },
+        text(val) {
             if (val !== undefined) {
-                if (selector === '#mhc_load_active_campaign_btn') {
-                    domState.loadBtnHtml = val;
+                if (selector === '#mhc_active_game_title') {
+                    domState.activeGameTitle = val;
                 }
                 return this;
             }
-            return selector === '#mhc_load_active_campaign_btn' ? domState.loadBtnHtml : '';
+            return selector === '#mhc_active_game_title' ? domState.activeGameTitle : '';
         },
         is(query) {
             if (selector === '#mhc_concierge_modal') return true;
@@ -80,7 +76,6 @@ globalThis.$ = (selector) => {
         val() { return ''; },
         fadeIn() { return this; },
         fadeOut() { return this; },
-        text() { return this; },
         css() { return this; },
         append() { return this; },
         remove() { return this; },
@@ -229,7 +224,7 @@ console.log('Testing Chat Affinity lifecycle across Chat A -> Chat B -> Chat A..
 
     // In Chat B, sync button must VANISH
     assert.strictEqual(domState.syncBtnVisible, false, 'Sync button must vanish in foreign Chat B');
-    assert.ok(domState.loadBtnHtml.includes('Dungeon of Torment'), 'Load Active Campaign button should offer Chat B title');
+    assert.strictEqual(domState.activeGameTitle, 'Dungeon of Torment', 'Header active game title should show Chat B title');
 
     // The blueprint/dossier origin is still retained (not wiped!)
     const originWhileInB = getLoadedCampaignOrigin();
@@ -246,8 +241,7 @@ console.log('Testing Chat Affinity lifecycle across Chat A -> Chat B -> Chat A..
 
     // In Chat A, sync button must REAPPEAR
     assert.strictEqual(domState.syncBtnVisible, true, 'Sync button must automatically reappear when returning to Chat A');
-    assert.ok(domState.loadBtnTitle.includes('Concrete & Case Files'), 'Load Active Campaign title must contain full campaign name');
-    assert.ok(domState.loadBtnHtml.includes('Concrete & Case'), 'Load Active Campaign button should offer Chat A title');
+    assert.strictEqual(domState.activeGameTitle, 'Concrete & Case Files', 'Header active game title must contain full campaign name');
     console.log('✓ Chat Affinity correctly toggles Sync button visibility across chat switches');
 }
 

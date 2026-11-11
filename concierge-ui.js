@@ -364,6 +364,24 @@ export function loadValidatedDraft(targetRuleset = null) {
             if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
+        if (Array.isArray(validated.chatHistory)) {
+            validated.chatHistory.forEach(m => {
+                if (m && typeof m.content === 'string') {
+                    m.content = m.content.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
+                }
+            });
+        }
+        if (validated.stageChatHistories) {
+            for (const stage of Object.keys(validated.stageChatHistories)) {
+                if (Array.isArray(validated.stageChatHistories[stage])) {
+                    validated.stageChatHistories[stage].forEach(m => {
+                        if (m && typeof m.content === 'string') {
+                            m.content = m.content.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
+                        }
+                    });
+                }
+            }
+        }
         return { draft: validated };
     } catch (err) {
         console.warn(`[${adapter.label} Concierge] Unexpected error reading draft; purging:`, err);
@@ -506,7 +524,7 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     setConciergeTab('cards');
 
     if (showGreeting) {
-        const greeting = "Welcome to Session Zero! I'm your Session Zero Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?";
+        const greeting = "Welcome to Session Zero! I'm your Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?";
         appendChatBubble('assistant', greeting);
         chatHistory.push({ role: 'assistant', content: greeting });
         stageChatHistories.initial = [...chatHistory];
@@ -557,7 +575,10 @@ function renderChatHistoryFromState() {
         const displayStr = msg.displayContent || (typeof msg.content === 'string' ? msg.content : '');
         if (displayStr) {
             const isAssistant = msg.role === 'assistant';
-            const text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
+            let text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
+            if (isAssistant && typeof text === 'string' && text.includes('Concierge')) {
+                text = text.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
+            }
             appendChatBubble(msg.role, text, msg.imageSrc || null);
         } else if (Array.isArray(msg.content)) {
             let text = '';
@@ -937,7 +958,7 @@ export async function setAdventureStep(targetStep, opts = {}) {
 /**
  * Render the Live Blueprint cards from activeDossier.
  */
-function updateBlueprintDeck() {
+export function updateBlueprintDeck() {
     const meta = activeDossier.meta || {};
     const proto = activeDossier.protagonist || {};
     const npcs = activeDossier.npcs || [];
@@ -1023,9 +1044,12 @@ function updateBlueprintDeck() {
         $('#mhc_deck_system_desc').text(meta.premise || `${titlePrefix} ${sysLabel} narrative engine.`);
     }
 
-    const defaultCampTitle = `Untitled ${titlePrefix} Campaign`;
-    const campTitle = (meta.title || '').trim() || defaultCampTitle;
-    $('#mhc_deck_campaign_title').text(campTitle);
+    const defaultCampTitle = isSessionZeroAgnostic ? 'Untitled Campaign' : `Untitled ${titlePrefix} Campaign`;
+    const campTitle = (meta.title || '').trim();
+    const effectiveCampTitle = isSessionZeroAgnostic && isDefaultUntitledCampaignTitle(campTitle)
+        ? 'Untitled Campaign'
+        : (campTitle || defaultCampTitle);
+    $('#mhc_deck_campaign_title').text(effectiveCampTitle);
     if (meta.tone) {
         $('#mhc_deck_system_tone_text').text(meta.tone);
         $('#mhc_deck_system_tone').show();
@@ -1400,7 +1424,10 @@ function updateBlueprintDeck() {
             borderColor: isFramingReady ? 'rgba(34, 197, 94, 0.4)' : 'rgba(59, 130, 246, 0.4)',
             color: isFramingReady ? '#4ade80' : '#93c5fd',
         });
-    $('#mhc_initial_title').text((meta.title || '').trim() || 'Untitled Campaign');
+    const initialCampTitle = (!meta.rulesetConfirmed && isDefaultUntitledCampaignTitle(meta.title))
+        ? 'Untitled Campaign'
+        : ((meta.title || '').trim() || 'Untitled Campaign');
+    $('#mhc_initial_title').text(initialCampTitle);
     $('#mhc_initial_premise').text((meta.premise || '').trim() || '(Waiting for premise...)');
     $('#mhc_initial_focal_lens').text((meta.focalLens || '').trim() || '(Waiting for focal lens/pivot...)');
     $('#mhc_initial_tone').text((meta.tone || '').trim() || '(Waiting for tone...)');
@@ -1582,6 +1609,10 @@ function updateBlueprintDeck() {
 function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
     const stream = document.getElementById('mhc_chat_messages');
     if (!stream) return;
+
+    if (role === 'assistant' && typeof text === 'string' && text.includes('Concierge')) {
+        text = text.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
+    }
 
     const bubble = document.createElement('div');
     bubble.className = `mhc-bubble mhc-bubble-${role}`;
@@ -3058,7 +3089,6 @@ export async function refreshConciergeActiveContext(targetChatId = null) {
 
         if (activeRunning) {
             $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').show();
-            $('#mhc_load_active_campaign_btn').show();
             const rawTitle = (activeRunning.meta?.title || '').trim();
             const hasCustomTitle = rawTitle && !isDefaultUntitledCampaignTitle(rawTitle);
             const displayTitle = hasCustomTitle ? rawTitle : 'Active Game';
@@ -3079,20 +3109,8 @@ export async function refreshConciergeActiveContext(targetChatId = null) {
                     $('#mhc_new_adventure_stepper').hide();
                 }
             }
-
-            if (hasCustomTitle) {
-                const shortTitle = rawTitle.length > 20 ? `${rawTitle.slice(0, 18)}...` : rawTitle;
-                $('#mhc_load_active_campaign_btn')
-                    .attr('title', `Active campaign "${rawTitle}" detected in this chat! Click to pull into Session Zero.`)
-                    .html(`📂 Load "${shortTitle}"`);
-            } else {
-                $('#mhc_load_active_campaign_btn')
-                    .attr('title', 'Pull the active chat\'s Campaign Dossier into Session Zero to view or edit')
-                    .html('📂 Load Active Campaign');
-            }
         } else {
             $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').hide();
-            $('#mhc_load_active_campaign_btn').hide();
             $('#mhc_active_game_label').hide();
             if (currentNavMode === 'living-world') {
                 currentNavMode = 'new-adventure';
@@ -3301,10 +3319,10 @@ export async function switchToTrack(targetMode) {
  * so the player can branch off or forge an alternate adventure.
  */
 export async function forkActiveCampaignToSessionZero() {
-    const hasExistingSession = (Array.isArray(sessionZeroTrack.chatHistory) && sessionZeroTrack.chatHistory.length > 0)
+    const hasExistingSessionProgress = (Array.isArray(sessionZeroTrack.chatHistory) && sessionZeroTrack.chatHistory.length > 0)
         || !isDossierEmptyOrUntouched(sessionZeroTrack.dossier);
 
-    if (hasExistingSession) {
+    if (hasExistingSessionProgress) {
         const title = sessionZeroTrack.dossier?.meta?.title || 'Untitled Session Zero';
         const ok = await showConciergeConfirm({
             icon: '🍴',
@@ -3315,6 +3333,8 @@ export async function forkActiveCampaignToSessionZero() {
         });
         if (!ok) return false;
     }
+
+    resetConciergeState({ showGreeting: false });
 
     const sourceDossier = livingWorldTrack.dossier || activeDossier;
     if (!sourceDossier || isDossierEmptyOrUntouched(sourceDossier)) {
@@ -3434,100 +3454,6 @@ export function bindModalEvents() {
             }
         } finally {
             stopImportProgress(charLabel);
-        }
-    });
-
-    // Inspiration Toolbar: Load Active Campaign Dossier
-    $('#mhc_load_active_campaign_btn').on('click', async () => {
-        startImportProgress('Active Campaign');
-        try {
-            toastr?.info('Scanning for active campaign dossier...', 'Active Campaign', { timeOut: 1500 });
-            let dossier = await loadActiveCampaignDossier();
-            if (!dossier) {
-                const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-                const bookName = ctx?.chatMetadata?.world_info || (ctx?.chatId ? `Campaign_${ctx.chatId}` : '');
-                let rawEntryText = '';
-                if (bookName) {
-                    try {
-                        const data = await fetchWorldInfoBook(bookName);
-                        const found = Object.values(data?.entries || {}).find(e =>
-                            e?.comment?.includes('PbtA Concierge') || e?.content?.includes('Protagonist')
-                        );
-                        if (found) rawEntryText = found.content;
-                    } catch (_) {}
-                }
-
-                if (rawEntryText) {
-                    const rehydrateOk = await showConciergeConfirm({
-                        icon: '🧙‍♂️',
-                        title: 'Rehydrate Legacy Campaign?',
-                        message: 'A legacy or unparsed campaign entry was found. Would you like the AI Campaign Architect to rehydrate and heal it?',
-                        confirmLabel: '✨ Rehydrate Dossier',
-                        confirmColor: '#2563eb',
-                    });
-                    if (rehydrateOk) {
-                        dossier = await reconstituteDossierWithAi(rawEntryText, msg => toastr?.info(msg));
-                    }
-                }
-            }
-
-            if (!dossier) {
-                toastr?.clear?.();
-                toastr?.warning('No active campaign dossier found in this chat.');
-                return;
-            }
-
-            const candidateTitle = (dossier.meta?.title || '').trim() || 'Active Adventure';
-            const hasExistingSessionProgress = (Array.isArray(chatHistory) && chatHistory.length > 0) || !isDossierEmptyOrUntouched(activeDossier);
-
-            if (hasExistingSessionProgress) {
-                const proceed = await showConciergeConfirm({
-                    icon: '📂',
-                    title: 'Overwrite Unlaunched Draft?',
-                    message: `An in-progress Session Zero draft is currently open.\n\nLoading "${candidateTitle}" will discard your unlaunched draft and restart the conversation for this campaign.\n\nProceed?`,
-                    confirmLabel: '📂 Load Active Campaign',
-                    confirmColor: '#2563eb',
-                });
-                if (!proceed) {
-                    toastr?.clear?.();
-                    toastr?.info('Load cancelled. Current Session Zero draft retained.');
-                    return;
-                }
-            }
-
-            // Cleanly reset Session Zero state without default welcome bubble
-            resetConciergeState({ showGreeting: false });
-
-            // Install active campaign into live dossier & deck
-            activeDossier = healAndNormalizeDossier(dossier);
-            const ctxEarly = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-            const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-                || ctxEarly?.getCurrentChatId?.()
-                || ctxEarly?.chatId
-                || ctxEarly?.chatMetadata?.chat_id
-                || '';
-            loadedCampaignOriginChatId = currentChatId;
-            loadedCampaignOriginTitle = (activeDossier.meta?.title || '').trim();
-            activeDossier._originChatId = loadedCampaignOriginChatId;
-            activeDossier._originCampaignTitle = loadedCampaignOriginTitle;
-
-            updateBlueprintDeck();
-            setConciergeTab('cards');
-            await updateSyncButtonState();
-
-            const isFae = activeDossier.meta?.ruleset === 'fae';
-            const vitalityTerm = isFae ? 'resource pools' : 'Harm capacity';
-            const loadNotice = `📂 **Active Campaign Loaded:** "${activeDossier.meta?.title}"\n\nYou can now adjust ${vitalityTerm}, campaign dials, party mode, or supporting cast in the Blueprint Deck on the right. When you're ready, click **"🔄 Sync to Active Game"** to apply your changes without resetting the story!`;
-            appendChatBubble('assistant', loadNotice);
-            chatHistory.push({ role: 'assistant', content: loadNotice });
-
-            saveDraft();
-            toastr?.clear?.();
-            toastr?.success(`Loaded active campaign: "${candidateTitle}"! Dials and cards are now editable.`);
-        } catch (err) {
-            toastr?.error(`Failed to load active campaign: ${err.message}`);
-        } finally {
-            stopImportProgress('Active Campaign');
         }
     });
 

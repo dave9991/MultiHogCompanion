@@ -309,14 +309,14 @@
 
                 <!-- ── Campaign Lorebooks Sync ── -->
                 <div class="inline-drawer mhc-lorebook-section" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
-                    <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0;">
-                        <label class="checkbox_label" title="Keep campaign lorebooks synchronized with adventure chat name instead of raw timestamps" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1;" onclick="event.stopPropagation();">
+                    <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; margin: 0; padding: 0; gap: 8px;">
+                        <label class="checkbox_label" title="Keep campaign lorebooks synchronized with adventure chat name instead of raw timestamps" style="display: flex; align-items: center; cursor: pointer; margin: 0; flex: 1; flex-shrink: 0; white-space: nowrap;" onclick="event.stopPropagation();">
                             <input id="mhc_lorebook_sync_enable" type="checkbox" style="margin-right: 8px;" onclick="event.stopPropagation();">
-                            <span style="font-size: 0.9em;"><b>📚 Campaign Lorebooks:</b> Auto-Sync</span>
+                            <span style="font-size: 0.9em; white-space: nowrap;"><b>📚 Campaign Lorebooks:</b> Auto-Sync</span>
                         </label>
-                        <div style="display: flex; align-items: center; gap: 6px;" title="Click to expand lorebook sync settings">
-                            <span id="mhc_lorebook_prefix_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); font-family: monospace; white-space: nowrap;">Prefix: —</span>
-                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75;"></div>
+                        <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 1;" title="Click to expand lorebook sync settings">
+                            <span id="mhc_lorebook_prefix_badge" style="font-size: 0.7em; padding: 1px 6px; border-radius: 3px; background: rgba(80,180,120,0.2); color: #88ffbb; border: 1px solid rgba(80,180,120,0.35); font-family: monospace; white-space: nowrap; max-width: 170px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle;">Prefix: —</span>
+                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="font-size: 0.85em; opacity: 0.75; flex-shrink: 0;"></div>
                         </div>
                     </div>
 
@@ -349,11 +349,11 @@
                             </div>
                             <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
                                 <span style="opacity: 0.7;">Target Prefix:</span>
-                                <span id="mhc_lorebook_target_prefix" style="font-family: monospace; color: #88ccff;">—</span>
+                                <span id="mhc_lorebook_target_prefix" style="font-family: monospace; color: #88ccff; max-width: 60%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">—</span>
                             </div>
                             <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
                                 <span style="opacity: 0.7;">Current Prefix:</span>
-                                <span id="mhc_lorebook_current_prefix" style="font-family: monospace; color: #ffcc88;">—</span>
+                                <span id="mhc_lorebook_current_prefix" style="font-family: monospace; color: #ffcc88; max-width: 60%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">—</span>
                             </div>
                             <div style="display: flex; justify-content: space-between;">
                                 <span style="opacity: 0.7;">Matching Lorebooks:</span>

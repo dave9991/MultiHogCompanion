@@ -1475,13 +1475,14 @@ export async function updateLorebookSyncUI() {
         const detectedCountDisplay = $('#mhc_lorebook_detected_count');
 
         if (!s.enableLorebookSync) {
-            badge.text('Disabled').css({
+            badge.text('Disabled').attr('title', 'Lorebook Auto-Sync is disabled').css({
                 background: 'rgba(255,255,255,0.06)',
                 color: 'rgba(255,255,255,0.4)',
                 borderColor: 'rgba(255,255,255,0.1)',
             });
         } else if (status.inSync) {
-            badge.text(`Prefix: ${status.targetPrefix || '—'}`).css({
+            const prefix = status.targetPrefix || '—';
+            badge.text(`Prefix: ${prefix}`).attr('title', `Campaign Prefix: ${prefix}`).css({
                 background: 'rgba(80,180,120,0.2)',
                 color: '#88ffbb',
                 borderColor: 'rgba(80,180,120,0.35)',
@@ -1490,16 +1491,22 @@ export async function updateLorebookSyncUI() {
             const shortOld = status.currentPrefix
                 ? (status.currentPrefix.length > 14 ? status.currentPrefix.slice(0, 14) + '…' : status.currentPrefix)
                 : 'none';
-            badge.text(`⚠️ Out of Sync (${shortOld})`).css({
+            badge.text(`⚠️ Out of Sync (${shortOld})`).attr('title', `Out of Sync — Current: ${status.currentPrefix || 'none'}, Target: ${status.targetPrefix || 'none'}`).css({
                 background: 'rgba(255,180,60,0.2)',
                 color: '#ffcc88',
                 borderColor: 'rgba(255,180,60,0.4)',
             });
         }
 
-        if (chatDisplay.length) chatDisplay.text(status.chatTitle || '(none)');
-        if (targetPrefixDisplay.length) targetPrefixDisplay.text(status.targetPrefix || '—');
-        if (currentPrefixDisplay.length) currentPrefixDisplay.text(status.currentPrefix || '—');
+        if (chatDisplay.length) {
+            chatDisplay.text(status.chatTitle || '(none)').attr('title', status.chatTitle || '(none)');
+        }
+        if (targetPrefixDisplay.length) {
+            targetPrefixDisplay.text(status.targetPrefix || '—').attr('title', status.targetPrefix || '—');
+        }
+        if (currentPrefixDisplay.length) {
+            currentPrefixDisplay.text(status.currentPrefix || '—').attr('title', status.currentPrefix || '—');
+        }
         if (detectedCountDisplay.length) {
             detectedCountDisplay.text(`${status.matchingBooks.length} book(s) found`);
         }

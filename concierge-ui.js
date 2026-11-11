@@ -364,24 +364,6 @@ export function loadValidatedDraft(targetRuleset = null) {
             if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
-        if (Array.isArray(validated.chatHistory)) {
-            validated.chatHistory.forEach(m => {
-                if (m && typeof m.content === 'string') {
-                    m.content = m.content.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
-                }
-            });
-        }
-        if (validated.stageChatHistories) {
-            for (const stage of Object.keys(validated.stageChatHistories)) {
-                if (Array.isArray(validated.stageChatHistories[stage])) {
-                    validated.stageChatHistories[stage].forEach(m => {
-                        if (m && typeof m.content === 'string') {
-                            m.content = m.content.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
-                        }
-                    });
-                }
-            }
-        }
         return { draft: validated };
     } catch (err) {
         console.warn(`[${adapter.label} Concierge] Unexpected error reading draft; purging:`, err);
@@ -575,10 +557,7 @@ function renderChatHistoryFromState() {
         const displayStr = msg.displayContent || (typeof msg.content === 'string' ? msg.content : '');
         if (displayStr) {
             const isAssistant = msg.role === 'assistant';
-            let text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
-            if (isAssistant && typeof text === 'string' && text.includes('Concierge')) {
-                text = text.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
-            }
+            const text = isAssistant ? stripConciergeStateBlocks(displayStr) : displayStr;
             appendChatBubble(msg.role, text, msg.imageSrc || null);
         } else if (Array.isArray(msg.content)) {
             let text = '';
@@ -1609,10 +1588,6 @@ export function updateBlueprintDeck() {
 function appendChatBubble(role, text, imageSrc = null, hasDiagnostic = false) {
     const stream = document.getElementById('mhc_chat_messages');
     if (!stream) return;
-
-    if (role === 'assistant' && typeof text === 'string' && text.includes('Concierge')) {
-        text = text.replace(/I'm your (?:PbtA|Session Zero)\s+Concierge/gi, "I'm your Concierge");
-    }
 
     const bubble = document.createElement('div');
     bubble.className = `mhc-bubble mhc-bubble-${role}`;

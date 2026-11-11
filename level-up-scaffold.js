@@ -314,6 +314,7 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
 
     if (!chatId) return scaffoldDossierStubForChat('unknown', liveMemo);
 
+    const cleanPartId = String(chatId || '').replace(/\.jsonl$/i, '').trim();
     const candidateIds = getCandidateChatIds(chatId);
     let dossier = null;
 
@@ -458,9 +459,10 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
         }
 
         // Keep partition cache in sync
-        if (companionSettings?.chatStates && chatId) {
-            companionSettings.chatStates[chatId] = companionSettings.chatStates[chatId] || {};
-            companionSettings.chatStates[chatId].companionDossier = dossier;
+        const cleanPartId = String(chatId || '').replace(/\.jsonl$/i, '').trim();
+        if (companionSettings?.chatStates && cleanPartId) {
+            companionSettings.chatStates[cleanPartId] = companionSettings.chatStates[cleanPartId] || {};
+            companionSettings.chatStates[cleanPartId].companionDossier = dossier;
         }
 
         return dossier;
@@ -483,9 +485,9 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
     }
 
     // Save in chat partition
-    if (companionSettings?.chatStates && chatId) {
-        companionSettings.chatStates[chatId] = companionSettings.chatStates[chatId] || {};
-        companionSettings.chatStates[chatId].companionDossier = stub;
+    if (companionSettings?.chatStates && cleanPartId) {
+        companionSettings.chatStates[cleanPartId] = companionSettings.chatStates[cleanPartId] || {};
+        companionSettings.chatStates[cleanPartId].companionDossier = stub;
     }
 
     // Save in SillyTavern chatMetadata if available
@@ -547,15 +549,14 @@ export function persistCompanionDossier(chatId, dossier) {
     } catch (_) {}
 
     // 2. MultiHog Companion extension_settings partition
+    const cleanId = String(chatId || '').replace(/\.jsonl$/i, '').trim();
     try {
         const compSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
             || globalThis.extension_settings?.multihog_companion;
-        if (compSettings) {
+        if (compSettings && cleanId) {
             compSettings.chatStates = compSettings.chatStates || {};
-            for (const cid of candidateIds) {
-                compSettings.chatStates[cid] = compSettings.chatStates[cid] || {};
-                compSettings.chatStates[cid].companionDossier = dossier;
-            }
+            compSettings.chatStates[cleanId] = compSettings.chatStates[cleanId] || {};
+            compSettings.chatStates[cleanId].companionDossier = dossier;
         }
     } catch (_) {}
 
@@ -563,12 +564,10 @@ export function persistCompanionDossier(chatId, dossier) {
     try {
         const rpg = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
             || globalThis.extension_settings?.rpg_tracker;
-        if (rpg) {
+        if (rpg && cleanId) {
             rpg.chatStates = rpg.chatStates || {};
-            for (const cid of candidateIds) {
-                rpg.chatStates[cid] = rpg.chatStates[cid] || {};
-                rpg.chatStates[cid].companionDossier = dossier;
-            }
+            rpg.chatStates[cleanId] = rpg.chatStates[cleanId] || {};
+            rpg.chatStates[cleanId].companionDossier = dossier;
         }
     } catch (_) {}
 

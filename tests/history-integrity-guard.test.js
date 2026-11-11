@@ -15,6 +15,7 @@ import {
     resolveAuthoritativeChatId,
     normalizeChatIdForMatch,
     isSameChatId,
+    scrubDuplicateChatStateKeys,
     checkTrackerProjectionIntegrity,
     renderTrackerQuarantineBanner,
     verifyHistoryPointer,
@@ -233,4 +234,46 @@ assert.ok(reportMd.includes('Horror'), 'Report must identify Horror chat');
 assert.ok(reportMd.includes('HTTP 404'), 'Report must include HTTP 404 detail');
 
 console.log('✓ verifyHistoryPointer and scanAllChatHistories verified');
+
+// ── 6. Scrub Duplicate .jsonl Keys in chatStates ─────────────────────────────
+console.log('Testing scrubDuplicateChatStateKeys...');
+const dirtySettings = {
+    chatStates: {
+        'The Sunken Vault': {
+            campaignBooks: ['The_Sunken_Vault_Locations'],
+            renamedCampaignPrefix: 'The_Sunken_Vault',
+        },
+        'The Sunken Vault.jsonl': {
+            companionDossier: { protagonist: { name: 'Vance' } },
+        },
+        'Standalone.jsonl': {
+            companionDossier: { protagonist: { name: 'Solo' } },
+        },
+    },
+};
+
+const didScrub = scrubDuplicateChatStateKeys(dirtySettings);
+assert.strictEqual(didScrub, true, 'scrubDuplicateChatStateKeys must report mutation');
+assert.strictEqual(dirtySettings.chatStates['The Sunken Vault.jsonl'], undefined, '.jsonl duplicate must be deleted');
+assert.strictEqual(
+    dirtySettings.chatStates['The Sunken Vault'].companionDossier.protagonist.name,
+    'Vance',
+    'companionDossier from duplicate .jsonl entry must be merged into base entry'
+);
+assert.strictEqual(
+    dirtySettings.chatStates['The Sunken Vault'].campaignBooks[0],
+    'The_Sunken_Vault_Locations',
+    'Original fields in base entry must be preserved'
+);
+assert.strictEqual(dirtySettings.chatStates['Standalone.jsonl'], undefined);
+assert.strictEqual(
+    dirtySettings.chatStates['Standalone'].companionDossier.protagonist.name,
+    'Solo',
+    'Standalone .jsonl entry must be migrated to base name'
+);
+
+const cleanAgain = scrubDuplicateChatStateKeys(dirtySettings);
+assert.strictEqual(cleanAgain, false, 'No mutation when already clean');
+console.log('✓ scrubDuplicateChatStateKeys verified');
+
 console.log('--- All History Integrity Guard tests passed! ---');

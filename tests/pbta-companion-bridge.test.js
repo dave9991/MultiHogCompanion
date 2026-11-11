@@ -141,7 +141,48 @@ const unrelatedRes = await globalThis.window.fetch('https://example.com/api/stat
 const unrelatedContent = await unrelatedRes.text();
 assert.strictEqual(unrelatedContent, 'Unrelated data', 'Unrelated requests must remain completely untouched');
 
-// Test 4c: Clean teardown
+// Test 4c: /api/characters/chats error normalization (WRK-10)
+teardownCompanionDocInterceptor();
+globalThis.window.fetch = async (input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.includes('/api/characters/chats')) {
+        return new Response(JSON.stringify({ error: true }), {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+        });
+    }
+    return new Response('ok', { status: 200 });
+};
+setupCompanionDocInterceptor();
+
+const errorChatsRes = await globalThis.window.fetch('/api/characters/chats');
+const errorChatsData = await errorChatsRes.json();
+assert.ok(Array.isArray(errorChatsData), 'Must normalize { error: true } to empty array []');
+assert.strictEqual(errorChatsData.length, 0, 'Empty array returned');
+
+// Test 4d: /api/characters/chats valid array pass-through
+teardownCompanionDocInterceptor();
+globalThis.window.fetch = async (input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.includes('/api/characters/chats')) {
+        return new Response(JSON.stringify([{ file_name: 'test.jsonl', file_id: 'test' }]), {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+        });
+    }
+    return new Response('ok', { status: 200 });
+};
+setupCompanionDocInterceptor();
+
+const validChatsRes = await globalThis.window.fetch('/api/characters/chats');
+const validChatsData = await validChatsRes.json();
+assert.ok(Array.isArray(validChatsData));
+assert.strictEqual(validChatsData.length, 1);
+assert.strictEqual(validChatsData[0].file_id, 'test');
+
+// Test 4e: Clean teardown
 teardownCompanionDocInterceptor();
 const afterTeardownRes = await globalThis.window.fetch('/scripts/extensions/third-party/SillyTavern-MultihogDnDFramework/docs/multihogDnDdoc.md');
 const afterTeardownText = await afterTeardownRes.text();

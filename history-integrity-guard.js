@@ -74,6 +74,43 @@ export function isSameChatId(idA, idB) {
 }
 
 /**
+ * Scrubs any duplicate `.jsonl` partition keys from `chatStates`, migrating or merging
+ * them into their canonical extension-free keys to prevent collisions with upstream MultiHog's
+ * campaignPrefix and orphaned lorebook candidate detection.
+ *
+ * @param {object} settings Settings object containing `chatStates` (e.g. rpg_tracker or multihog_companion)
+ * @returns {boolean} Whether any duplicate keys were scrubbed
+ */
+export function scrubDuplicateChatStateKeys(settings) {
+    if (!settings?.chatStates || typeof settings.chatStates !== 'object') return false;
+    let mutated = false;
+    for (const key of Object.keys(settings.chatStates)) {
+        if (key.endsWith('.jsonl')) {
+            const base = key.slice(0, -6);
+            if (!base) continue;
+            const dupe = settings.chatStates[key];
+            if (settings.chatStates[base]) {
+                const target = settings.chatStates[base];
+                if (dupe && typeof dupe === 'object') {
+                    for (const [prop, val] of Object.entries(dupe)) {
+                        if (target[prop] === undefined && val !== undefined && val !== '') {
+                            target[prop] = val;
+                        }
+                    }
+                }
+                delete settings.chatStates[key];
+                mutated = true;
+            } else {
+                settings.chatStates[base] = dupe;
+                delete settings.chatStates[key];
+                mutated = true;
+            }
+        }
+    }
+    return mutated;
+}
+
+/**
  * Checks if MultiHog's `isHistoryPersistenceBlocked()` latch is active.
  *
  * @param {Function|null} [blockCheckFn=null] Optional injected check function for tests
@@ -128,6 +165,15 @@ export async function checkTrackerProjectionIntegrity(options = {}) {
     const projectionOwner = s?.chatStateProjectionOwner ? String(s.chatStateProjectionOwner).trim() : null;
 
     const persistenceBlocked = await checkHistoryPersistenceBlocked(options.isBlockedFn);
+
+    if (s?.chatStates) {
+        scrubDuplicateChatStateKeys(s);
+    }
+    const comp = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
+        || (typeof globalThis !== 'undefined' ? globalThis.extension_settings?.multihog_companion : null);
+    if (comp?.chatStates) {
+        scrubDuplicateChatStateKeys(comp);
+    }
 
     const normSt = normalizeChatIdForMatch(stChatId);
     const savedPart = stChatId

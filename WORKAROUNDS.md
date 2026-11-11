@@ -42,6 +42,7 @@
 | **WRK-07** | **Truncated Message Stop Button Choice Injection** | 🟡 **MODERATE**: ST emits message rendered on user stop click. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`EVT-10 (GENERATION_STOPPED)`](./LISTENERS.md#evt-10-generation_stopped-cyoa-stop-guard--aborted-message-shield)<br>[`DOM-06 (Capture Stop)`](./LISTENERS.md#dom-06) | Low (SillyTavern event design choice). |
 | **WRK-08** | **Level-Up, Permadeath & Paragraph Fusion Footer Shield** | 🟡 **MODERATE**: Protocol pause collision & 0px footer crushing on single newline. | [`FEAT-03 (CYOA On-Demand Engine)`](./FEATURES.md#feat-03-cyoa-on-demand-choice-engine--instant-auto-repair) | [`style.css`](./style.css)<br>[`cyoa-safety-net.js`](./cyoa-safety-net.js) | Medium (Upstream scopes button CSS rules). |
 | **WRK-09** | **FAE State Tracker Party Block Stripping** | 🟡 **MODERATE**: Upstream mergeMemo appends [PARTY] even when modules.party is disabled. | [`FEAT-01 (PbtA Cartridge)`](./FEATURES.md#feat-01-pbta-ruleset-cartridge-engine) | [`fae-state-sync.js`](./fae-state-sync.js) (`reconcileFaeMemoAfterTurn`)<br>[`EVT-08`](./LISTENERS.md#evt-08-settings_updated-ruleset--state-sync-coordinator) | High (Upstream guards `mergeMemo` by `settings.modules`). |
+| **WRK-10** | **Empty Character Directory Chat Listing Exception** | 🔴 **CRITICAL**: Upstream `listExistingSillyTavernChatIds` aborts orphaned lorebook cleanup on `{ error: true }`. | Upstream Chat Deletion & Cleanup | [`ADR-MP-01 (window.fetch)`](./MONKEYPATCHES.md#adr-mp-01-synthetic-pbta-ruleset-injection-via-windowfetch)<br>[`history-integrity-guard.js`](./history-integrity-guard.js) (`scrubDuplicateChatStateKeys`) | High (Upstream handles non-array responses gracefully). |
 
 ---
 
@@ -263,4 +264,42 @@ Upstream MultiHog does **not** check whether `settings.modules.party === false` 
 
 #### Retirement Criteria
 Upstream MultiHog's `mergeMemo` respects module enable toggles (e.g. `if (settings.modules && settings.modules[tag.toLowerCase()] === false) continue;`).
+
+---
+
+### WRK-10: Empty Character Directory Chat Listing Exception (Upstream cleanDeletedChatRecords Abort)
+
+* **Target Surface:** Upstream MultiHog `listExistingSillyTavernChatIds` (`index.js#L625-L632`) and SillyTavern Backend `/api/characters/chats` (`st-source/src/endpoints/characters.js#L1504-L1506`)
+* **Associated Feature:** Upstream Chat Deletion & Orphaned Lorebook Purge
+* **Associated Mechanisms:** [`ADR-MP-01 (window.fetch Interception)`](./MONKEYPATCHES.md#adr-mp-01-synthetic-pbta-ruleset-injection-via-windowfetch), [`history-integrity-guard.js`](./history-integrity-guard.js) (`scrubDuplicateChatStateKeys`), [`level-up-scaffold.js`](./level-up-scaffold.js)
+
+#### The Upstream Defect
+When deleting an adventure chat in SillyTavern, SillyTavern emits `CHAT_DELETED`, triggering upstream MultiHog's `cleanDeletedChatRecords(chatId)`.
+Before offering orphaned lorebooks for purge, upstream verifies that `chatId` no longer exists by building a complete Set of all surviving chat IDs via `listExistingSillyTavernChatIds()`.
+Inside `listExistingSillyTavernChatIds()`, upstream queries `/api/characters/chats` for every character installed in SillyTavern:
+```javascript
+const chats = await post('/api/characters/chats', { avatar_url: character.avatar, simple: true });
+if (!Array.isArray(chats)) throw new Error('Invalid character chat list');
+```
+However, in core SillyTavern (`st-source/src/endpoints/characters.js`), if a character has never had a chat created (or has no chats directory on disk), `/api/characters/chats` responds with `{ error: true }`. Because `{ error: true }` is an object and not an Array, upstream throws `Error: Invalid character chat list`.
+This exception is caught by `onDeletedChat`'s `try/catch` (`console.warn('[RPG Tracker] Deleted chat cleanup skipped:', error)`), which immediately aborts execution.
+As a result:
+1. `offerOrphanedLorebookPurge` is never called.
+2. The user confirmation modal (`Purge orphaned lorebooks?`) never appears.
+3. The deleted chat's partition remains permanently in `rpg_tracker.chatStates` along with its orphaned campaign lorebooks.
+
+Furthermore, if companion dossier persistence previously keyed partitions with `.jsonl` extensions (e.g. `rpg.chatStates['Campaign.jsonl']`), upstream's `orphanedLorebooksForDeletedChat` treats the duplicate key as an active secondary chat sharing the prefix, clobbering candidate detection.
+
+#### Companion Mitigation
+1. **Fetch Normalization (`pbta-companion-bridge.js`)**: Intercepts `window.fetch` for `/api/characters/chats`. If the backend returns `{ error: true }`, Companion normalizes the response to an empty JSON array `[]` (`status: 200, Content-Type: application/json`), satisfying upstream's `Array.isArray(chats)` guard.
+2. **Key Sanitization (`level-up-scaffold.js`)**: Strips `.jsonl` extensions when persisting dossiers into `chatStates`, preventing duplicate extension-laden keys from entering `rpg_tracker.chatStates`.
+3. **Partition Scrubber (`scrubDuplicateChatStateKeys`)**: Automatically purges and consolidates any existing `.jsonl` duplicate keys in `rpg_tracker.chatStates` during `runChatChangedCoordinator` and startup integrity audits.
+
+#### Blast Radius If Removed
+* Any SillyTavern installation containing characters without existing chat histories will completely fail to prompt for orphaned lorebook deletion when adventures are deleted.
+* Deleted adventure lorebooks and state tracker partitions will leak indefinitely.
+
+#### Retirement Criteria
+Upstream MultiHog handles non-array responses gracefully (e.g. `if (!Array.isArray(chats)) continue;`).
+
 

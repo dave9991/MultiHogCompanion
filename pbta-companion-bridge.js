@@ -289,6 +289,36 @@ export function setupCompanionDocInterceptor() {
             }
         }
 
+        // [CATALOG: ADR-MP-01] See MONKEYPATCHES.md & WORKAROUNDS.md (WRK-10) — Normalization of /api/characters/chats to return [] on { error: true }
+        if (url && (url.includes('/api/characters/chats') || url.endsWith('/api/characters/chats'))) {
+            try {
+                const response = await _originalFetch.call(this, input, init);
+                if (response && response.ok) {
+                    const cloned = response.clone();
+                    try {
+                        const data = await cloned.json();
+                        if (data && data.error === true) {
+                            const headers = typeof Headers !== 'undefined'
+                                ? new Headers(response.headers)
+                                : { ...response.headers };
+                            if (headers instanceof Headers) {
+                                headers.set('content-type', 'application/json');
+                                headers.delete('content-length');
+                            }
+                            return new Response(JSON.stringify([]), {
+                                status: 200,
+                                statusText: 'OK',
+                                headers,
+                            });
+                        }
+                    } catch (_) {}
+                }
+                return response;
+            } catch (err) {
+                console.warn('[MultiHog Companion] Fallback: Could not normalize /api/characters/chats:', err);
+            }
+        }
+
         return _originalFetch.apply(this, arguments);
     };
 

@@ -66,6 +66,9 @@ To make MultiHog support PbtA and FAE without touching upstream files (which is 
    - If FAE is active, returns tailored FAE markdown documentation (`buildTailoredFaeDocumentation`).
    - If PbtA is active, compiles the PbtA cartridge (stats, moves, harm tracks, principles, agendas) into markdown text.
    - Returns a synthetic `new Response(rulesetDocText, { status: 200, headers: { 'Content-Type': 'text/markdown' } })`.
+4b. When `input` contains `/api/characters/chats` ([`WRK-10`](./WORKAROUNDS.md#wrk-10-empty-character-directory-chat-listing-exception-upstream-cleandeletedchatrecords-abort)):
+   - Checks if the response body is `{ error: true }` (character directory does not exist on disk).
+   - If true, normalizes the response to an empty array `[]` (`new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })`), preventing upstream `listExistingSillyTavernChatIds` from throwing an exception during chat deletion.
 5. If neither PbtA nor FAE is active, or URL is anything else:
    - Forwards transparently: `return _originalFetch.apply(this, arguments);`.
 

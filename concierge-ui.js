@@ -170,11 +170,65 @@ let activeNameRagSeeds = '';
 let activeNameRagKey = '';
 
 let currentNavMode = 'new-adventure';
+let lastActiveConciergeMode = 'new-adventure';
 let currentAdventureStep = 'initial';
 let unlockedSteps = { initial: true, canon: false, adventure: false, character: false };
 let stageChatHistories = { initial: [], canon: [], adventure: [], character: [] };
 let lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
 let attachedSources = [];
+
+// ── Two-Track Architecture: Session Zero Sandbox vs Active Living World ──
+const sessionZeroTrack = {
+    dossier: createEmptyDossier(),
+    chatHistory: [],
+    changelog: [],
+    currentAdventureStep: 'initial',
+    unlockedSteps: { initial: true, canon: false, adventure: false, character: false },
+    stageChatHistories: { initial: [], canon: [], adventure: [], character: [] },
+    lastSyncedSnapshots: { framing: null, canon: null, adventure: null },
+    attachedSources: [],
+    stagedCanonEntries: [],
+    pendingAttachments: [],
+    activeImports: [],
+    rulesetConfirmed: false,
+};
+
+const livingWorldTrack = {
+    chatId: null,
+    campaignTitle: null,
+    dossier: null,
+    chatHistory: [],
+    stagedCanonEntries: [],
+};
+
+function snapshotCurrentToSessionZeroTrack() {
+    sessionZeroTrack.dossier = activeDossier;
+    sessionZeroTrack.chatHistory = [...chatHistory];
+    sessionZeroTrack.changelog = [...changelog];
+    sessionZeroTrack.currentAdventureStep = currentAdventureStep;
+    sessionZeroTrack.unlockedSteps = { ...unlockedSteps };
+    sessionZeroTrack.stageChatHistories = { ...stageChatHistories };
+    sessionZeroTrack.lastSyncedSnapshots = { ...lastSyncedSnapshots };
+    sessionZeroTrack.attachedSources = [...attachedSources];
+    sessionZeroTrack.stagedCanonEntries = getStagedCanonEntries();
+    sessionZeroTrack.pendingAttachments = [...pendingAttachments];
+    sessionZeroTrack.activeImports = [...activeImports];
+    sessionZeroTrack.rulesetConfirmed = Boolean(activeDossier?.meta?.rulesetConfirmed);
+}
+
+function restoreSessionZeroTrack() {
+    activeDossier = sessionZeroTrack.dossier;
+    chatHistory = sessionZeroTrack.chatHistory;
+    changelog = sessionZeroTrack.changelog || [];
+    currentAdventureStep = sessionZeroTrack.currentAdventureStep || 'initial';
+    unlockedSteps = { ...sessionZeroTrack.unlockedSteps };
+    stageChatHistories = { ...sessionZeroTrack.stageChatHistories };
+    lastSyncedSnapshots = { ...sessionZeroTrack.lastSyncedSnapshots };
+    attachedSources = [...(sessionZeroTrack.attachedSources || [])];
+    setStagedCanonEntries(sessionZeroTrack.stagedCanonEntries || []);
+    pendingAttachments = [...(sessionZeroTrack.pendingAttachments || [])];
+    activeImports = [...(sessionZeroTrack.activeImports || [])];
+}
 
 export function getConciergeStageState() {
     return {
@@ -182,7 +236,20 @@ export function getConciergeStageState() {
         currentAdventureStep,
         unlockedSteps: { ...unlockedSteps },
         rulesetConfirmed: Boolean(activeDossier?.meta?.rulesetConfirmed),
+        lastActiveConciergeMode,
     };
+}
+
+export function getActiveConciergeDossier() {
+    return activeDossier;
+}
+
+export function getSessionZeroTrack() {
+    return sessionZeroTrack;
+}
+
+export function getLivingWorldTrack() {
+    return livingWorldTrack;
 }
 
 function startImportProgress(label) {
@@ -222,6 +289,8 @@ async function ensureModalMounted() {
  * Untouched sessions do not pollute storage.
  */
 function saveDraft() {
+    // Only save when in Session Zero track! Never save Living World to Session Zero draft storage!
+    if (currentNavMode !== 'new-adventure') return;
     try {
         const ruleset = systemRegistry.detectRuleset(activeDossier);
         const adapter = systemRegistry.get(ruleset);
@@ -239,10 +308,10 @@ function saveDraft() {
             dossier: activeDossier,
             chatHistory,
             changelog,
-            originChatId: loadedCampaignOriginChatId,
-            originCampaignTitle: loadedCampaignOriginTitle,
+            originChatId: null,
+            originCampaignTitle: null,
             timestamp: Date.now(),
-            currentNavMode,
+            currentNavMode: 'new-adventure',
             currentAdventureStep,
             unlockedSteps,
             stageChatHistories,
@@ -260,7 +329,10 @@ function saveDraft() {
  * @param {string|null} [targetRuleset=null]
  */
 export function loadValidatedDraft(targetRuleset = null) {
-    const ruleset = targetRuleset || systemRegistry.detectRuleset(activeDossier) || (isFaeActive() ? 'fae' : 'pbta');
+    const ruleset = targetRuleset
+        || (currentNavMode === 'new-adventure' ? systemRegistry.detectRuleset(activeDossier) : null)
+        || systemRegistry.detectRuleset(sessionZeroTrack.dossier)
+        || (isFaeActive() ? 'fae' : 'pbta');
     const adapter = systemRegistry.get(ruleset);
     const key = adapter.getDraftStorageKey();
     try {
@@ -323,8 +395,8 @@ function showConciergeConfirm({
     confirmLabel = 'Confirm',
     confirmColor = '#dc2626',
 } = {}) {
-    if (typeof document === 'undefined') {
-        return Promise.resolve(true);
+    if (typeof document === 'undefined' || globalThis.__MHC_TEST_AUTO_CONFIRM__ !== undefined) {
+        return Promise.resolve(globalThis.__MHC_TEST_AUTO_CONFIRM__ !== false);
     }
     const modalRoot = document.getElementById('mhc_concierge_modal');
     if (!modalRoot) {
@@ -434,14 +506,13 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     setConciergeTab('cards');
 
     if (showGreeting) {
-        const greeting = effectiveRuleset === 'fae'
-            ? "Welcome to Session Zero! I'm your FAE Concierge. Tell me what kind of adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?"
-            : "Welcome to Session Zero! I'm your PbtA Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?";
+        const greeting = "Welcome to Session Zero! I'm your Session Zero Concierge. Tell me what kind of game or adventure you'd like to play, or drop in a screenshot, character art, or lore document to inspire our world. What genre or vibe are you aiming for?";
         appendChatBubble('assistant', greeting);
         chatHistory.push({ role: 'assistant', content: greeting });
         stageChatHistories.initial = [...chatHistory];
     }
     evaluateStepUnlocks();
+    snapshotCurrentToSessionZeroTrack();
 }
 
 /**
@@ -881,7 +952,12 @@ function updateBlueprintDeck() {
     const isUntouchedAndUnestablished = !meta.genreEstablished && isDossierEmptyOrUntouched(activeDossier);
 
     const titlePrefix = adapter.id === 'fae' ? 'FAE' : adapter.id === 'pbta' ? 'PbtA' : adapter.id.toUpperCase();
-    $('#mhc_concierge_modal_title').text(`${titlePrefix} Concierge`);
+    if (currentNavMode === 'living-world') {
+        const campTitle = (activeDossier.meta?.title || loadedCampaignOriginTitle || '').trim() || 'Active Campaign';
+        $('#mhc_concierge_modal_title').text(`Living World Dossier: ${campTitle}`);
+    } else {
+        $('#mhc_concierge_modal_title').text('Session Zero Concierge');
+    }
     $('#mhc_deck_engine_title').text(`${adapter.badgeIcon} ${titlePrefix} Engine`);
 
     const toggleContainer = $('#mhc_header_ruleset_toggle');
@@ -925,10 +1001,13 @@ function updateBlueprintDeck() {
         }
     }
 
-    if (isUntouchedAndUnestablished) {
+    const isSessionZeroAgnostic = currentNavMode === 'new-adventure' && (currentAdventureStep === 'initial' || currentAdventureStep === 'canon' || !meta.rulesetConfirmed);
+    if (isSessionZeroAgnostic || isUntouchedAndUnestablished) {
         $('#mhc_header_system_badge')
             .text('✨ Any Genre / Custom')
-            .attr('title', `Active Engine: ${adapter.label} (${adapter.diceEngine}) — Use any preset or forge custom setting`);
+            .attr('title', isSessionZeroAgnostic
+                ? 'Ruleset and engine will be chosen in Step 3 (Adventure)'
+                : `Active Engine: ${adapter.label} (${adapter.diceEngine}) — Use any preset or forge custom setting`);
         $('#mhc_deck_system_tag').text('ANY GENRE / CUSTOM');
         $('#mhc_deck_system_desc').text(meta.premise || (isFae
             ? 'Single-pass 4dF attrition engine — pick any preset or forge custom Resource Pools.'
@@ -1476,6 +1555,21 @@ function updateBlueprintDeck() {
             $('#mhc_tab_progression_btn').show();
             $('.mhc-chat-column').show();
         }
+    }
+
+    // Footer button visibility per track
+    if (currentNavMode === 'living-world') {
+        $('#mhc_save_draft_btn').hide();
+        $('#mhc_reset_session_btn').hide();
+        $('#mhc_launch_campaign_btn').hide();
+        $('#mhc_fork_campaign_btn').show();
+        $('#mhc_sync_active_campaign_btn').show();
+    } else {
+        $('#mhc_save_draft_btn').show();
+        $('#mhc_reset_session_btn').show();
+        $('#mhc_launch_campaign_btn').show();
+        $('#mhc_fork_campaign_btn').hide();
+        $('#mhc_sync_active_campaign_btn').hide();
     }
 
     // Raw Markdown Tab
@@ -2878,6 +2972,15 @@ export async function loadActiveCampaignDossier(targetChatId = null) {
  */
 export async function updateSyncButtonState(targetChatId = null) {
     const syncBtn = $('#mhc_sync_active_campaign_btn');
+    if (!syncBtn.length) return false;
+
+    // Strict Track Guard: Sync button only appears if in living-world mode OR if viewing the origin chat of a loaded campaign
+    if (currentNavMode !== 'living-world' && !loadedCampaignOriginChatId) {
+        console.log('EARLY EXIT: Not living-world and no loadedCampaignOriginChatId');
+        syncBtn.hide();
+        return false;
+    }
+
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     const currentChatId = targetChatId
         || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
@@ -2945,13 +3048,42 @@ export async function updateSyncButtonState(targetChatId = null) {
 export async function refreshConciergeActiveContext(targetChatId = null) {
     try {
         const activeRunning = await loadActiveCampaignDossier(targetChatId);
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+        const currentChatId = targetChatId
+            || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+            || ctx?.getCurrentChatId?.()
+            || ctx?.chatId
+            || ctx?.chatMetadata?.chat_id
+            || '';
+
         if (activeRunning) {
             $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').show();
             $('#mhc_load_active_campaign_btn').show();
-            if (activeRunning.meta?.title && !isDefaultUntitledCampaignTitle(activeRunning.meta.title)) {
-                const shortTitle = activeRunning.meta.title.length > 20 ? `${activeRunning.meta.title.slice(0, 18)}...` : activeRunning.meta.title;
+            const rawTitle = (activeRunning.meta?.title || '').trim();
+            const hasCustomTitle = rawTitle && !isDefaultUntitledCampaignTitle(rawTitle);
+            const displayTitle = hasCustomTitle ? rawTitle : 'Active Game';
+            $('#mhc_active_game_title').text(displayTitle);
+            $('#mhc_active_game_label').show().attr('title', `Active Campaign: ${displayTitle}`);
+
+            if (loadedCampaignOriginChatId && currentChatId) {
+                const currentCandidates = getCandidateChatIds(currentChatId);
+                const originCandidates = getCandidateChatIds(loadedCampaignOriginChatId);
+                if (currentCandidates.some(id => originCandidates.includes(id))) {
+                    currentNavMode = 'living-world';
+                    const navBtns = $('.mhc-mode-nav-btn');
+                    if (typeof navBtns.removeClass === 'function') navBtns.removeClass('active');
+                    if (typeof navBtns.css === 'function') navBtns.css({ background: 'transparent', color: '#9ca3af' });
+                    const lwBtn = $('.mhc-mode-nav-btn[data-nav-mode="living-world"]');
+                    if (typeof lwBtn.addClass === 'function') lwBtn.addClass('active');
+                    if (typeof lwBtn.css === 'function') lwBtn.css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+                    $('#mhc_new_adventure_stepper').hide();
+                }
+            }
+
+            if (hasCustomTitle) {
+                const shortTitle = rawTitle.length > 20 ? `${rawTitle.slice(0, 18)}...` : rawTitle;
                 $('#mhc_load_active_campaign_btn')
-                    .attr('title', `Active campaign "${activeRunning.meta.title}" detected in this chat! Click to pull into Session Zero.`)
+                    .attr('title', `Active campaign "${rawTitle}" detected in this chat! Click to pull into Session Zero.`)
                     .html(`📂 Load "${shortTitle}"`);
             } else {
                 $('#mhc_load_active_campaign_btn')
@@ -2961,10 +3093,15 @@ export async function refreshConciergeActiveContext(targetChatId = null) {
         } else {
             $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').hide();
             $('#mhc_load_active_campaign_btn').hide();
+            $('#mhc_active_game_label').hide();
             if (currentNavMode === 'living-world') {
                 currentNavMode = 'new-adventure';
-                $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
-                $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+                const navBtns = $('.mhc-mode-nav-btn');
+                if (typeof navBtns.removeClass === 'function') navBtns.removeClass('active');
+                if (typeof navBtns.css === 'function') navBtns.css({ background: 'transparent', color: '#9ca3af' });
+                const naBtn = $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]');
+                if (typeof naBtn.addClass === 'function') naBtn.addClass('active');
+                if (typeof naBtn.css === 'function') naBtn.css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
                 $('#mhc_new_adventure_stepper').show();
             }
         }
@@ -2983,6 +3120,11 @@ export function getLoadedCampaignOrigin() {
 export function setLoadedCampaignOrigin(chatId, title = null, dossier = null) {
     loadedCampaignOriginChatId = chatId;
     loadedCampaignOriginTitle = title;
+    if (chatId) {
+        currentNavMode = 'living-world';
+    } else {
+        currentNavMode = 'new-adventure';
+    }
     if (dossier) {
         activeDossier = dossier;
     }
@@ -3044,6 +3186,177 @@ export function renderProgressionTabView() {
             updateBlueprintDeck();
         },
     });
+}
+
+/**
+ * Transitions the Concierge between the Active Game Track ('living-world')
+ * and the Session Zero Sandbox Track ('new-adventure').
+ *
+ * @param {'new-adventure'|'living-world'} targetMode
+ * @returns {Promise<boolean>} Whether the track transition succeeded
+ */
+export async function switchToTrack(targetMode) {
+    if (targetMode === 'living-world') {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+        const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+            || ctx?.getCurrentChatId?.()
+            || ctx?.chatId
+            || '';
+        if (!currentChatId) {
+            toastr?.warning('No active chat selected.', 'Living World');
+            return false;
+        }
+        const campaignDossier = await loadActiveCampaignDossier(currentChatId);
+        if (!campaignDossier) {
+            toastr?.warning('No active campaign dossier found for the current chat.', 'Living World');
+            return false;
+        }
+
+        // Snapshot current session-zero state before switching to living-world
+        if (currentNavMode === 'new-adventure') {
+            snapshotCurrentToSessionZeroTrack();
+            saveDraft();
+        }
+
+        currentNavMode = 'living-world';
+        lastActiveConciergeMode = 'living-world';
+
+        $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+        $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+
+        // Hydrate livingWorldTrack
+        livingWorldTrack.chatId = currentChatId;
+        livingWorldTrack.dossier = healAndNormalizeDossier(campaignDossier);
+        livingWorldTrack.dossier.meta = livingWorldTrack.dossier.meta || {};
+        livingWorldTrack.dossier.meta.rulesetConfirmed = true;
+        livingWorldTrack.campaignTitle = (livingWorldTrack.dossier.meta?.title || '').trim();
+        livingWorldTrack.dossier._originChatId = currentChatId;
+        livingWorldTrack.dossier._originCampaignTitle = livingWorldTrack.campaignTitle;
+
+        loadedCampaignOriginChatId = currentChatId;
+        loadedCampaignOriginTitle = livingWorldTrack.campaignTitle;
+        activeDossier = livingWorldTrack.dossier;
+
+        const stagedLivingCanon = livingWorldTrack.dossier.canonLorebookEntries || [];
+        setStagedCanonEntries(stagedLivingCanon);
+
+        if (!livingWorldTrack.chatHistory.length) {
+            const isFae = activeDossier.meta?.ruleset === 'fae';
+            const vitalityTerm = isFae ? 'resource pools' : 'Harm capacity';
+            const greet = `📂 Loaded active campaign **"${livingWorldTrack.campaignTitle || 'Active Campaign'}"**! You can adjust campaign calibration dials, scale ${vitalityTerm}, manage supporting NPCs, or evolve the blueprint below. Changes can be synced directly back to your running game with **🔄 Sync to Active Game**, or cloned into a fresh adventure with **🍴 Fork as New Campaign**.`;
+            livingWorldTrack.chatHistory = [{ role: 'assistant', content: greet }];
+        }
+        chatHistory = livingWorldTrack.chatHistory;
+        renderChatHistoryFromState();
+
+        $('#mhc_new_adventure_stepper').hide();
+        $('.mhc-chat-column').show();
+        $('#mhc_tab_progression_btn').show();
+        $('#mhc_save_draft_btn').hide();
+        $('#mhc_reset_session_btn').hide();
+        $('#mhc_launch_campaign_btn').hide();
+        $('#mhc_fork_campaign_btn').show();
+        $('#mhc_sync_active_campaign_btn').show();
+
+        updateBlueprintDeck();
+        setConciergeTab('cards');
+        await updateSyncButtonState(currentChatId);
+        toastr?.info(`Loaded Living World Dossier for "${livingWorldTrack.campaignTitle || 'Active Campaign'}"`, 'Living World');
+        return true;
+    } else if (targetMode === 'new-adventure') {
+        if (currentNavMode === 'living-world') {
+            livingWorldTrack.dossier = activeDossier;
+            livingWorldTrack.chatHistory = [...chatHistory];
+        }
+
+        currentNavMode = 'new-adventure';
+        lastActiveConciergeMode = 'new-adventure';
+
+        $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
+        $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
+
+        restoreSessionZeroTrack();
+        loadedCampaignOriginChatId = null;
+        loadedCampaignOriginTitle = null;
+
+        renderChatHistoryFromState();
+
+        $('#mhc_new_adventure_stepper').show();
+        $('#mhc_save_draft_btn').show();
+        $('#mhc_reset_session_btn').show();
+        $('#mhc_launch_campaign_btn').show();
+        $('#mhc_fork_campaign_btn').hide();
+        $('#mhc_sync_active_campaign_btn').hide();
+
+        evaluateStepUnlocks();
+        updateBlueprintDeck();
+        setConciergeTab('cards');
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Clones the active Living World campaign into the Session Zero track
+ * so the player can branch off or forge an alternate adventure.
+ */
+export async function forkActiveCampaignToSessionZero() {
+    const hasExistingSession = (Array.isArray(sessionZeroTrack.chatHistory) && sessionZeroTrack.chatHistory.length > 0)
+        || !isDossierEmptyOrUntouched(sessionZeroTrack.dossier);
+
+    if (hasExistingSession) {
+        const title = sessionZeroTrack.dossier?.meta?.title || 'Untitled Session Zero';
+        const ok = await showConciergeConfirm({
+            icon: '🍴',
+            title: 'Overwrite Session Zero Draft?',
+            message: `An in-progress draft ("${title}") exists in Session Zero Concierge.\n\nForking "${livingWorldTrack.campaignTitle || 'Active Campaign'}" will overwrite this draft with a clone of the active world. Continue?`,
+            confirmLabel: '🍴 Fork & Overwrite',
+            confirmColor: '#2563eb',
+        });
+        if (!ok) return false;
+    }
+
+    const sourceDossier = livingWorldTrack.dossier || activeDossier;
+    if (!sourceDossier || isDossierEmptyOrUntouched(sourceDossier)) {
+        toastr?.warning('No active campaign dossier available to fork.', 'Fork Campaign');
+        return false;
+    }
+
+    const clone = JSON.parse(JSON.stringify(sourceDossier));
+    delete clone._originChatId;
+    delete clone._originCampaignTitle;
+    if (clone.meta) {
+        delete clone.meta.chatId;
+        const baseTitle = (clone.meta.title || 'Campaign').trim();
+        clone.meta.title = baseTitle.endsWith('(Fork)') ? baseTitle : `${baseTitle} (Fork)`;
+        clone.meta.rulesetConfirmed = false;
+    }
+
+    sessionZeroTrack.dossier = clone;
+    sessionZeroTrack.currentAdventureStep = 'initial';
+    sessionZeroTrack.unlockedSteps = {
+        initial: true,
+        canon: true,
+        adventure: true,
+        character: true,
+    };
+    const stagedEntries = Array.isArray(clone.canonLorebookEntries) ? [...clone.canonLorebookEntries] : [];
+    sessionZeroTrack.stagedCanonEntries = stagedEntries;
+    sessionZeroTrack.attachedSources = [];
+    sessionZeroTrack.lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
+
+    const greet = `🍴 **Forked from "${livingWorldTrack.campaignTitle || 'Active Campaign'}"!**\n\nThe series bible, axioms, and world elements have been cloned into Session Zero Concierge. You can refine the framing and premise in Step 1, review canon in Step 2, and confirm or tune your ruleset & dials in Step 3.`;
+    sessionZeroTrack.chatHistory = [{ role: 'assistant', content: greet }];
+    sessionZeroTrack.stageChatHistories = {
+        initial: [...sessionZeroTrack.chatHistory],
+        canon: [],
+        adventure: [],
+        character: [],
+    };
+
+    await switchToTrack('new-adventure');
+    toastr?.success('Campaign cloned into Session Zero Concierge!', 'Forked as New Campaign');
+    return true;
 }
 
 /**
@@ -3724,73 +4037,17 @@ export function bindModalEvents() {
                 $('#mhc_concierge_modal').fadeOut(150);
                 const { launchLevelUpOrRespecDesk } = await import('./index.js');
                 await launchLevelUpOrRespecDesk({ isRespec: true });
-            } else if (mode === 'living-world') {
-                currentNavMode = 'living-world';
-                $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
-                $(this).addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
-                $('#mhc_new_adventure_stepper').hide();
-                $('.mhc-chat-column').show();
-
-                const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-                const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-                    || ctx?.getCurrentChatId?.()
-                    || ctx?.chatId
-                    || '';
-                if (currentChatId) {
-                    const campaignDossier = await loadActiveCampaignDossier(currentChatId);
-                    if (campaignDossier) {
-                        activeDossier = healAndNormalizeDossier(campaignDossier);
-                        activeDossier.meta.rulesetConfirmed = true;
-                        loadedCampaignOriginChatId = currentChatId;
-                        loadedCampaignOriginTitle = (activeDossier.meta?.title || '').trim();
-                        activeDossier._originChatId = loadedCampaignOriginChatId;
-                        activeDossier._originCampaignTitle = loadedCampaignOriginTitle;
-
-                        updateBlueprintDeck();
-                        setConciergeTab('cards');
-                        await updateSyncButtonState();
-
-                        if (!chatHistory.length) {
-                            const isFae = activeDossier.meta?.ruleset === 'fae';
-                            const vitalityTerm = isFae ? 'resource pools' : 'Harm capacity';
-                            const greet = `📂 Loaded active campaign **"${activeDossier.meta?.title || 'Active Adventure'}"**! You can adjust campaign calibration dials, scale ${vitalityTerm}, manage supporting NPCs, or evolve the blueprint below. Changes can be synced directly back to your running game with **🔄 Sync to Active Game**.`;
-                            appendChatBubble('assistant', greet);
-                            chatHistory.push({ role: 'assistant', content: greet });
-                        }
-                        toastr?.info(`Loaded Living World Dossier for "${activeDossier.meta?.title || 'Active Campaign'}"`, 'Living World');
-                    } else {
-                        toastr?.warning('No active campaign dossier found for the current chat.', 'Living World');
-                    }
-                } else {
-                    toastr?.warning('No active chat selected.', 'Living World');
-                }
-            } else if (mode === 'new-adventure') {
-                currentNavMode = 'new-adventure';
-                $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
-                $(this).addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
-                $('#mhc_new_adventure_stepper').show();
-
-                const draftRes = loadValidatedDraft();
-                if (draftRes?.draft) {
-                    const { draft } = draftRes;
-                    activeDossier = draft.dossier;
-                    if (draft.stagedCanonEntries) setStagedCanonEntries(draft.stagedCanonEntries);
-                    if (draft.currentAdventureStep) currentAdventureStep = draft.currentAdventureStep;
-                    if (draft.unlockedSteps) unlockedSteps = { ...unlockedSteps, ...draft.unlockedSteps };
-                    if (draft.stageChatHistories) stageChatHistories = { ...stageChatHistories, ...draft.stageChatHistories };
-                    if (draft.lastSyncedSnapshots) lastSyncedSnapshots = { ...lastSyncedSnapshots, ...draft.lastSyncedSnapshots };
-                    if (draft.attachedSources) attachedSources = [...draft.attachedSources];
-                    chatHistory = draft.chatHistory || [];
-                    renderChatHistoryFromState();
-                }
-
-                evaluateStepUnlocks();
-                updateBlueprintDeck();
-                setConciergeTab('cards');
+            } else if (mode === 'living-world' || mode === 'new-adventure') {
+                await switchToTrack(mode);
             }
         } finally {
             setTimeout(() => { _isNavigatingMode = false; }, 300);
         }
+    });
+
+    // Fork as New Campaign (clones Living World into Session Zero Sandbox)
+    $('#mhc_fork_campaign_btn').on('click', async () => {
+        await forkActiveCampaignToSessionZero();
     });
 
     // Copy Markdown
@@ -4202,23 +4459,22 @@ export async function openConciergeModal({ ruleset = null, genreKey = null, navM
         resetConciergeState({ showGreeting: true, ruleset, genreKey });
         toastr?.info('Previous uncompleted draft could not be fully loaded and was reset to a fresh Session Zero.', 'Session Zero');
     } else if (draftResult?.draft) {
-        // Valid draft found: restore it if in-memory history isn't already active
+        // Valid draft found: restore it into sessionZeroTrack
         const { draft } = draftResult;
-        loadedCampaignOriginChatId = draft.originChatId || draft.dossier?._originChatId || null;
-        loadedCampaignOriginTitle = draft.originCampaignTitle || draft.dossier?._originCampaignTitle || null;
+        sessionZeroTrack.dossier = draft.dossier;
+        if (draft.stagedCanonEntries && Array.isArray(draft.stagedCanonEntries)) {
+            sessionZeroTrack.stagedCanonEntries = draft.stagedCanonEntries;
+        }
+        if (draft.currentAdventureStep) sessionZeroTrack.currentAdventureStep = draft.currentAdventureStep;
+        if (draft.unlockedSteps) sessionZeroTrack.unlockedSteps = { ...unlockedSteps, ...draft.unlockedSteps };
+        if (draft.stageChatHistories) sessionZeroTrack.stageChatHistories = { ...stageChatHistories, ...draft.stageChatHistories };
+        if (draft.lastSyncedSnapshots) sessionZeroTrack.lastSyncedSnapshots = { ...lastSyncedSnapshots, ...draft.lastSyncedSnapshots };
+        if (draft.attachedSources) sessionZeroTrack.attachedSources = [...draft.attachedSources];
+        sessionZeroTrack.chatHistory = draft.chatHistory || [];
+        sessionZeroTrack.changelog = draft.changelog || [];
+
         if (!chatHistory.length) {
-            activeDossier = draft.dossier;
-            if (draft.stagedCanonEntries && Array.isArray(draft.stagedCanonEntries)) {
-                setStagedCanonEntries(draft.stagedCanonEntries);
-            }
-            if (draft.currentNavMode) currentNavMode = draft.currentNavMode;
-            if (draft.currentAdventureStep) currentAdventureStep = draft.currentAdventureStep;
-            if (draft.unlockedSteps) unlockedSteps = { ...unlockedSteps, ...draft.unlockedSteps };
-            if (draft.stageChatHistories) stageChatHistories = { ...stageChatHistories, ...draft.stageChatHistories };
-            if (draft.lastSyncedSnapshots) lastSyncedSnapshots = { ...lastSyncedSnapshots, ...draft.lastSyncedSnapshots };
-            if (draft.attachedSources) attachedSources = [...draft.attachedSources];
-            chatHistory = draft.chatHistory || [];
-            changelog = draft.changelog || [];
+            restoreSessionZeroTrack();
             renderChatHistoryFromState();
             evaluateStepUnlocks();
             toastr?.info('Resumed previous Session Zero draft in progress.', 'Session Zero');
@@ -4226,10 +4482,8 @@ export async function openConciergeModal({ ruleset = null, genreKey = null, navM
     } else {
         // No draft exists in storage
         if (chatHistory.length > 0) {
-            // Storage was cleared or campaign was previously built; reset in-memory state cleanly
             resetConciergeState({ showGreeting: true, ruleset, genreKey });
-        } else if (!$('#mhc_chat_messages').children().length) {
-            // Pristine first open: show greeting
+        } else if (!sessionZeroTrack.chatHistory?.length && !$('#mhc_chat_messages').children().length) {
             resetConciergeState({ showGreeting: true, ruleset, genreKey });
         }
     }
@@ -4237,45 +4491,13 @@ export async function openConciergeModal({ ruleset = null, genreKey = null, navM
     // Refresh active chat context indicators and sync button visibility
     await refreshConciergeActiveContext();
 
-    if (navMode === 'living-world') {
-        const campaignDossier = await loadActiveCampaignDossier();
-        if (campaignDossier) {
-            currentNavMode = 'living-world';
-            activeDossier = healAndNormalizeDossier(campaignDossier);
-            activeDossier.meta = activeDossier.meta || {};
-            activeDossier.meta.rulesetConfirmed = true;
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-            const currentChatId = (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
-                || ctx?.getCurrentChatId?.()
-                || ctx?.chatId
-                || '';
-            loadedCampaignOriginChatId = currentChatId;
-            loadedCampaignOriginTitle = (activeDossier.meta?.title || '').trim();
-            activeDossier._originChatId = loadedCampaignOriginChatId;
-            activeDossier._originCampaignTitle = loadedCampaignOriginTitle;
-            $('#mhc_new_adventure_stepper').hide();
-            $('.mhc-chat-column').show();
-            $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
-            $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
-        } else {
-            currentNavMode = 'new-adventure';
-            $('#mhc_new_adventure_stepper').show();
-            $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
-            $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
-        }
-    } else if (navMode === 'new-adventure') {
-        currentNavMode = 'new-adventure';
-        $('#mhc_new_adventure_stepper').show();
-        $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
-        $('.mhc-mode-nav-btn[data-nav-mode="new-adventure"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
-    } else {
-        $('.mhc-mode-nav-btn').removeClass('active').css({ background: 'transparent', color: '#9ca3af' });
-        $(`.mhc-mode-nav-btn[data-nav-mode="${currentNavMode}"]`).addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
-        if (currentNavMode === 'living-world') {
-            $('#mhc_new_adventure_stepper').hide();
-        } else {
-            $('#mhc_new_adventure_stepper').show();
-        }
+    const targetMode = navMode || (lastActiveConciergeMode === 'living-world' ? 'living-world' : 'new-adventure');
+    let switched = false;
+    if (targetMode === 'living-world') {
+        switched = await switchToTrack('living-world');
+    }
+    if (!switched) {
+        await switchToTrack('new-adventure');
     }
 
     updateBlueprintDeck();

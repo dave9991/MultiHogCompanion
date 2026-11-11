@@ -84,6 +84,8 @@ globalThis.$ = (selector) => {
         css() { return this; },
         append() { return this; },
         remove() { return this; },
+        addClass() { return this; },
+        removeClass() { return this; },
         children() { return { length: 0 }; },
         find() {
             return {

@@ -661,7 +661,7 @@ export function openLevelUpModal({
                         <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 2px; gap: 2px;">
                             <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="character" style="border: none; background: rgba(59,130,246,0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
                             <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer; ${showLivingWorldInitially ? '' : 'display: none;'}" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
-                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-compass"></i> Session Zero Concierge</button>
                         </div>
                     </div>
                     <div class="mhc-header-subbadges">
@@ -764,7 +764,7 @@ export function openLevelUpModal({
                         <div class="mhc-mode-switcher-bar" style="display: inline-flex; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 2px; gap: 2px;">
                             <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="character" style="border: none; background: rgba(59,130,246,0.35); color: #93c5fd; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
                             <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer; ${showLivingWorldInitially ? '' : 'display: none;'}" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
-                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
+                            <button type="button" class="mhc-mode-nav-btn" data-nav-mode="new-adventure" style="border: none; background: transparent; color: #9ca3af; font-size: 0.78em; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer;" title="Start Session Zero for a New Adventure"><i class="fa-solid fa-compass"></i> Session Zero Concierge</button>
                         </div>
                     </div>
                     <div class="mhc-header-subbadges">
@@ -2073,7 +2073,7 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                 closeLevelUpModal();
                 const { openConciergeModal } = await import('./concierge-ui.js');
                 await openConciergeModal({
-                    ruleset: isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e'),
+                    ruleset: mode === 'new-adventure' ? null : (isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e')),
                     navMode: mode,
                 });
             } finally {

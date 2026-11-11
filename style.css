@@ -262,11 +262,41 @@
 /* ── Mode Switcher Bar ── */
 .mhc-mode-switcher-bar {
     display: inline-flex;
+    align-items: center;
     background: rgba(0, 0, 0, 0.35);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
-    padding: 2px;
+    padding: 2px 4px;
+    gap: 3px;
+}
+
+.mhc-track-group {
+    display: inline-flex;
+    align-items: center;
     gap: 2px;
+}
+
+.mhc-track-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.74em;
+    font-weight: 700;
+    color: #60a5fa;
+    padding: 3px 6px;
+    margin-right: 2px;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+}
+
+.mhc-track-divider {
+    width: 1px;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.18);
+    margin: 2px 4px;
+    align-self: center;
 }
 
 .mhc-mode-nav-btn {

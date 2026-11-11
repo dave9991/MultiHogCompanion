@@ -12,10 +12,18 @@
             </div>
             
             <div class="mhc-header-controls">
-                <div class="mhc-mode-switcher-bar" title="Switch between Character Desk, Living World Dossier, and New Adventure">
-                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="character" title="Open Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
-                    <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
-                    <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="new-adventure" title="Conversational Session Zero Draft"><i class="fa-solid fa-sparkles"></i> New Adventure</button>
+                <div class="mhc-mode-switcher-bar" title="Switch between Active Game (Character, Living World) and Session Zero Concierge">
+                    <div class="mhc-track-group mhc-track-active-game">
+                        <span class="mhc-track-label" id="mhc_active_game_label" title="Active Campaign Context" style="display: none;">
+                            <i class="fa-solid fa-gamepad"></i> <span id="mhc_active_game_title" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle;">Active Game</span>
+                        </span>
+                        <button type="button" class="mhc-mode-nav-btn" data-nav-mode="character" title="Open Character &amp; Leveling Desk"><i class="fa-solid fa-shield-halved"></i> Character</button>
+                        <button type="button" class="mhc-mode-nav-btn" data-nav-mode="living-world" title="View Living World Dossier for Active Campaign"><i class="fa-solid fa-earth-americas"></i> Living World</button>
+                    </div>
+                    <div class="mhc-track-divider"></div>
+                    <div class="mhc-track-group mhc-track-sandbox">
+                        <button type="button" class="mhc-mode-nav-btn active" data-nav-mode="new-adventure" title="Session Zero: Forge a New Adventure"><i class="fa-solid fa-compass"></i> Session Zero Concierge</button>
+                    </div>
                 </div>
                 <div id="mhc_header_system_badge" class="mhc-system-badge" title="Active Genre / System (Concierge can use any preset or create a custom setting)">
                     ✨ Any Genre / Custom
@@ -444,6 +452,9 @@
                 <button type="button" id="mhc_reset_session_btn" class="menu_button" style="color: #f87171;" title="Reset session zero and start fresh">↺ Reset</button>
             </div>
             <div class="mhc-footer-right" style="display: flex; gap: 8px;">
+                <button type="button" id="mhc_fork_campaign_btn" class="menu_button" style="display: none; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; font-weight: bold; padding: 6px 14px;" title="Clone active campaign world into Session Zero to forge a new adventure">
+                    🍴 Fork as New Campaign
+                </button>
                 <button type="button" id="mhc_sync_active_campaign_btn" class="menu_button" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-weight: bold; padding: 6px 14px;" title="Sync modified rules, Harm scaling, and blueprint back to the ongoing chat without resetting messages">
                     🔄 Sync to Active Game
                 </button>

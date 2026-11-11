@@ -444,4 +444,111 @@ assert.strictEqual(loadActiveBtn.visible, true, 'Load Active Campaign button mus
 await openConciergeModal({ ruleset: 'pbta', navMode: 'living-world' });
 assert.strictEqual(getConciergeStageState().currentNavMode, 'new-adventure', 'openConciergeModal must fall back to new-adventure when no Concierge dossier exists');
 
+// ── 6. Two-Track Isolation & Fork as New Campaign ──────────────────────────
+console.log('9. Testing Two-Track Isolation (Session Zero <-> Living World) and Fork Campaign...');
+
+const {
+    switchToTrack,
+    forkActiveCampaignToSessionZero,
+    getActiveConciergeDossier,
+    updateBlueprintDeck,
+} = await import('../concierge-ui.js');
+
+// Verify modal HTML has two-track elements
+assert.ok(modalHtml.includes('id="mhc_active_game_label"'), 'concierge-modal.html must contain #mhc_active_game_label');
+assert.ok(modalHtml.includes('id="mhc_active_game_title"'), 'concierge-modal.html must contain #mhc_active_game_title');
+assert.ok(modalHtml.includes('class="mhc-track-group mhc-track-active-game"'), 'concierge-modal.html must contain active game track group');
+assert.ok(modalHtml.includes('class="mhc-track-group mhc-track-sandbox"'), 'concierge-modal.html must contain sandbox track group');
+assert.ok(modalHtml.includes('id="mhc_fork_campaign_btn"'), 'concierge-modal.html must contain #mhc_fork_campaign_btn');
+assert.ok(css.includes('.mhc-track-group'), 'style.css must style .mhc-track-group');
+assert.ok(css.includes('.mhc-track-divider'), 'style.css must style .mhc-track-divider');
+
+// A. Start fresh in Session Zero
+resetConciergeState({ showGreeting: false });
+assert.strictEqual(getConciergeStageState().currentNavMode, 'new-adventure');
+
+// Setup a Session Zero draft with custom premise and step
+const sessionDossier = getActiveConciergeDossier();
+sessionDossier.meta = sessionDossier.meta || {};
+sessionDossier.meta.title = 'My Sandbox Adventure';
+sessionDossier.meta.premise = 'A mysterious uncharted island emerges in the mist.';
+sessionDossier.meta.rulesetConfirmed = false;
+
+// B. Switch to Living World (on chat_concierge_100)
+globalThis.SillyTavern.getContext = () => ({
+    getCurrentChatId: () => 'chat_concierge_100',
+    chatMetadata: { chat_id: 'chat_concierge_100' },
+    extensionSettings: {
+        rpg_tracker: {
+            chatStates: {
+                chat_concierge_100: {
+                    campaignDossier: conciergeDossier,
+                },
+            },
+        },
+    },
+});
+
+const switchedToLiving = await switchToTrack('living-world');
+assert.strictEqual(switchedToLiving, true, 'Switching to living-world with valid concierge dossier must succeed');
+assert.strictEqual(getConciergeStageState().currentNavMode, 'living-world', 'Nav mode must be living-world');
+
+const livingDossier = getActiveConciergeDossier();
+assert.strictEqual(livingDossier.meta.title, 'Sunken Citadel Delve', 'Living World must load active campaign title');
+assert.strictEqual(livingDossier._originChatId, 'chat_concierge_100', 'Living World must record origin chatId');
+
+// Check button visibility in Living World
+const forkBtn = getOrCreateMockElement('#mhc_fork_campaign_btn');
+const syncBtn = getOrCreateMockElement('#mhc_sync_active_campaign_btn');
+const saveDraftBtn = getOrCreateMockElement('#mhc_save_draft_btn');
+const stepperBar = getOrCreateMockElement('#mhc_new_adventure_stepper');
+
+assert.strictEqual(forkBtn.visible, true, 'Fork button must be visible in Living World');
+assert.strictEqual(syncBtn.visible, true, 'Sync button must be visible in Living World');
+assert.strictEqual(saveDraftBtn.visible, false, 'Save Draft button must be hidden in Living World');
+assert.strictEqual(stepperBar.visible, false, 'Stepper bar must be hidden in Living World');
+
+// C. Switch back to Session Zero Concierge
+const switchedToSessionZero = await switchToTrack('new-adventure');
+assert.strictEqual(switchedToSessionZero, true, 'Switching to new-adventure must succeed');
+assert.strictEqual(getConciergeStageState().currentNavMode, 'new-adventure', 'Nav mode must be new-adventure');
+
+const restoredSessionDossier = getActiveConciergeDossier();
+assert.strictEqual(restoredSessionDossier.meta.title, 'My Sandbox Adventure', 'Session Zero title must be pristine without Living World bleed-over');
+assert.strictEqual(restoredSessionDossier.meta.premise, 'A mysterious uncharted island emerges in the mist.', 'Session Zero premise must be preserved');
+assert.strictEqual(restoredSessionDossier._originChatId, undefined, 'Session Zero must have no _originChatId');
+
+// Check button and stepper visibility in Session Zero
+assert.strictEqual(forkBtn.visible, false, 'Fork button must be hidden in Session Zero');
+assert.strictEqual(syncBtn.visible, false, 'Sync button must be hidden in Session Zero');
+assert.strictEqual(saveDraftBtn.visible, true, 'Save Draft button must be visible in Session Zero');
+assert.strictEqual(stepperBar.visible, true, 'Stepper bar must be visible in Session Zero');
+
+// D. Test Fork as New Campaign
+// Switch back to living world first
+await switchToTrack('living-world');
+
+// User cancels prompt
+globalThis.__MHC_TEST_AUTO_CONFIRM__ = false;
+const cancelledFork = await forkActiveCampaignToSessionZero();
+assert.strictEqual(cancelledFork, false, 'Cancelling fork prompt must abort fork');
+assert.strictEqual(getConciergeStageState().currentNavMode, 'living-world', 'Mode must remain living-world after cancellation');
+
+// User confirms prompt
+globalThis.__MHC_TEST_AUTO_CONFIRM__ = true;
+const forked = await forkActiveCampaignToSessionZero();
+assert.strictEqual(forked, true, 'forkActiveCampaignToSessionZero must succeed');
+assert.strictEqual(getConciergeStageState().currentNavMode, 'new-adventure', 'After fork, mode must transition to new-adventure');
+
+const forkedDossier = getActiveConciergeDossier();
+assert.strictEqual(forkedDossier.meta.title, 'Sunken Citadel Delve (Fork)', 'Forked dossier title must be appended with (Fork)');
+assert.strictEqual(forkedDossier.meta.rulesetConfirmed, false, 'Forked dossier rulesetConfirmed must be reset to false for Step 3 confirmation');
+assert.strictEqual(forkedDossier._originChatId, undefined, 'Forked dossier must not retain _originChatId');
+assert.strictEqual(forkedDossier.meta.chatId, undefined, 'Forked dossier must not retain meta.chatId');
+assert.strictEqual(getConciergeStageState().currentAdventureStep, 'initial', 'Forked dossier must start at Step 1 (initial)');
+assert.strictEqual(getConciergeStageState().unlockedSteps.character, true, 'Forked dossier must have all stages unlocked for editing');
+
+// Clean up test flag
+delete globalThis.__MHC_TEST_AUTO_CONFIRM__;
+
 console.log('--- ALL CONCIERGE 4-STEP UI CONTROLLER TESTS PASSED CLEANLY! ---');

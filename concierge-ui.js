@@ -122,6 +122,7 @@ import {
     getCandidateChatIds,
     isFaeActive,
 } from './pbta-ruleset-persistence.js';
+import { openBlueprintGameSystemInWizard } from './game-system-bridge.js';
 import { systemRegistry } from './concierge-system-registry.js';
 import { renderProgressionArchitect } from './progression-architect-ui.js';
 import './concierge-system-pbta.js';
@@ -1221,10 +1222,21 @@ export function updateBlueprintDeck() {
     const customMod = worldRules.customModule;
     const customModTag = customMod ? (customMod.tag || customMod.fieldKey || '') : '';
     const customModSample = customMod ? (customMod.sampleContent || customMod.sample || '') : '';
+    const customModDrivers = customMod?.drivers ? String(customMod.drivers).toLowerCase() : '';
     if (customMod && (customModTag || customMod.label)) {
         $('#mhc_deck_custom_module_tag').text((customModTag || 'CUSTOM').toUpperCase());
         $('#mhc_deck_custom_module_label').text(customMod.label || customModTag);
         $('#mhc_deck_custom_module_instruction').text(customMod.instruction || '');
+        if (customModDrivers) {
+            let driverLabel = `⚡ ${customModDrivers}`;
+            if (customModDrivers === 'gm_deltas') driverLabel = '⚡ GM Deltas';
+            else if (customModDrivers === 'gm_annotation') driverLabel = '📝 GM Notes';
+            else if (customModDrivers === 'auto_tick') driverLabel = '⏱️ Auto-Tick';
+            else if (customModDrivers === 'clock') driverLabel = '⏰ Clock';
+            $('#mhc_deck_custom_module_drivers').text(driverLabel).show();
+        } else {
+            $('#mhc_deck_custom_module_drivers').hide();
+        }
         if (customModSample) {
             $('#mhc_deck_custom_module_sample').text(customModSample).show();
         } else {
@@ -3679,6 +3691,22 @@ export function bindModalEvents() {
                 saveDraft();
             }
         }
+    });
+
+    // [CATALOG: DOM-12] See LISTENERS.md — Open Custom Game System / HUD Tracker in MultiHog Game System Wizard
+    $('#mhc_deck_edit_wizard_btn').on('click', async (e) => {
+        e.stopPropagation();
+        const currentMod = activeDossier?.worldRules?.customModule;
+        if (!currentMod) return;
+        await openBlueprintGameSystemInWizard(currentMod, {
+            onSave: (updated) => {
+                activeDossier.worldRules = activeDossier.worldRules || {};
+                activeDossier.worldRules.customModule = updated;
+                changelog.push(`Updated Game System (${updated.label || updated.tag}) via Wizard`);
+                updateBlueprintDeck();
+                saveDraft();
+            },
+        });
     });
 
     // Custom HUD Tracker Module dismiss / remove button

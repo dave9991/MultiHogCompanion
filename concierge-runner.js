@@ -35,6 +35,7 @@ import {
     loadMainPcSectionNames,
     buildPlayerCardBio,
 } from './concierge-pc-format.js';
+import { normalizeGameSystemDrivers } from './game-system-bridge.js';
 
 /**
  * Send an outgoing user chat message into SillyTavern.
@@ -837,20 +838,71 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                         rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
                     }
 
-                    // Register Custom HUD Tracker Module in MultiHog Settings if defined
+                    // Register Custom HUD Tracker / Game System in MultiHog Settings if defined
                     const customMod = dossier.worldRules?.customModule;
                     if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
                         const customTag = (customMod.tag || customMod.fieldKey || customMod.label)
                             .replace(/[^a-zA-Z0-9_]/g, '_')
                             .toUpperCase();
+                        const driversList = normalizeGameSystemDrivers(customMod.drivers);
+                        const systemId = customMod.id || `gs_${Date.now()}_${customTag.toLowerCase()}`;
+                        const syspromptId = customMod.syspromptLibraryId || `sys_${systemId}`;
+                        const label = customMod.label || customMod.tag || customMod.fieldKey || customTag;
+                        const instruction = customMod.instruction || customMod.gmInstruction || '';
+                        const sampleTemplate = customMod.sampleContent || customMod.sample || customMod.trackerContent || '';
+
+                        // 1. Register in rpgSettings.gameSystems
+                        rpgSettings.gameSystems = rpgSettings.gameSystems || [];
+                        const existingGsIdx = rpgSettings.gameSystems.findIndex(gs => gs.customFieldTag?.toUpperCase() === customTag || gs.id === systemId);
+                        const gsDef = {
+                            id: systemId,
+                            name: label,
+                            description: instruction,
+                            author: 'Concierge',
+                            version: '1.0.0',
+                            enabled: true,
+                            needsTracker: Boolean(sampleTemplate),
+                            customFieldTag: customTag,
+                            syspromptLibraryId: syspromptId,
+                            effectOwner: customMod.effectOwner || 'world',
+                            drivers: driversList,
+                            isBuiltin: false,
+                        };
+                        if (existingGsIdx >= 0) {
+                            rpgSettings.gameSystems[existingGsIdx] = gsDef;
+                        } else {
+                            rpgSettings.gameSystems.push(gsDef);
+                        }
+
+                        // 2. Register in rpgSettings.customSyspromptLibrary
+                        if (instruction) {
+                            rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary || [];
+                            const existingSysIdx = rpgSettings.customSyspromptLibrary.findIndex(sp => sp.id === syspromptId);
+                            const sysDef = {
+                                id: syspromptId,
+                                name: `${label} (Game System)`,
+                                content: instruction,
+                                category: 'Game Systems',
+                                tags: ['game-system', customTag.toLowerCase()],
+                                enabled: true,
+                                origin: 'wizard',
+                            };
+                            if (existingSysIdx >= 0) {
+                                rpgSettings.customSyspromptLibrary[existingSysIdx] = sysDef;
+                            } else {
+                                rpgSettings.customSyspromptLibrary.push(sysDef);
+                            }
+                        }
+
+                        // 3. Register in rpgSettings.customFields
                         rpgSettings.customFields = rpgSettings.customFields || [];
                         const existingIdx = rpgSettings.customFields.findIndex(f => f.tag?.toUpperCase() === customTag);
                         const fieldDef = {
                             tag: customTag,
-                            label: customMod.label || customMod.tag || customMod.fieldKey || customTag,
+                            label: label,
                             icon: customMod.icon || '📟',
-                            prompt: customMod.instruction || '',
-                            template: customMod.sampleContent || customMod.sample || '',
+                            prompt: instruction,
+                            template: sampleTemplate,
                             enabled: true,
                             scope: 'chat',
                         };
@@ -863,6 +915,8 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                         if (Array.isArray(rpgSettings.blockOrder) && !rpgSettings.blockOrder.includes(customTag)) {
                             rpgSettings.blockOrder.push(customTag);
                         }
+                        rpgSettings.chatStates[chatId].gameSystems = [...rpgSettings.gameSystems];
+                        rpgSettings.chatStates[chatId].customSyspromptLibrary = [...(rpgSettings.customSyspromptLibrary || [])];
                         rpgSettings.chatStates[chatId].customFields = [...rpgSettings.customFields];
                     }
                 }

@@ -264,14 +264,16 @@
                         <div class="mhc-card-header">
                             <span class="mhc-card-title">📟 Custom HUD Tracker</span>
                             <div style="display: flex; align-items: center; gap: 6px;">
+                                <span id="mhc_deck_custom_module_drivers" class="mhc-pill" style="display: none; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; font-size: 0.75em;">⚡ GM Deltas</span>
                                 <span id="mhc_deck_custom_module_tag" class="mhc-pill" style="border-color: rgba(139, 92, 246, 0.4); color: #c084fc;">INACTIVE</span>
+                                <button type="button" id="mhc_deck_edit_wizard_btn" class="menu_button" style="padding: 1px 6px; font-size: 0.75em; border-color: rgba(139, 92, 246, 0.5); color: #d8b4fe;" title="Open in MultiHog Game System Wizard">🧙 Edit in Wizard</button>
                                 <button type="button" id="mhc_deck_remove_custom_mod_btn" class="menu_button" style="padding: 1px 6px; font-size: 0.75em; opacity: 0.8; color: #ff8888;" title="Dismiss / Remove this Custom HUD Tracker">✕</button>
                             </div>
                         </div>
                         <div class="mhc-custom-module-body">
                             <div id="mhc_deck_custom_module_label" style="font-weight: 700; color: #c084fc; font-size: 0.9em;"></div>
                             <div id="mhc_deck_custom_module_instruction" class="mhc-card-desc" style="margin-top: 4px; font-size: 0.8em; opacity: 0.85;"></div>
-                            <div id="mhc_deck_custom_module_sample" class="mhc-module-sample-preview" style="margin-top: 6px; display: none;"></div>
+                            <pre id="mhc_deck_custom_module_sample" class="mhc-module-sample-preview" style="margin-top: 6px; display: none; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 6px; font-family: monospace; font-size: 0.78em; white-space: pre-wrap; color: #a7f3d0;"></pre>
                         </div>
                     </div>
 

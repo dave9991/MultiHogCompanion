@@ -236,3 +236,13 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
   * **Surgical & Safe Deletion:** Purges confirmed orphans via `deleteOldLorebooks`, unbinding active ST world activation, clearing world info caches, and refreshing client-side UI lists.
 * **Associated Mechanisms:** [`DOM-11`](./LISTENERS.md#dom-11).
 
+### FEAT-12: Game System Wizard Bridge & Custom HUD Trackers
+<a id="feat-12-game-system-wizard-bridge--custom-hud-trackers"></a>
+* **Overview:** Bridges the Concierge Session Zero intake pipeline with MultiHog's native Game System Wizard (`game-systems.js`), enabling the AI Concierge to act as a client for creating, displaying, and live-editing custom mechanics, gauges, and trackers.
+* **Core Capabilities:**
+  * **Full Game System Schema & Multi-Step Prompts:** Injects structured schemas into Concierge Builders (Steps 1, 2, and 4) requiring explicit `tag:`, `label:`, `icon:`, `drivers:`, `instruction:`, and `sample:`. Strictly prohibits empty stubs or skeletal lorebook rules.
+  * **XML & Block Bi-Directional Serialization (`game-system-bridge.js`):** Parses native MultiHog Game System XML `<game_system>` outputs and serializes blueprint custom modules into YAML/Markdown blocks (`[CUSTOM_MODULE]` and `[GAME_SYSTEM]`) interchangeably.
+  * **Interactive Wizard Editing (`DOM-12`):** Surfaces an **🧙 Edit in Wizard** button in the Blueprint Deck alongside driver badges (`⚡ GM Deltas`, `⏱️ Auto-Tick`, `📝 GM Notes`, `⏰ Clock`) and a monospace HUD preview. Clicking opens MultiHog's native Wizard modal (`openGameSystemWizard`), staging the system into `rpgSettings` and reading back modifications to live-update the blueprint and draft.
+  * **Full MultiHog Setting Compilation & Lorebook Distribution:** At campaign launch, registers the custom system across `rpgSettings.gameSystems`, `rpgSettings.customSyspromptLibrary` (injecting the GM instruction rule with `origin: 'wizard'`), `rpgSettings.customFields`, and `rpgSettings.blockOrder`. Formats complete, informative `{prefix}_Rules` lorebook entries with drivers, instructions, and HUD samples.
+* **Associated Mechanisms:** [`DOM-12`](./LISTENERS.md#dom-12).
+

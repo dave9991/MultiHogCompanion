@@ -314,22 +314,27 @@ export function buildWorldRuleEntry(axiom) {
 export function buildCustomModuleLoreEntry(customModule) {
     if (!customModule || typeof customModule !== 'object') return null;
     const rawKey = (customModule.tag || customModule.fieldKey || '').trim();
-    const instruction = (customModule.instruction || '').trim();
+    const instruction = (customModule.instruction || customModule.gmInstruction || '').trim();
     const sample = (customModule.sampleContent || customModule.sample || '').trim();
+    const drivers = Array.isArray(customModule.drivers)
+        ? customModule.drivers.join(', ')
+        : (typeof customModule.drivers === 'string' ? customModule.drivers.trim() : '');
 
     if (!rawKey && !instruction) return null;
     const fieldKey = rawKey || 'custom';
     const label = (customModule.label || fieldKey).trim();
 
-    const core = [
+    const coreLines = [
         `[CORE]`,
         `Name: ${label}`,
         `Type: Custom HUD Tracker / Game System`,
         `Field: ${fieldKey}`,
-        ...(instruction ? [`Instruction: ${instruction}`] : []),
-        ...(sample ? [`Format Sample: ${sample}`] : []),
-        `[/CORE]`,
-    ].join('\n');
+    ];
+    if (drivers) coreLines.push(`Drivers: ${drivers}`);
+    if (instruction) coreLines.push(`Instruction: ${instruction}`);
+    if (sample) coreLines.push(`Format Sample: ${sample}`);
+    coreLines.push(`[/CORE]`);
+    const core = coreLines.join('\n');
 
     const keys = Array.from(new Set([
         label.toLowerCase(),

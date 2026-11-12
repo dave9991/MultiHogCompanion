@@ -12,6 +12,7 @@ import { systemRegistry } from './concierge-system-registry.js';
 import './concierge-system-pbta.js';
 import './concierge-system-fae.js';
 import { DND5E_GENRES } from './concierge-system-dnd5e.js';
+import { normalizeGameSystemDrivers, extractGameSystemTemplate } from './game-system-bridge.js';
 
 /**
  * Checks if a given campaign title matches any default placeholder (e.g. Untitled PbtA Campaign, Untitled FAE Campaign).
@@ -882,8 +883,17 @@ The Kick: Unset
         lines.push(`tag: ${cm.tag}`);
         lines.push(`label: ${cm.label}`);
         if (cm.icon) lines.push(`icon: ${cm.icon}`);
+        const dList = [];
+        if (cm.driverGmAnnotation ?? cm.drivers?.gmAnnotation) dList.push('gm_annotation');
+        if (cm.driverTime ?? cm.drivers?.time) dList.push('time');
+        if (cm.driverStatedFact ?? cm.drivers?.statedFact) dList.push('stated_fact');
+        if (dList.length) lines.push(`drivers: ${dList.join(', ')}`);
+        if (cm.effectOwner) lines.push(`effect_owner: ${cm.effectOwner}`);
         if (cm.instruction) lines.push(`instruction: ${cm.instruction}`);
-        if (cm.sampleContent) lines.push(`sample: ${cm.sampleContent}`);
+        if (cm.sampleContent) {
+            lines.push('sample:');
+            lines.push(cm.sampleContent);
+        }
         lines.push('[/CUSTOM_MODULE]');
     }
 
@@ -922,7 +932,7 @@ export function formatChangelogForContext(changelog, maxEntries = 8) {
  *   hasMutations: boolean
  * }}
  */
-const NEXT_DOSSIER_BLOCK_LOOKAHEAD = String.raw`(?=\n[ \t]*\[(?:\/?(?:UPDATE_DOSSIER|CONCIERGE_STATE|CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON))(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$))`;
+const NEXT_DOSSIER_BLOCK_LOOKAHEAD = String.raw`(?=\n[ \t]*\[(?:\/?(?:UPDATE_DOSSIER|CONCIERGE_STATE|CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON))(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$))`;
 
 /**
  * Matches all occurrences of a section block (e.g., PROTAGONIST, NPC, MONSTER, MAP, FACTION, KICK, WORLD_RULES, CUSTOM_MODULE, CONFIG, CYOA).
@@ -979,7 +989,7 @@ function matchDossierSectionBlocks(raw, tagRegexStr, closeTagRegexStr) {
 export function normalizeMalformedDossierClosers(text) {
     if (!text || typeof text !== 'string') return text;
     return text.replace(
-        /^[ \t]*\/(PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|CYOA|CONFIG|CONTEMPLATION|WORLD_RULES?|CUSTOM_MODULE|FRAMING|CANON_UPDATE|CANON_ENTRY|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON)[ \t]*$/gim,
+        /^[ \t]*\/(PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|CYOA|CONFIG|CONTEMPLATION|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|FRAMING|CANON_UPDATE|CANON_ENTRY|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON)[ \t]*$/gim,
         (_, tag) => `[/${tag.toUpperCase()}]`,
     );
 }
@@ -1049,7 +1059,7 @@ export function applyDossierUpdates(text, dossier) {
             return fallbackResult;
         }
         // Fallback: check if text contains standalone line-start blocks or explicitly closed blocks directly
-        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
+        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
         if (hasDirectBlocks) {
             raw = cleanedText;
         }
@@ -1096,7 +1106,7 @@ export function applyDossierUpdates(text, dossier) {
     const kickBlocks = matchDossierSectionBlocks(raw, 'KICK', 'KICK');
     const cyoaBlocks = matchDossierSectionBlocks(raw, 'CYOA', 'CYOA');
     const ruleBlocks = matchDossierSectionBlocks(raw, 'WORLD_RULES?', 'WORLD_RULES?');
-    const customModuleBlocks = matchDossierSectionBlocks(raw, 'CUSTOM_MODULE', 'CUSTOM_MODULE');
+    const customModuleBlocks = matchDossierSectionBlocks(raw, '(?:CUSTOM_MODULE|GAME_SYSTEM)', '(?:CUSTOM_MODULE|GAME_SYSTEM)');
     const configBlocks = matchDossierSectionBlocks(raw, 'CONFIG', 'CONFIG');
 
     let topLevelRaw = raw;
@@ -2188,8 +2198,8 @@ export function applyDossierUpdates(text, dossier) {
         }
     }
 
-    // ── 7c. Custom Tracker Module ──────────────────────────────────────────────
-    if (/\[REMOVE_CUSTOM_MODULE\]/i.test(raw) || /remove_custom_module\s*:\s*true/i.test(raw)) {
+    // ── 7c. Custom Tracker / Game System Module ────────────────────────────────
+    if (/\[REMOVE_(?:CUSTOM_MODULE|GAME_SYSTEM)\]/i.test(raw) || /remove_(?:custom_module|game_system)\s*:\s*true/i.test(raw)) {
         if (updated.worldRules.customModule) {
             const existingTag = updated.worldRules.customModule.tag || updated.worldRules.customModule.fieldKey || 'CUSTOM';
             changes.push(`Removed Custom Tracker Module [${existingTag}]`);
@@ -2203,14 +2213,22 @@ export function applyDossierUpdates(text, dossier) {
         const tag = (kv.tag || kv.fieldkey || kv.field_key || kv.name || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '');
         if (tag) {
             const label = cleanTargetName(kv.label || kv.title || tag);
-            const icon = (kv.icon || '📦').trim();
-            const instruction = kv.instruction || kv.prompt || kv.description || '';
+            const icon = (kv.icon || '📟').trim();
+            const instruction = kv.instruction || kv.prompt || kv.description || kv.gm_instruction || kv.gm_content || '';
+            const gmContent = kv.gm_content || kv.gm_instruction || instruction;
+            const trackerContent = kv.tracker_content || kv.prompt || instruction;
+            const effectOwner = (kv.effect_owner || kv.effectowner || 'tracker').toLowerCase();
+            const drivers = normalizeGameSystemDrivers(kv);
+
             let sampleContent = '';
             const codeBlockM = cmBlock.match(/```(?:text)?\s*([\s\S]*?)```/i);
+            const tagBlockM = tag ? extractGameSystemTemplate(cmBlock, tag) : '';
             if (codeBlockM) {
                 sampleContent = codeBlockM[1].trim();
+            } else if (tagBlockM) {
+                sampleContent = tagBlockM.trim();
             } else {
-                const sampleM = cmBlock.match(/(?:^|\n)\s*(?:sample|sample_content|content)\s*:\s*\n?([\s\S]*?)(?=(?:\n\s*[a-zA-Z0-9_\-]+\s*:)|$)/i);
+                const sampleM = cmBlock.match(/(?:^|\n)\s*(?:sample|sample_content|content)\s*:\s*\n?([\s\S]*)$/i);
                 if (sampleM && sampleM[1].trim()) {
                     sampleContent = sampleM[1].trim();
                 } else {
@@ -2219,13 +2237,21 @@ export function applyDossierUpdates(text, dossier) {
             }
 
             const moduleObj = {
+                name: label || tag,
                 tag,
                 fieldKey: tag,
                 label: label || tag,
                 icon,
                 instruction,
+                gmContent,
+                trackerContent,
                 sampleContent,
                 sample: sampleContent,
+                driverTime: drivers.time,
+                driverGmAnnotation: drivers.gmAnnotation,
+                driverStatedFact: drivers.statedFact,
+                drivers,
+                effectOwner,
             };
 
             updated.worldRules.customModule = moduleObj;
@@ -3035,17 +3061,21 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.worldRules.axioms = Array.isArray(dossier.worldRules.axioms) ? dossier.worldRules.axioms : [];
     if (dossier.worldRules.customModule && typeof dossier.worldRules.customModule === 'object') {
         const cm = dossier.worldRules.customModule;
-        const normalizedTag = (cm.tag || cm.fieldKey || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '') || 'CUSTOM';
+        const normalizedTag = (cm.tag || cm.fieldKey || cm.trackerTag || 'CUSTOM').toUpperCase().replace(/[^A-Z0-9_]/g, '') || 'CUSTOM';
         const normalizedSample = cm.sampleContent ?? cm.sample ?? '';
         dossier.worldRules.customModule = {
             ...cm,
+            name: cm.name || cm.label || normalizedTag,
             tag: normalizedTag,
             fieldKey: normalizedTag,
             label: cm.label || normalizedTag,
-            icon: cm.icon || '📦',
-            instruction: cm.instruction || '',
+            icon: cm.icon || cm.trackerIcon || '📟',
+            instruction: cm.instruction || cm.gmContent || '',
+            gmContent: cm.gmContent || cm.instruction || '',
             sampleContent: normalizedSample,
             sample: normalizedSample,
+            drivers: normalizeGameSystemDrivers(cm),
+            effectOwner: cm.effectOwner || 'tracker',
         };
     } else {
         dossier.worldRules.customModule = null;

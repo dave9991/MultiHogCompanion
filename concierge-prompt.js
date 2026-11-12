@@ -452,14 +452,17 @@ architectural_notes: Parking garages replaced by stabling pens; armories are nur
 [/WORLD_RULES]
 
 [CUSTOM_MODULE] (Optional — dynamically equips MultiHog HUD with a tracker card)
-tag: SYMBIOTES (or AERIAL, MUTATIONS, etc. — uppercase tag)
+tag: SYMBIOTES (or AERIAL, MUTATIONS, RELIC_COMPASS, etc. — uppercase tag)
 label: Living Arsenal & Mounts
 icon: 🐍
-instruction: Track bonded symbiotes, feeding status (e.g. Fed 3/3), and stabled mounts.
+drivers: gm_annotation
+instruction: Narrate bonded symbiote behavior and hunger. Emit *(Symbiote fed: +1 Venom)* when the protagonist feeds them.
 sample:
-- Spitting Viper: Fed (3/3 venom) | Docile
-- Chitin Carapace: Molting in 2 days | +2 Armor
-- Six-Legged Runner: Stabled at Gate | Well-fed
+[SYMBIOTES]
+Spitting Viper: Fed (3/3 venom) | Docile
+Chitin Carapace: Molting in 2 days | +2 Armor
+Six-Legged Runner: Stabled at Gate | Well-fed
+[/SYMBIOTES]
 [/CUSTOM_MODULE]
 [/UPDATE_DOSSIER]
 \`\`\`
@@ -488,6 +491,7 @@ sample:
      - **World Rules & Custom Trackers (\`[WORLD_RULES]\` & \`[CUSTOM_MODULE]\`):** When the pitch features a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal flight with wings, underwater cities):
        * Proactively emit a \`[WORLD_RULES]\` block establishing the core axiom, concrete substitutions, negative constraints, and architectural notes.
        * ONLY emit a matching \`[CUSTOM_MODULE]\` block if this rule introduces a unique, setting-specific physical resource or mechanical gauge (e.g. symbiote hunger, wing stamina, radiation, corruption). DO NOT emit \`[CUSTOM_MODULE]\` for social, legal, or military doctrines with no bespoke mechanical gauge. NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking", "Health", "Combat", "Inventory") — MultiHog natively tracks all conditions, health, combat rounds, and encounters.
+       * Complete Definition Required: When emitting \`[CUSTOM_MODULE]\` or \`[GAME_SYSTEM]\`, you MUST provide all fields: \`tag:\`, \`label:\`, \`icon:\`, \`drivers:\`, \`instruction:\`, and \`sample:\`. NEVER emit an empty or partial stub.
        * Support partial edits and removals: \`remove_world_rule: Title\`, \`remove_custom_module: true\`, \`clear_world_rules: true\`.
      - **Cast & World:** Proactively draft 1 key \`[FACTION]\`, 1 stationary world \`[NPC]\` (ally, mentor, or contact), 1 primary \`[MONSTER]\` with Harm, Armor, and countdown doom front clock, and 1 starting \`[MAP]\` site.
      - **The Kick (\`[KICK]\`):** Starting location, imminent crisis, and opening prompt hook.
@@ -839,10 +843,11 @@ architectural_notes: How this law alters buildings/cities (e.g. "Stables replace
 [/WORLD_RULES]
 
 [CUSTOM_MODULE]
-tag: SYMBIOTES (or AERIAL, MUTATIONS, etc. — uppercase tag)
+tag: SYMBIOTES (or AERIAL, MUTATIONS, RELIC_COMPASS, etc. — uppercase tag)
 label: Living Arsenal & Mounts
 icon: 🐍
-instruction: Track bonded symbiotes, feeding status (e.g. Fed 3/3), and stabled mounts.
+drivers: gm_annotation
+instruction: Track bonded symbiotes, feeding status (e.g. Fed 3/3), and stabled mounts. Emit *(Symbiote fed: +1 Venom)* when fed.
 sample:
 - Spitting Viper: Fed (3/3 venom) | Docile
 - Chitin Carapace: Molting in 2 days | +2 Armor
@@ -1926,6 +1931,21 @@ ${continuitySection}`;
 
 // ── Stage 4 (👤 Character — Protagonist & Progression Codex) ────────────────────
 
+export const CUSTOM_MODULE_SCHEMA = `### ⚙️ [CUSTOM_MODULE] Schema (Optional Game System / HUD Tracker):
+If the protagonist or setting relies on a bespoke mechanical resource, item tracker, or gauge (e.g. Relic Compass charge, Symbiote inventory, Radiation meter, Sanity):
+\`\`\`text
+[CUSTOM_MODULE]
+tag: <UPPERCASE_TAG_NAME> (e.g. RELIC_COMPASS, SYMBIOTES, CORRUPTION)
+label: <Human readable title> (e.g. Relic Compass Charge)
+icon: <Single Emoji> (e.g. 🧭, 🐍, ☢️)
+drivers: gm_annotation | gm_deltas | auto_tick | clock (default: gm_annotation)
+instruction: <Clear GM rule instructing the AI model how and when to modify this field during play>
+sample:
+<Monospace HUD preview showing format, gauge, or item list>
+[/CUSTOM_MODULE]
+\`\`\`
+* 🚫 NEVER emit empty or partial [CUSTOM_MODULE] stubs with missing instructions or sample.`;
+
 /**
  * Stage 4 Builder: Protagonist character sheet & progression codex compiler.
  * Emits strictly [PROTAGONIST] and optional [CUSTOM_MODULE], or [NOOP].
@@ -2011,7 +2031,9 @@ Your ONLY job is to assemble or update the Protagonist character sheet and optio
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Protagonist updates>
 
-${protagonistSchema}${diffSection}
+${protagonistSchema}
+
+${CUSTOM_MODULE_SCHEMA}${diffSection}
 
 ${continuitySection}`;
 }

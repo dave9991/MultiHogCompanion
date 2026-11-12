@@ -1326,6 +1326,97 @@ function formatUpstreamDiffText(diff) {
     return '';
 }
 
+export const PRODUCTION_PIPELINE_OVERVIEW = `### 🎬 Creative Team & Production Pipeline:
+1. 🧭 Framing: High-level campaign premise, dramatic tone, and focal lens.
+2. 📚 Canon Series Bible: World laws, persistent factions, key locations, historical lore.
+3. 🗺️ Episode 1 Adventure: Opening crisis, immediate danger, adversaries, starting maps.
+4. 👤 Protagonist: Character sheet, starting moves/abilities, personal bonds & stakes.`;
+
+/**
+ * Formats an authoritative Campaign Continuity Brief and Production Hand-Off Memo
+ * across upstream stages for injection into downstream stage prompts.
+ *
+ * @param {object} params
+ * @param {object} params.dossier
+ * @param {Array<object>} [params.canonEntries=[]]
+ * @param {'adventure'|'character'} params.stage
+ * @returns {string}
+ */
+export function formatStageContinuityBrief({ dossier, canonEntries = [], stage = 'character' } = {}) {
+    const meta = dossier?.meta || {};
+    const axioms = dossier?.worldRules?.axioms || [];
+    const activeCanon = Array.isArray(canonEntries) ? canonEntries.filter(e => !e.disabled) : [];
+    const disabledCanon = Array.isArray(canonEntries) ? canonEntries.filter(e => e.disabled) : [];
+    const theKick = dossier?.theKick || {};
+    const monsters = dossier?.monsters || [];
+    const maps = dossier?.maps || [];
+    const npcs = dossier?.npcs || [];
+    const stageNotes = meta.stageNotes || {};
+
+    const sections = [];
+
+    // 1. Campaign Foundation (from Step 1 Framing)
+    const foundationLines = [
+        `* Title: ${meta.title || 'Untitled Campaign'}`,
+        meta.premise ? `* Premise: ${meta.premise}` : null,
+        meta.focalLens ? `* Focal Lens: ${meta.focalLens}` : null,
+        meta.tone ? `* Dramatic Tone: ${meta.tone}` : null,
+        meta.ruleset ? `* Ruleset Engine: ${meta.ruleset.toUpperCase()} (${meta.systemLabel || meta.systemKey || 'standard'})` : null,
+    ].filter(Boolean);
+    if (foundationLines.length) {
+        sections.push(`#### 🧭 Campaign Foundation (from Framing):\n${foundationLines.join('\n')}`);
+    }
+
+    // 2. Production Hand-Off Notes / Creative Memos
+    const memoLines = [];
+    if (stageNotes.framing) memoLines.push(`* **Framing Memo:** ${stageNotes.framing}`);
+    if (stageNotes.canon) memoLines.push(`* **Canon & Worldbuilding Memo:** ${stageNotes.canon}`);
+    if (stage === 'character' && stageNotes.adventure) memoLines.push(`* **Adventure Stage Memo:** ${stageNotes.adventure}`);
+    if (memoLines.length) {
+        sections.push(`#### 📝 Production Team Hand-Off Memos:\n${memoLines.join('\n')}`);
+    }
+
+    // 3. Series Bible & Canon (from Step 2 Canon)
+    if (activeCanon.length > 0 || axioms.length > 0) {
+        const canonParts = [];
+        if (activeCanon.length > 0) {
+            canonParts.push(`**Active Series Bible Entries (${activeCanon.length} in play):**\n${formatCanonEntriesForContext(activeCanon)}`);
+        }
+        if (disabledCanon.length > 0) {
+            canonParts.push(`**Deferred / Background Entries (${disabledCanon.length} background):** ${disabledCanon.map(e => e.name || 'Untitled').join(', ')}`);
+        }
+        if (axioms.length > 0) {
+            canonParts.push(`**World Axioms (${axioms.length} laws established):**\n${formatAxiomsForContext(axioms)}`);
+        }
+        sections.push(`#### 📚 Series Bible & World Laws (from Canon):\n${canonParts.join('\n\n')}`);
+    }
+
+    // 4. Episode 1 Adventure State (Only relevant for Step 4 Character)
+    if (stage === 'character') {
+        const advLines = [];
+        if (theKick.startingLocation || theKick.crisis) {
+            advLines.push(`* Starting Location: ${theKick.startingLocation || 'Unspecified'}`);
+            advLines.push(`* Opening Crisis: ${theKick.crisis || 'Unspecified'}`);
+            if (theKick.openingPrompt) advLines.push(`* Turn 1 Prompt: ${theKick.openingPrompt}`);
+        }
+        if (maps.length > 0) {
+            advLines.push(`* Staged Locations / Maps: ${maps.map(m => m.site || m.name || 'Location').join(', ')}`);
+        }
+        if (monsters.length > 0) {
+            advLines.push(`* Staged Adversaries / Hazards: ${monsters.map(m => m.name || 'Adversary').join(', ')}`);
+        }
+        if (npcs.length > 0) {
+            advLines.push(`* Staged Supporting NPCs: ${npcs.map(n => `${n.name || 'NPC'} (${n.role || 'Cast'})`).join(', ')}`);
+        }
+        if (advLines.length) {
+            sections.push(`#### 🗺️ Episode 1 Adventure Stage Set (from Adventure):\n${advLines.join('\n')}`);
+        }
+    }
+
+    if (!sections.length) return '';
+    return `### 🎬 Authoritative Campaign Continuity Brief:\n${sections.join('\n\n')}`;
+}
+
 // ── Stage 1 (🧭 Initial — System-Agnostic Intake & Framing Q&A) ───────────────
 
 /**
@@ -1346,6 +1437,12 @@ export function buildStage1InitialBuilderPrompt(dossier, sourcesOutline = '') {
 
 We are currently in **Step 1: Initial Intake & Framing** of campaign creation.
 This step is **100% ruleset-agnostic** — NEVER output dice mechanics, stats, monsters, maps, or character sheets here.
+
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You extract and establish the core campaign premise, dramatic tone, and local focal lens.
+* **Downstream Collaboration:** You are laying the creative foundation. Later team members will construct the persistent Series Bible (Step 2), stage Episode 1 (Step 3), and forge the protagonist (Step 4). Focus on establishing clear, evocative creative direction for them!
 
 ### 🎯 Your Single Mission:
 Your ONLY job is to extract or update the high-level campaign framing from the conversation and emit an [UPDATE_DOSSIER] block containing a [FRAMING] block (or [NOOP] if no updates are needed).
@@ -1412,6 +1509,12 @@ export function buildStage1InitialTalkerPrompt(dossier, sourcesOutline = '') {
 
 Your mission is to welcome the player, understand their core concept, and help them establish the overarching premise, tone, and focal lens for their adventure.
 
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You guide the player to establish their high-level campaign premise, dramatic tone, and local focal lens.
+* **Downstream Collaboration:** You are helping the player lay the creative foundation for the production team. Once framing is locked, the Canon Archivist (Step 2) will build the Series Bible, the Adventure Designer (Step 3) will stage Episode 1, and the Character Architect (Step 4) will forge the protagonist. Keep the conversation engaging, evocative, and high-level!
+
 ---
 
 ### 🚫 Hard Boundaries for Step 1:
@@ -1471,6 +1574,12 @@ export function buildStage2CanonBuilderPrompt(dossier, canonEntries = [], upstre
     return `You are Agent 1: The Canon Series Bible Builder, an expert Tabletop RPG archivist and world compiler.
 
 We are currently in **Step 2: \`📚 Canon\` (Series Bible & World Laws)** of campaign creation.
+
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You extract, expand, refine, and curate the authoritative **Series Bible Lorebook** (factions, key locations, history, world lore) and **World Laws (Axioms)**.
+* **Downstream Collaboration:** Later team members will stage Episode 1 (the crisis and adversaries in Step 3) and craft the protagonist (Step 4). As you shape the Canon, feel free to plant unresolved faction rivalries, rumors, or mysterious locations for them to build upon!
 
 ### 🎯 Your Single Mission:
 Your ONLY job is to extract, expand, refine, and curate the persistent **Series Bible Lorebook** and **World Laws (Axioms)**.
@@ -1553,6 +1662,12 @@ export function buildStage2CanonTalkerPrompt(dossier, canonEntries = [], upstrea
 
 Your mission is to guide the player as they shape their persistent world lore, factions, historical anchors, and fundamental world axioms.
 
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You guide the player to shape their persistent world lore, factions, historical anchors, and fundamental world axioms.
+* **Downstream Collaboration:** Later team members will stage Episode 1 (the crisis and adversaries in Step 3) and craft the protagonist (Step 4). As you shape the Canon with the player, feel free to plant evocative hooks, simmering faction rivalries, or mysterious locations for them to build upon!
+
 ---
 
 ### 🚫 Hard Boundaries for Step 2:
@@ -1566,9 +1681,11 @@ Your mission is to guide the player as they shape their persistent world lore, f
    - If the player asks to scrap or overhaul their entire campaign premise or focal pivot, nudge them in plain English: *"To redefine our core premise or campaign focal lens, click back to the **🧭 Initial** tab up top!"*
    - If the player asks to stat out monsters, build dungeons, or create their character sheet, remind them in plain English: *"We'll stat out our Episode 1 crisis, maps, and adversaries in the next step—click **🗺️ Adventure** in the top stepper bar whenever you're ready (or **👤 Character** once unlocked)!"*
 
-### Current Lorebook Deck & World Axioms:
-* Series Bible Entries: ${Array.isArray(canonEntries) ? canonEntries.length : 0} entries
-* World Axioms: ${axioms.length} axioms established${diffBlock}`;
+### 📚 Current Series Bible Deck & World Axioms:
+${formatCanonEntriesForContext(canonEntries)}
+
+### ⚖️ Current World Axioms:
+${formatAxiomsForContext(axioms)}${diffBlock}`;
 }
 
 // ── Stage 3 (🗺️ Adventure — Episode 1 Stage Set & Ruleset Engine) ───────────────
@@ -1706,9 +1823,7 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
   \`\`\``;
     }
 
-    const canonSection = activeCanon.length > 0
-        ? `\n### 📚 [ACTIVE_CANON_SERIES_BIBLE] (Authoritative Grounding):\n${formatCanonEntriesForContext(activeCanon)}`
-        : '';
+    const continuitySection = formatStageContinuityBrief({ dossier, canonEntries, stage: 'adventure' });
 
     const diffSection = diffText
         ? `\n\n### [UPSTREAM_CANON_DIFF]:\n${diffText}\n\n**HARMONIZATION DIRECTIVE:** Upstream Canon entries were altered. Surgically update the Episode 1 Adventure ([KICK], [MAP], [MONSTER], [NPC], [FACTION]) to harmonize with these changes.`
@@ -1722,6 +1837,12 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
 
 We are currently in **Step 3: \`🗺️ Adventure\` (Episode 1 Stage Set & Ruleset Engine)**.
 Active Ruleset: **${effectiveRuleset.toUpperCase()}**
+
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You stage the Episode 1 starting crisis, immediate danger, adversaries, and opening locations for the chosen ruleset (${effectiveRuleset.toUpperCase()}).
+* **Downstream Collaboration:** Next, the Character Architect will forge the protagonist. Feel free to stage immediate dilemmas, skill needs, or moral choices for the protagonist to answer!
 
 ### 🎯 Your Single Mission:
 Your ONLY job is to assemble or update the Episode 1 starting stage set:
@@ -1744,7 +1865,9 @@ Your ONLY job is to assemble or update the Episode 1 starting stage set:
 * Ground every adversary, location, and NPC in the established active Canon entries.
 * 🏷️ **Name Diversity & Targeted Placeholders:** For newly introduced NPCs, adversaries, or distinct characters in Episode 1, emit targeted placeholders: \`name: [[NAME: evocative role or concept]]\` (e.g. \`[NPC] name: [[NAME: eccentric scrap merchant]]\`). NameRAG will resolve authentic names automatically. Do NOT invent generic cliché names.
 
-${rulesetDirectives}${canonSection}${diffSection}${bonesSection}`;
+${rulesetDirectives}
+
+${continuitySection}${diffSection}${bonesSection}`;
 }
 
 /**
@@ -1760,6 +1883,7 @@ ${rulesetDirectives}${canonSection}${diffSection}${bonesSection}`;
 export function buildStage3AdventureTalkerPrompt(dossier, canonEntries = [], { upstreamDiff = '', agnosticBones = null } = {}) {
     const effectiveRuleset = dossier?.meta?.ruleset || 'pbta';
     const diffText = formatUpstreamDiffText(upstreamDiff);
+    const continuitySection = formatStageContinuityBrief({ dossier, canonEntries, stage: 'adventure' });
 
     let specificGreetingNote = '';
     if (diffText) {
@@ -1771,6 +1895,12 @@ export function buildStage3AdventureTalkerPrompt(dossier, canonEntries = [], { u
     return `You are the **Adventure Concierge**, an expert Game Master facilitating Step 3: \`🗺️ Adventure\` (Episode 1 Stage Set).
 
 Your mission is to guide the player through establishing their starting crisis, locations, adversaries, and ruleset calibration dials for Episode 1.
+
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You guide the player to stage their starting crisis, opening location, immediate danger, and adversaries for Episode 1.
+* **Downstream Collaboration:** Next, the Character Architect will forge the protagonist. Feel free to discuss dilemmas, skill needs, or moral choices with the player that their protagonist will face!
 
 ---
 
@@ -1784,7 +1914,9 @@ Your mission is to guide the player through establishing their starting crisis, 
      Tell them in plain English: *"That changes our core world foundation—click back to the **📚 Canon** tab up top to update the world bible first!"*
    - If the player asks to scrap the entire premise, nudge them to click back to **\`🧭 Initial\`**.
 3. **Unlock Invitation:**
-   - Once the Episode 1 stage ([KICK], maps, adversaries, NPCs) is ready and the player is happy with the starting setup, invite them to click **\`👤 Character\`** in the top stepper bar to create their protagonist and progression codex!${specificGreetingNote}`;
+   - Once the Episode 1 stage ([KICK], maps, adversaries, NPCs) is ready and the player is happy with the starting setup, invite them to click **\`👤 Character\`** in the top stepper bar to create their protagonist and progression codex!${specificGreetingNote}
+
+${continuitySection}`;
 }
 
 // ── Stage 4 (👤 Character — Protagonist & Progression Codex) ────────────────────
@@ -1802,6 +1934,7 @@ Your mission is to guide the player through establishing their starting crisis, 
 export function buildStage4CharacterBuilderPrompt(dossier, canonEntries = [], { upstreamDiff = '' } = {}) {
     const effectiveRuleset = dossier?.meta?.ruleset || 'pbta';
     const diffText = formatUpstreamDiffText(upstreamDiff);
+    const continuitySection = formatStageContinuityBrief({ dossier, canonEntries, stage: 'character' });
 
     let protagonistSchema = '';
     if (effectiveRuleset === 'dnd5e') {
@@ -1851,6 +1984,12 @@ export function buildStage4CharacterBuilderPrompt(dossier, canonEntries = [], { 
 We are currently in **Step 4: \`👤 Character\` (Protagonist & Progression Codex)**.
 Active Ruleset: **${effectiveRuleset.toUpperCase()}**
 
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You assemble, refine, and balance the Protagonist character sheet and progression codex for ${effectiveRuleset.toUpperCase()}.
+* **Upstream Collaboration:** Ground the protagonist directly in the established Series Bible factions, world laws, and the immediate Episode 1 crisis staged by the team!
+
 ### 🎯 Your Single Mission:
 Your ONLY job is to assemble or update the Protagonist character sheet and optional Custom Tracker Module:
 * [PROTAGONIST] (Fully statted for ${effectiveRuleset.toUpperCase()})
@@ -1867,7 +2006,9 @@ Your ONLY job is to assemble or update the Protagonist character sheet and optio
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Protagonist updates>
 
-${protagonistSchema}${diffSection}`;
+${protagonistSchema}${diffSection}
+
+${continuitySection}`;
 }
 
 /**
@@ -1881,6 +2022,7 @@ ${protagonistSchema}${diffSection}`;
  */
 export function buildStage4CharacterTalkerPrompt(dossier, canonEntries = [], { upstreamDiff = '' } = {}) {
     const diffText = formatUpstreamDiffText(upstreamDiff);
+    const continuitySection = formatStageContinuityBrief({ dossier, canonEntries, stage: 'character' });
 
     let specificGreetingNote = '';
     if (diffText) {
@@ -1890,6 +2032,12 @@ export function buildStage4CharacterTalkerPrompt(dossier, canonEntries = [], { u
     return `You are the **Character Concierge**, an expert Game Master facilitating Step 4: \`👤 Character\` (Protagonist & Progression Codex).
 
 Your mission is to help the player create their protagonist, shape their background, choose their abilities, and prepare for campaign launch.
+
+${PRODUCTION_PIPELINE_OVERVIEW}
+
+### 🤝 Your Role & Collaborative Responsibilities:
+* **Your Responsibility:** You guide the player to forge their protagonist, choose abilities and gear, and prepare for campaign launch.
+* **Upstream Collaboration:** Ground your character suggestions, background ideas, and bond hooks directly in the established Series Bible, world factions, and the immediate Episode 1 crisis staged by the team!
 
 ---
 
@@ -1903,5 +2051,7 @@ Your mission is to help the player create their protagonist, shape their backgro
    - If the player asks to change the starting dungeon, opening crisis, or adversaries:
      Nudge them in plain English: *"To adjust our opening crisis, starting location, or adversaries, click back to the **🗺️ Adventure** tab up top!"*
    - If the player asks to change the overall world lore, genre, or world laws:
-     Nudge them in plain English: *"To modify the world setting or series bible, click back to the **📚 Canon** tab up top!"*${specificGreetingNote}`;
+     Nudge them in plain English: *"To modify the world setting or series bible, click back to the **📚 Canon** tab up top!"*${specificGreetingNote}
+
+${continuitySection}`;
 }

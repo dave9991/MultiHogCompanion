@@ -50,6 +50,11 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
             focalLens: '',
             framingComplete: false,
             rulesetConfirmed: false,
+            stageNotes: {
+                framing: '',
+                canon: '',
+                adventure: '',
+            },
             createdAt: Date.now(),
         },
         protagonist: adapter.createEmptyProtagonist(systemKey),
@@ -2850,6 +2855,13 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.meta.focalLens = typeof rawMeta.focalLens === 'string' ? rawMeta.focalLens.trim() : '';
     dossier.meta.framingComplete = Boolean(rawMeta.framingComplete);
     dossier.meta.rulesetConfirmed = Boolean(rawMeta.rulesetConfirmed);
+    dossier.meta.stageNotes = (rawMeta.stageNotes && typeof rawMeta.stageNotes === 'object')
+        ? {
+            framing: typeof rawMeta.stageNotes.framing === 'string' ? rawMeta.stageNotes.framing.trim() : '',
+            canon: typeof rawMeta.stageNotes.canon === 'string' ? rawMeta.stageNotes.canon.trim() : '',
+            adventure: typeof rawMeta.stageNotes.adventure === 'string' ? rawMeta.stageNotes.adventure.trim() : '',
+        }
+        : { framing: '', canon: '', adventure: '' };
     if (dossier.meta.genreEstablished !== undefined) {
         dossier.meta.genreEstablished = Boolean(dossier.meta.genreEstablished);
     } else {

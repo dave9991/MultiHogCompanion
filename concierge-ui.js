@@ -783,6 +783,12 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
         if (stage === 'adventure') {
             lastSyncedSnapshots.adventure = snapshotAdventure(activeDossier);
             lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+            if (activeDossier?.theKick?.crisis) {
+                activeDossier.meta = activeDossier.meta || {};
+                activeDossier.meta.stageNotes = activeDossier.meta.stageNotes || { framing: '', canon: '', adventure: '' };
+                const loc = activeDossier.theKick.startingLocation ? ` in ${activeDossier.theKick.startingLocation}` : '';
+                activeDossier.meta.stageNotes.adventure = `Opening crisis${loc}: ${activeDossier.theKick.crisis}`;
+            }
         }
         evaluateStepUnlocks();
         updateBlueprintDeck();
@@ -851,6 +857,16 @@ export async function setAdventureStep(targetStep, opts = {}) {
             lastSyncedSnapshots.framing = snapshotFraming(activeDossier);
             lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
             unlockedSteps.adventure = true;
+
+            activeDossier.meta = activeDossier.meta || {};
+            activeDossier.meta.stageNotes = activeDossier.meta.stageNotes || { framing: '', canon: '', adventure: '' };
+            if (activeDossier.meta.premise) {
+                activeDossier.meta.stageNotes.framing = `${activeDossier.meta.premise}${activeDossier.meta.focalLens ? ' Focused on: ' + activeDossier.meta.focalLens : ''}`;
+            }
+            const activeFactions = getStagedCanonEntries().filter(e => e.kind === 'FACTION' && !e.disabled).map(e => e.name);
+            if (activeFactions.length) {
+                activeDossier.meta.stageNotes.canon = `Key active factions in play: ${activeFactions.join(', ')}.`;
+            }
 
             const canon = getStagedCanonEntries();
             const activeCount = canon.filter(e => !e.disabled).length;

@@ -15,6 +15,7 @@ import {
     buildStage3AdventureTalkerPrompt,
     buildStage4CharacterBuilderPrompt,
     buildStage4CharacterTalkerPrompt,
+    formatStageContinuityBrief,
 } from '../concierge-prompt.js';
 import { systemRegistry } from '../concierge-system-registry.js';
 import '../concierge-system-pbta.js';
@@ -296,5 +297,45 @@ console.log('14. Testing Stage 4 First-Entry Prompt & Reactive Guardrails...');
 const s4TalkerReactive = buildStage4CharacterTalkerPrompt(createEmptyDossier('dnd5e'), sampleCanonEntries, {});
 assert.ok(s4TalkerReactive.includes('Strictly Reactive Navigation Assistance'), 'Talker prompt must instruct reactive-only navigation');
 assert.ok(s4TalkerReactive.includes('Never recite or quote this guidance unprompted'), 'Talker prompt must prohibit unprompted navigation recitation');
+
+console.log('15. Testing Writers Room Continuity Brief & Hand-off Notes...');
+const testDossier = createEmptyDossier('pbta');
+testDossier.meta.title = 'Fallout: New Reno';
+testDossier.meta.premise = 'Mob families battle for control of the casinos.';
+testDossier.meta.stageNotes = {
+    framing: 'Focus on gritty crime and high stakes.',
+    canon: 'The Wright Family controls the alcohol stills.',
+    adventure: 'Starts in the basement of the Desperado casino under gunfire.',
+};
+testDossier.theKick.startingLocation = 'Desperado Casino';
+testDossier.theKick.crisis = 'Drive-by shooting breaks through the front glass';
+
+const continuityBrief = formatStageContinuityBrief({
+    dossier: testDossier,
+    canonEntries: sampleCanonEntries,
+    stage: 'character',
+});
+
+assert.ok(continuityBrief.includes('Authoritative Campaign Continuity Brief'));
+assert.ok(continuityBrief.includes('Fallout: New Reno'));
+assert.ok(continuityBrief.includes('Mob families battle for control of the casinos.'));
+assert.ok(continuityBrief.includes('Focus on gritty crime and high stakes.'));
+assert.ok(continuityBrief.includes('The Wright Family controls the alcohol stills.'));
+assert.ok(continuityBrief.includes('Starts in the basement of the Desperado casino under gunfire.'));
+assert.ok(continuityBrief.includes('Desperado Casino'));
+assert.ok(continuityBrief.includes('Drive-by shooting breaks through the front glass'));
+assert.ok(continuityBrief.includes('Lyon Partisans'));
+
+const s4TalkerFull = buildStage4CharacterTalkerPrompt(testDossier, sampleCanonEntries);
+assert.ok(s4TalkerFull.includes('Authoritative Campaign Continuity Brief'));
+assert.ok(s4TalkerFull.includes('Fallout: New Reno'));
+assert.ok(s4TalkerFull.includes('Desperado Casino'));
+assert.ok(s4TalkerFull.includes('Lyon Partisans'));
+assert.ok(s4TalkerFull.includes('Creative Team & Production Pipeline'));
+
+const s4BuilderFull = buildStage4CharacterBuilderPrompt(testDossier, sampleCanonEntries);
+assert.ok(s4BuilderFull.includes('Authoritative Campaign Continuity Brief'));
+assert.ok(s4BuilderFull.includes('Desperado Casino'));
+assert.ok(s4BuilderFull.includes('Lyon Partisans'));
 
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

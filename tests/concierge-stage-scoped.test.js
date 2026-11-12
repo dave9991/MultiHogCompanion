@@ -338,4 +338,8 @@ assert.ok(s4BuilderFull.includes('Authoritative Campaign Continuity Brief'));
 assert.ok(s4BuilderFull.includes('Desperado Casino'));
 assert.ok(s4BuilderFull.includes('Lyon Partisans'));
 
+console.log('16. Verifying raw prose preservation in stripConciergeStateBlocks (no prefix suppression)...');
+const withPrefixAndBlock = 'Initial_Concierge:\n\n[NOOP][/NOOP]\n\nExcellent. You got the right idea.';
+assert.strictEqual(stripConciergeStateBlocks(withPrefixAndBlock), 'Initial_Concierge:\n\n\n\nExcellent. You got the right idea.');
+
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

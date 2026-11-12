@@ -458,9 +458,13 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
     const effectiveRuleset = ruleset || (isFaeActive() ? 'fae' : 'pbta');
     const adapter = systemRegistry.get(effectiveRuleset);
     try {
-        localStorage.removeItem(adapter.getDraftStorageKey());
-        if (adapter.id === 'pbta') {
-            localStorage.removeItem(STORAGE_DRAFT_KEY);
+        for (const ad of systemRegistry.list()) {
+            localStorage.removeItem(ad.getDraftStorageKey());
+        }
+        localStorage.removeItem(STORAGE_DRAFT_KEY);
+        if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.removeItem('mhc_session_zero_draft');
+            sessionStorage.removeItem('mhc_last_concierge_desk');
         }
     } catch (_) {}
 
@@ -2410,10 +2414,27 @@ async function handleUserSend() {
             if (m.role === 'assistant') {
                 const cleanContent = stripConciergeStateBlocks(m.content) || m.content;
                 const reportPrefix = m.builderReport ? `[BUILDER_REPORT: ${m.builderReport}]\n\n` : '';
-                const activeAdapter = systemRegistry.get(systemRegistry.detectRuleset(activeDossier));
+                let assistantName = 'Concierge';
+                if (currentNavMode === 'new-adventure') {
+                    if (currentAdventureStep === 'initial') {
+                        assistantName = 'Initial_Concierge';
+                    } else if (currentAdventureStep === 'canon') {
+                        assistantName = 'Canon_Archivist';
+                    } else if (currentAdventureStep === 'adventure') {
+                        assistantName = activeDossier?.meta?.rulesetConfirmed
+                            ? `${String(activeDossier.meta.ruleset).toUpperCase()}_Adventure_Concierge`
+                            : 'Adventure_Concierge';
+                    } else if (currentAdventureStep === 'character') {
+                        const ruleset = activeDossier?.meta?.ruleset || 'PbtA';
+                        assistantName = `${String(ruleset).toUpperCase()}_Character_Concierge`;
+                    }
+                } else {
+                    const activeAdapter = systemRegistry.get(systemRegistry.detectRuleset(activeDossier));
+                    assistantName = activeAdapter?.getAssistantName() || 'Living_World_Concierge';
+                }
                 return {
                     role: 'assistant',
-                    name: activeAdapter.getAssistantName(),
+                    name: assistantName,
                     content: `${reportPrefix}${cleanContent}`,
                 };
             }

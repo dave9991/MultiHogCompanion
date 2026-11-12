@@ -192,6 +192,9 @@ export {
     getMultihogPlayerPortrait,
 };
 
+// [CATALOG: ADR-MP-01] Immediately install early fetch interceptor on module load
+setupCompanionDocInterceptor();
+
 const EXTENSION_NAME = 'multihog_companion';
 
 const EXTENSION_FOLDER = 'scripts/extensions/third-party/MultiHogCompanion';
@@ -3497,6 +3500,51 @@ if (typeof jQuery !== 'undefined') {
                     await syncCampaignLorebooks({ isAuto: true, chatId: targetChatId });
                     await updateLorebookSyncUI();
                 }, 150);
+            }
+        });
+    }
+
+    // [CATALOG: EVT-13] See LISTENERS.md — Adventure Deletion & Orphaned Dossier Cleanup
+    if (event_types.CHAT_DELETED) {
+        eventSource.on(event_types.CHAT_DELETED, async (deletedChatId) => {
+            try {
+                if (!deletedChatId) return;
+                const cleanId = String(deletedChatId).trim();
+                const { deleteOldLorebooks, listAllWorldNames } = await import('./campaign-lore-sync.js');
+                const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+                const allNames = await listAllWorldNames(ctx);
+
+                // Candidates for this adventure's campaign dossier
+                const candidateDossiers = new Set([
+                    `Campaign_${cleanId}`,
+                    `Campaign_${cleanId.replace(/\s+/g, '_')}`,
+                    `Campaign_${cleanId.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`,
+                ]);
+
+                // Check other active chats in settings to ensure dossier isn't claimed elsewhere
+                const s = typeof getSettings === 'function' ? getSettings() : null;
+                const otherStates = Object.entries(s?.chatStates || {}).filter(([id]) => id !== cleanId);
+
+                const toDelete = [];
+                for (const book of allNames) {
+                    if (candidateDossiers.has(book)) {
+                        const isClaimedByOther = otherStates.some(([_, state]) =>
+                            state?.campaignDossier?.meta?.title === cleanId ||
+                            state?.companionDossier?.meta?.title === cleanId ||
+                            state?.boundDossier === book
+                        );
+                        if (!isClaimedByOther) {
+                            toDelete.push(book);
+                        }
+                    }
+                }
+
+                if (toDelete.length > 0) {
+                    await deleteOldLorebooks(toDelete, ctx);
+                    console.log('[MultiHog Companion] Cleaned orphaned campaign dossier(s):', toDelete);
+                }
+            } catch (err) {
+                console.warn('[MultiHog Companion] Dossier cleanup on chat deletion skipped:', err);
             }
         });
     }

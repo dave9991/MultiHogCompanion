@@ -648,6 +648,8 @@ export async function syncCampaignLorebooks(options = {}) {
         // Remap linked campaignBooks in chatState
         if (Array.isArray(part.campaignBooks)) {
             part.campaignBooks = part.campaignBooks.map((name) => bookRenameMap[name] || name);
+        } else if (Object.keys(bookRenameMap).length) {
+            part.campaignBooks = Object.values(bookRenameMap);
         }
 
         // Remap active keys from OldPrefix:: to NewPrefix::

@@ -45,6 +45,7 @@ The following matrix highlights events where **multiple files or upstream MultiH
 | **`GENERATION_STOPPED`** | • `cyoa-safety-net.js`<br>• *Upstream MultiHog* | 1. `cyoa-safety-net.js` (aborts in-flight on-demand CYOA generation) | 🟢 **LOW**: Clean abort handler. |
 | **`GENERATION_ENDED`** | • *Upstream MultiHog* | *(Companion CYOA auto-dispatch retired in favor of DOM-07 Wand action)* | 🟢 **RETIRED (Companion)**: Automated background trigger replaced with deterministic on-demand Wand/Slash execution. |
 | **`CHAT_COMPLETION_PROMPT_READY`** | • *Upstream MultiHog* | *(Companion CYOA prompt stripping retired in favor of native upstream pruning)* | 🟢 **RETIRED (Companion)**: Decommissioned to defer to upstream MultiHog's native choice pruning and avoid fragile regex parsing of story prose. |
+| **`CHAT_DELETED`** | • `index.js` (`EVT-13`)<br>• *Upstream MultiHog* | 1. Upstream `onDeletedChat` (`cleanDeletedChatRecords` & `offerOrphanedLorebookPurge`)<br>2. `index.js` (`EVT-13` checks and cleans unshared `Campaign_{Title}` dossier) | 🟢 **ACTIVE**: Prevents orphaned campaign dossier leaks and coordinates with upstream purge. |
 | **`APP_READY`** | • `index.js` (`setupImagineInterceptor`)<br>• *Upstream MultiHog* | 1. Companion wraps `/imagine` callback | 🟢 **LOW**: Run-once initialization. |
 
 ---
@@ -286,6 +287,18 @@ T+600ms:  [index.js] runSettingsUpdatedCoordinator() executes under _isSettingsS
 * **Trigger:** SillyTavern constructs the prompt payload and completes token budgeting right before dispatching the HTTP request to the Chat Completion API (`openai.js:1610` and `script.js:3978`).
 * **Status:** 🔴 **RETIRED**. Decommissioned along with ADR-MP-03's CYOA stripping to defer to upstream MultiHog's native choice pruning (`cyoaConfig.stripOldChoicesFromPrompt`). Eliminates fragile regular expression parsing of natural language story prose and aligns with the on-demand Wand/Slash CYOA model (`DOM-07`).
 * **Anchor Preserved:** `[CATALOG: EVT-12]` preserved in codebase for architectural traceability.
+
+---
+
+### EVT-13: `CHAT_DELETED` (Adventure Deletion & Orphaned Dossier Cleanup)
+* **Trigger:** SillyTavern deletes a chat session (`delChat` in `script.js`).
+* **Registered In:** `index.js`
+* **Execution Priority:** Standard FIFO (`eventSource.on`).
+* **Payload Structure:** `deletedChatId` (string chat title/id)
+* **Purpose:** Upstream MultiHog's native `offerOrphanedLorebookPurge` evaluates only partition books matching `{Prefix}_Partition` (via `bookBelongsToPrefix`) and ignores the primary `Campaign_{Title}` dossier. This listener verifies whether `Campaign_{Title}` is claimed by any remaining active chat. If unshared and orphaned, it permanently cleans it up via `deleteOldLorebooks` so orphaned dossier books do not leak in SillyTavern's world info directory.
+* **Blast Radius:** If removed, deleting an adventure chat will prompt to purge partition lorebooks but leak the `Campaign_{Title}` dossier as an orphan.
+* **Status:** 🟢 **ACTIVE**.
+
 
 ---
 

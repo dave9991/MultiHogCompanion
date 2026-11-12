@@ -297,7 +297,7 @@ export function setupCompanionDocInterceptor() {
                     const cloned = response.clone();
                     try {
                         const data = await cloned.json();
-                        if (data && data.error === true) {
+                        if (!Array.isArray(data) && (data?.error === true || typeof data === 'object')) {
                             const headers = typeof Headers !== 'undefined'
                                 ? new Headers(response.headers)
                                 : { ...response.headers };
@@ -311,11 +311,29 @@ export function setupCompanionDocInterceptor() {
                                 headers,
                             });
                         }
-                    } catch (_) {}
+                    } catch (_) {
+                        return new Response(JSON.stringify([]), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'content-type': 'application/json' },
+                        });
+                    }
+                    return response;
+                } else if (response && !response.ok) {
+                    return new Response(JSON.stringify([]), {
+                        status: 200,
+                        statusText: 'OK',
+                        headers: { 'content-type': 'application/json' },
+                    });
                 }
                 return response;
             } catch (err) {
-                console.warn('[MultiHog Companion] Fallback: Could not normalize /api/characters/chats:', err);
+                console.warn('[MultiHog Companion] Fallback: Could not query /api/characters/chats, returning clean empty list:', err);
+                return new Response(JSON.stringify([]), {
+                    status: 200,
+                    statusText: 'OK',
+                    headers: { 'content-type': 'application/json' },
+                });
             }
         }
 
@@ -339,3 +357,9 @@ export function teardownCompanionDocInterceptor() {
         _interceptorActive = false;
     }
 }
+
+// Auto-install immediately on module evaluation if running in browser
+if (typeof window !== 'undefined' && window.fetch && !window.fetch.__mhcDocBridgeInstalled) {
+    setupCompanionDocInterceptor();
+}
+

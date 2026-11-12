@@ -291,13 +291,15 @@ As a result:
 Furthermore, if companion dossier persistence previously keyed partitions with `.jsonl` extensions (e.g. `rpg.chatStates['Campaign.jsonl']`), upstream's `orphanedLorebooksForDeletedChat` treats the duplicate key as an active secondary chat sharing the prefix, clobbering candidate detection.
 
 #### Companion Mitigation
-1. **Fetch Normalization (`pbta-companion-bridge.js`)**: Intercepts `window.fetch` for `/api/characters/chats`. If the backend returns `{ error: true }`, Companion normalizes the response to an empty JSON array `[]` (`status: 200, Content-Type: application/json`), satisfying upstream's `Array.isArray(chats)` guard.
-2. **Key Sanitization (`level-up-scaffold.js`)**: Strips `.jsonl` extensions when persisting dossiers into `chatStates`, preventing duplicate extension-laden keys from entering `rpg_tracker.chatStates`.
-3. **Partition Scrubber (`scrubDuplicateChatStateKeys`)**: Automatically purges and consolidates any existing `.jsonl` duplicate keys in `rpg_tracker.chatStates` during `runChatChangedCoordinator` and startup integrity audits.
+1. **Fetch Normalization (`pbta-companion-bridge.js` / ADR-MP-01)**: Intercepts `window.fetch` for `/api/characters/chats` immediately on module evaluation. If the backend returns `{ error: true }`, a non-200 status, or any non-array payload, Companion normalizes the response to an empty JSON array `[]` (`status: 200, Content-Type: application/json`). This satisfies upstream's `Array.isArray(chats)` guard during chat deletion and guarantees SillyTavern's core `replaceCurrentChat()` selects an existing chat rather than generating an unwanted timestamped blank chat (`Game Master - <timestamp>.jsonl`).
+2. **Concierge Campaign Lorebook Registration (`concierge-runner.js`)**: When launching an adventure via Concierge, registers the partition books (`{Prefix}_NPCs`, `{Prefix}_Locations`, `{Prefix}_Quests`, `{Prefix}_Rules`, `{Prefix}_Skeleton`, `{Prefix}_Canon`) and `renamedCampaignPrefix` directly into `rpgSettings.chatStates[chatId].campaignBooks` so upstream's `offerOrphanedLorebookPurge` recognizes them as owned by the deleting chat.
+3. **Orphaned Dossier Cleanup (`index.js` / EVT-13)**: Hooks `CHAT_DELETED` to check and permanently delete unshared `Campaign_{Title}` dossier lorebooks that upstream's `bookBelongsToPrefix` excludes from standard partition purges.
+4. **Key Sanitization (`level-up-scaffold.js`)**: Strips `.jsonl` extensions when persisting dossiers into `chatStates`, preventing duplicate extension-laden keys from entering `rpg_tracker.chatStates`.
+5. **Partition Scrubber (`scrubDuplicateChatStateKeys`)**: Automatically purges and consolidates any existing `.jsonl` duplicate keys in `rpg_tracker.chatStates` during `runChatChangedCoordinator` and startup integrity audits.
 
 #### Blast Radius If Removed
-* Any SillyTavern installation containing characters without existing chat histories will completely fail to prompt for orphaned lorebook deletion when adventures are deleted.
-* Deleted adventure lorebooks and state tracker partitions will leak indefinitely.
+* Any SillyTavern installation containing characters without existing chat histories will completely fail to prompt for orphaned lorebook deletion when adventures are deleted, and will generate an empty blank chat that must be deleted manually.
+* Deleted adventure lorebooks, primary campaign dossiers, and state tracker partitions will leak indefinitely.
 
 #### Retirement Criteria
 Upstream MultiHog handles non-array responses gracefully (e.g. `if (!Array.isArray(chats)) continue;`).

@@ -161,6 +161,54 @@ const errorChatsData = await errorChatsRes.json();
 assert.ok(Array.isArray(errorChatsData), 'Must normalize { error: true } to empty array []');
 assert.strictEqual(errorChatsData.length, 0, 'Empty array returned');
 
+// Test 4c-ii: /api/characters/chats non-200 / 404 / 500 error normalization
+teardownCompanionDocInterceptor();
+globalThis.window.fetch = async (input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.includes('/api/characters/chats')) {
+        return new Response('Not Found', { status: 404, statusText: 'Not Found' });
+    }
+    return new Response('ok', { status: 200 });
+};
+setupCompanionDocInterceptor();
+const notFoundChatsRes = await globalThis.window.fetch('/api/characters/chats');
+const notFoundChatsData = await notFoundChatsRes.json();
+assert.ok(Array.isArray(notFoundChatsData), 'Must normalize non-ok response to empty array []');
+assert.strictEqual(notFoundChatsData.length, 0);
+
+// Test 4c-iii: /api/characters/chats non-array object normalization
+teardownCompanionDocInterceptor();
+globalThis.window.fetch = async (input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.includes('/api/characters/chats')) {
+        return new Response(JSON.stringify({ message: 'Character directory does not exist' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+        });
+    }
+    return new Response('ok', { status: 200 });
+};
+setupCompanionDocInterceptor();
+const objChatsRes = await globalThis.window.fetch('/api/characters/chats');
+const objChatsData = await objChatsRes.json();
+assert.ok(Array.isArray(objChatsData), 'Must normalize non-array object to empty array []');
+assert.strictEqual(objChatsData.length, 0);
+
+// Test 4c-iv: /api/characters/chats thrown network error fallback
+teardownCompanionDocInterceptor();
+globalThis.window.fetch = async (input) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.includes('/api/characters/chats')) {
+        throw new Error('Network failure');
+    }
+    return new Response('ok', { status: 200 });
+};
+setupCompanionDocInterceptor();
+const thrownChatsRes = await globalThis.window.fetch('/api/characters/chats');
+const thrownChatsData = await thrownChatsRes.json();
+assert.ok(Array.isArray(thrownChatsData), 'Must catch network error and return empty array []');
+assert.strictEqual(thrownChatsData.length, 0);
+
 // Test 4d: /api/characters/chats valid array pass-through
 teardownCompanionDocInterceptor();
 globalThis.window.fetch = async (input) => {

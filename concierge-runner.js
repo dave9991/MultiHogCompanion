@@ -838,6 +838,15 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                         rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
                     }
 
+                    // Derive campaign prefix and register partition lorebooks for upstream MultiHog purge tracking
+                    const cleanPrefix = (chatId || '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                    rpgSettings.chatStates[chatId].renamedCampaignPrefix = cleanPrefix;
+
+                    const standardSuffixes = ['NPCs', 'Locations', 'Quests', 'Factions', 'Rules', 'Skeleton', 'Canon', 'World'];
+                    const campaignBooksSet = new Set(rpgSettings.chatStates[chatId].campaignBooks || []);
+                    standardSuffixes.forEach(suf => campaignBooksSet.add(`${cleanPrefix}_${suf}`));
+                    rpgSettings.chatStates[chatId].campaignBooks = [...campaignBooksSet];
+
                     // Register Custom HUD Tracker / Game System in MultiHog Settings if defined
                     const customMod = dossier.worldRules?.customModule;
                     if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {

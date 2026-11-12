@@ -17,6 +17,7 @@ import {
     detectGenderFromText,
     cleanContextKeywords,
     buildContextAwareQuery,
+    parseResolvedNameToken,
 } from '../namerag-hooks.js';
 import { buildConciergeSystemPrompt, buildConciergeBuilderPrompt } from '../concierge-prompt.js';
 
@@ -308,8 +309,11 @@ const resolvedOutput = await resolveDossierNamePlaceholders(sampleBlueprint, {
 });
 assert.ok(!resolvedOutput.includes('[[NAME:'), 'All [[NAME:...]] placeholders must be resolved');
 assert.ok(resolvedOutput.includes('name: Kaelen Valerius'), 'Protagonist name resolved to NameRAG candidate');
-assert.ok(resolvedOutput.includes('name: Thorgar Ironbeard'), 'Mentor name resolved to NameRAG candidate');
-assert.ok(resolvedOutput.includes('name: Morvath'), 'Monster name resolved to NameRAG candidate');
+assert.ok(resolvedOutput.includes('[NAME: mentor, RESOLVED TO: Thorgar Ironbeard]'), 'Mentor name evolved to blueprint syntax');
+assert.ok(resolvedOutput.includes('[NAME: stalker, RESOLVED TO: Morvath]'), 'Monster name evolved to blueprint syntax');
+assert.strictEqual(parseResolvedNameToken('[NAME: mentor, RESOLVED TO: Thorgar Ironbeard]').cleanName, 'Thorgar Ironbeard');
+assert.strictEqual(parseResolvedNameToken('[NAME: mentor, RESOLVED TO: Thorgar Ironbeard]').tag, 'mentor');
+assert.strictEqual(parseResolvedNameToken('[NAME: mentor, RESOLVED TO: Thorgar Ironbeard]').isResolvedToken, true);
 console.log('✓ Targeted NameRAG resolution pipeline successfully replaced all placeholders without collisions');
 
 // 9. Test resolveDossierNamePlaceholders offline fallback
@@ -332,7 +336,8 @@ const offlineResolved = await resolveDossierNamePlaceholders(offlineBlueprint, {
     meta: { systemKey: 'fantasy' },
 });
 assert.ok(!offlineResolved.includes('[[NAME:'), 'Offline fallback must resolve placeholders completely');
-assert.ok(/name:\s+[A-Za-z]+/.test(offlineResolved), 'A clean replacement name must be assigned');
+assert.ok(/name:\s+(?:\[NAME:[^\]]+\]|[A-Za-z]+)/.test(offlineResolved), 'A clean replacement or evolved name must be assigned');
+assert.ok(parseResolvedNameToken(offlineResolved.match(/name:\s*([^\n\r]+)/)[1]).cleanName.length > 0);
 console.log('✓ Offline fallback cleanly populates names without leaving placeholder tokens');
 
 // 10. Test rollNameRagCandidate timeout & fallback source tagging
@@ -483,5 +488,80 @@ const parsedJson = JSON.parse(resolvedJsonOutput);
 assert.strictEqual(parsedJson.length, 2);
 assert.ok(parsedJson[0].name && !parsedJson[0].name.includes('[[NAME:'), 'Resolved name must be valid');
 console.log('✓ Series Bible Canon cards and JSON array placeholders extracted and resolved cleanly');
+
+// 13. Test parseResolvedNameToken parser resilience, evolution syntax, and launch sanitization
+console.log('Testing parseResolvedNameToken evolution syntax and launch sanitization...');
+
+// 13a. parseResolvedNameToken standard format
+const parsed1 = parseResolvedNameToken('[NAME: desperate threshold runner, RESOLVED TO: Kaelen Ward]');
+assert.strictEqual(parsed1.cleanName, 'Kaelen Ward');
+assert.strictEqual(parsed1.tag, 'desperate threshold runner');
+assert.strictEqual(parsed1.isResolvedToken, true);
+
+// 13b. parseResolvedNameToken alternate format
+const parsed2 = parseResolvedNameToken('[REALNAME: Silas Vane, NAME: paranoid scrap-doc]');
+assert.strictEqual(parsed2.cleanName, 'Silas Vane');
+assert.strictEqual(parsed2.tag, 'paranoid scrap-doc');
+assert.strictEqual(parsed2.isResolvedToken, true);
+
+// 13c. parseResolvedNameToken clean string pass-through
+const parsed3 = parseResolvedNameToken('Coil-Jackal');
+assert.strictEqual(parsed3.cleanName, 'Coil-Jackal');
+assert.strictEqual(parsed3.tag, '');
+assert.strictEqual(parsed3.isResolvedToken, false);
+
+// 13d. parseResolvedNameToken fallback for unstripped placeholder
+const parsed4 = parseResolvedNameToken('[[NAME: desperate threshold runner]]');
+assert.strictEqual(parsed4.cleanName, 'desperate threshold runner');
+assert.strictEqual(parsed4.tag, 'desperate threshold runner');
+assert.strictEqual(parsed4.isResolvedToken, false);
+
+// 13e. Exemption from extractNamePlaceholders re-resolution
+const sampleEvolvedText = 'name: [NAME: desperate threshold runner, RESOLVED TO: Kaelen Ward]\nname: [NAME: paranoid scrap-doc, RESOLVED TO: Silas Vane]';
+const secondPassPlaceholders = extractNamePlaceholders(sampleEvolvedText);
+assert.strictEqual(secondPassPlaceholders.length, 0, 'Evolved tokens must never be re-extracted as placeholders');
+
+// 13f. Step 3 Auto-Pass resolution simulation matching user screenshot
+const step3AutoPassOutput = `[UPDATE_DOSSIER]
+[NPC]
+name: [[NAME: desperate threshold runner]]
+role: Ally
+appearance: Ragged scavenger in padded leather
+[/NPC]
+[NPC]
+name: [[NAME: paranoid scrap-doc]]
+role: Ally
+appearance: Tense doctor with ocular lens
+[/NPC]
+[MONSTER]
+name: Coil-Jackal
+threat_level: 1
+[/MONSTER]
+[/UPDATE_DOSSIER]`;
+
+const step3Resolved = await resolveDossierNamePlaceholders(step3AutoPassOutput, {
+    meta: { systemKey: 'fae', tone: 'post-apocalyptic' },
+});
+
+assert.ok(!step3Resolved.includes('[[NAME:'), 'Auto-pass output must have no unresolved [[NAME:');
+assert.ok(step3Resolved.includes('[NAME: desperate threshold runner, RESOLVED TO:'), 'Threshold runner must evolve with concept tag');
+assert.ok(step3Resolved.includes('[NAME: paranoid scrap-doc, RESOLVED TO:'), 'Scrap doc must evolve with concept tag');
+assert.ok(step3Resolved.includes('name: Coil-Jackal'), 'Pre-named monster must remain intact');
+
+// 13g. Launch pipeline sanitization
+const { applyDossierUpdates, createEmptyDossier } = await import('../concierge-parser.js');
+const { updatedDossier } = applyDossierUpdates(step3Resolved, createEmptyDossier('fae'));
+assert.strictEqual(updatedDossier.npcs.length, 2);
+// In blueprint, names have evolution syntax
+assert.ok(updatedDossier.npcs[0].name.startsWith('[NAME:'));
+assert.ok(updatedDossier.npcs[1].name.startsWith('[NAME:'));
+
+// When launched, names are sanitized to clean names
+const cleanNpcNames = updatedDossier.npcs.map(n => parseResolvedNameToken(n.name).cleanName);
+assert.ok(!cleanNpcNames[0].includes('['), 'Sanitized NPC name must have no brackets');
+assert.ok(!cleanNpcNames[1].includes('['), 'Sanitized NPC name must have no brackets');
+assert.ok(cleanNpcNames[0].length > 1);
+assert.ok(cleanNpcNames[1].length > 1);
+console.log('✓ parseResolvedNameToken, evolution format, double-bracket exemption, and launch sanitization verified cleanly');
 
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

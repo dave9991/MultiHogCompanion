@@ -116,7 +116,7 @@ import {
 } from './adventure-chat.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
 import { FAE_GENRES, TEMPO_WINDOWS } from './fae-ruleset.js';
-import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders } from './namerag-hooks.js';
+import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders, parseResolvedNameToken } from './namerag-hooks.js';
 import {
     getCompanionActiveCartridge,
     getCandidateChatIds,
@@ -767,10 +767,37 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
             { role: 'user', name: 'Player', content: promptText },
         ];
         const builderRaw = await sendConciergeRequest(builderMsgs);
-        const report = applyDossierUpdates(builderRaw, activeDossier);
+        let processedBuilderRaw = builderRaw;
+        let autoPassResolutions = [];
+        if (extension_settings?.multihog_companion?.enableNameRag !== false) {
+            try {
+                const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true });
+                processedBuilderRaw = resolved.text;
+                autoPassResolutions = resolved.resolutions || [];
+            } catch (resErr) {
+                console.warn('[MultiHog Companion] Placeholder name resolution error in auto-pass:', resErr);
+            }
+        }
+        const report = applyDossierUpdates(processedBuilderRaw, activeDossier);
         if (report.hasMutations) {
             activeDossier = report.updatedDossier;
         }
+
+        const autoPassDiagnostic = {
+            timestamp: new Date().toISOString(),
+            mode: 'auto-pass',
+            stage,
+            userPrompt: promptText,
+            rawResponse: processedBuilderRaw,
+            nameRagResolutions: autoPassResolutions,
+            errors: report.errors,
+            hasMutations: report.hasMutations,
+            isNoop: report.isNoop,
+            builderSummary: report.builderSummary,
+            activeDossierSnapshot: JSON.parse(JSON.stringify(activeDossier)),
+        };
+        window._mhcLastBuilderTransaction = autoPassDiagnostic;
+        window._lastConciergeBuilderDiagnostic = autoPassDiagnostic;
 
         const talkerMsgs = [
             { role: 'system', name: 'System', content: talkerSys },
@@ -1210,7 +1237,8 @@ export function updateBlueprintDeck() {
 
     // Protagonist Card
     $('#mhc_deck_char_playbook').text(proto.archetype || proto.playbook || 'In Development');
-    $('#mhc_deck_char_name').text(proto.name || 'Unnamed Adventurer');
+    const { cleanName: protoClean } = parseResolvedNameToken(proto.name);
+    $('#mhc_deck_char_name').text(protoClean || 'Unnamed Adventurer');
 
     adapter.renderDeckStats({
         vitalsEl: $('#mhc_deck_char_vitals'),
@@ -1225,6 +1253,10 @@ export function updateBlueprintDeck() {
     npcList.empty();
     if (npcs.length) {
         npcs.forEach(n => {
+            const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(n.name);
+            const tagBadge = (isResolvedToken && tag)
+                ? ` <span class="mhc-pill" style="font-size: 0.7em; background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" title="Concept tag evolved via NameRAG">🏷️ ${escapeHtml(tag)}</span>`
+                : '';
             const role = n.role || 'Ally';
             const demeanor = n.demeanor ? ` · <i>${n.demeanor}</i>` : '';
             const app = n.appearance ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Look:</b> ${n.appearance}</div>` : '';
@@ -1257,11 +1289,11 @@ export function updateBlueprintDeck() {
                     <div class="mhc-npc-rel-controls" style="margin-top: 6px; padding: 6px 8px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
                         <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 0.78em;">
                             <span style="color: #4ade80;">🤝 Friendship: <b class="mhc-rel-val-friendship">${fSign}${fVal}</b></span>
-                            <input type="range" class="mhc-npc-rel-slider" data-npc="${encodeURIComponent(n.name)}" data-axis="friendship" min="-150" max="150" step="5" value="${fVal}" style="flex: 1; max-width: 130px; height: 3px; accent-color: #4ade80; cursor: pointer;">
+                            <input type="range" class="mhc-npc-rel-slider" data-npc="${encodeURIComponent(cleanName)}" data-axis="friendship" min="-150" max="150" step="5" value="${fVal}" style="flex: 1; max-width: 130px; height: 3px; accent-color: #4ade80; cursor: pointer;">
                         </div>
                         <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.78em;">
                             <span style="color: #f472b6;">💗 Affection: <b class="mhc-rel-val-affection">${aSign}${aVal}</b></span>
-                            <input type="range" class="mhc-npc-rel-slider" data-npc="${encodeURIComponent(n.name)}" data-axis="affection" min="-150" max="150" step="5" value="${aVal}" style="flex: 1; max-width: 130px; height: 3px; accent-color: #f472b6; cursor: pointer;">
+                            <input type="range" class="mhc-npc-rel-slider" data-npc="${encodeURIComponent(cleanName)}" data-axis="affection" min="-150" max="150" step="5" value="${aVal}" style="flex: 1; max-width: 130px; height: 3px; accent-color: #f472b6; cursor: pointer;">
                         </div>
                     </div>
                 `;
@@ -1271,7 +1303,7 @@ export function updateBlueprintDeck() {
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
                         <div class="mhc-deck-item-title" style="color: var(--mhc-accent, #3b82f6);">
-                            👤 ${n.name} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${woundBadge}${demeanor}
+                            👤 ${escapeHtml(cleanName)} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${tagBadge}${woundBadge}${demeanor}
                         </div>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
@@ -1296,6 +1328,10 @@ export function updateBlueprintDeck() {
     if (monsters.length) {
         if (isFae) {
             monsters.forEach(m => {
+                const { cleanName: mClean, tag: mTag, isResolvedToken: mIsResolved } = parseResolvedNameToken(m.name);
+                const mTagBadge = (mIsResolved && mTag)
+                    ? ` <span class="mhc-pill" style="font-size: 0.7em; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" title="Concept tag evolved via NameRAG">🏷️ ${escapeHtml(mTag)}</span>`
+                    : '';
                 const threat = m.threat_level ?? m.threatLevel ?? 1;
                 const layers = m.layers ?? m.hp ?? 1;
                 const poolsAtRisk = Array.isArray(m.pools_at_risk) ? m.pools_at_risk.join(', ') : (m.pools_at_risk || m.poolsAtRisk || 'Health');
@@ -1313,7 +1349,7 @@ export function updateBlueprintDeck() {
                     <div class="mhc-deck-item collapsible">
                         <div class="mhc-deck-item-header">
                             <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
-                                👹 ${escapeHtml(m.name)} ${threatBadge} ${poolBadge}
+                                👹 ${escapeHtml(mClean)} ${mTagBadge}${threatBadge} ${poolBadge}
                             </div>
                             <span class="mhc-deck-item-toggle">▼</span>
                         </div>
@@ -1327,6 +1363,10 @@ export function updateBlueprintDeck() {
             });
         } else {
             monsters.forEach(m => {
+                const { cleanName: mClean, tag: mTag, isResolvedToken: mIsResolved } = parseResolvedNameToken(m.name);
+                const mTagBadge = (mIsResolved && mTag)
+                    ? ` <span class="mhc-pill" style="font-size: 0.7em; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" title="Concept tag evolved via NameRAG">🏷️ ${escapeHtml(mTag)}</span>`
+                    : '';
                 const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
                 const moves = m.moves?.length ? m.moves.join('; ') : '';
                 const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
@@ -1348,7 +1388,7 @@ export function updateBlueprintDeck() {
                     <div class="mhc-deck-item collapsible">
                         <div class="mhc-deck-item-header">
                             <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
-                                👹 ${m.name} ${harmBadge} ${doomBadge}
+                                👹 ${escapeHtml(mClean)} ${mTagBadge}${harmBadge} ${doomBadge}
                             </div>
                             <span class="mhc-deck-item-toggle">▼</span>
                         </div>
@@ -4005,7 +4045,13 @@ export function bindModalEvents() {
         const sign = val >= 0 ? '+' : '';
 
         if (!activeDossier?.npcs) return;
-        const npc = activeDossier.npcs.find(n => n.name && n.name.toLowerCase() === rawName.toLowerCase());
+        const npc = activeDossier.npcs.find(n => {
+            if (!n.name) return false;
+            const clean = parseResolvedNameToken(n.name).cleanName.toLowerCase();
+            const raw = n.name.toLowerCase();
+            const target = rawName.toLowerCase();
+            return clean === target || raw === target;
+        });
         if (npc) {
             npc[axis] = val;
             const container = $(this).closest('.mhc-npc-rel-controls');

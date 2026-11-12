@@ -34,6 +34,45 @@ const GENRE_QUERY_MAP = {
 };
 
 /**
+ * Parses a character or entity name string that may contain blueprint evolution syntax.
+ * Formats supported:
+ * - "[NAME: tag, RESOLVED TO: Name]"
+ * - "[REALNAME: Name, NAME: tag]" or "[REALNAME: Name, TAG: tag]"
+ * - Plain string: "Name"
+ * - Lingering placeholder: "[[NAME: tag]]"
+ *
+ * @param {string} raw
+ * @returns {{ cleanName: string, tag: string, isResolvedToken: boolean }}
+ */
+export function parseResolvedNameToken(raw) {
+    if (!raw || typeof raw !== 'string') return { cleanName: '', tag: '', isResolvedToken: false };
+    let str = raw.trim();
+    if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+        str = str.slice(1, -1).trim();
+    }
+
+    // 1. Standard: [NAME: tag, RESOLVED TO: Name]
+    const m1 = str.match(/\[NAME:\s*(.+?),\s*RESOLVED TO:\s*(.+?)\]/i);
+    if (m1) {
+        return { cleanName: m1[2].trim(), tag: m1[1].trim(), isResolvedToken: true };
+    }
+
+    // 2. Alternate: [REALNAME: Name, NAME: tag] or [REALNAME: Name, TAG: tag]
+    const m2 = str.match(/\[REALNAME:\s*(.+?),\s*(?:NAME|TAG):\s*(.+?)\]/i);
+    if (m2) {
+        return { cleanName: m2[1].trim(), tag: m2[2].trim(), isResolvedToken: true };
+    }
+
+    // 3. Fallback for unstripped [[NAME: tag]]
+    const m3 = str.match(/\[\[NAME(?::\s*([^\]]+))?\]\]/i);
+    if (m3) {
+        return { cleanName: m3[1]?.trim() || 'Unnamed', tag: m3[1]?.trim() || '', isResolvedToken: false };
+    }
+
+    return { cleanName: str, tag: '', isResolvedToken: false };
+}
+
+/**
  * Normalizes user-entered gender strings into standard NameRAG filters ('M', 'F', 'Dual').
  * @param {string} val
  * @returns {string|undefined}
@@ -502,10 +541,14 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
 
     // Track names already used in this dossier to guarantee zero intra-campaign duplicates
     const usedNames = new Set();
-    if (hasEstablishedProtagonist) usedNames.add(existingProtoName.toLowerCase());
-    if (establishedCompanionName) usedNames.add(establishedCompanionName.toLowerCase());
-    (activeDossier?.npcs || []).forEach(n => n.name && usedNames.add(n.name.toLowerCase()));
-    (activeDossier?.monsters || []).forEach(m => m.name && usedNames.add(m.name.toLowerCase()));
+    if (hasEstablishedProtagonist) usedNames.add(parseResolvedNameToken(existingProtoName).cleanName.toLowerCase());
+    if (establishedCompanionName) usedNames.add(parseResolvedNameToken(establishedCompanionName).cleanName.toLowerCase());
+    (activeDossier?.npcs || []).forEach(n => {
+        if (n.name) usedNames.add(parseResolvedNameToken(n.name).cleanName.toLowerCase());
+    });
+    (activeDossier?.monsters || []).forEach(m => {
+        if (m.name) usedNames.add(parseResolvedNameToken(m.name).cleanName.toLowerCase());
+    });
 
     let resolvedOutput = rawBuilderOutput;
     const resolutions = [];
@@ -586,18 +629,32 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
 
         usedNames.add(chosenName.toLowerCase());
 
+        // Format replacement: If placeholder had an evocative concept tag (not a generic slot or preserved name),
+        // preserve evolution for Session Zero visibility: [NAME: tag, RESOLVED TO: chosenName]
+        let replacement = chosenName;
+        const cleanTag = (ph.tag || '').trim();
+        const GENERIC_SLOT_TAGS = new Set(['protagonist', 'companion', 'general', 'npc', 'pc', 'monster', 'adversary', 'ally']);
+        if (
+            cleanTag &&
+            !GENERIC_SLOT_TAGS.has(cleanTag.toLowerCase()) &&
+            source !== 'Existing Dossier (Preserved)'
+        ) {
+            replacement = `[NAME: ${cleanTag}, RESOLVED TO: ${chosenName}]`;
+        }
+
         // Perform exact replacement across the entire text
-        resolvedOutput = resolvedOutput.split(ph.token).join(chosenName);
+        resolvedOutput = resolvedOutput.split(ph.token).join(replacement);
 
         resolutions.push({
             placeholder: ph.token,
-            tag: ph.tag || 'general',
+            tag: cleanTag || 'general',
             blockType,
             query,
             gender,
             source,
             candidates: candidatePool,
             selectedName: chosenName,
+            replacement,
         });
     }
 

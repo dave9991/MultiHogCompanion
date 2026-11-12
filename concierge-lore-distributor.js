@@ -18,6 +18,7 @@ import {
     buildMonsterEntryContent,
     buildNpcKeys,
 } from './concierge-npc-format.js';
+import { parseResolvedNameToken } from './namerag-hooks.js';
 
 /**
  * Extracts clean, deduplicated search keywords from a title or entity name.
@@ -389,20 +390,26 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
         return { npcs: [], factions: [], locations: [], quests: [], worldRules: [] };
     }
 
-    const npcs = (dossier.npcs || []).map(n => ({
-        name: n.name,
-        role: n.role,
-        friendship: n.friendship ?? 0,
-        affection: n.affection ?? 0,
-        keys: buildNpcKeys(n.name),
-        ...buildNpcEntryContent(n, sectionNames),
-    })).filter(e => e.name && e.core);
+    const npcs = (dossier.npcs || []).map(n => {
+        const cleanName = parseResolvedNameToken(n.name).cleanName;
+        return {
+            name: cleanName,
+            role: n.role,
+            friendship: n.friendship ?? 0,
+            affection: n.affection ?? 0,
+            keys: buildNpcKeys(cleanName),
+            ...buildNpcEntryContent({ ...n, name: cleanName }, sectionNames),
+        };
+    }).filter(e => e.name && e.core);
 
-    const monsters = (dossier.monsters || []).map(m => ({
-        name: m.name,
-        keys: buildNpcKeys(m.name),
-        ...buildMonsterEntryContent(m, sectionNames, { ruleset: dossier?.meta?.ruleset }),
-    })).filter(e => e.name && e.core);
+    const monsters = (dossier.monsters || []).map(m => {
+        const cleanName = parseResolvedNameToken(m.name).cleanName;
+        return {
+            name: cleanName,
+            keys: buildNpcKeys(cleanName),
+            ...buildMonsterEntryContent({ ...m, name: cleanName }, sectionNames, { ruleset: dossier?.meta?.ruleset }),
+        };
+    }).filter(e => e.name && e.core);
 
     const factions = (dossier.factions || [])
         .map(buildFactionEntry)

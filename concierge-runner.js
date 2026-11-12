@@ -426,7 +426,33 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
     const { healAndNormalizeDossier } = await import('./concierge-parser.js');
     const { applyPbtACartridge, applyFaeCartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
-    const dossier = healAndNormalizeDossier(rawDossier);
+    const { parseResolvedNameToken, resolveDossierNamePlaceholders } = await import('./namerag-hooks.js');
+
+    // Pre-Launch Safety Net: Resolve any lingering [[NAME:...]] tokens before initializing live game
+    let sanitizedRawDossier = rawDossier;
+    const rawDossierStr = JSON.stringify(rawDossier || {});
+    if (rawDossierStr.includes('[[NAME')) {
+        try {
+            const resolvedStr = await resolveDossierNamePlaceholders(rawDossierStr, rawDossier);
+            sanitizedRawDossier = JSON.parse(typeof resolvedStr === 'string' ? resolvedStr : resolvedStr.text);
+        } catch (sweepErr) {
+            console.warn('[PbtA Concierge] Pre-launch placeholder sweep non-fatal error:', sweepErr);
+        }
+    }
+
+    const dossier = healAndNormalizeDossier(sanitizedRawDossier);
+
+    // Strip blueprint evolution tokens ([NAME: tag, RESOLVED TO: Name]) for clean live gameplay
+    if (dossier.protagonist?.name) {
+        dossier.protagonist.name = parseResolvedNameToken(dossier.protagonist.name).cleanName;
+    }
+    (dossier.npcs || []).forEach(n => {
+        if (n.name) n.name = parseResolvedNameToken(n.name).cleanName;
+    });
+    (dossier.monsters || []).forEach(m => {
+        if (m.name) m.name = parseResolvedNameToken(m.name).cleanName;
+    });
+
     dossier.meta = dossier.meta || {};
     dossier.meta.conciergeCreated = true;
     dossier.meta.isStub = false;

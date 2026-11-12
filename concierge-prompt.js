@@ -9,6 +9,7 @@ import { FAE_GENRES } from './fae-ruleset.js';
 import { formatDossierForContext, formatChangelogForContext } from './concierge-parser.js';
 import { ARCHIVIST_QUOTAS } from './concierge-canon.js';
 import { systemRegistry } from './concierge-system-registry.js';
+import { parseResolvedNameToken } from './namerag-hooks.js';
 
 /**
  * Builds the comprehensive system prompt for the FAE Concierge.
@@ -1406,7 +1407,11 @@ export function formatStageContinuityBrief({ dossier, canonEntries = [], stage =
             advLines.push(`* Staged Adversaries / Hazards: ${monsters.map(m => m.name || 'Adversary').join(', ')}`);
         }
         if (npcs.length > 0) {
-            advLines.push(`* Staged Supporting NPCs: ${npcs.map(n => `${n.name || 'NPC'} (${n.role || 'Cast'})`).join(', ')}`);
+            advLines.push(`* Staged Supporting NPCs: ${npcs.map(n => {
+                const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(n.name);
+                const tagNote = (isResolvedToken && tag) ? ` [concept: ${tag}]` : '';
+                return `${cleanName}${tagNote} (${n.role || 'Cast'})`;
+            }).join(', ')}`);
         }
         if (advLines.length) {
             sections.push(`#### 🗺️ Episode 1 Adventure Stage Set (from Adventure):\n${advLines.join('\n')}`);

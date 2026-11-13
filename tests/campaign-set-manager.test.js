@@ -3,6 +3,8 @@ import {
     sanitizeCampaignPrefix,
     parsePartitionBookName,
     classifyLorebooks,
+    classifyCartridges,
+    deleteGameCartridges,
     MULTIHOG_PARTITIONS,
 } from '../campaign-set-manager.js';
 
@@ -119,4 +121,50 @@ const eldoriaProtected = report.protectedBooks.find(b => b.name === 'Eldoria');
 assert.ok(eldoriaProtected, 'Eldoria must be marked protected as custom world');
 
 console.log('✓ classifyLorebooks correctly grouped active, misaligned, orphaned, and protected books');
+
+// 4. Test classifyCartridges
+const mockCartridges = [
+    { id: 'pbta_cartridge', name: 'PbtA Narrative Engine (Fantasy (Dungeon World / Fellowship))' },
+    { id: 'fae_cartridge', name: 'Freeform Attrition Engine (Gritty OSR Dungeon Crawl (Dark Fantasy Delve))' },
+    { id: 'pbta_the_sunken_vault', name: 'PbtA: The Sunken Vault' },
+    { id: 'fae_mariposa_mutiny', name: 'FAE: Mariposa Mutiny' },
+    { id: 'pbta_concrete_case_files', name: 'PbtA: Concrete & Case Files' },
+    { id: 'custom_homebrew_v1', name: 'My Custom Homebrew Pack' },
+];
+
+const cartReport = classifyCartridges({
+    gameCartridges: mockCartridges,
+    gmChats: mockGmChats,
+    companionChatCartridges: {},
+});
+
+assert.strictEqual(cartReport.totalCartridgeCount, 6);
+assert.strictEqual(cartReport.presetCartridges.length, 2, 'Should identify 2 reusable engine presets');
+assert.strictEqual(cartReport.activeCartridges.length, 1, 'The Sunken Vault cartridge matches active chat');
+assert.strictEqual(cartReport.activeCartridges[0].id, 'pbta_the_sunken_vault');
+assert.strictEqual(cartReport.orphanCartridges.length, 2, 'Mariposa Mutiny & Concrete & Case Files have no active chat');
+assert.ok(cartReport.orphanCartridges.some(c => c.id === 'fae_mariposa_mutiny'));
+assert.ok(cartReport.orphanCartridges.some(c => c.id === 'pbta_concrete_case_files'));
+assert.strictEqual(cartReport.customCartridges.length, 1, 'Custom homebrew cartridge must be preserved');
+assert.strictEqual(cartReport.customCartridges[0].id, 'custom_homebrew_v1');
+console.log('✓ classifyCartridges correctly categorized presets, active, orphaned, and custom cartridges');
+
+// 5. Test deleteGameCartridges
+let savedCalled = false;
+const mockCtx = {
+    extensionSettings: {
+        rpg_tracker: {
+            gameCartridges: [...mockCartridges],
+        },
+    },
+    saveSettings: async () => { savedCalled = true; },
+};
+
+const delRes = await deleteGameCartridges(['fae_mariposa_mutiny', 'pbta_concrete_case_files'], mockCtx);
+assert.strictEqual(delRes.deletedCount, 2, 'Should report 2 deleted cartridges');
+assert.strictEqual(savedCalled, true, 'Should persist settings after deletion');
+assert.strictEqual(mockCtx.extensionSettings.rpg_tracker.gameCartridges.length, 4, '4 cartridges should remain');
+assert.ok(!mockCtx.extensionSettings.rpg_tracker.gameCartridges.some(c => c.id === 'fae_mariposa_mutiny'));
+console.log('✓ deleteGameCartridges safely removes selected cartridges and persists settings');
+
 console.log('--- ALL CAMPAIGN SET MANAGER TESTS PASSED CLEANLY! ---');

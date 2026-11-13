@@ -234,6 +234,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
     4. **Protected External & Standalone:** Lorebooks bound to other character cards (via `extensions.world` or `character_book`) or standalone non-campaign lorebooks (e.g. `Eldoria`), which are safeguarded from deletion.
   * **Verified In-Place Alignment:** Clones and re-links campaign stacks using `verifyClonedLorebooks` before deleting older source books, ensuring zero data loss during chat renames.
   * **Surgical & Safe Deletion:** Purges confirmed orphans via `deleteOldLorebooks`, unbinding active ST world activation, clearing world info caches, and refreshing client-side UI lists.
+  * **Game Cartridge Audit & Cleanup (`classifyCartridges`, `deleteGameCartridges`):** Audits `rpg_tracker.gameCartridges` against active GM chats to separate active campaign cartridges, reusable engine presets (`pbta_cartridge`, `fae_cartridge`), and user-custom cartridges from orphaned Concierge campaign cartridges, allowing one-click or batch removal without affecting saved chats or memos.
 * **Associated Mechanisms:** [`DOM-11`](./LISTENERS.md#dom-11).
 
 ### FEAT-12: Game System Wizard Bridge & Custom HUD Trackers

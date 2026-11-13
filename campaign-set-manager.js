@@ -251,6 +251,137 @@ export function classifyLorebooks({
 }
 
 /**
+ * Pure classifier: categorizes MultiHog Game Cartridges against active GM chats.
+ *
+ * @param {object} params
+ * @param {Array<object>} [params.gameCartridges=[]]
+ * @param {Array<{ chatId: string, chatTitle: string, prefix?: string }>} [params.gmChats=[]]
+ * @param {object} [params.companionChatCartridges={}]
+ * @returns {object}
+ */
+export function classifyCartridges({
+    gameCartridges = [],
+    gmChats = [],
+    companionChatCartridges = {},
+}) {
+    const activeTitles = [];
+    const activeSlugs = new Set();
+
+    for (const chat of gmChats) {
+        const title = (chat.chatTitle || chat.chatId || '').replace(/\.jsonl$/i, '').trim();
+        if (!title) continue;
+        const lowerTitle = title.toLowerCase();
+        activeTitles.push(lowerTitle);
+        activeSlugs.add(sanitizeCampaignPrefix(chat.prefix || title).toLowerCase());
+    }
+
+    // Also include explicit title bindings from companionChatCartridges for existing chats
+    if (companionChatCartridges && typeof companionChatCartridges === 'object') {
+        for (const [cid, record] of Object.entries(companionChatCartridges)) {
+            if (!record || typeof record !== 'object') continue;
+            const normCid = String(cid || '').replace(/\.jsonl$/i, '').trim().toLowerCase();
+            const normSlug = sanitizeCampaignPrefix(normCid).toLowerCase();
+            const chatExists = activeTitles.includes(normCid) || activeSlugs.has(normSlug);
+            if (chatExists && record.title) {
+                const t = String(record.title).trim().toLowerCase();
+                activeTitles.push(t);
+                activeSlugs.add(sanitizeCampaignPrefix(t).toLowerCase());
+            }
+        }
+    }
+
+    const activeCartridges = [];
+    const orphanCartridges = [];
+    const presetCartridges = [];
+    const customCartridges = [];
+
+    for (const c of gameCartridges) {
+        if (!c || typeof c !== 'object') continue;
+        const id = String(c.id || '');
+        const name = String(c.name || id || 'Unnamed Cartridge');
+
+        if (id === 'pbta_cartridge' || id === 'fae_cartridge') {
+            presetCartridges.push({ ...c, matchReason: 'Reusable Engine Preset' });
+            continue;
+        }
+
+        const isCompanionCampaignId = id.startsWith('pbta_') || id.startsWith('fae_');
+        const prefixMatch = name.match(/^(?:PbtA|PBTA|FAE):\s*(.+)$/i);
+
+        if (isCompanionCampaignId || prefixMatch) {
+            const rawTitle = (prefixMatch ? prefixMatch[1] : '').trim().toLowerCase();
+            const rawSlug = rawTitle ? sanitizeCampaignPrefix(rawTitle).toLowerCase() : '';
+            const idSlug = id.replace(/^(?:pbta|fae)_/i, '').toLowerCase();
+
+            const matchesChat =
+                (rawTitle && activeTitles.some(t => t === rawTitle || t.endsWith(` - ${rawTitle}`))) ||
+                (rawSlug && activeSlugs.has(rawSlug)) ||
+                (idSlug && activeSlugs.has(idSlug));
+
+            if (matchesChat) {
+                activeCartridges.push({ ...c, matchReason: 'Active Campaign' });
+            } else {
+                orphanCartridges.push({ ...c, matchReason: 'No matching chat found' });
+            }
+        } else {
+            customCartridges.push({ ...c, matchReason: 'User Custom / Imported' });
+        }
+    }
+
+    return {
+        activeCartridges,
+        orphanCartridges,
+        presetCartridges,
+        customCartridges,
+        totalCartridgeCount: gameCartridges.filter(c => c && typeof c === 'object').length,
+    };
+}
+
+/**
+ * Deletes specified Game Cartridges from MultiHog settings and persists the change.
+ *
+ * @param {string[]} cartridgeIds
+ * @param {object} [ctx=null]
+ * @returns {Promise<{ deletedCount: number }>}
+ */
+export async function deleteGameCartridges(cartridgeIds = [], ctx = null) {
+    const effectiveCtx = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null);
+    const idSet = new Set((cartridgeIds || []).map(id => String(id)));
+    if (idSet.size === 0) return { deletedCount: 0 };
+
+    let deletedCount = 0;
+    const rpgPrimary = effectiveCtx?.extensionSettings?.rpg_tracker;
+    if (rpgPrimary && Array.isArray(rpgPrimary.gameCartridges)) {
+        const before = rpgPrimary.gameCartridges.length;
+        rpgPrimary.gameCartridges = rpgPrimary.gameCartridges.filter(c => !idSet.has(String(c?.id || '')));
+        deletedCount = before - rpgPrimary.gameCartridges.length;
+    }
+
+    const rpgGlobal = globalThis.extension_settings?.rpg_tracker;
+    if (rpgGlobal && rpgGlobal !== rpgPrimary && Array.isArray(rpgGlobal.gameCartridges)) {
+        const before = rpgGlobal.gameCartridges.length;
+        rpgGlobal.gameCartridges = rpgGlobal.gameCartridges.filter(c => !idSet.has(String(c?.id || '')));
+        if (deletedCount === 0) {
+            deletedCount = before - rpgGlobal.gameCartridges.length;
+        }
+    }
+
+    if (deletedCount > 0) {
+        if (typeof effectiveCtx?.saveSettings === 'function') {
+            try {
+                await effectiveCtx.saveSettings();
+            } catch (_) {
+                effectiveCtx?.saveSettingsDebounced?.();
+            }
+        } else {
+            effectiveCtx?.saveSettingsDebounced?.();
+        }
+    }
+
+    return { deletedCount };
+}
+
+/**
  * Performs a live audit of the current SillyTavern environment.
  * @param {object} [ctx] SillyTavern context
  * @returns {Promise<object>} Audit report
@@ -335,8 +466,24 @@ export async function auditCampaignSets(ctx = null) {
         otherCharChats: [],
     });
 
+    // 6. Classify Game Cartridges against active GM chats
+    const gameCartridges =
+        effectiveCtx?.extensionSettings?.rpg_tracker?.gameCartridges ||
+        globalThis.extension_settings?.rpg_tracker?.gameCartridges ||
+        [];
+    const companionChatCartridges =
+        effectiveCtx?.extensionSettings?.multihog_companion?.chatCartridges ||
+        globalThis.extension_settings?.multihog_companion?.chatCartridges ||
+        {};
+    const cartridgeAudit = classifyCartridges({
+        gameCartridges,
+        gmChats,
+        companionChatCartridges,
+    });
+
     return {
         ...report,
+        cartridgeAudit,
         activeCharName,
         activeCharAvatar,
     };
@@ -540,6 +687,19 @@ function renderModalContent(dialog, audit, ctx) {
     const totalActiveBooks = audit.activeSets.reduce((sum, s) => sum + s.dossierBooks.length + s.partitionBooks.length, 0);
     const totalMisalignedBooks = audit.misalignedSets.reduce((sum, s) => sum + s.dossierBooks.length + s.partitionBooks.length, 0);
     const totalOrphanBooks = audit.orphanSets.reduce((sum, s) => sum + s.count, 0);
+    const cartAudit = audit.cartridgeAudit || {
+        activeCartridges: [],
+        orphanCartridges: [],
+        presetCartridges: [],
+        customCartridges: [],
+        totalCartridgeCount: 0,
+    };
+    const orphanCartridges = cartAudit.orphanCartridges || [];
+    const protectedCartridges = [
+        ...(cartAudit.activeCartridges || []),
+        ...(cartAudit.presetCartridges || []),
+        ...(cartAudit.customCartridges || []),
+    ];
 
     dialog.innerHTML = `
         <div class="mhc-modal-header" style="border-bottom: 1px solid rgba(160,120,240,0.3); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; background: rgba(20,21,26,0.95);">
@@ -547,7 +707,7 @@ function renderModalContent(dialog, audit, ctx) {
                 <i class="fa-solid fa-boxes-stacked" style="color: #cc99ff; font-size: 1.3em;"></i>
                 <div>
                     <h3 style="margin: 0; font-size: 1.15em; font-weight: 600; color: #f3f4f6;">Campaign Set Manager</h3>
-                    <span style="font-size: 0.8em; opacity: 0.7;">Active Game Master: <strong style="color: #88ccff;">${audit.activeCharName}</strong> &bull; Total Lorebooks: <strong>${audit.totalWorldCount}</strong></span>
+                    <span style="font-size: 0.8em; opacity: 0.7;">Active Game Master: <strong style="color: #88ccff;">${audit.activeCharName}</strong> &bull; Total Lorebooks: <strong>${audit.totalWorldCount}</strong> &bull; Cartridges: <strong>${cartAudit.totalCartridgeCount}</strong></span>
                 </div>
             </div>
             <button class="mhc-modal-close" style="background: none; border: none; color: #9ca3af; font-size: 1.3em; cursor: pointer; padding: 4px 8px;">&times;</button>
@@ -688,17 +848,61 @@ function renderModalContent(dialog, audit, ctx) {
                     </div>
                 </div>
             </div>
-                    <div style="font-size: 0.8em; opacity: 0.75; margin-bottom: 4px;">These lorebooks are preserved and locked because they belong to other character cards or standalone custom worlds.</div>
-                    ${audit.protectedBooks.length === 0 ? '<div style="font-size: 0.85em; opacity: 0.6; font-style: italic;">No protected external books found.</div>' : ''}
-                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                        ${audit.protectedBooks.map(b => `
-                            <span style="background: rgba(90,160,250,0.12); border: 1px solid rgba(90,160,250,0.25); color: #bfdbfe; font-size: 0.78em; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px;">
-                                <i class="fa-solid fa-lock" style="font-size: 0.75em; opacity: 0.7;"></i>
-                                <span style="font-family: monospace;">${b.name}</span>
-                                <span style="font-size: 0.85em; opacity: 0.6;">(${b.reason})</span>
-                            </span>
-                        `).join('')}
+
+            <!-- SECTION 5: GAME CARTRIDGES -->
+            <div class="mhc-set-section" style="background: rgba(255,255,255,0.03); border: 1px solid ${orphanCartridges.length > 0 ? 'rgba(239, 68, 68, 0.3)' : 'rgba(160, 120, 240, 0.25)'}; border-radius: 8px; overflow: hidden; flex-shrink: 0;">
+                <div class="mhc-set-section-hdr" style="padding: 10px 14px; background: ${orphanCartridges.length > 0 ? 'rgba(239, 68, 68, 0.08)' : 'rgba(160, 120, 240, 0.08)'}; border-bottom: 1px solid ${orphanCartridges.length > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(160, 120, 240, 0.2)'}; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                    <div style="font-weight: 600; color: ${orphanCartridges.length > 0 ? '#f87171' : '#d8b4fe'}; display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-gamepad"></i>
+                        <span>Game Cartridges</span>
+                        <span style="font-size: 0.8em; opacity: 0.8; font-weight: normal;">(${orphanCartridges.length} orphaned &bull; ${protectedCartridges.length} active/preset)</span>
                     </div>
+                    <i class="fa-solid fa-chevron-${orphanCartridges.length > 0 ? 'down' : 'right'}" style="font-size: 0.8em; opacity: 0.7;"></i>
+                </div>
+                <div class="mhc-set-section-content" style="padding: 10px 14px; display: ${orphanCartridges.length > 0 ? 'flex' : 'none'}; flex-direction: column; gap: 10px;">
+                    ${orphanCartridges.length === 0 ? '<div style="font-size: 0.85em; opacity: 0.7; font-style: italic; color: #6ee7b7;"><i class="fa-solid fa-check"></i> Zero orphaned campaign cartridges detected!</div>' : `
+                        <div style="font-size: 0.8em; opacity: 0.8; color: #fca5a5;">These Concierge campaign cartridges no longer match any existing chat. Deleting them removes clutter from MultiHog's cartridge list without affecting saved chats or memos.</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
+                            <label style="font-size: 0.8em; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="mhc_orphan_cartridge_select_all" />
+                                <span>Select All (${orphanCartridges.length} cartridges)</span>
+                            </label>
+                            <button id="mhc_delete_selected_cartridges_btn" class="menu_button interactable" style="font-size: 0.78em; padding: 4px 12px; display: inline-flex; align-items: center; gap: 5px; background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" disabled>
+                                <i class="fa-solid fa-trash"></i>
+                                <span>Delete Selected</span>
+                            </button>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            ${orphanCartridges.map((c, idx) => `
+                                <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(239, 68, 68, 0.15); border-radius: 6px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; min-width: 0;">
+                                        <input type="checkbox" class="mhc-orphan-cartridge-cb" data-cid="${c.id}" />
+                                        <div style="min-width: 0;">
+                                            <div style="font-weight: 600; color: #fca5a5; font-size: 0.88em;">${c.icon || '🎮'} ${c.name || c.id}</div>
+                                            <div style="font-family: monospace; font-size: 0.74em; opacity: 0.65;">ID: ${c.id}</div>
+                                        </div>
+                                    </label>
+                                    <button class="mhc-delete-cartridge-btn menu_button interactable" data-cidx="${idx}" style="font-size: 0.72em; padding: 3px 8px; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;">
+                                        <i class="fa-solid fa-trash-can"></i> Delete
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                    ${protectedCartridges.length > 0 ? `
+                        <div style="margin-top: 4px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07);">
+                            <div style="font-size: 0.78em; opacity: 0.75; margin-bottom: 6px;">Active, Engine Preset &amp; Custom Cartridges (Protected):</div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                                ${protectedCartridges.map(c => `
+                                    <span style="background: rgba(160,120,240,0.12); border: 1px solid rgba(160,120,240,0.25); color: #e9d5ff; font-size: 0.76em; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px;">
+                                        <span>${c.icon || '🎮'}</span>
+                                        <span>${c.name || c.id}</span>
+                                        <span style="font-size: 0.85em; opacity: 0.6;">(${c.matchReason})</span>
+                                    </span>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
                 </div>
             </div>
 
@@ -856,5 +1060,73 @@ function renderModalContent(dialog, audit, ctx) {
             const freshAudit = await auditCampaignSets(ctx);
             renderModalContent(dialog, freshAudit, ctx);
         });
+    });
+
+    // ── Game Cartridges Checkbox & Deletion Handlers ──
+    const cartSelectAllCb = dialog.querySelector('#mhc_orphan_cartridge_select_all');
+    const cartDeleteSelectedBtn = dialog.querySelector('#mhc_delete_selected_cartridges_btn');
+    const cartItemCheckboxes = dialog.querySelectorAll('.mhc-orphan-cartridge-cb');
+
+    function updateCartridgeDeleteBtnState() {
+        const checkedCount = dialog.querySelectorAll('.mhc-orphan-cartridge-cb:checked').length;
+        if (cartDeleteSelectedBtn) {
+            cartDeleteSelectedBtn.disabled = checkedCount === 0;
+            cartDeleteSelectedBtn.innerHTML = `<i class="fa-solid fa-trash"></i> <span>Delete Selected (${checkedCount})</span>`;
+        }
+        if (cartSelectAllCb) {
+            cartSelectAllCb.checked = checkedCount > 0 && checkedCount === cartItemCheckboxes.length;
+        }
+    }
+
+    cartSelectAllCb?.addEventListener('change', (e) => {
+        const isChecked = e.target.checked;
+        cartItemCheckboxes.forEach(cb => { cb.checked = isChecked; });
+        updateCartridgeDeleteBtnState();
+    });
+
+    cartItemCheckboxes.forEach(cb => {
+        cb.addEventListener('change', updateCartridgeDeleteBtnState);
+    });
+
+    dialog.querySelectorAll('.mhc-delete-cartridge-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const cIdx = Number(btn.getAttribute('data-cidx'));
+            const cart = orphanCartridges[cIdx];
+            if (!cart) return;
+
+            const confirmed = window.confirm(
+                `Are you sure you want to delete the orphaned Game Cartridge "${cart.name || cart.id}"?\n\n` +
+                `(This removes the cartridge preset from MultiHog without affecting any saved chats or memos.)`
+            );
+            if (!confirmed) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+            await deleteGameCartridges([cart.id], ctx);
+            const freshAudit = await auditCampaignSets(ctx);
+            renderModalContent(dialog, freshAudit, ctx);
+        });
+    });
+
+    cartDeleteSelectedBtn?.addEventListener('click', async () => {
+        const selectedIds = Array.from(dialog.querySelectorAll('.mhc-orphan-cartridge-cb:checked'))
+            .map(cb => cb.getAttribute('data-cid'))
+            .filter(Boolean);
+
+        if (selectedIds.length === 0) return;
+
+        const confirmed = window.confirm(
+            `Are you sure you want to delete these ${selectedIds.length} selected orphaned Game Cartridges?\n\n` +
+            selectedIds.join('\n')
+        );
+        if (!confirmed) return;
+
+        cartDeleteSelectedBtn.disabled = true;
+        cartDeleteSelectedBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting...';
+
+        await deleteGameCartridges(selectedIds, ctx);
+        const freshAudit = await auditCampaignSets(ctx);
+        renderModalContent(dialog, freshAudit, ctx);
     });
 }

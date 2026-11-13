@@ -564,4 +564,37 @@ assert.ok(cleanNpcNames[0].length > 1);
 assert.ok(cleanNpcNames[1].length > 1);
 console.log('✓ parseResolvedNameToken, evolution format, double-bracket exemption, and launch sanitization verified cleanly');
 
+// 13h. Canon & Concierge Prompt Context Unwrapping + Resolved Name Guidance
+const { summarizeCanonInventory, buildFocusBlock } = await import('../concierge-canon.js');
+const {
+    buildConciergeTalkerContext,
+    buildStage2CanonBuilderPrompt,
+    buildStage3AdventureBuilderPrompt,
+    RESOLVED_NAME_FORMAT_GUIDANCE,
+} = await import('../concierge-prompt.js');
+
+const canonEntries = [
+    { kind: 'NPC', name: '[NAME: veteran fire captain / shift commander, RESOLVED TO: Sheridan Vance]', importance: 5, content: 'Commands Station 51.' },
+    { kind: 'FACTION', name: 'Central LA Dispatch Collective', importance: 4, content: 'Coordinates county-wide radio dispatch.' },
+];
+
+const inv = summarizeCanonInventory(canonEntries, 5);
+assert.strictEqual(inv.top.NPC[0], 'Sheridan Vance [concept: veteran fire captain / shift commander]');
+assert.strictEqual(inv.top.FACTION[0], 'Central LA Dispatch Collective');
+
+const focusBlock = buildFocusBlock(canonEntries);
+assert.ok(focusBlock.includes('### [NPC] Sheridan Vance [concept: veteran fire captain / shift commander]'));
+assert.ok(!focusBlock.includes('RESOLVED TO:'), 'Focus block must unwrap RESOLVED TO into clean name + concept');
+
+const talkerCtx = buildConciergeTalkerContext(updatedDossier, []);
+assert.ok(talkerCtx.includes(RESOLVED_NAME_FORMAT_GUIDANCE), 'Talker context must explain [NAME: ..., RESOLVED TO: ...] format');
+
+const stage2Prompt = buildStage2CanonBuilderPrompt(updatedDossier, canonEntries);
+assert.ok(stage2Prompt.includes('Do NOT use `[[NAME: ...]]` for Factions/Organizations'), 'Step 2 Canon Builder must restrict [[NAME: ...]] to people only');
+assert.ok(stage2Prompt.includes('Sheridan Vance [concept: veteran fire captain / shift commander]'), 'Step 2 continuity brief must unwrap canon names cleanly');
+
+const stage3Prompt = buildStage3AdventureBuilderPrompt(updatedDossier, canonEntries);
+assert.ok(stage3Prompt.includes(RESOLVED_NAME_FORMAT_GUIDANCE), 'Step 3 Adventure Builder must include resolved name format guidance');
+console.log('✓ Canon inventory/focus unwrapping and Concierge resolved-name prompt guidance verified cleanly');
+
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

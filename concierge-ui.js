@@ -1010,6 +1010,47 @@ export async function setAdventureStep(targetStep, opts = {}) {
 }
 
 /**
+ * Formats an entity or canon name for Blueprint Deck cards, rendering any
+ * NameRAG-resolved token (`[NAME: concept, RESOLVED TO: Name]`) cleanly with
+ * the resolved name prominent and a compact NameRAG badge.
+ *
+ * @param {string} rawName
+ * @param {object} [options={}]
+ * @returns {{ cleanName: string, tag: string, isResolvedToken: boolean, badgeHtml: string, html: string }}
+ */
+export function formatBlueprintNameWithBadge(rawName, {
+    fallback = 'Unnamed',
+    badgeBg = 'rgba(139, 92, 246, 0.16)',
+    badgeBorder = 'rgba(139, 92, 246, 0.45)',
+    badgeColor = '#d8b4fe',
+} = {}) {
+    const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(rawName);
+    const display = cleanName || fallback;
+    if (!isResolvedToken) {
+        return {
+            cleanName: display,
+            tag: '',
+            isResolvedToken: false,
+            badgeHtml: '',
+            html: escapeHtml(display),
+        };
+    }
+    const tooltip = tag
+        ? `Generated via NameRAG from concept: ${tag}`
+        : 'Generated via NameRAG';
+    const shortTag = tag && tag.length > 24 ? `${tag.slice(0, 22)}…` : tag;
+    const badgeText = shortTag ? `🎲 NameRAG · ${shortTag}` : '🎲 NameRAG';
+    const badgeHtml = ` <span class="mhc-pill mhc-namerag-badge" style="font-size: 0.7em; background: ${badgeBg}; border-color: ${badgeBorder}; color: ${badgeColor};" title="${escapeHtml(tooltip)}">${escapeHtml(badgeText)}</span>`;
+    return {
+        cleanName: display,
+        tag,
+        isResolvedToken: true,
+        badgeHtml,
+        html: `<span style="font-weight: 700;">${escapeHtml(display)}</span>${badgeHtml}`,
+    };
+}
+
+/**
  * Render the Live Blueprint cards from activeDossier.
  */
 export function updateBlueprintDeck() {
@@ -1249,8 +1290,8 @@ export function updateBlueprintDeck() {
 
     // Protagonist Card
     $('#mhc_deck_char_playbook').text(proto.archetype || proto.playbook || 'In Development');
-    const { cleanName: protoClean } = parseResolvedNameToken(proto.name);
-    $('#mhc_deck_char_name').text(protoClean || 'Unnamed Adventurer');
+    const protoFormatted = formatBlueprintNameWithBadge(proto.name, { fallback: 'Unnamed Adventurer' });
+    $('#mhc_deck_char_name').html(protoFormatted.html);
 
     adapter.renderDeckStats({
         vitalsEl: $('#mhc_deck_char_vitals'),
@@ -1265,10 +1306,11 @@ export function updateBlueprintDeck() {
     npcList.empty();
     if (npcs.length) {
         npcs.forEach(n => {
-            const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(n.name);
-            const tagBadge = (isResolvedToken && tag)
-                ? ` <span class="mhc-pill" style="font-size: 0.7em; background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" title="Concept tag evolved via NameRAG">🏷️ ${escapeHtml(tag)}</span>`
-                : '';
+            const { cleanName, badgeHtml: tagBadge } = formatBlueprintNameWithBadge(n.name, {
+                badgeBg: 'rgba(59, 130, 246, 0.15)',
+                badgeBorder: 'rgba(59, 130, 246, 0.4)',
+                badgeColor: '#93c5fd',
+            });
             const role = n.role || 'Ally';
             const demeanor = n.demeanor ? ` · <i>${n.demeanor}</i>` : '';
             const app = n.appearance ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Look:</b> ${n.appearance}</div>` : '';
@@ -1340,10 +1382,11 @@ export function updateBlueprintDeck() {
     if (monsters.length) {
         if (isFae) {
             monsters.forEach(m => {
-                const { cleanName: mClean, tag: mTag, isResolvedToken: mIsResolved } = parseResolvedNameToken(m.name);
-                const mTagBadge = (mIsResolved && mTag)
-                    ? ` <span class="mhc-pill" style="font-size: 0.7em; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" title="Concept tag evolved via NameRAG">🏷️ ${escapeHtml(mTag)}</span>`
-                    : '';
+                const { cleanName: mClean, badgeHtml: mTagBadge } = formatBlueprintNameWithBadge(m.name, {
+                    badgeBg: 'rgba(239, 68, 68, 0.15)',
+                    badgeBorder: 'rgba(239, 68, 68, 0.4)',
+                    badgeColor: '#fca5a5',
+                });
                 const threat = m.threat_level ?? m.threatLevel ?? 1;
                 const layers = m.layers ?? m.hp ?? 1;
                 const poolsAtRisk = Array.isArray(m.pools_at_risk) ? m.pools_at_risk.join(', ') : (m.pools_at_risk || m.poolsAtRisk || 'Health');
@@ -1375,10 +1418,11 @@ export function updateBlueprintDeck() {
             });
         } else {
             monsters.forEach(m => {
-                const { cleanName: mClean, tag: mTag, isResolvedToken: mIsResolved } = parseResolvedNameToken(m.name);
-                const mTagBadge = (mIsResolved && mTag)
-                    ? ` <span class="mhc-pill" style="font-size: 0.7em; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" title="Concept tag evolved via NameRAG">🏷️ ${escapeHtml(mTag)}</span>`
-                    : '';
+                const { cleanName: mClean, badgeHtml: mTagBadge } = formatBlueprintNameWithBadge(m.name, {
+                    badgeBg: 'rgba(239, 68, 68, 0.15)',
+                    badgeBorder: 'rgba(239, 68, 68, 0.4)',
+                    badgeColor: '#fca5a5',
+                });
                 const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
                 const moves = m.moves?.length ? m.moves.join('; ') : '';
                 const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
@@ -1428,7 +1472,8 @@ export function updateBlueprintDeck() {
             const desc = map.briefDescription || map.prompt || '';
             const entrance = map.entrance ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Entrance:</b> ${map.entrance}</div>` : '';
             const features = map.features?.length ? `<div style="font-size: 0.8em; opacity: 0.8; margin-top: 4px;"><b>Features:</b> ${map.features.join(', ')}</div>` : '';
-            const isPrimary = (map.site || '').toLowerCase().trim() === startSiteName;
+            const mapNameInfo = formatBlueprintNameWithBadge(map.site, { fallback: 'Unnamed Site' });
+            const isPrimary = mapNameInfo.cleanName.toLowerCase().trim() === startSiteName;
             const stageBadge = isPrimary
                 ? '<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" title="Starting location: Generated immediately at launch">⭐ Starting Site</span>'
                 : '<span class="mhc-pill" style="font-size: 0.72em; opacity: 0.75;" title="Queued in Locations lorebook for lazy on-entry generation">📦 Staged for Entry</span>';
@@ -1436,7 +1481,7 @@ export function updateBlueprintDeck() {
                 <div class="mhc-deck-item collapsible">
                     <div class="mhc-deck-item-header">
                         <div class="mhc-deck-item-title">
-                            🗺️ ${map.site} <span class="mhc-pill" style="font-size: 0.72em;">${map.kind || 'Site'} · ${map.threat || 'Threat'}</span> ${stageBadge}
+                            🗺️ ${mapNameInfo.html} <span class="mhc-pill" style="font-size: 0.72em;">${map.kind || 'Site'} · ${map.threat || 'Threat'}</span> ${stageBadge}
                         </div>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
@@ -1460,6 +1505,12 @@ export function updateBlueprintDeck() {
         fList.empty();
         if (factions.length) {
             factions.forEach(f => {
+                const { html: factionNameHtml } = formatBlueprintNameWithBadge(f.name, {
+                    fallback: 'Unnamed Faction',
+                    badgeBg: 'rgba(245, 158, 11, 0.15)',
+                    badgeBorder: 'rgba(245, 158, 11, 0.45)',
+                    badgeColor: '#fcd34d',
+                });
                 const standing = f.standing || 'Neutral';
                 let badgeColor = 'rgba(156, 163, 175, 0.4)';
                 if (/friendly|allied|ally/i.test(standing)) badgeColor = 'rgba(34, 197, 94, 0.4)';
@@ -1469,7 +1520,7 @@ export function updateBlueprintDeck() {
                     <div class="mhc-deck-item collapsible">
                         <div class="mhc-deck-item-header">
                             <div class="mhc-deck-item-title" style="color: var(--mhc-warning, #f59e0b);">
-                                🚩 ${f.name} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${badgeColor};">${standing}</span>
+                                🚩 ${factionNameHtml} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${badgeColor};">${standing}</span>
                             </div>
                             <span class="mhc-deck-item-toggle">▼</span>
                         </div>
@@ -1602,6 +1653,12 @@ export function updateBlueprintDeck() {
             `);
             for (const entry of entries) {
                 const comment = entry.comment || `[${entry.kind}] ${entry.name}`;
+                const { cleanName: canonCleanName, badgeHtml: canonNameRagBadge } = formatBlueprintNameWithBadge(entry.name, {
+                    fallback: 'Untitled',
+                    badgeBg: 'rgba(139, 92, 246, 0.16)',
+                    badgeBorder: 'rgba(139, 92, 246, 0.45)',
+                    badgeColor: '#d8b4fe',
+                });
                 const isDisabled = Boolean(entry.disabled);
                 const statusLabel = isDisabled ? '⊘ Disabled' : '✓ Active';
                 const statusStyle = isDisabled
@@ -1615,7 +1672,7 @@ export function updateBlueprintDeck() {
                         <div class="mhc-deck-item-header" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
                             <div class="mhc-deck-item-title" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 <span style="margin-right: 2px;">${meta.icon}</span>
-                                <span style="font-weight: 600;">${escapeHtml(entry.name || 'Untitled')}</span>
+                                <span style="font-weight: 700;">${escapeHtml(canonCleanName)}</span>${canonNameRagBadge}
                                 <span class="mhc-pill" style="font-size: 0.7em; margin-left: 4px;">${escapeHtml(entry.kind || k)}</span>
                                 ${impBadge}
                             </div>

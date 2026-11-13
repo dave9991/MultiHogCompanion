@@ -1226,6 +1226,8 @@ ${formattedBlueprint}
 ${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
 }
 
+export const RESOLVED_NAME_FORMAT_GUIDANCE = `* **Resolved Name Format (\`[NAME: <concept>, RESOLVED TO: <Name>]\`):** Whenever an entity or Canon entry shows \`[NAME: <concept>, RESOLVED TO: <Name>]\` (or \`<Name> [concept: <concept>]\`), **\`<Name>\` is their official, NameRAG-assigned canonical name** and \`<concept>\` is only their original role/archetype. Always address and refer to them by \`<Name>\` in prose, moves, and updates, and NEVER revert a resolved name back to a \`[[NAME: ...]]\` placeholder.`;
+
 /**
  * Builds the full system context payload for Agent 2: The Talker.
  * Places the authoritative live blueprint cleanly labeled at the tail of the system prompt.
@@ -1247,6 +1249,7 @@ export function buildConciergeTalkerContext(activeDossier, changelog, activeName
 This is the exact, verified state of the campaign deck currently
 visible to the player on their screen. It has already been synchronized
 by the Builder. Speak to the player based strictly on this live state.
+${RESOLVED_NAME_FORMAT_GUIDANCE}
 ======================================================================
 ${formattedBlueprint}
 
@@ -1291,7 +1294,8 @@ function formatCanonEntriesForContext(entries = []) {
     }
     return entries.map(e => {
         const kind = (e.kind || 'LORE').toUpperCase();
-        const name = e.name || 'Untitled';
+        const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(e.name);
+        const name = (isResolvedToken && tag) ? `${cleanName} [concept: ${tag}]` : (cleanName || e.name || 'Untitled');
         const status = e.disabled ? 'DISABLED' : 'ACTIVE';
         const importance = e.importance !== undefined ? e.importance : 4;
         const preview = (e.content || e.description || e.text || '')
@@ -1389,7 +1393,10 @@ export function formatStageContinuityBrief({ dossier, canonEntries = [], stage =
             canonParts.push(`**Active Series Bible Entries (${activeCanon.length} in play):**\n${formatCanonEntriesForContext(activeCanon)}`);
         }
         if (disabledCanon.length > 0) {
-            canonParts.push(`**Deferred / Background Entries (${disabledCanon.length} background):** ${disabledCanon.map(e => e.name || 'Untitled').join(', ')}`);
+            canonParts.push(`**Deferred / Background Entries (${disabledCanon.length} background):** ${disabledCanon.map(e => {
+                const { cleanName } = parseResolvedNameToken(e.name);
+                return cleanName || e.name || 'Untitled';
+            }).join(', ')}`);
         }
         if (axioms.length > 0) {
             canonParts.push(`**World Axioms (${axioms.length} laws established):**\n${formatAxiomsForContext(axioms)}`);
@@ -1409,7 +1416,11 @@ export function formatStageContinuityBrief({ dossier, canonEntries = [], stage =
             advLines.push(`* Staged Locations / Maps: ${maps.map(m => m.site || m.name || 'Location').join(', ')}`);
         }
         if (monsters.length > 0) {
-            advLines.push(`* Staged Adversaries / Hazards: ${monsters.map(m => m.name || 'Adversary').join(', ')}`);
+            advLines.push(`* Staged Adversaries / Hazards: ${monsters.map(m => {
+                const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(m.name);
+                const tagNote = (isResolvedToken && tag) ? ` [concept: ${tag}]` : '';
+                return `${cleanName || m.name || 'Adversary'}${tagNote}`;
+            }).join(', ')}`);
         }
         if (npcs.length > 0) {
             advLines.push(`* Staged Supporting NPCs: ${npcs.map(n => {
@@ -1424,7 +1435,7 @@ export function formatStageContinuityBrief({ dossier, canonEntries = [], stage =
     }
 
     if (!sections.length) return '';
-    return `### 🎬 Authoritative Campaign Continuity Brief:\n${sections.join('\n\n')}`;
+    return `### 🎬 Authoritative Campaign Continuity Brief:\n${sections.join('\n\n')}\n\n${RESOLVED_NAME_FORMAT_GUIDANCE}`;
 }
 
 // ── Stage 1 (🧭 Initial — System-Agnostic Intake & Framing Q&A) ───────────────
@@ -1606,7 +1617,7 @@ You emit an [UPDATE_DOSSIER] block containing ONLY:
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
 * 🚫 **NEVER output Episode 1 stat blocks here:** NEVER emit [MONSTER], [MAP], [KICK], or [PROTAGONIST] cards in Step 2. Those belong in Step 3 (\`🗺️ Adventure\`) and Step 4 (\`👤 Character\`).
-* 🏷️ **Name Diversity & Targeted Placeholders:** For named NPCs, faction leaders, or distinct characters, NEVER invent generic placeholder names (e.g., "Dr. Thorne", "Commander Vance"). Instead, emit 'name' using a targeted placeholder tag: \`name: [[NAME: evocative role or concept]]\` (e.g., \`[[NAME: grizzled wasteland doctor]]\`, \`[[NAME: nomadic raider matriarch]]\`). NameRAG will automatically inject authentic, culturally resonant names.
+* 🏷️ **Name Diversity & Targeted Placeholders (People Only):** For individual \`NPC\` entries or distinct named characters, NEVER invent generic placeholder names (e.g., "Dr. Thorne", "Commander Vance"). Instead, emit \`name\` using a targeted placeholder tag: \`name: [[NAME: evocative role or concept]]\` (e.g., \`[[NAME: grizzled wasteland doctor]]\`, \`[[NAME: nomadic raider matriarch]]\`). NameRAG will automatically inject authentic, culturally resonant names. **Do NOT use \`[[NAME: ...]]\` for Factions/Organizations, Locations, Rules, Events, or Lore** — give those clear descriptive names directly.
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Canon & World Rule updates>
 * If no updates were requested:

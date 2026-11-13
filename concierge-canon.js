@@ -11,7 +11,7 @@
  * Pure helpers are exported for unit testing; network/LLM access is injected.
  */
 
-import { resolveDossierNamePlaceholders } from './namerag-hooks.js';
+import { resolveDossierNamePlaceholders, parseResolvedNameToken } from './namerag-hooks.js';
 
 export const ARCHIVIST_TOKEN_THRESHOLD = 6000;
 export const MIDDLE_IMPORT_TOKEN_THRESHOLD = 300;
@@ -662,7 +662,10 @@ export function summarizeCanonInventory(entries, topN = 5) {
     }
     const top = {};
     for (const [k, list] of Object.entries(buckets)) {
-        top[k] = list.sort((a, b) => b.importance - a.importance).slice(0, topN).map(e => e.name);
+        top[k] = list.sort((a, b) => b.importance - a.importance).slice(0, topN).map(e => {
+            const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(e.name);
+            return (isResolvedToken && tag) ? `${cleanName} [concept: ${tag}]` : (cleanName || e.name);
+        });
     }
     return { counts, top, total: entries.length };
 }
@@ -1391,7 +1394,11 @@ export function retrieveCanonSlice(entries, query, opts = {}) {
  */
 export function buildFocusBlock(slice) {
     if (!slice?.length) return '';
-    const parts = slice.map(e => `### [${e.kind}] ${e.name}\n${e.content}`);
+    const parts = slice.map(e => {
+        const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(e.name);
+        const displayName = (isResolvedToken && tag) ? `${cleanName} [concept: ${tag}]` : (cleanName || e.name);
+        return `### [${e.kind}] ${displayName}\n${e.content}`;
+    });
     return `\n[CANON_FOCUS: full canon for the player's chosen focus]\n${parts.join('\n\n')}\n[/CANON_FOCUS]\n`;
 }
 

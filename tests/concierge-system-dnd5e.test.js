@@ -27,7 +27,7 @@ import {
     formatDndModifierString,
     DND5E_GENRES,
 } from '../concierge-system-dnd5e.js';
-import { createEmptyDossier, healAndNormalizeDossier } from '../concierge-parser.js';
+import { createEmptyDossier, healAndNormalizeDossier, formatDossierForContext } from '../concierge-parser.js';
 
 test('1. Dnd5eSystemAdapter is registered in systemRegistry with valid metadata', () => {
     assert.ok(systemRegistry.has('dnd5e'), 'systemRegistry must contain dnd5e');
@@ -402,4 +402,49 @@ equipment: Chain mail, shield, 15 gp
     assert.equal(updated.protagonist.class, 'Fighter');
     assert.equal(updated.meta.title, "Donald's Frontier Quest");
     assert.ok(res.hasMutations, 'Must report mutations');
+});
+
+test('11. formatDossierForContext and renderDeckMonsterHtml render D&D 5e protagonist and monster stats cleanly', () => {
+    const dossier = {
+        meta: { title: 'Keep on the Borderlands', ruleset: 'dnd5e', systemKey: 'fantasy', systemLabel: 'High Fantasy' },
+        protagonist: {
+            name: 'Donald',
+            class: 'Fighter',
+            level: 1,
+            hitDie: 'd10',
+            hp: { current: 12, max: 12 },
+            ac: 16,
+            stats: { STR: 16, DEX: 14, CON: 14, INT: 10, WIS: 12, CHA: 8 },
+            features: ['Fighting Style: Dueling (+2 damage)'],
+            abilities: ['Second Wind (1/1 per short rest)'],
+        },
+        monsters: [
+            {
+                name: 'Goblin Skulker',
+                hp: { current: 7, max: 7 },
+                ac: 15,
+                cr: '1/4',
+                attacks: ['Scimitar (1d6+2 dmg)'],
+                weakness: 'Light sensitivity',
+            },
+        ],
+    };
+
+    const contextText = formatDossierForContext(dossier);
+    assert.match(contextText, /class:\s*Fighter/);
+    assert.match(contextText, /hp:\s*12\/12/);
+    assert.match(contextText, /ac:\s*16/);
+    assert.match(contextText, /hitDie:\s*d10/);
+    assert.match(contextText, /features:\s*\n- Fighting Style: Dueling/);
+    assert.match(contextText, /abilities:\s*\n- Second Wind/);
+    assert.ok(!contextText.includes('harm: 5'), 'D&D 5e protagonist context must not emit PbtA harm: 5');
+    assert.match(contextText, /hp:\s*7\/7/);
+    assert.match(contextText, /ac:\s*15/);
+    assert.match(contextText, /cr:\s*1\/4/);
+    assert.ok(!contextText.includes('harm: 4'), 'D&D 5e monster context must not emit PbtA harm: 4');
+
+    const monsterHtml = dnd5eSystemAdapter.renderDeckMonsterHtml(dossier.monsters[0]);
+    assert.ok(monsterHtml.includes('Goblin Skulker'));
+    assert.ok(monsterHtml.includes('HP: 7/7 | AC: 15 | CR: 1/4'));
+    assert.ok(!monsterHtml.includes('Armor: undefined'));
 });

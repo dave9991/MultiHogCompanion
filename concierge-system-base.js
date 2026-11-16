@@ -268,7 +268,119 @@ export class ConciergeSystemAdapter {
         return false;
     }
 
-    // ── UI Deck Presentation ───────────────────────────────────────────────
+    // ── UI Deck Presentation & Context Serialization ───────────────────────
+
+    /**
+     * Returns true if the protagonist object contains meaningful authored state.
+     * @param {object} protagonist
+     * @returns {boolean}
+     */
+    isProtagonistConfigured(protagonist) {
+        if (!protagonist || typeof protagonist !== 'object') return false;
+        return Boolean(protagonist.name || protagonist.playbook || protagonist.class);
+    }
+
+    /**
+     * Formats the protagonist block lines for LLM [CURRENT_CAMPAIGN_DOSSIER] context.
+     * @param {object} protagonist
+     * @param {object} dossier
+     * @returns {string[]}
+     */
+    formatProtagonistForContext(protagonist, dossier) {
+        const p = protagonist || {};
+        const lines = [
+            '[PROTAGONIST]',
+            `name: ${p.name || 'Unnamed Adventurer'}`,
+        ];
+        if (p.gender) lines.push(`gender: ${p.gender}`);
+        if (p.playbook || p.class || p.archetype) {
+            lines.push(`playbook: ${p.playbook || p.class || p.archetype}`);
+        }
+        if (p.species) lines.push(`species: ${p.species}`);
+        if (p.appearance) lines.push(`appearance: ${p.appearance}`);
+        if (p.equipment) lines.push(`equipment: ${p.equipment}`);
+        if (p.personality) lines.push(`personality: ${p.personality}`);
+        if (p.background) lines.push(`background: ${p.background}`);
+        if (p.habits) lines.push(`habits: ${p.habits}`);
+        if (p.stats && Object.keys(p.stats).length) {
+            lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+        }
+        if (p.status) lines.push(`status: ${p.status}`);
+        if (Array.isArray(p.gear) && p.gear.length) lines.push(`gear: ${p.gear.join(', ')}`);
+        if (p.bio) lines.push(`bio: ${p.bio}`);
+        lines.push(`portrait: ${p.portraitSrc ? 'set' : 'none'}`);
+        lines.push('[/PROTAGONIST]');
+        return lines;
+    }
+
+    /**
+     * Formats a single adversary/monster block for LLM [CURRENT_CAMPAIGN_DOSSIER] context.
+     * @param {object} monster
+     * @param {object} dossier
+     * @returns {string[]}
+     */
+    formatMonsterForContext(monster, dossier) {
+        const m = monster || {};
+        const lines = [
+            '[MONSTER]',
+            `name: ${m.name || 'Threat'}`,
+        ];
+        if (m.status) lines.push(`status: ${m.status}`);
+        if (m.attacks && m.attacks.length) lines.push(`attacks: ${[].concat(m.attacks).join(', ')}`);
+        if (m.weakness) lines.push(`weakness: ${m.weakness}`);
+        if (m.notes) lines.push(`notes: ${m.notes}`);
+        lines.push('[/MONSTER]');
+        return lines;
+    }
+
+    /**
+     * Renders an adversary/monster card HTML string for the Blueprint Deck UI.
+     * @param {object} monster
+     * @param {object} [helpers={}]
+     * @returns {string}
+     */
+    renderDeckMonsterHtml(monster, helpers = {}) {
+        const escapeHtml = helpers.escapeHtml || ((s) => String(s ?? ''));
+        const formatName = helpers.formatBlueprintNameWithBadge || ((name) => ({ cleanName: name || 'Unnamed', badgeHtml: '' }));
+        const m = monster || {};
+        const { cleanName, badgeHtml } = formatName(m.name, {
+            badgeBg: 'rgba(239, 68, 68, 0.15)',
+            badgeBorder: 'rgba(239, 68, 68, 0.4)',
+            badgeColor: '#fca5a5',
+        });
+        const attacks = Array.isArray(m.attacks) && m.attacks.length ? m.attacks.join(', ') : (m.attacks || 'Natural attacks');
+        return `
+            <div class="mhc-deck-item collapsible">
+                <div class="mhc-deck-item-header">
+                    <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
+                        👹 ${escapeHtml(cleanName)} ${badgeHtml}
+                    </div>
+                    <span class="mhc-deck-item-toggle">▼</span>
+                </div>
+                <div class="mhc-deck-item-detail">
+                    <div style="font-size: 0.85em; opacity: 0.85;"><b>Attacks:</b> ${escapeHtml(attacks)}</div>
+                    ${m.notes ? `<div style="font-size: 0.8em; opacity: 0.75;"><b>Notes:</b> ${escapeHtml(m.notes)}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Updates ruleset-specific calibration dial buttons in the Blueprint Deck UI.
+     * @param {Function} $ jQuery / DOM selector helper
+     * @param {object} dossier
+     */
+    renderDeckDials($, dossier) {
+        if (typeof $ !== 'function') return;
+        const cfg = dossier?.config || {};
+        const partyMode = cfg.partyMode || 'squad';
+        const partyLabel = partyMode.charAt(0).toUpperCase() + partyMode.slice(1);
+        const relsOn = cfg.relationships !== false;
+        $('#mhc_dial_heroic_btn').hide();
+        $('#mhc_dial_tempo_btn').hide();
+        $('#mhc_dial_party_btn').text(`👥 Party: ${partyLabel}`).show();
+        $('#mhc_dial_relationships_btn').text(`🤝 Relations: ${relsOn ? 'On' : 'Off'}`).css('opacity', relsOn ? '1' : '0.65').show();
+    }
 
     /**
      * Renders character stat pills and vitals in the Blueprint Deck UI.

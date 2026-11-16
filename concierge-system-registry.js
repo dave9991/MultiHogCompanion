@@ -62,12 +62,42 @@ class ConciergeSystemRegistry {
     }
 
     /**
-     * Inspects a campaign dossier object and detects its active ruleset ID.
-     * @param {object} [dossier]
-     * @returns {string} Detected ruleset ID (e.g. 'fae' or 'pbta')
+     * Detects ruleset ID from raw State Memo text markers.
+     * @param {string} memoText
+     * @param {string|null} [fallback=null]
+     * @returns {string|null}
      */
-    detectRuleset(dossier) {
-        if (!dossier || typeof dossier !== 'object') return this.#defaultSystemId;
+    detectRulesetFromMemo(memoText, fallback = null) {
+        if (!memoText || typeof memoText !== 'string') return fallback;
+        if (/FAE Knobs:|Positive Tags:|\(\(PILLS\)\)\s*Scars & Debuffs:|Leverage Barriers/i.test(memoText)) {
+            return 'fae';
+        }
+        if (/Harm\s*:\s*\d+\/\d+|\(Harm:\s*\d+\/\d+\)|\bMoves\s*:|\[PBTA_|Hack & Slash/i.test(memoText)) {
+            return 'pbta';
+        }
+        if (/\b(?:Attr|Saves|Proficiencies)\s*:|\bHD\s*:\s*\d*d\d+|\bTotal\s*:\s*\d+\s*\/\s*\d+\s*XP\s*\(Level/i.test(memoText)) {
+            return 'dnd5e';
+        }
+        return fallback;
+    }
+
+    /**
+     * Inspects a campaign dossier object (or memo text) and detects its active ruleset ID.
+     * @param {object|string|null|undefined} [dossier]
+     * @param {object} [options={}]
+     * @param {string} [options.memo='']
+     * @param {string|null} [options.fallback=null]
+     * @returns {string} Detected ruleset ID (e.g. 'fae', 'pbta', or 'dnd5e')
+     */
+    detectRuleset(dossier, options = {}) {
+        const { memo = '', fallback = null } = options || {};
+        if (typeof dossier === 'string') {
+            return this.detectRulesetFromMemo(dossier, fallback || this.#defaultSystemId);
+        }
+        if (!dossier || typeof dossier !== 'object') {
+            const fromMemo = memo ? this.detectRulesetFromMemo(memo, null) : null;
+            return fromMemo || fallback || this.#defaultSystemId;
+        }
 
         // 1. Explicit meta.ruleset takes top priority
         const explicit = dossier.meta?.ruleset;
@@ -75,8 +105,10 @@ class ConciergeSystemRegistry {
             return explicit.toLowerCase().trim();
         }
 
-        // 2. FAE structural markers
         const p = dossier.protagonist || {};
+        const sysKey = (dossier.meta?.systemKey || '').toLowerCase();
+
+        // 2. FAE structural markers
         if (
             (Array.isArray(p.positiveTags) && p.positiveTags.length > 0) ||
             (Array.isArray(p.positive_tags) && p.positive_tags.length > 0) ||
@@ -84,7 +116,8 @@ class ConciergeSystemRegistry {
             p.heroic_domain ||
             (dossier.pools && Object.keys(dossier.pools).length > 0) ||
             (p.pools && Object.keys(p.pools).length > 0) ||
-            (dossier.config?.faeGenre)
+            (dossier.config?.faeGenre) ||
+            sysKey === 'fae'
         ) {
             return 'fae';
         }
@@ -93,17 +126,37 @@ class ConciergeSystemRegistry {
         if (
             dossier.progressionBlueprint ||
             p.hitDie ||
-            (p.stats && (p.stats.STR !== undefined || p.stats.DEX !== undefined || p.stats.CON !== undefined) && !Array.isArray(p.startingMoves) && !dossier.config?.harmMax) ||
-            (dossier.meta?.ruleset === 'dnd5e')
+            sysKey === 'dnd5e' ||
+            (p.stats && (p.stats.STR !== undefined || p.stats.DEX !== undefined || p.stats.CON !== undefined) && !Array.isArray(p.startingMoves) && !dossier.config?.harmMax && !p.isPbta && !p.playbook && !p.harm)
         ) {
             return 'dnd5e';
         }
 
-        // 4. Check systemKey if meta.ruleset was unset
-        const sysKey = (dossier.meta?.systemKey || '').toLowerCase();
+        // 4. Explicit PbtA structural markers
+        if (
+            p.isPbta ||
+            p.playbook ||
+            p.harm ||
+            (Array.isArray(p.startingMoves) && p.startingMoves.length > 0) ||
+            (Array.isArray(p.moves) && p.moves.length > 0) ||
+            dossier.config?.harmMax ||
+            sysKey === 'pbta'
+        ) {
+            return 'pbta';
+        }
+
+        // 5. System label pattern check
+        const sysLabel = String(dossier.meta?.systemLabel || '');
+        if (sysLabel) {
+            if (/\b(?:FAE|Freeform Attrition)\b/i.test(sysLabel)) return 'fae';
+            if (/\b(?:PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome)\b/i.test(sysLabel)) return 'pbta';
+            if (/\b(?:D&D|Dungeons\s*&\s*Dragons|5e)\b/i.test(sysLabel)) return 'dnd5e';
+        }
+
+        // 6. Check systemKey if meta.ruleset was unset
         if (sysKey) {
             for (const adapter of this.#systems.values()) {
-                if (adapter.id === this.#defaultSystemId) continue;
+                if (adapter.id === this.#defaultSystemId || adapter.id === 'dnd5e') continue;
                 const genres = adapter.getGenres();
                 if (genres && genres[sysKey]) {
                     return adapter.id;
@@ -113,19 +166,24 @@ class ConciergeSystemRegistry {
             if (defaultAdapter?.getGenres()?.[sysKey]) {
                 return defaultAdapter.id;
             }
+            const dndAdapter = this.has('dnd5e') ? this.get('dnd5e') : null;
+            if (dndAdapter?.getGenres()?.[sysKey]) {
+                return 'dnd5e';
+            }
         }
 
-        // 4. PbtA structural markers
-        if (
-            (p.stats && Object.keys(p.stats).length > 0) ||
-            (Array.isArray(p.startingMoves) && p.startingMoves.length > 0) ||
-            (Array.isArray(p.moves) && p.moves.length > 0) ||
-            dossier.config?.harmMax
-        ) {
+        // 7. Remaining PbtA stat check
+        if (p.stats && Object.keys(p.stats).length > 0) {
             return 'pbta';
         }
 
-        return this.#defaultSystemId;
+        // 8. Memo fallback
+        if (memo) {
+            const fromMemo = this.detectRulesetFromMemo(memo, null);
+            if (fromMemo) return fromMemo;
+        }
+
+        return fallback || this.#defaultSystemId;
     }
 
     /**

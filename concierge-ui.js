@@ -115,7 +115,7 @@ import {
     findNextAdventureVersionName,
 } from './adventure-chat.js';
 import { PBTA_GENRES } from './pbta-ruleset.js';
-import { FAE_GENRES, TEMPO_WINDOWS } from './fae-ruleset.js';
+import { FAE_GENRES } from './fae-ruleset.js';
 import { buildNameRagSeedsForConcierge, resolveDossierNamePlaceholders, parseResolvedNameToken } from './namerag-hooks.js';
 import {
     getCompanionActiveCartridge,
@@ -1149,66 +1149,14 @@ export function updateBlueprintDeck() {
     $('#mhc_deck_dial_playstyle').text(playstyleLabel);
     $('#mhc_dial_playstyle_btn').text(playstyleDialLabel);
 
-    if (isFae) {
-        const knobs = cfg.knobs || activeDossier.knobs || {};
-        const shiftVal = knobs.base_attrition_shift ?? 0;
-        const shiftStr = shiftVal >= 0 ? `+${shiftVal}` : `${shiftVal}`;
-        const fleeStr = knobs.flee_grace_toggle ? 'ON' : 'OFF';
-        $('#mhc_dial_harm_btn').text(`⚖️ Shift: ${shiftStr}`);
-        $('#mhc_dial_downed_btn').text(`🏃 Flee Grace: ${fleeStr}`);
-
-        const isHeroic = Boolean(cfg.heroicTier || cfg.heroic_tier || knobs.heroic_tier);
-        $('#mhc_dial_heroic_btn')
-            .text(`⚡ Heroic: ${isHeroic ? 'ON' : 'OFF'}`)
-            .css('opacity', isHeroic ? '1' : '0.65')
-            .show();
-
-        const curTempo = cfg.actionTempo || knobs.action_tempo || 'gritty_default';
-        const tempoLabel = TEMPO_WINDOWS[curTempo]?.label || TEMPO_WINDOWS.gritty_default.label;
-        $('#mhc_dial_tempo_btn')
-            .text(`⏱️ Tempo: ${tempoLabel}`)
-            .show();
-    } else {
-        $('#mhc_dial_heroic_btn').hide();
-        $('#mhc_dial_tempo_btn').hide();
-        const harmMax = cfg.harmMax || 5;
-        let harmTag = '(Standard)';
-        if (harmMax === 3) harmTag = '(Gritty)';
-        else if (harmMax === 4) harmTag = '(Tense)';
-        else if (harmMax === 6) harmTag = '(Pulp)';
-        $('#mhc_dial_harm_btn').text(`❤️ Harm: ${harmMax} ${harmTag}`);
-
-        const maxHarmFate = cfg.maxHarmFate || { rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated' };
-        const fateRule = maxHarmFate.rule || 'Mortal Peril';
-        let fateShort = 'Mortal Peril';
-        let fateIcon = '💀';
-        if (/respawn|graveyard|ghost|mmo|shrine/i.test(fateRule)) {
-            fateShort = 'Respawn';
-            fateIcon = '🔄';
-        } else if (/burnout|exhaust|faint|pass out|fatigue/i.test(fateRule)) {
-            fateShort = 'Burnout / Faint';
-            fateIcon = '💤';
-        } else if (/unconscious|capture|knockout|arrest|subdue/i.test(fateRule)) {
-            fateShort = 'Knockout / Arrest';
-            fateIcon = '⛓️';
-        } else if (!/mortal\s*peril|last\s*breath|dying/i.test(fateRule)) {
-            fateShort = fateRule.length > 18 ? fateRule.slice(0, 16) + '...' : fateRule;
-            fateIcon = '⚡';
-        }
-        $('#mhc_dial_downed_btn').text(`${fateIcon} Downed: ${fateShort}`);
-    }
-
-    const partyMode = cfg.partyMode || 'squad';
-    const partyLabel = partyMode.charAt(0).toUpperCase() + partyMode.slice(1);
-    const relsOn = cfg.relationships !== false;
-
-    if (isFae) {
+    adapter.renderDeckDials($, activeDossier);
+    if (!adapter.hasDial('partyMode')) {
         $('#mhc_dial_party_btn').hide();
-        $('#mhc_dial_relationships_btn').hide();
-    } else {
-        $('#mhc_dial_party_btn').text(`👥 Party: ${partyLabel}`).show();
-        $('#mhc_dial_relationships_btn').text(`🤝 Relations: ${relsOn ? 'On' : 'Off'}`).css('opacity', relsOn ? '1' : '0.65').show();
     }
+    if (!adapter.hasDial('relationships')) {
+        $('#mhc_dial_relationships_btn').hide();
+    }
+    const relsOn = cfg.relationships !== false;
 
     const emojisOn = cfg.cyoaEmojis !== false;
     $('#mhc_dial_emojis_btn').text(`✨ Emojis: ${emojisOn ? 'On' : 'Off'}`);
@@ -1361,84 +1309,9 @@ export function updateBlueprintDeck() {
     const mList = $('#mhc_deck_monsters_list');
     mList.empty();
     if (monsters.length) {
-        if (isFae) {
-            monsters.forEach(m => {
-                const { cleanName: mClean, badgeHtml: mTagBadge } = formatBlueprintNameWithBadge(m.name, {
-                    badgeBg: 'rgba(239, 68, 68, 0.15)',
-                    badgeBorder: 'rgba(239, 68, 68, 0.4)',
-                    badgeColor: '#fca5a5',
-                });
-                const threat = m.threat_level ?? m.threatLevel ?? 1;
-                const layers = m.layers ?? m.hp ?? 1;
-                const poolsAtRisk = Array.isArray(m.pools_at_risk) ? m.pools_at_risk.join(', ') : (m.pools_at_risk || m.poolsAtRisk || 'Health');
-                const pressures = Array.isArray(m.pressures) ? m.pressures.join('; ') : (m.pressures || '');
-                const pressuresLine = pressures ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Pressures:</b> ${escapeHtml(pressures)}</div>` : '';
-                const barriers = Array.isArray(m.leverage_barriers) ? m.leverage_barriers.join(' / ') : (m.leverage_barriers || m.leverageBarriers || '');
-                const barrierLine = barriers ? `<div style="font-size: 0.8em; opacity: 0.85; color: #fbbf24;"><b>Leverage Barriers:</b> ${escapeHtml(barriers)}</div>` : '';
-                const finish = Array.isArray(m.full_finish_triggers) ? m.full_finish_triggers.join('; ') : (m.full_finish_triggers || m.fullFinishTriggers || '');
-                const finishLine = finish ? `<div style="font-size: 0.8em; opacity: 0.85; color: #4ade80;"><b>Full Finish Triggers:</b> ${escapeHtml(finish)}</div>` : '';
-
-                const threatBadge = `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">Threat: ${threat} | ${layers} Layer(s)</span>`;
-                const poolBadge = `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;">Pools: ${escapeHtml(poolsAtRisk)}</span>`;
-
-                mList.append(`
-                    <div class="mhc-deck-item collapsible">
-                        <div class="mhc-deck-item-header">
-                            <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
-                                👹 ${escapeHtml(mClean)} ${mTagBadge}${threatBadge} ${poolBadge}
-                            </div>
-                            <span class="mhc-deck-item-toggle">▼</span>
-                        </div>
-                        <div class="mhc-deck-item-detail">
-                            ${barrierLine}
-                            ${pressuresLine}
-                            ${finishLine}
-                        </div>
-                    </div>
-                `);
-            });
-        } else {
-            monsters.forEach(m => {
-                const { cleanName: mClean, badgeHtml: mTagBadge } = formatBlueprintNameWithBadge(m.name, {
-                    badgeBg: 'rgba(239, 68, 68, 0.15)',
-                    badgeBorder: 'rgba(239, 68, 68, 0.4)',
-                    badgeColor: '#fca5a5',
-                });
-                const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
-                const moves = m.moves?.length ? m.moves.join('; ') : '';
-                const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
-                const doomBadge = m.impendingDoom?.length
-                    ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;" title="Active Countdown Front / Impending Doom">⏳ Clock: ${m.impendingDoom.length}</span>`
-                    : '';
-                const doomLine = m.impendingDoom?.length
-                    ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>⏳ Impending Doom:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${m.impendingDoom.map(d => `<li>${d}</li>`).join('')}</ul></div>`
-                    : '';
-
-                const mCur = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
-                const mMax = parseInt(m.harm?.max ?? m.harm, 10) || 4;
-                const mHp = Math.max(0, mMax - mCur);
-                const harmBadge = mCur > 0
-                    ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">🩸 ${mHp}/${mMax} HP (Harm: ${mCur}/${mMax}) · Wounded</span>`
-                    : `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${mMax} | Armor: ${m.armor}</span>`;
-
-                mList.append(`
-                    <div class="mhc-deck-item collapsible">
-                        <div class="mhc-deck-item-header">
-                            <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
-                                👹 ${escapeHtml(mClean)} ${mTagBadge}${harmBadge} ${doomBadge}
-                            </div>
-                            <span class="mhc-deck-item-toggle">▼</span>
-                        </div>
-                        <div class="mhc-deck-item-detail">
-                            <div style="font-size: 0.85em; opacity: 0.85;"><b>Attacks:</b> ${attacks}</div>
-                            <div style="font-size: 0.8em; opacity: 0.75;"><b>Weakness:</b> ${m.weakness || 'None specified'}</div>
-                            ${movesLine}
-                            ${doomLine}
-                        </div>
-                    </div>
-                `);
-            });
-        }
+        monsters.forEach(m => {
+            mList.append(adapter.renderDeckMonsterHtml(m, { formatBlueprintNameWithBadge, escapeHtml }));
+        });
     } else {
         mList.append('<div class="mhc-empty-hint">No monsters queued yet.</div>');
     }

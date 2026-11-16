@@ -18,6 +18,10 @@ import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
 import { FAE_GENRES, sanitizeFaePositiveTags } from './fae-ruleset.js';
 import { normalizeFaePill } from './fae-state-sync.js';
 import { isConciergeCreatedDossier, loadActiveCampaignDossier } from './concierge-ui.js';
+import { systemRegistry } from './concierge-system-registry.js';
+import './concierge-system-pbta.js';
+import './concierge-system-fae.js';
+import './concierge-system-dnd5e.js';
 
 let _activeModalElement = null;
 
@@ -82,21 +86,12 @@ export function openLevelUpModal({
         }
     } catch (_) {}
 
-    const sysKeyLower = (dossier?.meta?.systemKey || '').toLowerCase();
-    const isFae = Boolean(
-        dossier?.meta?.ruleset === 'fae'
-        || (dossier?.meta?.systemKey && FAE_GENRES[String(dossier.meta.systemKey).toLowerCase()])
-        || Boolean(dossier?.protagonist?.pools && Object.keys(dossier.protagonist.pools).length > 0)
-        || /FAE Knobs:|Positive Tags:/i.test(rpgSettings?.currentMemo || '')
-    );
-    const isPbta = !isFae && !!(
-        sysKeyLower === 'pbta'
-        || (sysKeyLower && PBTA_GENRES[sysKeyLower])
-        || dossier?.protagonist?.isPbta
-        || dossier?.protagonist?.playbook
-        || dossier?.protagonist?.harm
-        || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel))
-    );
+    const detectedRuleset = systemRegistry.detectRuleset(dossier, {
+        memo: rpgSettings?.currentMemo || '',
+        fallback: 'dnd5e',
+    });
+    const isFae = detectedRuleset === 'fae';
+    const isPbta = detectedRuleset === 'pbta';
 
     // Normalize on load so previously stored/LLM blueprints never show HP/ASI/slot bookkeeping as features
     let activeBlueprint = normalizeBlueprint(blueprint || dossier?.progressionBlueprint || null);

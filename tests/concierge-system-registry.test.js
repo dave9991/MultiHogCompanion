@@ -169,3 +169,19 @@ test('3. Extensibility Proof: dynamically registering a 3rd game system (FitD)',
     assert.match(bio, /Special Ability:\s*Battleborn/i);
     assert.match(bio, /Wanted by Bluecoats/i);
 });
+
+test('4. detectRulesetFromMemo and detectRuleset memo/fallback resolution', () => {
+    const faeMemo = '[CHARACTER]\nArthur: 8/8 HP | FAE Knobs: Shift: 0\n((PILLS)) Positive Tags: Occult Scholar\n[/CHARACTER]';
+    const pbtaMemo = '[CHARACTER]\nThorne (Fighter): 4/5 HP | Harm: 1/5\n((PILLS)) Moves: Hack & Slash (+Might)\n[/CHARACTER]';
+    const dndMemo = '[CHARACTER]\nDonald (Fighter): 12/12 HP\nAttr: STR 16 (+3), DEX 14 (+2)\nHD: d10 (1/1)\n[/CHARACTER]\n[XP]\nTotal: 0 / 300 XP (Level 1)\n[/XP]';
+
+    assert.equal(systemRegistry.detectRulesetFromMemo(faeMemo), 'fae');
+    assert.equal(systemRegistry.detectRulesetFromMemo(pbtaMemo), 'pbta');
+    assert.equal(systemRegistry.detectRulesetFromMemo(dndMemo), 'dnd5e');
+    assert.equal(systemRegistry.detectRulesetFromMemo('', 'dnd5e'), 'dnd5e');
+
+    assert.equal(systemRegistry.detectRuleset(null, { memo: faeMemo, fallback: 'dnd5e' }), 'fae');
+    assert.equal(systemRegistry.detectRuleset({}, { memo: pbtaMemo, fallback: 'dnd5e' }), 'pbta');
+    assert.equal(systemRegistry.detectRuleset({}, { fallback: 'dnd5e' }), 'dnd5e');
+    assert.equal(systemRegistry.detectRuleset({ meta: { systemLabel: 'D&D 5e Standard', systemKey: 'fantasy' } }, { fallback: 'dnd5e' }), 'dnd5e');
+});

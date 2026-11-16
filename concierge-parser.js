@@ -670,7 +670,9 @@ The Kick: Unset
 [/CURRENT_CAMPAIGN_DOSSIER]`;
     }
 
-    const isFae = meta.ruleset === 'fae';
+    const rulesetId = systemRegistry.detectRuleset(dossier);
+    const adapter = systemRegistry.get(rulesetId);
+    const isFae = adapter.id === 'fae';
     const lines = [
         '[CURRENT_CAMPAIGN_DOSSIER]',
         'Status: IN_PROGRESS',
@@ -691,57 +693,8 @@ The Kick: Unset
     lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}${fatePart}${knobsPart}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
 
-    if (p.name || p.playbook || (isFae && (p.positiveTags?.length || (p.pools && Object.keys(p.pools).length)))) {
-        lines.push('[PROTAGONIST]');
-        lines.push(`name: ${p.name || 'Unnamed Adventurer'}`);
-        if (p.gender) lines.push(`gender: ${p.gender}`);
-        lines.push(`playbook: ${p.playbook || p.archetype || (isFae ? 'Unassigned' : 'In Development')}`);
-        if (p.species) lines.push(`species: ${p.species}`);
-        if (p.appearance) lines.push(`appearance: ${p.appearance}`);
-        if (p.equipment) lines.push(`equipment: ${p.equipment}`);
-        if (p.personality) lines.push(`personality: ${p.personality}`);
-        if (p.background) lines.push(`background: ${p.background}`);
-        if (p.habits) lines.push(`habits: ${p.habits}`);
-        if (isFae) {
-            if (isHeroicTier || p.heroicDomain) {
-                lines.push(`heroic_domain: ${p.heroicDomain || 'Archetype [specific domains]'}`);
-            }
-            if (p.positiveTags && p.positiveTags.length) {
-                lines.push(`positive_tags: ${p.positiveTags.join(', ')}`);
-            }
-            if (p.negativeTags && p.negativeTags.length) {
-                lines.push(`negative_tags: ${p.negativeTags.join(', ')}`);
-            }
-            if (p.pools && Object.keys(p.pools).length) {
-                const poolStrs = Object.values(p.pools).map(pl => `${pl.label}: ${pl.current}/${pl.max} (zero_debuff: ${pl.zero_debuff || 'None'}, recovery: ${pl.recovery || ''}, overflow: ${pl.on_overflow || ''})`);
-                lines.push(`pools: ${poolStrs.join(' | ')}`);
-            }
-        } else {
-            if (p.stats && Object.keys(p.stats).length) {
-                lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}`);
-            }
-            if (p.harm) {
-                const curH = parseInt(p.harm.current, 10) || 0;
-                const maxH = parseInt(p.harm.max, 10) || 5;
-                lines.push(curH > 0 ? `harm: ${curH}/${maxH}` : `harm: ${maxH}`);
-                lines.push(`armor: ${p.harm?.armor ?? 0}`);
-            } else {
-                lines.push('harm: 5');
-                lines.push('armor: 0');
-            }
-        }
-        if (!isFae && p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) {
-            lines.push(`conditions: ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}`);
-        }
-        if (p.status) lines.push(`status: ${p.status}`);
-        if (!isFae && p.startingMoves && p.startingMoves.length) {
-            lines.push('moves:');
-            p.startingMoves.forEach(mv => lines.push(`- ${mv}`));
-        }
-        if (p.gear && p.gear.length) lines.push(`gear: ${p.gear.join(', ')}`);
-        if (p.bio) lines.push(`bio: ${p.bio}`);
-        lines.push(`portrait: ${p.portraitSrc ? 'set' : 'none'}`);
-        lines.push('[/PROTAGONIST]');
+    if (adapter.isProtagonistConfigured(p)) {
+        lines.push(...adapter.formatProtagonistForContext(p, dossier));
     } else {
         lines.push('Protagonist: Unset');
     }
@@ -779,32 +732,7 @@ The Kick: Unset
     if (monsters.length) {
         lines.push(`Monsters (${monsters.length}):`);
         monsters.forEach(m => {
-            lines.push('[MONSTER]');
-            lines.push(`name: ${m.name}`);
-            const curHarm = parseInt(m.currentHarm ?? m.harm?.current ?? m.currentLayers, 10) || 0;
-            const maxHarm = parseInt(m.harm?.max ?? m.harm ?? m.layers, 10) || 4;
-            if (isFae) {
-                if (m.threatLevel !== undefined && m.threatLevel !== null) lines.push(`threat_level: ${m.threatLevel}`);
-                lines.push(`layers: ${curHarm > 0 ? `${curHarm}/${maxHarm}` : `${maxHarm}`}`);
-                if (m.poolsAtRisk) lines.push(`pools_at_risk: ${Array.isArray(m.poolsAtRisk) ? m.poolsAtRisk.join(', ') : m.poolsAtRisk}`);
-                if (m.pressures && m.pressures.length) lines.push(`pressures: ${Array.isArray(m.pressures) ? m.pressures.join(', ') : m.pressures}`);
-                if (m.instinct) lines.push(`instinct: ${m.instinct}`);
-                if (m.status) lines.push(`status: ${m.status}`);
-                if (m.leverageBarriers && m.leverageBarriers.length) lines.push(`leverage_barriers: ${Array.isArray(m.leverageBarriers) ? m.leverageBarriers.join(', ') : m.leverageBarriers}`);
-                if (m.fullFinishTriggers) lines.push(`full_finish_triggers: ${m.fullFinishTriggers}`);
-            } else {
-                lines.push(curHarm > 0 ? `harm: ${curHarm}/${maxHarm}` : `harm: ${maxHarm}`);
-                lines.push(`armor: ${m.armor || 0}`);
-                if (m.status) lines.push(`status: ${m.status}`);
-                if (m.attacks && m.attacks.length) lines.push(`attacks: ${[].concat(m.attacks).join(', ')}`);
-                lines.push(`weakness: ${m.weakness || 'Unknown'}`);
-                if (m.impendingDoom && m.impendingDoom.length) {
-                    lines.push('countdown:');
-                    m.impendingDoom.forEach(d => lines.push(`- ${d}`));
-                }
-            }
-            if (m.notes) lines.push(`notes: ${m.notes}`);
-            lines.push('[/MONSTER]');
+            lines.push(...adapter.formatMonsterForContext(m, dossier));
         });
     } else {
         lines.push('Monsters: None');

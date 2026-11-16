@@ -7,7 +7,7 @@
  */
 
 import { ConciergeSystemAdapter } from './concierge-system-base.js';
-import { FAE_GENRES, buildFaeCartridge, sanitizeFaePositiveTags } from './fae-ruleset.js';
+import { FAE_GENRES, TEMPO_WINDOWS, buildFaeCartridge, sanitizeFaePositiveTags } from './fae-ruleset.js';
 import { sanitizeHeroicDomain } from './concierge-parser.js';
 import { formatInitialFaeMemo, mergeDossierIntoLiveFaeMemo } from './fae-state-sync.js';
 import { buildMonsterEntryContent } from './concierge-npc-format.js';
@@ -272,6 +272,139 @@ export class FaeSystemAdapter extends ConciergeSystemAdapter {
 
     hasDial(dialName) {
         return ['playstyle', 'heroicTier', 'actionTempo', 'harmShift', 'fleeGrace', 'simulationDepth', 'cyoaEmojis'].includes(dialName);
+    }
+
+    isProtagonistConfigured(protagonist) {
+        if (!protagonist || typeof protagonist !== 'object') return false;
+        return Boolean(
+            protagonist.name ||
+            protagonist.playbook ||
+            protagonist.positiveTags?.length ||
+            (protagonist.pools && Object.keys(protagonist.pools).length)
+        );
+    }
+
+    formatProtagonistForContext(protagonist, dossier) {
+        const p = protagonist || {};
+        const cfg = dossier?.config || {};
+        const isHeroicTier = Boolean(cfg.heroicTier ?? cfg.knobs?.heroic_tier ?? false);
+        const lines = [
+            '[PROTAGONIST]',
+            `name: ${p.name || 'Unnamed Adventurer'}`,
+        ];
+        if (p.gender) lines.push(`gender: ${p.gender}`);
+        lines.push(`playbook: ${p.playbook || p.archetype || 'Unassigned'}`);
+        if (p.species) lines.push(`species: ${p.species}`);
+        if (p.appearance) lines.push(`appearance: ${p.appearance}`);
+        if (p.equipment) lines.push(`equipment: ${p.equipment}`);
+        if (p.personality) lines.push(`personality: ${p.personality}`);
+        if (p.background) lines.push(`background: ${p.background}`);
+        if (p.habits) lines.push(`habits: ${p.habits}`);
+        if (isHeroicTier || p.heroicDomain) {
+            lines.push(`heroic_domain: ${p.heroicDomain || 'Archetype [specific domains]'}`);
+        }
+        if (p.positiveTags && p.positiveTags.length) {
+            lines.push(`positive_tags: ${p.positiveTags.join(', ')}`);
+        }
+        if (p.negativeTags && p.negativeTags.length) {
+            lines.push(`negative_tags: ${p.negativeTags.join(', ')}`);
+        }
+        if (p.pools && Object.keys(p.pools).length) {
+            const poolStrs = Object.values(p.pools).map(pl => `${pl.label}: ${pl.current}/${pl.max} (zero_debuff: ${pl.zero_debuff || 'None'}, recovery: ${pl.recovery || ''}, overflow: ${pl.on_overflow || ''})`);
+            lines.push(`pools: ${poolStrs.join(' | ')}`);
+        }
+        if (p.status) lines.push(`status: ${p.status}`);
+        if (p.gear && p.gear.length) lines.push(`gear: ${p.gear.join(', ')}`);
+        if (p.bio) lines.push(`bio: ${p.bio}`);
+        lines.push(`portrait: ${p.portraitSrc ? 'set' : 'none'}`);
+        lines.push('[/PROTAGONIST]');
+        return lines;
+    }
+
+    formatMonsterForContext(monster, dossier) {
+        const m = monster || {};
+        const curHarm = parseInt(m.currentHarm ?? m.harm?.current ?? m.currentLayers, 10) || 0;
+        const maxHarm = parseInt(m.harm?.max ?? m.harm ?? m.layers, 10) || 4;
+        const lines = [
+            '[MONSTER]',
+            `name: ${m.name}`,
+        ];
+        if (m.threatLevel !== undefined && m.threatLevel !== null) lines.push(`threat_level: ${m.threatLevel}`);
+        lines.push(`layers: ${curHarm > 0 ? `${curHarm}/${maxHarm}` : `${maxHarm}`}`);
+        if (m.poolsAtRisk) lines.push(`pools_at_risk: ${Array.isArray(m.poolsAtRisk) ? m.poolsAtRisk.join(', ') : m.poolsAtRisk}`);
+        if (m.pressures && m.pressures.length) lines.push(`pressures: ${Array.isArray(m.pressures) ? m.pressures.join(', ') : m.pressures}`);
+        if (m.instinct) lines.push(`instinct: ${m.instinct}`);
+        if (m.status) lines.push(`status: ${m.status}`);
+        if (m.leverageBarriers && m.leverageBarriers.length) lines.push(`leverage_barriers: ${Array.isArray(m.leverageBarriers) ? m.leverageBarriers.join(', ') : m.leverageBarriers}`);
+        if (m.fullFinishTriggers) lines.push(`full_finish_triggers: ${m.fullFinishTriggers}`);
+        if (m.notes) lines.push(`notes: ${m.notes}`);
+        lines.push('[/MONSTER]');
+        return lines;
+    }
+
+    renderDeckMonsterHtml(monster, helpers = {}) {
+        const escapeHtml = helpers.escapeHtml || ((s) => String(s ?? ''));
+        const formatName = helpers.formatBlueprintNameWithBadge || ((name) => ({ cleanName: name || 'Unnamed', badgeHtml: '' }));
+        const m = monster || {};
+        const { cleanName: mClean, badgeHtml: mTagBadge } = formatName(m.name, {
+            badgeBg: 'rgba(239, 68, 68, 0.15)',
+            badgeBorder: 'rgba(239, 68, 68, 0.4)',
+            badgeColor: '#fca5a5',
+        });
+        const threat = m.threat_level ?? m.threatLevel ?? 1;
+        const layers = m.layers ?? m.hp ?? 1;
+        const poolsAtRisk = Array.isArray(m.pools_at_risk) ? m.pools_at_risk.join(', ') : (m.pools_at_risk || m.poolsAtRisk || 'Health');
+        const pressures = Array.isArray(m.pressures) ? m.pressures.join('; ') : (m.pressures || '');
+        const pressuresLine = pressures ? `<div style="font-size: 0.8em; opacity: 0.85;"><b>Pressures:</b> ${escapeHtml(pressures)}</div>` : '';
+        const barriers = Array.isArray(m.leverage_barriers) ? m.leverage_barriers.join(' / ') : (m.leverage_barriers || m.leverageBarriers || '');
+        const barrierLine = barriers ? `<div style="font-size: 0.8em; opacity: 0.85; color: #fbbf24;"><b>Leverage Barriers:</b> ${escapeHtml(barriers)}</div>` : '';
+        const finish = Array.isArray(m.full_finish_triggers) ? m.full_finish_triggers.join('; ') : (m.full_finish_triggers || m.fullFinishTriggers || '');
+        const finishLine = finish ? `<div style="font-size: 0.8em; opacity: 0.85; color: #4ade80;"><b>Full Finish Triggers:</b> ${escapeHtml(finish)}</div>` : '';
+
+        const threatBadge = `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">Threat: ${threat} | ${layers} Layer(s)</span>`;
+        const poolBadge = `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;">Pools: ${escapeHtml(poolsAtRisk)}</span>`;
+
+        return `
+            <div class="mhc-deck-item collapsible">
+                <div class="mhc-deck-item-header">
+                    <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
+                        👹 ${escapeHtml(mClean)} ${mTagBadge}${threatBadge} ${poolBadge}
+                    </div>
+                    <span class="mhc-deck-item-toggle">▼</span>
+                </div>
+                <div class="mhc-deck-item-detail">
+                    ${barrierLine}
+                    ${pressuresLine}
+                    ${finishLine}
+                </div>
+            </div>
+        `;
+    }
+
+    renderDeckDials($, dossier) {
+        if (typeof $ !== 'function') return;
+        const cfg = dossier?.config || {};
+        const knobs = cfg.knobs || dossier?.knobs || {};
+        const shiftVal = knobs.base_attrition_shift ?? 0;
+        const shiftStr = shiftVal >= 0 ? `+${shiftVal}` : `${shiftVal}`;
+        const fleeStr = knobs.flee_grace_toggle ? 'ON' : 'OFF';
+        $('#mhc_dial_harm_btn').text(`⚖️ Shift: ${shiftStr}`);
+        $('#mhc_dial_downed_btn').text(`🏃 Flee Grace: ${fleeStr}`);
+
+        const isHeroic = Boolean(cfg.heroicTier || cfg.heroic_tier || knobs.heroic_tier);
+        $('#mhc_dial_heroic_btn')
+            .text(`⚡ Heroic: ${isHeroic ? 'ON' : 'OFF'}`)
+            .css('opacity', isHeroic ? '1' : '0.65')
+            .show();
+
+        const curTempo = cfg.actionTempo || knobs.action_tempo || 'gritty_default';
+        const tempoLabel = TEMPO_WINDOWS[curTempo]?.label || TEMPO_WINDOWS.gritty_default.label;
+        $('#mhc_dial_tempo_btn')
+            .text(`⏱️ Tempo: ${tempoLabel}`)
+            .show();
+
+        $('#mhc_dial_party_btn').hide();
+        $('#mhc_dial_relationships_btn').hide();
     }
 
     renderDeckStats(elements, protagonist, dossier, { isUntouchedAndUnestablished = false, escapeHtml = (s) => s } = {}) {

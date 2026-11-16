@@ -11,6 +11,10 @@ import { getCandidateChatIds } from './persona-matching.js';
 import { getPartitionDossier } from './pbta-ruleset-persistence.js';
 import { PBTA_GENRES, splitTopLevelPillItems, splitPbtaMovesLine } from './pbta-ruleset.js';
 import { getCanonicalDndProgression } from './level-up-blueprint.js';
+import { systemRegistry } from './concierge-system-registry.js';
+import './concierge-system-pbta.js';
+import './concierge-system-fae.js';
+import './concierge-system-dnd5e.js';
 
 /**
  * Derives the canonical D&D 5e Hit Die ('d6' | 'd8' | 'd10' | 'd12') from a class name.
@@ -95,7 +99,7 @@ export function parseCharacterBlockFromMemo(memoText) {
     }
 
     // Detect PbtA narrative mechanics
-    const isPbta = /Harm\s*:\s*\d+\/\d+/i.test(memoText || '') || /\bMoves\s*:/i.test(memoText || '');
+    const isPbta = systemRegistry.detectRulesetFromMemo(memoText) === 'pbta';
 
     if (isPbta) {
         result.isPbta = true;
@@ -233,12 +237,8 @@ export function parseAbilitiesBlockFromMemo(memoText) {
  * @returns {boolean}
  */
 export function isDossierPbta(dossier) {
-    if (!dossier) return false;
-    const sysKey = (dossier.meta?.systemKey || '').toLowerCase();
-    if (sysKey === 'pbta' || Boolean(sysKey && PBTA_GENRES[sysKey])) return true;
-    if (dossier.protagonist?.isPbta || dossier.protagonist?.playbook || dossier.protagonist?.harm) return true;
-    if (dossier.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel)) return true;
-    return false;
+    if (!dossier || typeof dossier !== 'object') return false;
+    return systemRegistry.detectRuleset(dossier, { fallback: 'dnd5e' }) === 'pbta';
 }
 
 /**
@@ -253,7 +253,7 @@ export function scaffoldDossierStubForChat(chatId, stateMemo, chatTitle = '') {
     const charData = parseCharacterBlockFromMemo(stateMemo);
 
     // Determine basic system key
-    const isPbta = /Harm\s*:\s*\d+\/\d+/i.test(stateMemo) || /\(Harm:\s*\d+\/\d+\)/i.test(stateMemo) || !!charData.isPbta;
+    const isPbta = systemRegistry.detectRulesetFromMemo(stateMemo) === 'pbta' || !!charData.isPbta;
     const systemKey = isPbta ? 'pbta' : 'dnd5e';
     const systemLabel = isPbta ? 'PbtA Narrative Engine' : 'D&D 5e Standard';
 

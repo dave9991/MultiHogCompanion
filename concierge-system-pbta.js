@@ -186,6 +186,156 @@ export class PbtaSystemAdapter extends ConciergeSystemAdapter {
         return ['playstyle', 'harmMax', 'downed', 'partyMode', 'relationships', 'cyoaEmojis', 'simulationDepth'].includes(dialName);
     }
 
+    isProtagonistConfigured(protagonist) {
+        if (!protagonist || typeof protagonist !== 'object') return false;
+        return Boolean(protagonist.name || protagonist.playbook);
+    }
+
+    formatProtagonistForContext(protagonist, dossier) {
+        const p = protagonist || {};
+        const lines = [
+            '[PROTAGONIST]',
+            `name: ${p.name || 'Unnamed Adventurer'}`,
+        ];
+        if (p.gender) lines.push(`gender: ${p.gender}`);
+        lines.push(`playbook: ${p.playbook || p.archetype || 'In Development'}`);
+        if (p.species) lines.push(`species: ${p.species}`);
+        if (p.appearance) lines.push(`appearance: ${p.appearance}`);
+        if (p.equipment) lines.push(`equipment: ${p.equipment}`);
+        if (p.personality) lines.push(`personality: ${p.personality}`);
+        if (p.background) lines.push(`background: ${p.background}`);
+        if (p.habits) lines.push(`habits: ${p.habits}`);
+        if (p.stats && Object.keys(p.stats).length) {
+            lines.push(`stats: ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(', ')}`);
+        }
+        if (p.harm) {
+            const curH = parseInt(p.harm.current, 10) || 0;
+            const maxH = parseInt(p.harm.max, 10) || 5;
+            lines.push(curH > 0 ? `harm: ${curH}/${maxH}` : `harm: ${maxH}`);
+            lines.push(`armor: ${p.harm?.armor ?? 0}`);
+        } else {
+            lines.push('harm: 5');
+            lines.push('armor: 0');
+        }
+        if (p.conditions && (Array.isArray(p.conditions) ? p.conditions.length : String(p.conditions).trim())) {
+            lines.push(`conditions: ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}`);
+        }
+        if (p.status) lines.push(`status: ${p.status}`);
+        if (p.startingMoves && p.startingMoves.length) {
+            lines.push('moves:');
+            p.startingMoves.forEach(mv => lines.push(`- ${mv}`));
+        }
+        if (p.gear && p.gear.length) lines.push(`gear: ${p.gear.join(', ')}`);
+        if (p.bio) lines.push(`bio: ${p.bio}`);
+        lines.push(`portrait: ${p.portraitSrc ? 'set' : 'none'}`);
+        lines.push('[/PROTAGONIST]');
+        return lines;
+    }
+
+    formatMonsterForContext(monster, dossier) {
+        const m = monster || {};
+        const curHarm = parseInt(m.currentHarm ?? m.harm?.current ?? m.currentLayers, 10) || 0;
+        const maxHarm = parseInt(m.harm?.max ?? m.harm ?? m.layers, 10) || 4;
+        const lines = [
+            '[MONSTER]',
+            `name: ${m.name}`,
+            curHarm > 0 ? `harm: ${curHarm}/${maxHarm}` : `harm: ${maxHarm}`,
+            `armor: ${m.armor || 0}`,
+        ];
+        if (m.status) lines.push(`status: ${m.status}`);
+        if (m.attacks && m.attacks.length) lines.push(`attacks: ${[].concat(m.attacks).join(', ')}`);
+        lines.push(`weakness: ${m.weakness || 'Unknown'}`);
+        if (m.impendingDoom && m.impendingDoom.length) {
+            lines.push('countdown:');
+            m.impendingDoom.forEach(d => lines.push(`- ${d}`));
+        }
+        if (m.notes) lines.push(`notes: ${m.notes}`);
+        lines.push('[/MONSTER]');
+        return lines;
+    }
+
+    renderDeckMonsterHtml(monster, helpers = {}) {
+        const escapeHtml = helpers.escapeHtml || ((s) => String(s ?? ''));
+        const formatName = helpers.formatBlueprintNameWithBadge || ((name) => ({ cleanName: name || 'Unnamed', badgeHtml: '' }));
+        const m = monster || {};
+        const { cleanName: mClean, badgeHtml: mTagBadge } = formatName(m.name, {
+            badgeBg: 'rgba(239, 68, 68, 0.15)',
+            badgeBorder: 'rgba(239, 68, 68, 0.4)',
+            badgeColor: '#fca5a5',
+        });
+        const attacks = m.attacks?.length ? m.attacks.join(', ') : 'Natural attacks';
+        const moves = m.moves?.length ? m.moves.join('; ') : '';
+        const movesLine = moves ? `<div style="font-size: 0.8em; opacity: 0.8;"><b>Moves:</b> ${moves}</div>` : '';
+        const doomBadge = m.impendingDoom?.length
+            ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;" title="Active Countdown Front / Impending Doom">⏳ Clock: ${m.impendingDoom.length}</span>`
+            : '';
+        const doomLine = m.impendingDoom?.length
+            ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;"><b>⏳ Impending Doom:</b><ul style="margin: 2px 0 0 16px; padding: 0;">${m.impendingDoom.map(d => `<li>${d}</li>`).join('')}</ul></div>`
+            : '';
+
+        const mCur = parseInt(m.currentHarm ?? m.harm?.current, 10) || 0;
+        const mMax = parseInt(m.harm?.max ?? m.harm, 10) || 4;
+        const mHp = Math.max(0, mMax - mCur);
+        const harmBadge = mCur > 0
+            ? `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.6); color: #f87171;">🩸 ${mHp}/${mMax} HP (Harm: ${mCur}/${mMax}) · Wounded</span>`
+            : `<span class="mhc-pill" style="font-size: 0.72em; border-color: rgba(239, 68, 68, 0.4);">Harm: ${mMax} | Armor: ${m.armor}</span>`;
+
+        return `
+            <div class="mhc-deck-item collapsible">
+                <div class="mhc-deck-item-header">
+                    <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
+                        👹 ${escapeHtml(mClean)} ${mTagBadge}${harmBadge} ${doomBadge}
+                    </div>
+                    <span class="mhc-deck-item-toggle">▼</span>
+                </div>
+                <div class="mhc-deck-item-detail">
+                    <div style="font-size: 0.85em; opacity: 0.85;"><b>Attacks:</b> ${attacks}</div>
+                    <div style="font-size: 0.8em; opacity: 0.75;"><b>Weakness:</b> ${m.weakness || 'None specified'}</div>
+                    ${movesLine}
+                    ${doomLine}
+                </div>
+            </div>
+        `;
+    }
+
+    renderDeckDials($, dossier) {
+        if (typeof $ !== 'function') return;
+        const cfg = dossier?.config || {};
+        $('#mhc_dial_heroic_btn').hide();
+        $('#mhc_dial_tempo_btn').hide();
+        const harmMax = cfg.harmMax || 5;
+        let harmTag = '(Standard)';
+        if (harmMax === 3) harmTag = '(Gritty)';
+        else if (harmMax === 4) harmTag = '(Tense)';
+        else if (harmMax === 6) harmTag = '(Pulp)';
+        $('#mhc_dial_harm_btn').text(`❤️ Harm: ${harmMax} ${harmTag}`);
+
+        const maxHarmFate = cfg.maxHarmFate || { rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated' };
+        const fateRule = maxHarmFate.rule || 'Mortal Peril';
+        let fateShort = 'Mortal Peril';
+        let fateIcon = '💀';
+        if (/respawn|graveyard|ghost|mmo|shrine/i.test(fateRule)) {
+            fateShort = 'Respawn';
+            fateIcon = '🔄';
+        } else if (/burnout|exhaust|faint|pass out|fatigue/i.test(fateRule)) {
+            fateShort = 'Burnout / Faint';
+            fateIcon = '💤';
+        } else if (/unconscious|capture|knockout|arrest|subdue/i.test(fateRule)) {
+            fateShort = 'Knockout / Arrest';
+            fateIcon = '⛓️';
+        } else if (!/mortal\s*peril|last\s*breath|dying/i.test(fateRule)) {
+            fateShort = fateRule.length > 18 ? fateRule.slice(0, 16) + '...' : fateRule;
+            fateIcon = '⚡';
+        }
+        $('#mhc_dial_downed_btn').text(`${fateIcon} Downed: ${fateShort}`);
+
+        const partyMode = cfg.partyMode || 'squad';
+        const partyLabel = partyMode.charAt(0).toUpperCase() + partyMode.slice(1);
+        const relsOn = cfg.relationships !== false;
+        $('#mhc_dial_party_btn').text(`👥 Party: ${partyLabel}`).show();
+        $('#mhc_dial_relationships_btn').text(`🤝 Relations: ${relsOn ? 'On' : 'Off'}`).css('opacity', relsOn ? '1' : '0.65').show();
+    }
+
     renderDeckStats(elements, protagonist, dossier, { isUntouchedAndUnestablished = false, escapeHtml = (s) => s } = {}) {
         const { vitalsEl, statsEl, movesEl, heroicEl } = elements || {};
         if (heroicEl && typeof heroicEl.hide === 'function') heroicEl.hide();

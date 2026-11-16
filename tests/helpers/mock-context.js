@@ -103,3 +103,5 @@ export function resetMockGlobals() {
         }
     }
 }
+
+export { createStatefulJQueryMock, installDomHarness } from './dom-harness.js';

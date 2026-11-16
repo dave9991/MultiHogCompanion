@@ -9,6 +9,9 @@ import {
     buildTalkerInstructionNotice,
     formatDiagnosticTrace,
 } from '../concierge-parser.js';
+import { escapeHtml } from '../mhc-utils.js';
+import { renderDebugInspectorDom } from '../concierge-debug-inspector.js';
+import { installDomHarness } from './helpers/dom-harness.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -192,5 +195,109 @@ assert.ok(modalHtml.includes('id="mhc_debug_dossier_json"'), 'Modal must have #m
 assert.ok(modalHtml.includes('class="menu_button mhc-copy-debug-trace-btn"'), 'Modal must have .mhc-copy-debug-trace-btn');
 console.log('✓ concierge-modal.html contains all required debug inspector elements');
 
+// ── 6. Behavioral DOM Rendering & Shared Utility Tests ────────────────────────
+console.log('Testing escapeHtml utility and renderDebugInspectorDom via stateful DOM harness...');
+
+// 6a. escapeHtml edge cases
+assert.strictEqual(escapeHtml(null), '');
+assert.strictEqual(escapeHtml(undefined), '');
+assert.strictEqual(escapeHtml(42), '42');
+assert.strictEqual(escapeHtml(false), 'false');
+assert.strictEqual(
+    escapeHtml(`<script>alert("x" & 'y')</script>`),
+    '&lt;script&gt;alert(&quot;x&quot; &amp; &#39;y&#39;)&lt;/script&gt;'
+);
+
+// 6b. renderDebugInspectorDom behavioral DOM verification
+const harness = installDomHarness();
+try {
+    // Awaiting turn (tx = null)
+    renderDebugInspectorDom(null, { activeDossier: { meta: { title: 'Sandbox Test' } } });
+    assert.strictEqual(harness.getElement('#mhc_debug_status_badge')?.textContent, 'Awaiting Turn');
+    assert.strictEqual(harness.getElement('#mhc_debug_timestamp')?.textContent, '--:--:--');
+    assert.strictEqual(harness.getElement('#mhc_debug_attempt_count')?.textContent, 'Attempt 0/2');
+    assert.strictEqual(harness.getElement('#mhc_debug_critique_badge')?.textContent, 'Not Evaluated');
+    assert.strictEqual(harness.getElement('#mhc_debug_namerag_count')?.textContent, '0 resolved');
+    assert.ok(harness.getElement('#mhc_debug_dossier_json')?.textContent.includes('"Sandbox Test"'));
+
+    // Full mutated transaction with Contemplation, Pass 2 Refiner critique, NameRAG, and XSS payloads
+    const richTransaction = {
+        timestamp: '18:05:00',
+        finalStatus: 'MUTATED',
+        builderSummary: 'Updated Kaelen and NPCs',
+        contemplation: {
+            coreTension: 'Guild blockade <script>alert(1)</script>',
+            worldConsequences: 'Port rationing tightens',
+        },
+        critique: {
+            verdict: 'REVISE',
+            score: 76,
+            grade: 'C',
+            shouldRevise: true,
+            strengths: ['Strong atmosphere'],
+            weaknesses: ['Sparse dockside hooks'],
+            directives: ['Add harbormaster rivalry'],
+        },
+        refinerPass: {
+            hasMutations: true,
+            changes: ['Added Harbormaster Vane & <img onerror=alert(1)>'],
+        },
+        attempts: [
+            {
+                attempt: 1,
+                rawResponse: '[UPDATE_DOSSIER]\n[NOOP]\n[/UPDATE_DOSSIER]',
+                report: {
+                    changes: ['Added <script>xss</script> Blade'],
+                    errors: ['Warn <b>raw</b> tag'],
+                },
+            },
+        ],
+        nameRagResolutions: [
+            {
+                placeholder: '[[NAME:npc]]',
+                gender: 'F',
+                source: 'NameRAG',
+                query: 'maritime smuggler',
+                candidates: ['Sera', 'Lyra'],
+                selectedName: 'Sera',
+            },
+        ],
+        builderRequest: {
+            messages: [{ role: 'user', content: 'Build port ambush' }],
+        },
+        activeDossierSnapshot: { meta: { title: 'Port Ambush' } },
+    };
+
+    renderDebugInspectorDom(richTransaction, { activeDossier: {} });
+    assert.strictEqual(harness.getElement('#mhc_debug_status_badge')?.textContent, 'MUTATED');
+    assert.strictEqual(harness.getElement('#mhc_debug_status_badge')?.css.color, '#4ade80');
+    assert.strictEqual(harness.getElement('#mhc_debug_timestamp')?.textContent, '18:05:00');
+    assert.strictEqual(harness.getElement('#mhc_debug_attempt_count')?.textContent, 'Attempt 1/2');
+    assert.strictEqual(harness.getElement('#mhc_debug_critique_badge')?.textContent, 'REFINED (Pass 2 · 76/100 C)');
+    assert.strictEqual(harness.getElement('#mhc_debug_namerag_count')?.textContent, '1 resolved');
+
+    const changesHtml = harness.getElement('#mhc_debug_changes_list')?.htmlContent || '';
+    assert.ok(!changesHtml.includes('<script>'), 'Mutation list must escape <script>');
+    assert.ok(changesHtml.includes('&lt;script&gt;xss&lt;/script&gt;'), 'Escaped mutation payload present');
+
+    const errorsHtml = harness.getElement('#mhc_debug_errors_list')?.htmlContent || '';
+    assert.ok(errorsHtml.includes('&lt;b&gt;raw&lt;/b&gt;'), 'Error list must escape HTML tags');
+
+    const contempHtml = harness.getElement('#mhc_debug_contemplation_box')?.htmlContent || '';
+    assert.ok(contempHtml.includes('Pass 1 Architectural Scratchpad'));
+    assert.ok(!contempHtml.includes('<script>alert(1)</script>'), 'Contemplation box must escape <script>');
+    assert.ok(contempHtml.includes('&lt;img onerror=alert(1)&gt;'), 'Refiner changes must escape HTML tags');
+    assert.ok(contempHtml.includes('Resolved in Pass 2'));
+
+    const nameRagHtml = harness.getElement('#mhc_debug_namerag_list')?.htmlContent || '';
+    assert.ok(nameRagHtml.includes('♀ Female'));
+    assert.ok(nameRagHtml.includes('<b style="color: #4ade80;">Sera (picked)</b>'));
+    assert.ok(nameRagHtml.includes('Lyra'));
+    assert.ok(harness.getElement('#mhc_debug_dossier_json')?.textContent.includes('"Port Ambush"'));
+} finally {
+    harness.cleanup();
+}
+
+console.log('✓ escapeHtml edge cases and renderDebugInspectorDom behavioral DOM assertions verified cleanly');
 console.log('--- ALL CONCIERGE DEBUG INSPECTOR TESTS PASSED CLEANLY! ---');
 

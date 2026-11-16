@@ -1,3 +1,4 @@
+/// <reference path="./types.d.ts" />
 /**
  * concierge-system-base.js — MultiHog Companion
  *

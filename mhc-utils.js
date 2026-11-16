@@ -1,3 +1,4 @@
+/// <reference path="./types.d.ts" />
 /**
  * mhc-utils.js — MultiHog Companion
  *

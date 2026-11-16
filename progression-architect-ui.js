@@ -25,21 +25,7 @@ import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
 import { FAE_GENRES } from './fae-ruleset.js';
 import { systemRegistry } from './concierge-system-registry.js';
 import { calculateDndModifier } from './concierge-system-dnd5e.js';
-
-/**
- * Escapes HTML characters for safe DOM insertion.
- * @param {string} str
- * @returns {string}
- */
-function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+import { escapeHtml } from './mhc-utils.js';
 
 /** Tiers for D&D 5e 1–20 table: [start, end, label, summary] */
 const DND_TIERS = [

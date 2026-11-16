@@ -24,6 +24,8 @@
  *   for `/mhc-history-check`.
  */
 
+import { escapeHtml } from './mhc-utils.js';
+
 /**
  * Resolves the authoritative active chat ID directly from SillyTavern's context,
  * falling back to `_rpgCurrentChatId()` only when SillyTavern's context has no chat ID.
@@ -219,21 +221,6 @@ export async function checkTrackerProjectionIntegrity(options = {}) {
         partitionMemo,
         reason,
     };
-}
-
-/**
- * Escapes HTML special characters for safe banner rendering.
- *
- * @param {string} str
- * @returns {string}
- */
-function escapeHtml(str) {
-    return String(str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }
 
 /**

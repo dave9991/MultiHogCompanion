@@ -22,24 +22,9 @@ import { systemRegistry } from './concierge-system-registry.js';
 import './concierge-system-pbta.js';
 import './concierge-system-fae.js';
 import './concierge-system-dnd5e.js';
+import { escapeHtml } from './mhc-utils.js';
 
 let _activeModalElement = null;
-
-/**
- * Escapes HTML characters for safe DOM insertion.
- *
- * @param {string} str Raw string.
- * @returns {string} Escaped string.
- */
-function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
 
 /**
  * Closes and unmounts the active Level-Up / Respec Modal if present.

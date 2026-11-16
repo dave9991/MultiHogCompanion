@@ -93,7 +93,7 @@ console.log(`✓ All ${requiredAdrs.length} Architectural Decision Records prese
 console.log('Verifying Feature catalog coverage in FEATURES.md...');
 const requiredFeatures = [
     'FEAT-01', 'FEAT-02', 'FEAT-03', 'FEAT-04',
-    'FEAT-05', 'FEAT-06', 'FEAT-07', 'FEAT-08', 'FEAT-09', 'FEAT-10', 'FEAT-11',
+    'FEAT-05', 'FEAT-06', 'FEAT-07', 'FEAT-08', 'FEAT-09', 'FEAT-10', 'FEAT-11', 'FEAT-12',
 ];
 for (const feat of requiredFeatures) {
     assert.ok(
@@ -231,6 +231,45 @@ for (const rel of docFiles) {
     }
 }
 console.log(`✓ File references and cross-doc anchors verified across ${docFiles.length} documents`);
+
+// 8c. Verify every referenced catalog ID (FEAT-XX, WRK-XX, EVT-XX, DOM-XX, ADR-MP-XX) exists in its home catalog
+console.log('Verifying cross-document & source catalog ID references...');
+const validCatalogIds = new Set([
+    ...requiredFeatures,
+    ...requiredWorkarounds,
+    ...requiredCatalogTags,
+]);
+const allMdFiles = [
+    ...new Set([
+        ...fs.readdirSync(extensionRoot).filter(f => f.endsWith('.md')),
+        ...docFiles,
+    ]),
+];
+const catalogIdRefRegex = /\b(FEAT-\d{2,}|WRK-\d{2,}|EVT-\d{2,}|DOM-\d{2,}[a-z]?|ADR-MP-\d{2,})\b/g;
+let checkedCatalogRefs = 0;
+
+for (const rel of allMdFiles) {
+    const text = fs.readFileSync(path.join(extensionRoot, rel), 'utf8');
+    for (const m of text.matchAll(catalogIdRefRegex)) {
+        checkedCatalogRefs++;
+        assert.ok(
+            validCatalogIds.has(m[1]),
+            `${rel}: references unknown or uncataloged ID "${m[1]}"! Update catalog & catalog-integrity.test.js.`
+        );
+    }
+}
+for (const filePath of jsFiles) {
+    const text = fs.readFileSync(filePath, 'utf8');
+    const rel = path.relative(extensionRoot, filePath);
+    for (const m of text.matchAll(catalogIdRefRegex)) {
+        checkedCatalogRefs++;
+        assert.ok(
+            validCatalogIds.has(m[1]),
+            `${rel}: references unknown or uncataloged ID "${m[1]}"! Update catalog & catalog-integrity.test.js.`
+        );
+    }
+}
+console.log(`✓ All ${checkedCatalogRefs} catalog ID references verified across ${allMdFiles.length} docs and ${jsFiles.length} source files`);
 
 // 9. Verify Browser URL Resolution of Escaping Relative Imports across all JS source files
 const stPublicRoot = path.resolve(extensionRoot, '../../st-source/public');

@@ -57,7 +57,7 @@ export function isAdventureActive(chatId = null, ctx = null) {
     for (const id of candidateIds) {
         const part = s.chatStates?.[id];
         if (!part) continue;
-        if (part.pbtaCampaignDossier || part.companionDossier || part.playerCharacter?.name) {
+        if (part.pbtaCampaignDossier || part.faeCampaignDossier || part.companionDossier || part.campaignDossier || part.playerCharacter?.name) {
             hasExplicitChatCharacter = true;
             break;
         }
@@ -105,7 +105,7 @@ export function isAdventureActive(chatId = null, ctx = null) {
     for (const id of candidateIds) {
         const part = s.chatStates?.[id];
         if (!part) continue;
-        if (part.pbtaCampaignDossier || part.companionDossier || part.playerCharacter?.name) return true;
+        if (part.pbtaCampaignDossier || part.faeCampaignDossier || part.companionDossier || part.campaignDossier || part.playerCharacter?.name) return true;
         if (part.currentMemo && /\[CHARACTER\]/i.test(part.currentMemo)) return true;
         if (part.npcRelationshipValues && Object.keys(part.npcRelationshipValues).length > 0) return true;
     }

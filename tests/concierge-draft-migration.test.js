@@ -1,8 +1,8 @@
 /**
  * tests/concierge-draft-migration.test.js — MultiHog Companion
  *
- * Verifies Phase 3 modular storage migration, ruleset draft isolation,
- * corruption resilience, and dynamic UI ruleset adapter integration.
+ * Verifies ruleset draft isolation, corruption resilience, MIG-02 retirement,
+ * canonical partition dossier persistence, and dynamic UI ruleset adapter integration.
  */
 
 import { test } from 'node:test';
@@ -10,12 +10,22 @@ import assert from 'node:assert/strict';
 import {
     loadValidatedDraft,
     getDraftStorageKey,
-    STORAGE_DRAFT_KEY,
 } from '../concierge-ui.js';
 import { systemRegistry } from '../concierge-system-registry.js';
 import { createEmptyDossier } from '../concierge-parser.js';
+import {
+    getPartitionDossier,
+    setPartitionDossier,
+    isPbtAActive,
+    isFaeActive,
+} from '../pbta-ruleset-persistence.js';
+import {
+    getMultihogPlayerName,
+    getMultihogPlayerPortrait,
+} from '../persona-matching.js';
 import '../concierge-system-pbta.js';
 import '../concierge-system-fae.js';
+import '../concierge-system-dnd5e.js';
 
 // Setup mock in-memory localStorage for Node test runner
 const mockStore = new Map();
@@ -34,8 +44,12 @@ globalThis.localStorage = {
     },
 };
 
-test('1. Transparent legacy draft migration (mhc_pbta_concierge_draft -> mhc_concierge_draft_pbta)', () => {
+test('1. Scoped ruleset draft keys and MIG-02 retirement (legacy key ignored)', () => {
     localStorage.clear();
+
+    assert.equal(getDraftStorageKey('pbta'), 'mhc_concierge_draft_pbta');
+    assert.equal(getDraftStorageKey('fae'), 'mhc_concierge_draft_fae');
+    assert.equal(getDraftStorageKey('dnd5e'), 'mhc_concierge_draft_dnd5e');
 
     const pbtaDossier = createEmptyDossier('pbta', 'fantasy');
     pbtaDossier.meta.title = 'Legacy PbtA Campaign';
@@ -50,21 +64,29 @@ test('1. Transparent legacy draft migration (mhc_pbta_concierge_draft -> mhc_con
         timestamp: Date.now(),
     };
 
-    // Store in legacy key
-    localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify(legacyPayload));
+    // Legacy key is no longer read after MIG-02 retirement
+    localStorage.setItem('mhc_pbta_concierge_draft', JSON.stringify(legacyPayload));
+    assert.equal(loadValidatedDraft('pbta'), null, 'Legacy key must not be read after MIG-02 retirement');
 
-    assert.equal(localStorage.getItem(STORAGE_DRAFT_KEY) !== null, true);
-    assert.equal(localStorage.getItem(getDraftStorageKey('pbta')), null);
-
-    // loadValidatedDraft('pbta') should transparently migrate it
+    // Scoped keys load properly for pbta, fae, and dnd5e
+    localStorage.setItem(getDraftStorageKey('pbta'), JSON.stringify(legacyPayload));
     const result = loadValidatedDraft('pbta');
-    assert.ok(result, 'Result must not be null');
-    assert.ok(result.draft, 'Draft must be valid');
+    assert.ok(result?.draft, 'Scoped PbtA draft must load');
     assert.equal(result.draft.dossier.protagonist.name, 'Old Knight');
 
-    // Verify key migration
-    assert.ok(localStorage.getItem(getDraftStorageKey('pbta')), 'Scoped key must now be populated');
-    assert.equal(localStorage.getItem(STORAGE_DRAFT_KEY), null, 'Legacy key must be purged after migration');
+    const dndDossier = createEmptyDossier('dnd5e', 'forgotten_realms');
+    dndDossier.meta.title = 'Waterdeep Intrigue';
+    dndDossier.protagonist.name = 'Lyra';
+    localStorage.setItem(getDraftStorageKey('dnd5e'), JSON.stringify({
+        dossier: dndDossier,
+        chatHistory: [{ role: 'user', content: 'Create a rogue' }],
+        changelog: [],
+        timestamp: Date.now(),
+    }));
+    const dndResult = loadValidatedDraft('dnd5e');
+    assert.ok(dndResult?.draft, 'Scoped D&D 5e draft must load');
+    assert.equal(dndResult.draft.dossier.meta.ruleset, 'dnd5e');
+    assert.equal(dndResult.draft.dossier.protagonist.name, 'Lyra');
 });
 
 test('2. Multi-ruleset draft isolation prevents cross-engine pollution', () => {
@@ -122,12 +144,12 @@ test('3. Draft corruption resilience purges corrupted storage safely', () => {
     assert.equal(result.corrupted, true);
     assert.equal(localStorage.getItem(getDraftStorageKey('pbta')), null, 'Corrupted key must be purged');
 
-    // Store incomplete/missing chatHistory draft in legacy key
-    localStorage.setItem(STORAGE_DRAFT_KEY, JSON.stringify({ dossier: {} }));
-    const legacyResult = loadValidatedDraft('pbta');
-    assert.ok(legacyResult);
-    assert.equal(legacyResult.corrupted, true);
-    assert.equal(localStorage.getItem(STORAGE_DRAFT_KEY), null, 'Incomplete legacy key must be purged');
+    // Store incomplete/missing chatHistory draft in FAE scoped key
+    localStorage.setItem(getDraftStorageKey('fae'), JSON.stringify({ dossier: {} }));
+    const faeCorruptResult = loadValidatedDraft('fae');
+    assert.ok(faeCorruptResult);
+    assert.equal(faeCorruptResult.corrupted, true);
+    assert.equal(localStorage.getItem(getDraftStorageKey('fae')), null, 'Incomplete FAE scoped key must be purged');
 });
 
 test('4. Dynamic UI Adapter integration & dial queries', () => {
@@ -201,4 +223,57 @@ test('4. Dynamic UI Adapter integration & dial queries', () => {
     assert.ok(mockElements.vitalsEl._html.includes('Sanity: 7/8'));
     assert.ok(mockElements.statsEl._items.some(i => i.includes('Ward Weaver')));
     assert.ok(mockElements.movesEl._html.includes('Haunted'));
+});
+
+test('5. Canonical getPartitionDossier / setPartitionDossier parity across pbta, fae, and dnd5e', () => {
+    const dndDossier = createEmptyDossier('dnd5e', 'forgotten_realms');
+    dndDossier.protagonist.name = 'Seraphina';
+    const faeDossier = createEmptyDossier('fae', 'cosmic_horror');
+    faeDossier.protagonist.name = 'Arthur Pendelton';
+    faeDossier.protagonist.portraitSrc = 'user/images/arthur.png';
+    const pbtaDossier = createEmptyDossier('pbta', 'fantasy');
+    pbtaDossier.protagonist.name = 'Kaelen';
+
+    const rpgSettings = {
+        chatStates: {
+            chat_dnd: {},
+            chat_fae: {},
+            chat_pbta: {},
+            chat_fae_legacy: {
+                faeCampaignDossier: faeDossier,
+            },
+        },
+    };
+    const compSettings = { companionActiveCartridges: {} };
+
+    // D&D 5e write must populate companionDossier without polluting pbtaCampaignDossier
+    setPartitionDossier(rpgSettings.chatStates.chat_dnd, dndDossier, 'dnd5e');
+    assert.equal(rpgSettings.chatStates.chat_dnd.companionDossier, dndDossier);
+    assert.equal(rpgSettings.chatStates.chat_dnd.pbtaCampaignDossier, undefined);
+    assert.equal(rpgSettings.chatStates.chat_dnd.faeCampaignDossier, undefined);
+    assert.equal(getPartitionDossier(rpgSettings.chatStates.chat_dnd), dndDossier);
+    assert.equal(isPbtAActive('chat_dnd', rpgSettings, compSettings), false);
+    assert.equal(isFaeActive('chat_dnd', rpgSettings, compSettings), false);
+
+    // FAE write populates companionDossier and faeCampaignDossier
+    setPartitionDossier(rpgSettings.chatStates.chat_fae, faeDossier, 'fae');
+    assert.equal(rpgSettings.chatStates.chat_fae.companionDossier, faeDossier);
+    assert.equal(rpgSettings.chatStates.chat_fae.faeCampaignDossier, faeDossier);
+    assert.equal(rpgSettings.chatStates.chat_fae.pbtaCampaignDossier, undefined);
+    assert.equal(isFaeActive('chat_fae', rpgSettings, compSettings), true);
+    assert.equal(isPbtAActive('chat_fae', rpgSettings, compSettings), false);
+
+    // PbtA write populates companionDossier and pbtaCampaignDossier
+    setPartitionDossier(rpgSettings.chatStates.chat_pbta, pbtaDossier, 'pbta');
+    assert.equal(rpgSettings.chatStates.chat_pbta.companionDossier, pbtaDossier);
+    assert.equal(rpgSettings.chatStates.chat_pbta.pbtaCampaignDossier, pbtaDossier);
+    assert.equal(isPbtAActive('chat_pbta', rpgSettings, compSettings), true);
+
+    // Even if a legacy partition stored a dnd5e dossier in pbtaCampaignDossier, isPbtAActive rejects it
+    rpgSettings.chatStates.chat_dnd_polluted = { pbtaCampaignDossier: dndDossier };
+    assert.equal(isPbtAActive('chat_dnd_polluted', rpgSettings, compSettings), false);
+
+    // Persona matching resolves FAE protagonist name and portrait from faeCampaignDossier
+    assert.equal(getMultihogPlayerName('chat_fae_legacy', rpgSettings), 'Arthur Pendelton');
+    assert.equal(getMultihogPlayerPortrait('chat_fae_legacy', null, rpgSettings), 'user/images/arthur.png');
 });

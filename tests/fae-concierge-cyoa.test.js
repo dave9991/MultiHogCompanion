@@ -48,7 +48,6 @@ import {
 
 import {
     getDraftStorageKey,
-    STORAGE_DRAFT_KEY,
 } from '../concierge-ui.js';
 
 import {
@@ -1131,8 +1130,8 @@ name: [[NAME:protagonist]]
         // 2. Draft storage key isolation
         assert.equal(getDraftStorageKey('fae'), 'mhc_concierge_draft_fae');
         assert.equal(getDraftStorageKey('pbta'), 'mhc_concierge_draft_pbta');
+        assert.equal(getDraftStorageKey('dnd5e'), 'mhc_concierge_draft_dnd5e');
         assert.equal(getDraftStorageKey(null), 'mhc_concierge_draft_pbta');
-        assert.equal(STORAGE_DRAFT_KEY, 'mhc_pbta_concierge_draft');
     });
 
     test('FAE Pure Freeform (No Choices) Dial & Footer Purity', () => {

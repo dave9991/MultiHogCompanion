@@ -11,6 +11,7 @@
  */
 
 import { stripMarkdownNameArtifacts, isValidCharacterName } from './character-creator-sanitizer.js';
+import { getPartitionDossier } from './pbta-ruleset-persistence.js';
 export { isValidCharacterName };
 
 /**
@@ -216,15 +217,14 @@ export function getMultihogPlayerName(chatId, providedRpgSettings = null) {
 
     const candidateIds = getCandidateChatIds(chatId);
 
-    // 1. Chat partition playerCharacter, pbtaCampaignDossier, or companionDossier
+    // 1. Chat partition playerCharacter or campaign dossier
     for (const cid of candidateIds) {
         const rawPcName = s.chatStates?.[cid]?.playerCharacter?.name;
         const pcName = stripMarkdownNameArtifacts(rawPcName);
         if (pcName && isValidCharacterName(pcName)) {
             return pcName;
         }
-        const rawProtoName = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.name
-            || s.chatStates?.[cid]?.companionDossier?.protagonist?.name;
+        const rawProtoName = getPartitionDossier(s.chatStates?.[cid])?.protagonist?.name;
         const protoName = stripMarkdownNameArtifacts(rawProtoName);
         if (protoName && isValidCharacterName(protoName)) {
             return protoName;
@@ -294,8 +294,7 @@ export function getMultihogPlayerPortrait(chatId, charName, providedRpgSettings 
         const part = s.chatStates?.[cid];
         if (!part) continue;
         addCandidateName(part.playerCharacter?.name);
-        addCandidateName(part.pbtaCampaignDossier?.protagonist?.name);
-        addCandidateName(part.companionDossier?.protagonist?.name);
+        addCandidateName(getPartitionDossier(part)?.protagonist?.name);
         if (part.currentMemo) {
             addCandidateName(extractNameFromMemo(part.currentMemo));
         }
@@ -355,10 +354,9 @@ export function getMultihogPlayerPortrait(chatId, charName, providedRpgSettings 
     const live = lookupInMap(s.customPortraits, { allowGenericFallback: false });
     if (live) return live;
 
-    // 3. Check pbtaCampaignDossier, companionDossier, or playerCharacter portraitSrc across candidate partitions
+    // 3. Check campaign dossier or playerCharacter portraitSrc across candidate partitions
     for (const cid of candidateIds) {
-        const dossierPortrait = s.chatStates?.[cid]?.pbtaCampaignDossier?.protagonist?.portraitSrc
-            || s.chatStates?.[cid]?.companionDossier?.protagonist?.portraitSrc;
+        const dossierPortrait = getPartitionDossier(s.chatStates?.[cid])?.protagonist?.portraitSrc;
         if (dossierPortrait) return dossierPortrait;
         const pcPortrait = s.chatStates?.[cid]?.playerCharacter?.portraitSrc;
         if (pcPortrait) return pcPortrait;

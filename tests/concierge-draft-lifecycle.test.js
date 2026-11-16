@@ -181,10 +181,9 @@ console.log('Testing concierge-ui.js integration...');
     const uiJsPath = path.join(ROOT_DIR, 'concierge-ui.js');
     const uiJs = fs.readFileSync(uiJsPath, 'utf8');
 
-    // Must export resetConciergeState, loadValidatedDraft, and STORAGE_DRAFT_KEY
+    // Must export resetConciergeState, loadValidatedDraft, and getDraftStorageKey
     assert.ok(uiJs.includes('export function resetConciergeState'), 'concierge-ui.js must export resetConciergeState');
     assert.ok(uiJs.includes('export function loadValidatedDraft'), 'concierge-ui.js must export loadValidatedDraft');
-    assert.ok(uiJs.includes('export const STORAGE_DRAFT_KEY'), 'concierge-ui.js must export STORAGE_DRAFT_KEY');
     assert.ok(uiJs.includes('export function getDraftStorageKey'), 'concierge-ui.js must export getDraftStorageKey');
     assert.ok(uiJs.includes('mhc_concierge_draft_'), 'concierge-ui.js must scope drafts by ruleset prefix');
 

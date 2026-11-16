@@ -40,7 +40,7 @@
 | Migration ID | Title / Mechanism | File & Function | Target String / Regex Pattern | Replacement | Why It Exists | Safe to Remove When |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **MIG-01** | **Concierge Assistant Persona Cleansing [RETIRED]** | `concierge-ui.js`<br>• `loadValidatedDraft`<br>• `renderChatHistoryFromState`<br>• `appendChatBubble` | `/I'm your (?:PbtA\|Session Zero)\s+Concierge/gi` | `"I'm your Concierge"` | Legacy Session Zero drafts contained hardcoded "PbtA Concierge" greetings that leaked into multi-ruleset (FAE, D&D 5e) sessions. | ⚪ **RETIRED** via Option B clean sweep. Cleansed drafts and removed regex filters from presentation layer and load pipeline. |
-| **MIG-02** | **Concierge Draft Storage Key Migration** | `concierge-ui.js`<br>• `loadValidatedDraft`<br>• `saveConciergeDraft`<br>• `clearConciergeDraft` | Key `mhc_pbta_concierge_draft` (`STORAGE_DRAFT_KEY`) | Re-keyed to `mhc_concierge_draft_pbta` (`adapter.getDraftStorageKey()`) | Migrated single global draft storage key to ruleset-isolated keys to prevent cross-ruleset draft overwrite. | Safe to delete once all user profiles have loaded post-Phase 3 drafts or on localStorage reset. |
+| **MIG-02** | **Concierge Draft Storage Key Migration [RETIRED]** | `concierge-ui.js`<br>• `loadValidatedDraft`<br>• `saveDraft`<br>• `resetConciergeState` | Key `mhc_pbta_concierge_draft` (`STORAGE_DRAFT_KEY`) | Re-keyed to `mhc_concierge_draft_{ruleset}` (`adapter.getDraftStorageKey()`) | Migrated single global draft storage key to ruleset-isolated keys to prevent cross-ruleset draft overwrite. | ⚪ **RETIRED** via Option B clean sweep. Removed legacy `mhc_pbta_concierge_draft` fallback from `concierge-ui.js`. |
 | **MIG-03** | **Concierge State Block Stripping** | `concierge-parser.js`<br>• `stripConciergeStateBlocks`<br>`concierge-ui.js`<br>• `renderChatHistoryFromState`<br>• `processStreamingReply` | `[UPDATE_DOSSIER]`, `[CONCIERGE_STATE]`, `[FRAMING]`, `[CANON_...]`, `[PROTAGONIST]`, etc. | `""` (Stripped from visible bubble text) | Strips internal architectural protocol blocks from assistant streaming chunks and chat history so only conversation displays. | **Permanent**. Core protocol display filter for Concierge chat stream. |
 | **MIG-04** | **Character Creator Macro Sanitizer** | `character-creator-sanitizer.js`<br>• `sanitizeCharacterStockPrompt`<br>`index.js`<br>• QuickStart click handlers | `\{\{user\}\}(\s*[\(:])`<br>`\{\{user\}\}`<br>`\bCharacter Name\b(\s*[\(:])` | Protagonist name (or "the Adventurer" / "the protagonist") | Upstream stock prompts hardcode `{{user}}`, which ST macro expansion resolves to the human player persona instead of the RPG character. | Keep active until upstream MultiHog scopes character creator templates without `{{user}}`. |
 | **MIG-05** | **Live Memo Character Header Sanitizer** | `character-creator-sanitizer.js`<br>• `sanitizeCharacterHeaderInMemo`<br>• `stripMarkdownNameArtifacts` | `[*_\`~]`, `<[^>]+>`, repeated parentheticals `(\s*\((.*?)\))\s*\(\2\)`, and pool debuff `\(\(BAR...\)\)` | Clean unformatted name without duplicate tags | LLMs frequently wrap names in markdown (`**Name**`) or append duplicate archetypes, breaking upstream MultiHog header regexes. | **Permanent**. Necessary defense against LLM markdown variance. |
@@ -69,17 +69,19 @@
 * **Retirement Rationale:**
   With modern greetings in `concierge-ui.js` natively adopting the ruleset-neutral greeting `"Welcome to Session Zero! I'm your Concierge..."`, all new drafts are clean by default. In accordance with Option B (Clean Sweep), the redundant regex filters were completely eliminated from `appendChatBubble()`, `renderChatHistoryFromState()`, and `loadValidatedDraft()`, restoring pure presentation rendering without runtime regex overhead. User drafts containing legacy intros are cleared on draft reset.
 
-#### MIG-02: Concierge Draft Storage Key Migration
-* **Files & Functions:**
-  * `concierge-ui.js` -> `loadValidatedDraft(targetRuleset)` (lines 340-349)
-  * `concierge-ui.js` -> `saveConciergeDraft()` (line 303)
-  * `concierge-ui.js` -> `clearConciergeDraft()` (line 478)
+#### MIG-02: Concierge Draft Storage Key Migration [RETIRED]
+* **Status:** ⚪ **RETIRED** (Clean Sweep Option B executed)
+* **Historical Locations:**
+  * `concierge-ui.js` -> `STORAGE_DRAFT_KEY`
+  * `concierge-ui.js` -> `loadValidatedDraft(targetRuleset)`
+  * `concierge-ui.js` -> `saveDraft()`
+  * `concierge-ui.js` -> `resetConciergeState()`
 * **Target Pattern:** Storage key `'mhc_pbta_concierge_draft'`
-* **Replacement:** Scoped key `'mhc_concierge_draft_pbta'` via `adapter.getDraftStorageKey()`
-* **Why It Exists:**
-  Initial versions used a single global key `mhc_pbta_concierge_draft`. When FAE support was introduced, drafts between PbtA and FAE would overwrite each other. `loadValidatedDraft` checks if the scoped key exists; if missing and the requested ruleset is PbtA, it copies from `mhc_pbta_concierge_draft` into `mhc_concierge_draft_pbta` and deletes the old key via `localStorage.removeItem(STORAGE_DRAFT_KEY)`.
-* **Safe to Remove When:**
-  When existing browser profiles have loaded and migrated their old draft, or if the user performs a draft reset.
+* **Replacement:** Scoped key `'mhc_concierge_draft_{ruleset}'` via `adapter.getDraftStorageKey()`
+* **Why It Existed:**
+  Initial versions used a single global key `mhc_pbta_concierge_draft`. When FAE and D&D 5e support were introduced, drafts across rulesets would have overwritten each other. `loadValidatedDraft` temporarily copied any remaining `mhc_pbta_concierge_draft` into `mhc_concierge_draft_pbta` and deleted the legacy key.
+* **Retirement Rationale:**
+  With all ruleset adapters (`pbta`, `fae`, `dnd5e`) writing strictly to scoped `mhc_concierge_draft_{ruleset}` keys, the legacy `STORAGE_DRAFT_KEY` constant and fallback checks were removed from `concierge-ui.js`.
 
 #### MIG-03: Concierge State Block Stripping
 * **Files & Functions:**
@@ -229,7 +231,7 @@ The following string replacements, data migrations, and fallback sanitizers occu
 
 ---
 
-## Section 3: Proposed Cleanup Plan for MultiHogCompanion
+## Section 3: Historical Cleanup Plan for MultiHogCompanion *(Completed — MIG-01 & MIG-02 Retired)*
 
 ### 3.1 Problem Diagnosis: Leaky UI Sanitization
 In `concierge-ui.js`, regex cleansing of legacy assistant introductions (`/I'm your (?:PbtA|Session Zero)\s+Concierge/gi`) is currently executed in three distinct locations:

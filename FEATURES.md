@@ -45,6 +45,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 | **FEAT-09** | **D&D 5e & PbtA Unified Subfooter Alignment Engine** | [`dnd-fixes.js`](./dnd-fixes.js)<br>[`pbta-ruleset.js`](./pbta-ruleset.js) | None | [`EVT-04`](./LISTENERS.md#evt-04-chat_changed-coordinator--phase-2-reconciled) | None (Pure MultiHog Settings API) |
 | **FEAT-10** | **Autonomous Level-Up Concierge & Class Progression Codex** | [`level-up-runner.js`](./level-up-runner.js)<br>[`level-up-ui.js`](./level-up-ui.js)<br>[`level-up-blueprint.js`](./level-up-blueprint.js)<br>[`level-up-scaffold.js`](./level-up-scaffold.js) | [`WRK-08`](./WORKAROUNDS.md#wrk-08-level-up--permadeath-pause-protocol-shield) | [`DOM-08`](./LISTENERS.md#dom-08)<br>[`DOM-09`](./LISTENERS.md#dom-09) | None (Pure MultiHog Settings & State Memo API) |
 | **FEAT-11** | **Campaign Set Manager & Orphan Cleanup** | [`campaign-set-manager.js`](./campaign-set-manager.js)<br>[`campaign-lore-sync.js`](./campaign-lore-sync.js) | None | [`DOM-11`](./LISTENERS.md#dom-11) | None (Pure ST World Info & Chat Metadata API) |
+| **FEAT-12** | **Game System Wizard Bridge & Custom HUD Trackers** | [`game-system-bridge.js`](./game-system-bridge.js)<br>[`concierge-ui.js`](./concierge-ui.js)<br>[`concierge-parser.js`](./concierge-parser.js)<br>[`concierge-runner.js`](./concierge-runner.js) | None | [`DOM-12`](./LISTENERS.md#dom-12) | None (Pure MultiHog Game System Wizard API) |
 
 ---
 

@@ -58,6 +58,46 @@ export function getCandidateChatIds(chatId, rpgSettings = null) {
 }
 
 /**
+ * Returns the active campaign dossier stored on a chatStates partition,
+ * checking canonical `companionDossier` as well as ruleset-scoped keys.
+ *
+ * @param {object|null|undefined} part
+ * @returns {object|null}
+ */
+export function getPartitionDossier(part) {
+    if (!part || typeof part !== 'object') return null;
+    return part.companionDossier
+        || part.faeCampaignDossier
+        || part.pbtaCampaignDossier
+        || part.campaignDossier
+        || null;
+}
+
+/**
+ * Writes a campaign dossier into a chatStates partition under canonical `companionDossier`
+ * (and `campaignDossier`) while keeping ruleset-specific keys (`faeCampaignDossier` /
+ * `pbtaCampaignDossier`) synchronized for FAE and PbtA without polluting them for D&D 5e.
+ *
+ * @param {object|null|undefined} part
+ * @param {object|null|undefined} dossier
+ * @param {string|null} [rulesetHint=null]
+ */
+export function setPartitionDossier(part, dossier, rulesetHint = null) {
+    if (!part || typeof part !== 'object' || !dossier || typeof dossier !== 'object') return;
+    part.companionDossier = dossier;
+    part.campaignDossier = dossier;
+    const ruleset = String(rulesetHint || dossier?.meta?.ruleset || '').toLowerCase();
+    if (ruleset === 'fae') {
+        part.faeCampaignDossier = dossier;
+    } else if (ruleset === 'dnd5e') {
+        if (part.pbtaCampaignDossier?.meta?.ruleset === 'dnd5e') delete part.pbtaCampaignDossier;
+        if (part.faeCampaignDossier?.meta?.ruleset === 'dnd5e') delete part.faeCampaignDossier;
+    } else {
+        part.pbtaCampaignDossier = dossier;
+    }
+}
+
+/**
  * Retrieve the explicit CompanionActiveCartridge record for a chat.
  *
  * @param {string|null} chatId
@@ -155,11 +195,7 @@ export async function setCompanionActiveCartridge(chatId = null, cartridgeData =
     if (s?.chatStates && record.dossier) {
         for (const cid of candidateIds) {
             if (s.chatStates[cid]) {
-                if (record.cartridgeId === 'fae') {
-                    s.chatStates[cid].faeCampaignDossier = record.dossier;
-                } else {
-                    s.chatStates[cid].pbtaCampaignDossier = record.dossier;
-                }
+                setPartitionDossier(s.chatStates[cid], record.dossier, record.cartridgeId);
             }
         }
     }
@@ -218,8 +254,9 @@ export function isPbtAActive(chatId = null, rpgSettings = null, companionSetting
     const candidateIds = getCandidateChatIds(chatId, s);
     for (const cid of candidateIds) {
         if (s.chatStates?.[cid]) {
-            // Partition marked explicitly as FAE must not match PbtA
-            if (s.chatStates[cid].faeCampaignDossier || s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset === 'fae') {
+            // Partition marked explicitly as FAE or D&D 5e must not match PbtA
+            const pbtaRuleset = s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset;
+            if (s.chatStates[cid].faeCampaignDossier || pbtaRuleset === 'fae' || pbtaRuleset === 'dnd5e') {
                 continue;
             }
 
@@ -280,7 +317,8 @@ export function isPbtaChat(chatId = null, rpgSettings = null, companionSettings 
     if (!s) return false;
     const candidateIds = getCandidateChatIds(chatId, s);
     for (const cid of candidateIds) {
-        if (s.chatStates?.[cid]?.faeCampaignDossier || s.chatStates?.[cid]?.pbtaCampaignDossier?.meta?.ruleset === 'fae') {
+        const pbtaRuleset = s.chatStates?.[cid]?.pbtaCampaignDossier?.meta?.ruleset;
+        if (s.chatStates?.[cid]?.faeCampaignDossier || pbtaRuleset === 'fae' || pbtaRuleset === 'dnd5e') {
             return false;
         }
         if (s.chatStates?.[cid]?.pbtaCampaignDossier) return true;
@@ -962,13 +1000,16 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
 
     for (const cid of candidateIds) {
         if (s.chatStates?.[cid]?.pbtaCampaignDossier) {
-            if (s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset === 'fae') {
+            const pbtaRuleset = s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset;
+            if (pbtaRuleset === 'fae') {
                 faeDossier = s.chatStates[cid].pbtaCampaignDossier;
-            } else {
+                resolvedChatId = cid;
+                break;
+            } else if (pbtaRuleset !== 'dnd5e') {
                 pbtaDossier = s.chatStates[cid].pbtaCampaignDossier;
+                resolvedChatId = cid;
+                break;
             }
-            resolvedChatId = cid;
-            break;
         }
         if (s.chatStates?.[cid]?.faeCampaignDossier) {
             faeDossier = s.chatStates[cid].faeCampaignDossier;
@@ -982,12 +1023,16 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         if (activeCart.cartridgeId === 'fae' || activeCart.dossier?.meta?.ruleset === 'fae') {
             faeDossier = activeCart.dossier;
             if (resolvedChatId && s.chatStates?.[resolvedChatId]) {
-                s.chatStates[resolvedChatId].faeCampaignDossier = faeDossier;
+                setPartitionDossier(s.chatStates[resolvedChatId], faeDossier, 'fae');
+            }
+        } else if (activeCart.cartridgeId === 'dnd5e' || activeCart.dossier?.meta?.ruleset === 'dnd5e') {
+            if (resolvedChatId && s.chatStates?.[resolvedChatId]) {
+                setPartitionDossier(s.chatStates[resolvedChatId], activeCart.dossier, 'dnd5e');
             }
         } else {
             pbtaDossier = activeCart.dossier;
             if (resolvedChatId && s.chatStates?.[resolvedChatId]) {
-                s.chatStates[resolvedChatId].pbtaCampaignDossier = pbtaDossier;
+                setPartitionDossier(s.chatStates[resolvedChatId], pbtaDossier, 'pbta');
             }
         }
     }
@@ -1257,7 +1302,7 @@ export function collectRulesetDiagnostics(chatId = null, rpgSettings = null, com
         layerMatches.push('FAE Layer 1: Live customSyspromptLibrary fae_ snippets active');
     }
     for (const cid of candidates) {
-        if (s?.chatStates?.[cid]?.pbtaCampaignDossier && s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset !== 'fae') {
+        if (s?.chatStates?.[cid]?.pbtaCampaignDossier && s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset !== 'fae' && s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset !== 'dnd5e') {
             layerMatches.push(`PbtA Layer 2: Partition [${cid}] contains pbtaCampaignDossier`);
         }
         if (s?.chatStates?.[cid]?.faeCampaignDossier || s?.chatStates?.[cid]?.pbtaCampaignDossier?.meta?.ruleset === 'fae') {
@@ -1362,7 +1407,12 @@ export function collectRulesetDiagnostics(chatId = null, rpgSettings = null, com
                     lines.push(`    - Harm Limit: ${d.config?.harmLimit ?? 'default'} | Stress Limit: ${d.config?.stressLimit ?? 'default'}`);
                     lines.push(`    - Last Updated: ${d.meta?.lastUpdated || 'unknown'}`);
                 }
-                if (!part.faeCampaignDossier && !part.pbtaCampaignDossier) {
+                if (!part.faeCampaignDossier && !part.pbtaCampaignDossier && part.companionDossier) {
+                    const d = part.companionDossier;
+                    lines.push(`  - \`companionDossier\`: PRESENT`);
+                    lines.push(`    - Title: "${d.meta?.title || 'Untitled'}" | Ruleset: ${d.meta?.ruleset || 'unknown'} | System: ${d.meta?.systemKey || 'none'} (${d.meta?.systemLabel || 'none'})`);
+                    lines.push(`    - Protagonist: "${d.character?.name || d.protagonist?.name || 'Unnamed'}"`);
+                } else if (!part.faeCampaignDossier && !part.pbtaCampaignDossier) {
                     lines.push(`  - \`dossier\`: *NONE*`);
                 }
 

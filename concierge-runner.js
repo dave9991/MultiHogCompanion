@@ -36,6 +36,7 @@ import {
     buildPlayerCardBio,
 } from './concierge-pc-format.js';
 import { normalizeGameSystemDrivers } from './game-system-bridge.js';
+import { setPartitionDossier } from './pbta-ruleset-persistence.js';
 
 /**
  * Send an outgoing user chat message into SillyTavern.
@@ -818,12 +819,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 if (chatId) {
                     rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
                     rpgSettings.chatStates[chatId].currentMemo = initialMemo;
-                    rpgSettings.chatStates[chatId].campaignDossier = dossier;
-                    rpgSettings.chatStates[chatId].pbtaCampaignDossier = dossier;
-                    rpgSettings.chatStates[chatId].companionDossier = dossier;
-                    if (isFae) {
-                        rpgSettings.chatStates[chatId].faeCampaignDossier = dossier;
-                    }
+                    setPartitionDossier(rpgSettings.chatStates[chatId], dossier, adapter.id);
                     rpgSettings.chatStates[chatId].simulationDepth = simDepth;
                     rpgSettings.chatStates[chatId].worldProgressionEnabled = rpgSettings.worldProgressionEnabled;
                     rpgSettings.chatStates[chatId].mapEvolutionEnabled = rpgSettings.mapEvolutionEnabled;
@@ -1220,8 +1216,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 const keysToSync = [...new Set([chatId, `${cleanChatKey}.jsonl`, cleanChatKey].filter(k => k === chatId || rpgSettings.chatStates[k]))];
                 for (const key of keysToSync) {
                     rpgSettings.chatStates[key] = rpgSettings.chatStates[key] || {};
-                    rpgSettings.chatStates[key].campaignDossier = dossier;
-                    rpgSettings.chatStates[key].pbtaCampaignDossier = dossier;
+                    setPartitionDossier(rpgSettings.chatStates[key], dossier, adapter.id);
                     rpgSettings.chatStates[key].currentMemo = rpgSettings.currentMemo;
                     rpgSettings.chatStates[key].simulationDepth = dossier.config?.simulationDepth || 'active_fronts';
                     if (rpgSettings.customFields) {

@@ -134,8 +134,6 @@ try {
     if (extModule?.extension_settings) extension_settings = extModule.extension_settings;
 } catch (_) {}
 
-export const STORAGE_DRAFT_KEY = 'mhc_pbta_concierge_draft';
-
 /**
  * Returns the scoped localStorage draft key for the given ruleset.
  * Format: mhc_concierge_draft_{ruleset}
@@ -303,9 +301,6 @@ function saveDraft() {
         const isUntouched = !hasChat && isDossierEmptyOrUntouched(activeDossier);
         if (isUntouched) {
             localStorage.removeItem(key);
-            if (adapter.id === 'pbta') {
-                localStorage.removeItem(STORAGE_DRAFT_KEY);
-            }
             return;
         }
         const payload = {
@@ -340,17 +335,7 @@ export function loadValidatedDraft(targetRuleset = null) {
     const adapter = systemRegistry.get(ruleset);
     const key = adapter.getDraftStorageKey();
     try {
-        let raw = localStorage.getItem(key);
-        // Migration: read legacy 'mhc_pbta_concierge_draft' only for pbta
-        if (!raw && adapter.id === 'pbta') {
-            raw = localStorage.getItem(STORAGE_DRAFT_KEY);
-            if (raw) {
-                try {
-                    localStorage.setItem(key, raw);
-                    localStorage.removeItem(STORAGE_DRAFT_KEY);
-                } catch (_) {}
-            }
-        }
+        const raw = localStorage.getItem(key);
         if (!raw) return null;
         let parsed = null;
         try {
@@ -358,14 +343,12 @@ export function loadValidatedDraft(targetRuleset = null) {
         } catch (parseErr) {
             console.warn(`[${adapter.label} Concierge] Corrupted JSON in draft storage; purging:`, parseErr);
             localStorage.removeItem(key);
-            if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
         const validated = validateDraft(parsed);
         if (!validated) {
             console.warn(`[${adapter.label} Concierge] Incomplete draft detected; purging for clean start.`);
             localStorage.removeItem(key);
-            if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
             return { corrupted: true };
         }
         return { draft: validated };
@@ -373,7 +356,6 @@ export function loadValidatedDraft(targetRuleset = null) {
         console.warn(`[${adapter.label} Concierge] Unexpected error reading draft; purging:`, err);
         try {
             localStorage.removeItem(key);
-            if (adapter.id === 'pbta') localStorage.removeItem(STORAGE_DRAFT_KEY);
         } catch (_) {}
         return { corrupted: true };
     }
@@ -462,7 +444,6 @@ export function resetConciergeState({ showGreeting = true, ruleset = null, genre
         for (const ad of systemRegistry.list()) {
             localStorage.removeItem(ad.getDraftStorageKey());
         }
-        localStorage.removeItem(STORAGE_DRAFT_KEY);
         if (typeof sessionStorage !== 'undefined') {
             sessionStorage.removeItem('mhc_session_zero_draft');
             sessionStorage.removeItem('mhc_last_concierge_desk');

@@ -172,4 +172,4 @@ Chat switching is divided into two distinct execution phases:
   * *Upstream Guide*: [`chat-ownership.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/docs/chat-ownership.md) — upstream MultiHog documentation on `createChatCommitGuard` and `pass-affinity.js`.
   * *ST Chats Source*: [`chats.js`](file:///home/dlittle/ai-stack/sillytavern-test/st-source/public/scripts/chats.js) — chat loading and switching internals.
 * **MultiHog Companion Listener Catalog**:
-  * Consult [`LISTENERS.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/LISTENERS.md) for the active list of registered listeners (`EVT-01` through `EVT-12`, of which `EVT-06`, `EVT-11` and `EVT-12` are retired) and DOM delegations (`DOM-01a` through `DOM-07`).
+  * Consult [`LISTENERS.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/LISTENERS.md) for the active list of registered listeners (`EVT-01` through `EVT-13`, of which `EVT-06`, `EVT-11` and `EVT-12` are retired) and DOM delegations (`DOM-01a` through `DOM-12`).

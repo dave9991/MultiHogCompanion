@@ -8,6 +8,7 @@
  */
 
 import { getCandidateChatIds } from './persona-matching.js';
+import { getPartitionDossier } from './pbta-ruleset-persistence.js';
 import { PBTA_GENRES, splitTopLevelPillItems, splitPbtaMovesLine } from './pbta-ruleset.js';
 import { getCanonicalDndProgression } from './level-up-blueprint.js';
 
@@ -318,16 +319,12 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
     const candidateIds = getCandidateChatIds(chatId);
     let dossier = null;
 
-    // 1. Existing PbtA or Companion dossier in passed companionSettings
+    // 1. Existing PbtA, FAE, or Companion dossier in passed companionSettings
     if (companionSettings?.chatStates) {
         for (const cid of candidateIds) {
-            const part = companionSettings.chatStates[cid];
-            if (part?.pbtaCampaignDossier) {
-                dossier = part.pbtaCampaignDossier;
-                break;
-            }
-            if (part?.companionDossier) {
-                dossier = part.companionDossier;
+            const found = getPartitionDossier(companionSettings.chatStates[cid]);
+            if (found) {
+                dossier = found;
                 break;
             }
         }
@@ -357,12 +354,14 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
                 || globalThis.extension_settings?.rpg_tracker;
 
             for (const cid of candidateIds) {
-                if (compGlobal?.chatStates?.[cid]?.companionDossier) {
-                    dossier = compGlobal.chatStates[cid].companionDossier;
+                const compDossier = getPartitionDossier(compGlobal?.chatStates?.[cid]);
+                if (compDossier) {
+                    dossier = compDossier;
                     break;
                 }
-                if (rpgGlobal?.chatStates?.[cid]?.companionDossier) {
-                    dossier = rpgGlobal.chatStates[cid].companionDossier;
+                const rpgDossier = getPartitionDossier(rpgGlobal?.chatStates?.[cid]);
+                if (rpgDossier) {
+                    dossier = rpgDossier;
                     break;
                 }
             }

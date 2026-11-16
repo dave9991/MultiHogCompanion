@@ -557,4 +557,70 @@ assert.strictEqual(getConciergeStageState().unlockedSteps.character, true, 'Fork
 // Clean up test flag
 delete globalThis.__MHC_TEST_AUTO_CONFIRM__;
 
+// ── 10. Direct ConciergeStateStore Unit Isolation Verification ────────────────
+console.log('10. Testing ConciergeStateStore directly for zero cross-track state bleed...');
+
+const { ConciergeStateStore } = await import('../concierge-state-store.js');
+const { createEmptyDossier } = await import('../concierge-parser.js');
+
+const store = new ConciergeStateStore();
+assert.strictEqual(store.hasSessionZeroProgress(), false, 'Fresh ConciergeStateStore must report no Session Zero progress');
+
+const s0Dossier = createEmptyDossier('pbta', 'fantasy');
+s0Dossier.meta.title = 'Broken Crown';
+s0Dossier.meta.premise = 'A shattered kingdom awaits a new regent.';
+
+store.snapshotToSessionZero({
+    dossier: s0Dossier,
+    chatHistory: [{ role: 'user', content: 'Build a political intrigue campaign' }],
+    changelog: ['Set title to Broken Crown'],
+    currentAdventureStep: 'canon',
+    unlockedSteps: { initial: true, canon: true, adventure: false, character: false },
+    stageChatHistories: { initial: [{ role: 'user', content: 'hi' }], canon: [], adventure: [], character: [] },
+    lastSyncedSnapshots: { framing: { title: 'Broken Crown' }, canon: null, adventure: null },
+    attachedSources: [{ name: 'notes.md' }],
+    pendingAttachments: [],
+    activeImports: [],
+}, [{ id: 'c1', name: 'Iron Guild' }]);
+
+assert.strictEqual(store.hasSessionZeroProgress(), true, 'Snapshot must register Session Zero progress');
+
+const lwDossier = createEmptyDossier('fae', 'cosmic_horror');
+lwDossier.meta.title = 'Innsmouth Tides';
+lwDossier.canonLorebookEntries = [{ id: 'lw1', name: 'Esoteric Order' }];
+const hydrated = store.hydrateLivingWorld('chat_innsmouth', lwDossier);
+assert.strictEqual(hydrated.chatId, 'chat_innsmouth');
+assert.strictEqual(hydrated.campaignTitle, 'Innsmouth Tides');
+assert.strictEqual(hydrated.dossier._originChatId, 'chat_innsmouth');
+assert.strictEqual(hydrated.dossier.meta.rulesetConfirmed, true);
+assert.strictEqual(hydrated.stagedCanonEntries.length, 1);
+assert.strictEqual(hydrated.chatHistory.length, 1);
+
+const restored = store.restoreFromSessionZero();
+assert.strictEqual(restored.dossier.meta.title, 'Broken Crown');
+assert.strictEqual(restored.currentAdventureStep, 'canon');
+assert.strictEqual(restored.stagedCanonEntries[0].name, 'Iron Guild');
+assert.strictEqual(restored.attachedSources[0].name, 'notes.md');
+assert.strictEqual(restored.dossier._originChatId, undefined);
+
+const forkedTrack = store.forkToSessionZero(hydrated.dossier);
+assert.strictEqual(forkedTrack.dossier.meta.title, 'Innsmouth Tides (Fork)');
+assert.strictEqual(forkedTrack.dossier.meta.rulesetConfirmed, false);
+assert.strictEqual(forkedTrack.dossier._originChatId, undefined);
+assert.strictEqual(forkedTrack.unlockedSteps.character, true);
+assert.strictEqual(forkedTrack.currentAdventureStep, 'initial');
+assert.strictEqual(forkedTrack.stagedCanonEntries[0].name, 'Esoteric Order');
+
+store.applyDraftToSessionZero({
+    dossier: s0Dossier,
+    currentAdventureStep: 'adventure',
+    unlockedSteps: { adventure: true },
+    chatHistory: [{ role: 'assistant', content: 'Draft resumed' }],
+    changelog: ['Resumed'],
+    stagedCanonEntries: [{ id: 'c2', name: 'Silver Watch' }],
+});
+assert.strictEqual(store.sessionZeroTrack.currentAdventureStep, 'adventure');
+assert.strictEqual(store.sessionZeroTrack.unlockedSteps.adventure, true);
+assert.strictEqual(store.sessionZeroTrack.stagedCanonEntries[0].name, 'Silver Watch');
+
 console.log('--- ALL CONCIERGE 4-STEP UI CONTROLLER TESTS PASSED CLEANLY! ---');

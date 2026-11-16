@@ -124,7 +124,9 @@ import {
 } from './pbta-ruleset-persistence.js';
 import { openBlueprintGameSystemInWizard } from './game-system-bridge.js';
 import { systemRegistry } from './concierge-system-registry.js';
+import { conciergeStore, getSessionZeroTrack, getLivingWorldTrack } from './concierge-state-store.js';
 import { renderProgressionArchitect } from './progression-architect-ui.js';
+export { getSessionZeroTrack, getLivingWorldTrack };
 import './concierge-system-pbta.js';
 import './concierge-system-fae.js';
 import './concierge-system-dnd5e.js';
@@ -180,56 +182,37 @@ let lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
 let attachedSources = [];
 
 // ── Two-Track Architecture: Session Zero Sandbox vs Active Living World ──
-const sessionZeroTrack = {
-    dossier: createEmptyDossier(),
-    chatHistory: [],
-    changelog: [],
-    currentAdventureStep: 'initial',
-    unlockedSteps: { initial: true, canon: false, adventure: false, character: false },
-    stageChatHistories: { initial: [], canon: [], adventure: [], character: [] },
-    lastSyncedSnapshots: { framing: null, canon: null, adventure: null },
-    attachedSources: [],
-    stagedCanonEntries: [],
-    pendingAttachments: [],
-    activeImports: [],
-    rulesetConfirmed: false,
-};
-
-const livingWorldTrack = {
-    chatId: null,
-    campaignTitle: null,
-    dossier: null,
-    chatHistory: [],
-    stagedCanonEntries: [],
-};
+const sessionZeroTrack = conciergeStore.sessionZeroTrack;
+const livingWorldTrack = conciergeStore.livingWorldTrack;
 
 function snapshotCurrentToSessionZeroTrack() {
-    sessionZeroTrack.dossier = activeDossier;
-    sessionZeroTrack.chatHistory = [...chatHistory];
-    sessionZeroTrack.changelog = [...changelog];
-    sessionZeroTrack.currentAdventureStep = currentAdventureStep;
-    sessionZeroTrack.unlockedSteps = { ...unlockedSteps };
-    sessionZeroTrack.stageChatHistories = { ...stageChatHistories };
-    sessionZeroTrack.lastSyncedSnapshots = { ...lastSyncedSnapshots };
-    sessionZeroTrack.attachedSources = [...attachedSources];
-    sessionZeroTrack.stagedCanonEntries = getStagedCanonEntries();
-    sessionZeroTrack.pendingAttachments = [...pendingAttachments];
-    sessionZeroTrack.activeImports = [...activeImports];
-    sessionZeroTrack.rulesetConfirmed = Boolean(activeDossier?.meta?.rulesetConfirmed);
+    conciergeStore.snapshotToSessionZero({
+        dossier: activeDossier,
+        chatHistory,
+        changelog,
+        currentAdventureStep,
+        unlockedSteps,
+        stageChatHistories,
+        lastSyncedSnapshots,
+        attachedSources,
+        pendingAttachments,
+        activeImports,
+    }, getStagedCanonEntries());
 }
 
 function restoreSessionZeroTrack() {
-    activeDossier = sessionZeroTrack.dossier;
-    chatHistory = sessionZeroTrack.chatHistory;
-    changelog = sessionZeroTrack.changelog || [];
-    currentAdventureStep = sessionZeroTrack.currentAdventureStep || 'initial';
-    unlockedSteps = { ...sessionZeroTrack.unlockedSteps };
-    stageChatHistories = { ...sessionZeroTrack.stageChatHistories };
-    lastSyncedSnapshots = { ...sessionZeroTrack.lastSyncedSnapshots };
-    attachedSources = [...(sessionZeroTrack.attachedSources || [])];
-    setStagedCanonEntries(sessionZeroTrack.stagedCanonEntries || []);
-    pendingAttachments = [...(sessionZeroTrack.pendingAttachments || [])];
-    activeImports = [...(sessionZeroTrack.activeImports || [])];
+    const restored = conciergeStore.restoreFromSessionZero();
+    activeDossier = restored.dossier;
+    chatHistory = restored.chatHistory;
+    changelog = restored.changelog;
+    currentAdventureStep = restored.currentAdventureStep;
+    unlockedSteps = restored.unlockedSteps;
+    stageChatHistories = restored.stageChatHistories;
+    lastSyncedSnapshots = restored.lastSyncedSnapshots;
+    attachedSources = restored.attachedSources;
+    setStagedCanonEntries(restored.stagedCanonEntries);
+    pendingAttachments = restored.pendingAttachments;
+    activeImports = restored.activeImports;
 }
 
 export function getConciergeStageState() {
@@ -244,14 +227,6 @@ export function getConciergeStageState() {
 
 export function getActiveConciergeDossier() {
     return activeDossier;
-}
-
-export function getSessionZeroTrack() {
-    return sessionZeroTrack;
-}
-
-export function getLivingWorldTrack() {
-    return livingWorldTrack;
 }
 
 function startImportProgress(label) {
@@ -3270,28 +3245,12 @@ export async function switchToTrack(targetMode) {
         $('.mhc-mode-nav-btn[data-nav-mode="living-world"]').addClass('active').css({ background: 'rgba(59, 130, 246, 0.35)', color: '#93c5fd' });
 
         // Hydrate livingWorldTrack
-        livingWorldTrack.chatId = currentChatId;
-        livingWorldTrack.dossier = healAndNormalizeDossier(campaignDossier);
-        livingWorldTrack.dossier.meta = livingWorldTrack.dossier.meta || {};
-        livingWorldTrack.dossier.meta.rulesetConfirmed = true;
-        livingWorldTrack.campaignTitle = (livingWorldTrack.dossier.meta?.title || '').trim();
-        livingWorldTrack.dossier._originChatId = currentChatId;
-        livingWorldTrack.dossier._originCampaignTitle = livingWorldTrack.campaignTitle;
-
-        loadedCampaignOriginChatId = currentChatId;
-        loadedCampaignOriginTitle = livingWorldTrack.campaignTitle;
-        activeDossier = livingWorldTrack.dossier;
-
-        const stagedLivingCanon = livingWorldTrack.dossier.canonLorebookEntries || [];
-        setStagedCanonEntries(stagedLivingCanon);
-
-        if (!livingWorldTrack.chatHistory.length) {
-            const isFae = activeDossier.meta?.ruleset === 'fae';
-            const vitalityTerm = isFae ? 'resource pools' : 'Harm capacity';
-            const greet = `📂 Loaded active campaign **"${livingWorldTrack.campaignTitle || 'Active Campaign'}"**! You can adjust campaign calibration dials, scale ${vitalityTerm}, manage supporting NPCs, or evolve the blueprint below. Changes can be synced directly back to your running game with **🔄 Sync to Active Game**, or cloned into a fresh adventure with **🍴 Fork as New Campaign**.`;
-            livingWorldTrack.chatHistory = [{ role: 'assistant', content: greet }];
-        }
-        chatHistory = livingWorldTrack.chatHistory;
+        const track = conciergeStore.hydrateLivingWorld(currentChatId, healAndNormalizeDossier(campaignDossier));
+        loadedCampaignOriginChatId = track.chatId;
+        loadedCampaignOriginTitle = track.campaignTitle;
+        activeDossier = track.dossier;
+        setStagedCanonEntries(track.stagedCanonEntries);
+        chatHistory = track.chatHistory;
         renderChatHistoryFromState();
 
         $('#mhc_new_adventure_stepper').hide();
@@ -3310,8 +3269,7 @@ export async function switchToTrack(targetMode) {
         return true;
     } else if (targetMode === 'new-adventure') {
         if (currentNavMode === 'living-world') {
-            livingWorldTrack.dossier = activeDossier;
-            livingWorldTrack.chatHistory = [...chatHistory];
+            conciergeStore.snapshotToLivingWorld({ dossier: activeDossier, chatHistory });
         }
 
         currentNavMode = 'new-adventure';
@@ -3351,8 +3309,7 @@ export async function switchToTrack(targetMode) {
  * so the player can branch off or forge an alternate adventure.
  */
 export async function forkActiveCampaignToSessionZero() {
-    const hasExistingSessionProgress = (Array.isArray(sessionZeroTrack.chatHistory) && sessionZeroTrack.chatHistory.length > 0)
-        || !isDossierEmptyOrUntouched(sessionZeroTrack.dossier);
+    const hasExistingSessionProgress = conciergeStore.hasSessionZeroProgress();
 
     if (hasExistingSessionProgress) {
         const title = sessionZeroTrack.dossier?.meta?.title || 'Untitled Session Zero';
@@ -3374,37 +3331,7 @@ export async function forkActiveCampaignToSessionZero() {
         return false;
     }
 
-    const clone = JSON.parse(JSON.stringify(sourceDossier));
-    delete clone._originChatId;
-    delete clone._originCampaignTitle;
-    if (clone.meta) {
-        delete clone.meta.chatId;
-        const baseTitle = (clone.meta.title || 'Campaign').trim();
-        clone.meta.title = baseTitle.endsWith('(Fork)') ? baseTitle : `${baseTitle} (Fork)`;
-        clone.meta.rulesetConfirmed = false;
-    }
-
-    sessionZeroTrack.dossier = clone;
-    sessionZeroTrack.currentAdventureStep = 'initial';
-    sessionZeroTrack.unlockedSteps = {
-        initial: true,
-        canon: true,
-        adventure: true,
-        character: true,
-    };
-    const stagedEntries = Array.isArray(clone.canonLorebookEntries) ? [...clone.canonLorebookEntries] : [];
-    sessionZeroTrack.stagedCanonEntries = stagedEntries;
-    sessionZeroTrack.attachedSources = [];
-    sessionZeroTrack.lastSyncedSnapshots = { framing: null, canon: null, adventure: null };
-
-    const greet = `🍴 **Forked from "${livingWorldTrack.campaignTitle || 'Active Campaign'}"!**\n\nThe series bible, axioms, and world elements have been cloned into Session Zero Concierge. You can refine the framing and premise in Step 1, review canon in Step 2, and confirm or tune your ruleset & dials in Step 3.`;
-    sessionZeroTrack.chatHistory = [{ role: 'assistant', content: greet }];
-    sessionZeroTrack.stageChatHistories = {
-        initial: [...sessionZeroTrack.chatHistory],
-        canon: [],
-        adventure: [],
-        character: [],
-    };
+    conciergeStore.forkToSessionZero(sourceDossier);
 
     await switchToTrack('new-adventure');
     toastr?.success('Campaign cloned into Session Zero Concierge!', 'Forked as New Campaign');
@@ -4486,17 +4413,7 @@ export async function openConciergeModal({ ruleset = null, genreKey = null, navM
     } else if (draftResult?.draft) {
         // Valid draft found: restore it into sessionZeroTrack
         const { draft } = draftResult;
-        sessionZeroTrack.dossier = draft.dossier;
-        if (draft.stagedCanonEntries && Array.isArray(draft.stagedCanonEntries)) {
-            sessionZeroTrack.stagedCanonEntries = draft.stagedCanonEntries;
-        }
-        if (draft.currentAdventureStep) sessionZeroTrack.currentAdventureStep = draft.currentAdventureStep;
-        if (draft.unlockedSteps) sessionZeroTrack.unlockedSteps = { ...unlockedSteps, ...draft.unlockedSteps };
-        if (draft.stageChatHistories) sessionZeroTrack.stageChatHistories = { ...stageChatHistories, ...draft.stageChatHistories };
-        if (draft.lastSyncedSnapshots) sessionZeroTrack.lastSyncedSnapshots = { ...lastSyncedSnapshots, ...draft.lastSyncedSnapshots };
-        if (draft.attachedSources) sessionZeroTrack.attachedSources = [...draft.attachedSources];
-        sessionZeroTrack.chatHistory = draft.chatHistory || [];
-        sessionZeroTrack.changelog = draft.changelog || [];
+        conciergeStore.applyDraftToSessionZero(draft);
 
         if (!chatHistory.length) {
             restoreSessionZeroTrack();

@@ -8,6 +8,8 @@
  *    and renames the chat to the adventure title or campaign name.
  */
 
+import { getPartitionDossier } from './pbta-ruleset-persistence.js';
+
 /**
  * Checks if the current SillyTavern chat is clean/blank.
  * A chat is clean if it has 0 messages, or exactly 1 message that is a non-user greeting.
@@ -57,7 +59,7 @@ export function isAdventureActive(chatId = null, ctx = null) {
     for (const id of candidateIds) {
         const part = s.chatStates?.[id];
         if (!part) continue;
-        if (part.pbtaCampaignDossier || part.faeCampaignDossier || part.companionDossier || part.campaignDossier || part.playerCharacter?.name) {
+        if (getPartitionDossier(part) || part.playerCharacter?.name) {
             hasExplicitChatCharacter = true;
             break;
         }
@@ -105,7 +107,7 @@ export function isAdventureActive(chatId = null, ctx = null) {
     for (const id of candidateIds) {
         const part = s.chatStates?.[id];
         if (!part) continue;
-        if (part.pbtaCampaignDossier || part.faeCampaignDossier || part.companionDossier || part.campaignDossier || part.playerCharacter?.name) return true;
+        if (getPartitionDossier(part) || part.playerCharacter?.name) return true;
         if (part.currentMemo && /\[CHARACTER\]/i.test(part.currentMemo)) return true;
         if (part.npcRelationshipValues && Object.keys(part.npcRelationshipValues).length > 0) return true;
     }

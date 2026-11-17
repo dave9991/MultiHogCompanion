@@ -12,6 +12,7 @@ import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
 import { PBTA_GENRES, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
 import { FAE_GENRES, sanitizeFaePositiveTags, createInitialFaeState } from './fae-ruleset.js';
 import { parseFaeStateFromMemo, formatFaeCharacterMemoBlock, normalizeFaePill } from './fae-state-sync.js';
+import { getPartitionDossier, setPartitionDossier } from './pbta-ruleset-persistence.js';
 
 /**
  * Extracts the canonical identity key of a feature or ability (text before '(', ':', or '[').
@@ -1224,16 +1225,23 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
                 globalThis._rpgUpdateUIMemo(updatedMemo);
             }
             if (rpgSettings.chatStates && chatId && rpgSettings.chatStates[chatId]) {
-                rpgSettings.chatStates[chatId].currentMemo = updatedMemo;
-                for (const key of ['faeCampaignDossier', 'pbtaCampaignDossier', 'companionDossier']) {
-                    const proto = rpgSettings.chatStates[chatId][key]?.protagonist;
-                    if (proto) {
-                        proto.pools = JSON.parse(JSON.stringify(proposal.pools));
-                        proto.positiveTags = [...(proposal.positiveTags || [])];
-                        proto.negativeTags = [...(proposal.negativeTags || [])];
-                        rpgSettings.chatStates[chatId][key].config = rpgSettings.chatStates[chatId][key].config || {};
-                        rpgSettings.chatStates[chatId][key].config.knobs = { ...(proposal.knobs || {}) };
+                const part = rpgSettings.chatStates[chatId];
+                part.currentMemo = updatedMemo;
+                const seen = new Set();
+                for (const key of ['faeCampaignDossier', 'pbtaCampaignDossier', 'companionDossier', 'campaignDossier']) {
+                    const d = part[key];
+                    if (d?.protagonist && !seen.has(d)) {
+                        seen.add(d);
+                        d.protagonist.pools = JSON.parse(JSON.stringify(proposal.pools));
+                        d.protagonist.positiveTags = [...(proposal.positiveTags || [])];
+                        d.protagonist.negativeTags = [...(proposal.negativeTags || [])];
+                        d.config = d.config || {};
+                        d.config.knobs = { ...(proposal.knobs || {}) };
                     }
+                }
+                const canonical = getPartitionDossier(part);
+                if (canonical) {
+                    setPartitionDossier(part, canonical, 'fae');
                 }
             }
             if (typeof document !== 'undefined') {
@@ -1372,15 +1380,22 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         if (rpgSettings) {
             rpgSettings.currentMemo = updatedMemo;
             if (rpgSettings.chatStates && chatId && rpgSettings.chatStates[chatId]) {
-                rpgSettings.chatStates[chatId].currentMemo = updatedMemo;
-                for (const key of ['pbtaCampaignDossier', 'companionDossier']) {
-                    const proto = rpgSettings.chatStates[chatId][key]?.protagonist;
-                    if (proto) {
-                        proto.moves = [...(proposal.newFeatures || [])];
-                        if (proposal.harm) proto.harm = { ...proposal.harm };
-                        if (proposal.stats) proto.stats = { ...getCanonicalPbtaStats(proposal.stats, proposal.genreKey) };
-                        if (Array.isArray(proposal.advancesTaken)) proto.advancesTaken = [...proposal.advancesTaken];
+                const part = rpgSettings.chatStates[chatId];
+                part.currentMemo = updatedMemo;
+                const seen = new Set();
+                for (const key of ['pbtaCampaignDossier', 'faeCampaignDossier', 'companionDossier', 'campaignDossier']) {
+                    const d = part[key];
+                    if (d?.protagonist && !seen.has(d)) {
+                        seen.add(d);
+                        d.protagonist.moves = [...(proposal.newFeatures || [])];
+                        if (proposal.harm) d.protagonist.harm = { ...proposal.harm };
+                        if (proposal.stats) d.protagonist.stats = { ...getCanonicalPbtaStats(proposal.stats, proposal.genreKey) };
+                        if (Array.isArray(proposal.advancesTaken)) d.protagonist.advancesTaken = [...proposal.advancesTaken];
                     }
+                }
+                const canonical = getPartitionDossier(part);
+                if (canonical) {
+                    setPartitionDossier(part, canonical, 'pbta');
                 }
             }
             if (typeof document !== 'undefined') {

@@ -277,3 +277,28 @@ test('5. Canonical getPartitionDossier / setPartitionDossier parity across pbta,
     assert.equal(getMultihogPlayerName('chat_fae_legacy', rpgSettings), 'Arthur Pendelton');
     assert.equal(getMultihogPlayerPortrait('chat_fae_legacy', null, rpgSettings), 'user/images/arthur.png');
 });
+
+test('6. setPartitionDossier detects D&D 5e stubs and systemKey without meta.ruleset without polluting pbtaCampaignDossier', () => {
+    const sysKeyDndDossier = {
+        meta: { title: 'Sword Coast', systemKey: 'dnd5e' },
+        protagonist: { name: 'Lyra', class: 'Wizard' },
+    };
+    const stubDndDossier = {
+        meta: { title: 'Auto Stub', isStub: true },
+        protagonist: { name: 'Bram', class: 'Fighter' },
+    };
+
+    const partSysKey = {};
+    setPartitionDossier(partSysKey, sysKeyDndDossier);
+    assert.equal(partSysKey.companionDossier, sysKeyDndDossier);
+    assert.equal(partSysKey.campaignDossier, sysKeyDndDossier);
+    assert.equal(partSysKey.pbtaCampaignDossier, undefined);
+    assert.equal(partSysKey.faeCampaignDossier, undefined);
+
+    const partStub = {};
+    setPartitionDossier(partStub, stubDndDossier);
+    assert.equal(partStub.companionDossier, stubDndDossier);
+    assert.equal(partStub.campaignDossier, stubDndDossier);
+    assert.equal(partStub.pbtaCampaignDossier, undefined);
+    assert.equal(partStub.faeCampaignDossier, undefined);
+});

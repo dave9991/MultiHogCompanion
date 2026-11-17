@@ -1653,3 +1653,98 @@ test('Level-Up System: D&D 5e deterministic code-generated Hit Dice (HD) managem
     });
     assert.ok(!resPbta.updatedMemo.includes('HD:'), 'PbtA sheets must never receive an HD line');
 });
+
+test('Level-Up System: applyLevelUpCommit synchronizes FAE and PbtA partition dossiers canonically', () => {
+    // 1. FAE partition sync: starting from faeCampaignDossier populates companionDossier + campaignDossier + faeCampaignDossier
+    const faeChatId = 'test_fae_partition_sync';
+    const faeDossier = {
+        meta: { title: 'Arkham Investigation', ruleset: 'fae', systemKey: 'cosmic_horror' },
+        protagonist: {
+            name: 'Clara',
+            pools: {
+                health: { key: 'health', label: 'Health', current: 8, max: 8 },
+                sanity: { key: 'sanity', label: 'Sanity', current: 8, max: 8 },
+            },
+            positiveTags: ['Occult Scholar'],
+            negativeTags: [],
+        },
+        config: { knobs: { heroic_tier: false } },
+    };
+    const faeRpgSettings = {
+        currentMemo: '[CHARACTER]\nClara\nHealth: 8/8\nSanity: 8/8\n((PILLS)) Tags: Occult Scholar\n[/CHARACTER]',
+        chatStates: {
+            [faeChatId]: {
+                faeCampaignDossier: faeDossier,
+            },
+        },
+    };
+    const faeCommit = applyLevelUpCommit({
+        chatId: faeChatId,
+        currentMemo: faeRpgSettings.currentMemo,
+        rpgSettings: faeRpgSettings,
+        proposal: {
+            isFae: true,
+            characterName: 'Clara',
+            genreKey: 'cosmic_horror',
+            pools: {
+                health: { key: 'health', label: 'Health', current: 10, max: 10 },
+                sanity: { key: 'sanity', label: 'Sanity', current: 8, max: 8 },
+            },
+            positiveTags: ['Occult Scholar', 'Elder Ward'],
+            negativeTags: ['Haunted Dreams'],
+            knobs: { heroic_tier: true },
+        },
+    });
+    assert.strictEqual(faeCommit.success, true);
+    const faePart = faeRpgSettings.chatStates[faeChatId];
+    assert.strictEqual(faePart.companionDossier, faeDossier);
+    assert.strictEqual(faePart.campaignDossier, faeDossier);
+    assert.strictEqual(faePart.faeCampaignDossier, faeDossier);
+    assert.strictEqual(faePart.pbtaCampaignDossier, undefined);
+    assert.strictEqual(faePart.companionDossier.protagonist.pools.health.max, 10);
+    assert.deepStrictEqual(faePart.campaignDossier.protagonist.positiveTags, ['Occult Scholar', 'Elder Ward']);
+    assert.strictEqual(faePart.campaignDossier.config.knobs.heroic_tier, true);
+
+    // 2. PbtA partition sync: starting from pbtaCampaignDossier populates companionDossier + campaignDossier + pbtaCampaignDossier
+    const pbtaChatId = 'test_pbta_partition_sync';
+    const pbtaDossier = {
+        meta: { title: 'Iron Crown', ruleset: 'pbta', systemKey: 'fantasy' },
+        protagonist: {
+            name: 'Vex',
+            stats: { Might: 1, Agility: 2, Wits: 0, Heart: -1, Arcana: 1 },
+            harm: { current: 0, max: 4, armor: 1 },
+            moves: ['Hack & Slash (+Might)'],
+            advancesTaken: [],
+        },
+    };
+    const pbtaRpgSettings = {
+        currentMemo: '[CHARACTER]\nVex (The Fighter): 4/4 HP | Harm: 0/4 | Armor: 1 | XP: 5/5\nStats: Might +1, Agility +2, Wits +0, Heart -1, Arcana +1\n((PILLS)) Moves: Hack & Slash (+Might)\n[/CHARACTER]',
+        chatStates: {
+            [pbtaChatId]: {
+                pbtaCampaignDossier: pbtaDossier,
+            },
+        },
+    };
+    const pbtaCommit = applyLevelUpCommit({
+        chatId: pbtaChatId,
+        currentMemo: pbtaRpgSettings.currentMemo,
+        rpgSettings: pbtaRpgSettings,
+        proposal: {
+            isPbta: true,
+            characterName: 'Vex',
+            genreKey: 'fantasy',
+            stats: { Might: 2, Agility: 2, Wits: 0, Heart: -1, Arcana: 1 },
+            harm: { current: 0, max: 5, armor: 2 },
+            newFeatures: ['Hack & Slash (+Might)', 'Second Wind'],
+            advancesTaken: ['stat_boost'],
+        },
+    });
+    assert.strictEqual(pbtaCommit.success, true);
+    const pbtaPart = pbtaRpgSettings.chatStates[pbtaChatId];
+    assert.strictEqual(pbtaPart.companionDossier, pbtaDossier);
+    assert.strictEqual(pbtaPart.campaignDossier, pbtaDossier);
+    assert.strictEqual(pbtaPart.pbtaCampaignDossier, pbtaDossier);
+    assert.strictEqual(pbtaPart.companionDossier.protagonist.harm.max, 5);
+    assert.strictEqual(pbtaPart.campaignDossier.protagonist.stats.Might, 2);
+    assert.deepStrictEqual(pbtaPart.campaignDossier.protagonist.advancesTaken, ['stat_boost']);
+});

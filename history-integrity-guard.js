@@ -25,6 +25,7 @@
  */
 
 import { escapeHtml } from './mhc-utils.js';
+import { getPartitionDossier } from './pbta-ruleset-persistence.js';
 
 /**
  * Resolves the authoritative active chat ID directly from SillyTavern's context,
@@ -553,10 +554,7 @@ export async function scanAllChatHistories(options = {}) {
         const memoChars = typeof part.currentMemo === 'string' ? part.currentMemo.length : 0;
 
         // Extract protagonist/character name from dossier or memo for easy identification
-        let characterName = part.companionDossier?.protagonist?.name
-            || part.faeCampaignDossier?.protagonist?.name
-            || part.pbtaCampaignDossier?.protagonist?.name
-            || part.campaignDossier?.protagonist?.name
+        let characterName = getPartitionDossier(part)?.protagonist?.name
             || part.playerCharacter?.name
             || null;
         if (!characterName && typeof part.currentMemo === 'string') {

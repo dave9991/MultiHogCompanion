@@ -106,6 +106,8 @@ import {
     getCompanionActiveCartridge,
     setCompanionActiveCartridge,
     getActiveRulesetId,
+    getPartitionDossier,
+    setPartitionDossier,
 } from './pbta-ruleset-persistence.js';
 import {
     scanAndInitUnsyncedNpcs,
@@ -585,10 +587,16 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
     let dossier = null;
     let foundChatId = effectiveChatId;
 
-    // 1. Check candidate partitions for pbtaCampaignDossier (strictly for this chat)
+    // 1. Check candidate partitions for a non-D&D campaign dossier (strictly for this chat)
+    const isDndDossier = (d) => Boolean(
+        d?.meta?.ruleset === 'dnd5e'
+        || d?.meta?.systemKey === 'dnd5e'
+        || (d?.meta?.isStub && !d?.protagonist?.isPbta && !d?.protagonist?.isFae)
+    );
     for (const cid of uniqueIds) {
-        if (s.chatStates?.[cid]?.pbtaCampaignDossier) {
-            dossier = s.chatStates[cid].pbtaCampaignDossier;
+        const candidateDossier = getPartitionDossier(s.chatStates?.[cid]);
+        if (candidateDossier && !isDndDossier(candidateDossier)) {
+            dossier = candidateDossier;
             foundChatId = cid;
             break;
         }
@@ -596,7 +604,10 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
 
     // 2. Try World Info recovery bound strictly to this chat
     if (!dossier) {
-        dossier = await tryRecoverDossierFromWorldInfo(ctx, uniqueIds);
+        const recovered = await tryRecoverDossierFromWorldInfo(ctx, uniqueIds);
+        if (recovered && !isDndDossier(recovered)) {
+            dossier = recovered;
+        }
     }
 
     // If NO dossier exists for this specific chat, do NOT fabricate one or leak from other chats!
@@ -604,8 +615,13 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         return false;
     }
 
-    const { formatInitialPbtaMemo } = await import('./pbta-ruleset.js');
-    const initialMemo = formatInitialPbtaMemo(dossier);
+    let initialMemo = '';
+    if (dossier?.meta?.ruleset === 'fae' || dossier?.protagonist?.isFae) {
+        initialMemo = formatInitialFaeMemo(dossier);
+    } else {
+        const { formatInitialPbtaMemo } = await import('./pbta-ruleset.js');
+        initialMemo = formatInitialPbtaMemo(dossier);
+    }
     if (!initialMemo) return false;
 
     // Apply to live settings and candidate partitions
@@ -616,7 +632,7 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         if (!cid) continue;
         s.chatStates[cid] = s.chatStates[cid] || {};
         s.chatStates[cid].currentMemo = initialMemo;
-        s.chatStates[cid].pbtaCampaignDossier = dossier;
+        setPartitionDossier(s.chatStates[cid], dossier);
     }
 
     return await forceRenderTrackerView(s, effectiveChatId, initialMemo, { persist: true });
@@ -885,7 +901,7 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     saveSettingsDebounced();
 
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
-    const activeDossierSnapshot = overrides.dossier || s.chatStates?.[activeChatId]?.pbtaCampaignDossier || null;
+    const activeDossierSnapshot = overrides.dossier || getPartitionDossier(s.chatStates?.[activeChatId]) || null;
     if (activeChatId) {
         await setCompanionActiveCartridge(activeChatId, {
             cartridgeId: 'pbta',
@@ -987,7 +1003,7 @@ export async function applyFaeCartridge(genreKey = 'cosmic_horror', overrides = 
     compSettings.lastFaeGenre = genreKey;
     const activeChatId = getActiveChatId();
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
-    const activeDossierSnapshot = overrides.dossier || s.chatStates?.[activeChatId]?.faeCampaignDossier || s.chatStates?.[activeChatId]?.pbtaCampaignDossier || null;
+    const activeDossierSnapshot = overrides.dossier || getPartitionDossier(s.chatStates?.[activeChatId]) || null;
     if (activeChatId) {
         await setCompanionActiveCartridge(activeChatId, {
             cartridgeId: 'fae',
@@ -2308,7 +2324,9 @@ export function initWandMenu() {
             const chatId = ctx?.getCurrentChatId?.() || ctx?.chatId || s.currentChatId || 'default';
             const faeActive = isFaeChat(chatId, rpgSettings, s) || isFaeActive(chatId, rpgSettings, s);
             const pbtaActive = !faeActive && (isPbtaChat(chatId, rpgSettings, s) || isPbtAActive(chatId, rpgSettings, s));
-            const pacingXp = s.pbtaCampaignDossier?.[chatId]?.config?.pacingXp
+            const pacingXp = getPartitionDossier(rpgSettings?.chatStates?.[chatId])?.config?.pacingXp
+                || getPartitionDossier(s?.chatStates?.[chatId])?.config?.pacingXp
+                || s.pbtaCampaignDossier?.[chatId]?.config?.pacingXp
                 || s.companionDossier?.[chatId]?.config?.pacingXp;
             const status = evaluateLevelUpEligibility(curMemo, faeActive ? 'fae' : (pbtaActive ? 'pbta' : null), { pacingXp });
             if (status.eligible) {
@@ -3529,6 +3547,7 @@ if (typeof jQuery !== 'undefined') {
                 for (const book of allNames) {
                     if (candidateDossiers.has(book)) {
                         const isClaimedByOther = otherStates.some(([_, state]) =>
+                            getPartitionDossier(state)?.meta?.title === cleanId ||
                             state?.campaignDossier?.meta?.title === cleanId ||
                             state?.companionDossier?.meta?.title === cleanId ||
                             state?.boundDossier === book

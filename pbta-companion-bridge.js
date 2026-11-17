@@ -16,7 +16,7 @@
 
 import { PBTA_GENRES } from './pbta-ruleset.js';
 import { FAE_GENRES, buildTailoredFaeDocumentation } from './fae-ruleset.js';
-import { isFaeActive, getCompanionActiveCartridge } from './pbta-ruleset-persistence.js';
+import { isFaeActive, getCompanionActiveCartridge, getPartitionDossier } from './pbta-ruleset-persistence.js';
 
 let _originalFetch = null;
 let _interceptorActive = false;
@@ -104,10 +104,7 @@ export function detectActiveFaeGenre(customContext = {}) {
         }
         if (chatId && s?.chatStates?.[chatId]) {
             const chatPart = s.chatStates[chatId];
-            const dGenre = chatPart.faeCampaignDossier?.meta?.systemKey
-                || chatPart.pbtaCampaignDossier?.meta?.systemKey
-                || chatPart.companionDossier?.meta?.systemKey
-                || chatPart.campaignDossier?.meta?.systemKey;
+            const dGenre = getPartitionDossier(chatPart)?.meta?.systemKey;
             if (dGenre && FAE_GENRES[dGenre]) {
                 return dGenre;
             }

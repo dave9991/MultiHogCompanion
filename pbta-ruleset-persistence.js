@@ -87,7 +87,10 @@ export function setPartitionDossier(part, dossier, rulesetHint = null) {
     if (!part || typeof part !== 'object' || !dossier || typeof dossier !== 'object') return;
     part.companionDossier = dossier;
     part.campaignDossier = dossier;
-    const ruleset = String(rulesetHint || dossier?.meta?.ruleset || '').toLowerCase();
+    const inferredRuleset = dossier?.meta?.ruleset
+        || (dossier?.meta?.systemKey === 'dnd5e' ? 'dnd5e' : '')
+        || (dossier?.meta?.isStub && !dossier?.protagonist?.isPbta && !dossier?.protagonist?.isFae ? 'dnd5e' : '');
+    const ruleset = String(rulesetHint || inferredRuleset || '').toLowerCase();
     if (ruleset === 'fae') {
         part.faeCampaignDossier = dossier;
     } else if (ruleset === 'dnd5e') {
@@ -634,12 +637,17 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     const candidateIds = getCandidateChatIds(chatId, s);
     let existingDossier = null;
     let existingFaeDossier = null;
+    let existingCompanionDossier = null;
     for (const cid of candidateIds) {
         if (!existingDossier && s.chatStates?.[cid]?.pbtaCampaignDossier) {
             existingDossier = s.chatStates[cid].pbtaCampaignDossier;
         }
         if (!existingFaeDossier && s.chatStates?.[cid]?.faeCampaignDossier) {
             existingFaeDossier = s.chatStates[cid].faeCampaignDossier;
+        }
+        if (!existingCompanionDossier) {
+            const candidate = getPartitionDossier(s.chatStates?.[cid]);
+            if (candidate) existingCompanionDossier = candidate;
         }
     }
 
@@ -648,6 +656,9 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
         s.chatStates[cid] = s.chatStates[cid] || {};
         if (snapshot) {
             s.chatStates[cid].setup = snapshot;
+        }
+        if (existingCompanionDossier) {
+            setPartitionDossier(s.chatStates[cid], existingCompanionDossier);
         }
         if (existingDossier) {
             s.chatStates[cid].pbtaCampaignDossier = existingDossier;
@@ -672,17 +683,18 @@ export async function persistPbtaChatState(chatId, rpgSettings = null) {
     }
 
     // Guarantee dossiers remain on candidate partitions if saveChatState clobbered them
-    if (existingDossier) {
+    if (existingCompanionDossier || existingDossier || existingFaeDossier) {
         for (const cid of candidateIds) {
             if (s.chatStates[cid]) {
-                s.chatStates[cid].pbtaCampaignDossier = existingDossier;
-            }
-        }
-    }
-    if (existingFaeDossier) {
-        for (const cid of candidateIds) {
-            if (s.chatStates[cid]) {
-                s.chatStates[cid].faeCampaignDossier = existingFaeDossier;
+                if (existingCompanionDossier) {
+                    setPartitionDossier(s.chatStates[cid], existingCompanionDossier);
+                }
+                if (existingDossier) {
+                    s.chatStates[cid].pbtaCampaignDossier = existingDossier;
+                }
+                if (existingFaeDossier) {
+                    s.chatStates[cid].faeCampaignDossier = existingFaeDossier;
+                }
             }
         }
     }

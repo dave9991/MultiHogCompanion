@@ -121,6 +121,7 @@ import {
     getCompanionActiveCartridge,
     getCandidateChatIds,
     isFaeActive,
+    getPartitionDossier,
 } from './pbta-ruleset-persistence.js';
 import { openBlueprintGameSystemInWizard } from './game-system-bridge.js';
 import { systemRegistry } from './concierge-system-registry.js';
@@ -2937,27 +2938,20 @@ export async function loadActiveCampaignDossier(targetChatId = null) {
     }
 
     // 2. Check candidate chatStates partitions in memory
-    for (const cid of candidateIds) {
-        const part = rpgSettings?.chatStates?.[cid];
-        if (part) {
-            for (const key of ['pbtaCampaignDossier', 'faeCampaignDossier', 'campaignDossier', 'companionDossier']) {
-                if (part[key] && isConciergeCreatedDossier(part[key])) {
-                    return healAndNormalizeDossier(part[key]);
-                }
-            }
-        }
-    }
-
     const compSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
         || globalThis.extension_settings?.multihog_companion;
-    if (compSettings?.chatStates) {
+    for (const chatStatesMap of [rpgSettings?.chatStates, compSettings?.chatStates]) {
+        if (!chatStatesMap) continue;
         for (const cid of candidateIds) {
-            const part = compSettings.chatStates[cid];
-            if (part) {
-                for (const key of ['pbtaCampaignDossier', 'faeCampaignDossier', 'campaignDossier', 'companionDossier']) {
-                    if (part[key] && isConciergeCreatedDossier(part[key])) {
-                        return healAndNormalizeDossier(part[key]);
-                    }
+            const part = chatStatesMap[cid];
+            if (!part) continue;
+            const canonical = getPartitionDossier(part);
+            if (canonical && isConciergeCreatedDossier(canonical)) {
+                return healAndNormalizeDossier(canonical);
+            }
+            for (const key of ['pbtaCampaignDossier', 'faeCampaignDossier', 'campaignDossier', 'companionDossier']) {
+                if (part[key] && part[key] !== canonical && isConciergeCreatedDossier(part[key])) {
+                    return healAndNormalizeDossier(part[key]);
                 }
             }
         }

@@ -128,6 +128,8 @@ import {
     getActiveRulesetId,
     getPartitionDossier,
     setPartitionDossier,
+    isCompanionRulesetSnippetId,
+    pruneCompanionLibSectionOrder,
 } from './pbta-ruleset-persistence.js';
 import {
     scanAndInitUnsyncedNpcs,
@@ -660,23 +662,25 @@ async function applyRulesetCartridge({
         s.gameCartridges.push(cartridge);
     }
 
-    // 2. Install unlocked base overrides into customSyspromptLibrary
+    // 2. Install unlocked & custom overrides into customSyspromptLibrary (pruning stale ruleset snippets)
+    const shouldStripSnippet = (id) => isCompanionRulesetSnippetId(id) || id === 'mhc_dnd_subfooter_override_footer';
     if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
-    s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_') && !p.id.startsWith('fae_'));
+    s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !shouldStripSnippet(p?.id));
     const snippets = cartridge.payload.customSyspromptLibrary.map(item => ({
         ...item,
-        enabled: true,
+        enabled: item.enabled !== false,
         scope: 'chat',
         _chatSetupMember: true,
     }));
     s.customSyspromptLibrary.push(...snippets);
 
-    // 2b. Synchronize MultiHog's global snippet catalog
+    // 2b. Synchronize MultiHog's global snippet catalog (pruning stale ruleset definitions)
     if (!s.syspromptSnippetDatabase) s.syspromptSnippetDatabase = [];
-    for (const sn of snippets) {
-        const catIdx = s.syspromptSnippetDatabase.findIndex(p => p.id === sn.id);
-        if (catIdx >= 0) s.syspromptSnippetDatabase[catIdx] = { ...sn };
-        else s.syspromptSnippetDatabase.push({ ...sn });
+    s.syspromptSnippetDatabase = s.syspromptSnippetDatabase.filter(p => !shouldStripSnippet(p?.id));
+    s.syspromptSnippetDatabase.push(...snippets.map(sn => ({ ...sn })));
+
+    if (Array.isArray(s.syspromptSectionOrder)) {
+        s.syspromptSectionOrder = pruneCompanionLibSectionOrder(s.syspromptSectionOrder, snippets, { removeDndSubfooter: true });
     }
 
     // 3. Update sysprompt modules (deactivate base sections replaced by overrides or not used)
@@ -722,6 +726,8 @@ async function applyRulesetCartridge({
             genre: genreKey,
             systemLabel: activeLabel,
             title: overrides.campaignTitle || overrides.name || null,
+            ...(overrides.knobs ? { knobs: JSON.parse(JSON.stringify(overrides.knobs)) } : {}),
+            ...(overrides.config ? { config: JSON.parse(JSON.stringify(overrides.config)) } : {}),
             ...(activeDossierSnapshot ? { dossier: JSON.parse(JSON.stringify(activeDossierSnapshot)) } : {}),
         });
     }

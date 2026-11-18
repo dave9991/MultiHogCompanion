@@ -10,6 +10,7 @@ import {
     isValidCharacterName,
     stripMarkdownNameArtifacts,
 } from './character-creator-sanitizer.js';
+import { buildCampaignContextSnippets } from './pbta-ruleset.js';
 
 export const FAE_CARTRIDGE_ID = 'fae_attrition_engine_v1';
 export const CARTRIDGE_FORMAT = 'multihog-game-cartridge';
@@ -1980,8 +1981,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
             scope: 'chat',
             icon: 'fa-scroll',
             description: 'FAE 4dF attrition reminder',
-            origin: 'unlocked_base',
-            baseTag: 'ruleset_note',
+            origin: 'custom',
         },
         {
             id: 'fae_base_override_footer',
@@ -2029,6 +2029,9 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         },
     ];
 
+    const { snippets: contextSnippets, customModuleTag } = buildCampaignContextSnippets('fae', overrides, config);
+    customSyspromptLibrary.push(...contextSnippets);
+
     const syspromptModules = {
         role: false,
         rng_system: false,
@@ -2052,6 +2055,9 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
     };
 
     const baseBlockOrder = ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
+    if (customModuleTag && !baseBlockOrder.includes(customModuleTag)) {
+        baseBlockOrder.push(customModuleTag);
+    }
 
     const payload = {
         customSyspromptLibrary,

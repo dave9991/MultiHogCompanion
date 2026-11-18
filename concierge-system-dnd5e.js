@@ -22,6 +22,12 @@ import {
 import { deriveHitDieForClass } from './level-up-scaffold.js';
 import { deduplicateFeatures, extractFeatureKey } from './level-up-runner.js';
 import { applyDndSubfooterAlignment } from './dnd-fixes.js';
+import { buildCampaignContextSnippets } from './pbta-ruleset.js';
+import {
+    cleanseStockDndSettings,
+    setCompanionActiveCartridge,
+    persistPbtaChatState,
+} from './pbta-ruleset-persistence.js';
 import { buildPlayerCardBio } from './concierge-pc-format.js';
 import { buildMonsterEntryContent } from './concierge-npc-format.js';
 import { systemRegistry } from './concierge-system-registry.js';
@@ -708,15 +714,93 @@ ${inventoryLines.join('\n')}
         return liveMemo;
     }
 
-    async installCartridge(systemKey, overrides, options = {}) {
-        // MultiHog is natively D&D 5e!
-        // Apply subfooter alignment and disable narrative-halting level_up_protocol
+    async installCartridge(systemKey, overrides = {}, options = {}) {
+        // MultiHog is natively D&D 5e: cleanse any residual PbtA/FAE state,
+        // apply D&D subfooter alignment, inject campaign context (<tone>/<factions>/<world_rules>),
+        // and disable narrative-halting level_up_protocol.
         try {
-            await applyDndSubfooterAlignment();
-            const s = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
-                || globalThis.extension_settings?.rpg_tracker;
-            if (s?.syspromptModules) {
+            const effectiveCtx = options.ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null);
+            const s = options.rpgSettings
+                || effectiveCtx?.extensionSettings?.rpg_tracker
+                || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
+                || globalThis.extension_settings?.rpg_tracker
+                || null;
+            const chatId = options.chatId
+                || effectiveCtx?.getCurrentChatId?.()
+                || effectiveCtx?.chatId
+                || (typeof globalThis._rpgCurrentChatId === 'function' ? globalThis._rpgCurrentChatId() : null)
+                || null;
+
+            if (s) {
+                await cleanseStockDndSettings(s, { chatId, syncSetup: false });
+            }
+
+            await applyDndSubfooterAlignment(s ? { rpgSettings: s } : {});
+
+            if (s) {
+                s.syspromptModules = s.syspromptModules || {};
                 s.syspromptModules.level_up_protocol = false;
+
+                const { snippets: contextSnippets, customModuleTag } = buildCampaignContextSnippets(
+                    'dnd5e',
+                    overrides || {},
+                    overrides?.config || {},
+                );
+
+                const isDndCampaignSnippet = (id) => Boolean(id && (id.startsWith('dnd5e_campaign_') || id.startsWith('dnd5e_custom_')));
+                if (!Array.isArray(s.customSyspromptLibrary)) s.customSyspromptLibrary = [];
+                s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !isDndCampaignSnippet(p?.id));
+                if (!Array.isArray(s.syspromptSnippetDatabase)) s.syspromptSnippetDatabase = [];
+                s.syspromptSnippetDatabase = s.syspromptSnippetDatabase.filter(p => !isDndCampaignSnippet(p?.id));
+
+                if (contextSnippets.length > 0) {
+                    const dndSnippets = contextSnippets.map(item => ({
+                        ...item,
+                        enabled: true,
+                        scope: 'chat',
+                        _chatSetupMember: true,
+                    }));
+                    s.customSyspromptLibrary.push(...dndSnippets);
+                    s.syspromptSnippetDatabase.push(...dndSnippets.map(sn => ({ ...sn })));
+
+                    if (dndSnippets.some(p => p.id === 'dnd5e_custom_world_rules')) {
+                        s.syspromptModules.world_rules = false;
+                    }
+                } else {
+                    delete s.syspromptModules.world_rules;
+                }
+
+                if (customModuleTag) {
+                    if (!Array.isArray(s.blockOrder)) {
+                        s.blockOrder = ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'SPELLS', 'XP', 'TIME'];
+                    } else {
+                        s.blockOrder = [...s.blockOrder];
+                    }
+                    if (!s.blockOrder.includes(customModuleTag)) {
+                        s.blockOrder.push(customModuleTag);
+                    }
+                }
+
+                if (chatId) {
+                    await setCompanionActiveCartridge(chatId, {
+                        cartridgeId: 'dnd5e',
+                        genre: systemKey || 'fantasy',
+                        systemLabel: overrides?.systemLabel || 'D&D 5e',
+                        title: overrides?.campaignTitle || null,
+                        ...(overrides?.config ? { config: JSON.parse(JSON.stringify(overrides.config)) } : {}),
+                        ...(overrides?.dossier ? { dossier: JSON.parse(JSON.stringify(overrides.dossier)) } : {}),
+                    }, s);
+                    await persistPbtaChatState(chatId, s);
+                }
+
+                if (typeof SillyTavern !== 'undefined') {
+                    try {
+                        const bridge = await import('../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+                        if (typeof bridge.autoApplySysprompt === 'function') {
+                            await bridge.autoApplySysprompt(true);
+                        }
+                    } catch (_) {}
+                }
             }
             return true;
         } catch (err) {

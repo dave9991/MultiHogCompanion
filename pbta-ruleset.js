@@ -1092,6 +1092,81 @@ export function buildPbtAWorldRulesContent(worldRules) {
 }
 
 /**
+ * Builds campaign-specific custom sysprompt snippets (`<tone>`, `<factions>`, `<world_rules>`)
+ * and extracts any custom HUD tracker module tag defined under `worldRules.customModule`.
+ *
+ * Uses `origin: 'custom'` so upstream `normalizeSectionOrder` preserves them as orderable
+ * `lib:<id>` entries (they are not top-level base tags in `sysprompt.txt`).
+ *
+ * @param {string} prefix - Snippet ID prefix ('pbta' | 'fae' | 'dnd5e')
+ * @param {object} [overrides={}]
+ * @param {object} [config={}]
+ * @returns {{ snippets: Array<object>, customModuleTag: string|null }}
+ */
+export function buildCampaignContextSnippets(prefix, overrides = {}, config = {}) {
+    const snippets = [];
+
+    const toneRaw = overrides?.tone ?? config?.tone ?? '';
+    const toneStr = String(toneRaw || '').trim();
+    if (toneStr) {
+        snippets.push({
+            id: `${prefix}_campaign_tone`,
+            tag: 'tone',
+            content: `<tone>\nAtmosphere & Tone: ${toneStr}\nNarrate with this atmospheric style, sensory texture, mood, and genre conventions consistently.\n</tone>`,
+            enabled: true,
+            scope: 'chat',
+            icon: 'fa-masks-theater',
+            description: `Campaign tone: ${toneStr}`,
+            origin: 'custom',
+        });
+    }
+
+    const factionsList = overrides?.factions || config?.factions;
+    if (Array.isArray(factionsList) && factionsList.length > 0) {
+        const fText = factionsList
+            .map(f => `- ${f.name} (${f.standing || 'Neutral'}): ${f.agenda || 'Unstated'}${f.notes ? ` — ${f.notes}` : ''}`)
+            .join('\n');
+        snippets.push({
+            id: `${prefix}_campaign_factions`,
+            tag: 'factions',
+            content: `<factions>\nCampaign Factions & Powers:\n${fText}\nPortray faction agents, rivalries, and shifting leverage dynamically in response to protagonist moves.\n</factions>`,
+            enabled: true,
+            scope: 'chat',
+            icon: 'fa-flag',
+            description: 'Campaign factions and political agendas',
+            origin: 'custom',
+        });
+    }
+
+    const worldRules = overrides?.worldRules || config?.worldRules;
+    if (worldRules && Array.isArray(worldRules.axioms) && worldRules.axioms.length > 0) {
+        const wrContent = buildPbtAWorldRulesContent(worldRules);
+        if (wrContent) {
+            snippets.push({
+                id: `${prefix}_custom_world_rules`,
+                tag: 'world_rules',
+                content: wrContent,
+                enabled: true,
+                scope: 'chat',
+                icon: 'fa-globe',
+                description: 'Setting Axioms, Laws, and Negative Constraints',
+                origin: 'custom',
+            });
+        }
+    }
+
+    let customModuleTag = null;
+    const customMod = worldRules?.customModule;
+    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+        customModuleTag = String(customMod.tag || customMod.fieldKey || customMod.label)
+            .replace(/[^a-zA-Z0-9_]/g, '_')
+            .toUpperCase() || null;
+    }
+
+    return { snippets, customModuleTag };
+}
+
+/**
  * Builds the complete PbtA Game Cartridge object, optionally accepting dynamic overrides.
  *
  * @param {string} [genreKey='fantasy']
@@ -1167,8 +1242,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
             scope: 'chat',
             icon: 'fa-lock-open',
             description: 'PbtA tri-state outcomes (10+, 7-9, 6-)',
-            origin: 'unlocked_base',
-            baseTag: 'ruleset_note',
+            origin: 'custom',
         },
         {
             id: 'pbta_base_override_footer',
@@ -1216,57 +1290,8 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         },
     ];
 
-    if (overrides.tone || config.tone) {
-        const toneStr = String(overrides.tone || config.tone).trim();
-        if (toneStr) {
-            customSyspromptLibrary.push({
-                id: 'pbta_campaign_tone',
-                tag: 'tone',
-                content: `<tone>\nAtmosphere & Tone: ${toneStr}\nNarrate with this atmospheric style, sensory texture, mood, and genre conventions consistently.\n</tone>`,
-                enabled: true,
-                scope: 'chat',
-                icon: 'fa-masks-theater',
-                description: `Campaign tone: ${toneStr}`,
-                origin: 'unlocked_base',
-                baseTag: 'tone',
-            });
-        }
-    }
-
-    const factionsList = overrides.factions || config.factions;
-    if (Array.isArray(factionsList) && factionsList.length > 0) {
-        const fText = factionsList.map(f => `- ${f.name} (${f.standing || 'Neutral'}): ${f.agenda || 'Unstated'}${f.notes ? ` — ${f.notes}` : ''}`).join('\n');
-        customSyspromptLibrary.push({
-            id: 'pbta_campaign_factions',
-            tag: 'factions',
-            content: `<factions>\nCampaign Factions & Powers:\n${fText}\nPortray faction agents, rivalries, and shifting leverage dynamically in response to protagonist moves.\n</factions>`,
-            enabled: true,
-            scope: 'chat',
-            icon: 'fa-flag',
-            description: 'Campaign factions and political agendas',
-            origin: 'unlocked_base',
-            baseTag: 'factions',
-        });
-    }
-
-    // Setting World Rules (Axioms, Substitutions, Negative Constraints)
-    const worldRules = overrides.worldRules || config.worldRules;
-    if (worldRules && Array.isArray(worldRules.axioms) && worldRules.axioms.length > 0) {
-        const wrContent = buildPbtAWorldRulesContent(worldRules);
-        if (wrContent) {
-            customSyspromptLibrary.push({
-                id: 'pbta_custom_world_rules',
-                tag: 'world_rules',
-                content: wrContent,
-                enabled: true,
-                scope: 'chat',
-                icon: 'fa-globe',
-                description: 'Setting Axioms, Laws, and Negative Constraints',
-                origin: 'unlocked_base',
-                baseTag: 'world_rules',
-            });
-        }
-    }
+    const { snippets: contextSnippets, customModuleTag } = buildCampaignContextSnippets('pbta', overrides, config);
+    customSyspromptLibrary.push(...contextSnippets);
 
     const syspromptModules = {
         // Unlocked overrides active
@@ -1294,12 +1319,8 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     const baseBlockOrder = partyMode === 'solo'
         ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME']
         : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
-    const customMod = worldRules?.customModule;
-    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
-        const cTag = (customMod.tag || customMod.fieldKey || customMod.label).replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
-        if (!baseBlockOrder.includes(cTag)) {
-            baseBlockOrder.push(cTag);
-        }
+    if (customModuleTag && !baseBlockOrder.includes(customModuleTag)) {
+        baseBlockOrder.push(customModuleTag);
     }
 
     const payload = {

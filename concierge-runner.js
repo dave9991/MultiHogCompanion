@@ -553,8 +553,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 ...(dossier.config?.knobs || {}),
                 action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
             },
+            dossier,
         };
-        const cartridgeOk = await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx });
+        const cartridgeOk = await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx, chatId });
         if (cartridgeOk === false) {
             throw new Error(`Failed to install ${adapter.label} ruleset cartridge.`);
         }

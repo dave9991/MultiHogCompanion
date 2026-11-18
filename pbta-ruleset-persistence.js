@@ -7,7 +7,7 @@
  * Prevents MultiHog's Chat Setup Link from resetting PbtA campaigns to stock D&D.
  */
 
-import { PBTA_GENRES, buildPbtACartridge } from './pbta-ruleset.js';
+import { PBTA_GENRES, buildPbtACartridge, buildCampaignContextSnippets } from './pbta-ruleset.js';
 import { FAE_GENRES, buildFaeCartridge } from './fae-ruleset.js';
 import { isAdventureActive } from './adventure-chat.js';
 
@@ -815,6 +815,69 @@ export function isLiveSettingsPollutedWithFae(s) {
     return false;
 }
 
+export function isCompanionRulesetSnippetId(id) {
+    if (!id || typeof id !== 'string') return false;
+    return id.startsWith('pbta_')
+        || id.startsWith('fae_')
+        || id.startsWith('dnd5e_campaign_')
+        || id.startsWith('dnd5e_custom_');
+}
+
+export function pruneCompanionLibSectionOrder(order, keepSnippets = [], { removeDndSubfooter = false } = {}) {
+    if (!Array.isArray(order)) return order;
+    const keepIds = new Set((keepSnippets || []).map(item => item?.id).filter(Boolean));
+    return order.filter(key => {
+        if (typeof key !== 'string' || !key.startsWith('lib:')) return true;
+        const id = key.slice(4);
+        if (removeDndSubfooter && id === 'mhc_dnd_subfooter_override_footer') return keepIds.has(id);
+        if (isCompanionRulesetSnippetId(id)) return keepIds.has(id);
+        return true;
+    });
+}
+
+/**
+ * Verifies whether live MultiHog settings (`customSyspromptLibrary`, `stockPrompts`,
+ * `cyoaConfig`, `diceFunctionTool`) match the compiled target cartridge for a chat.
+ * Minimal test stubs that omit `.content` on library entries are treated as matching
+ * so non-full fixtures do not trigger spurious setup saves.
+ *
+ * @param {object|null} s
+ * @param {object|null} cartridge
+ * @param {'pbta_'|'fae_'} prefix
+ * @returns {boolean}
+ */
+export function doesLiveLibraryMatchCartridge(s, cartridge, prefix) {
+    const liveAll = Array.isArray(s?.customSyspromptLibrary) ? s.customSyspromptLibrary : [];
+    const targetAll = Array.isArray(cartridge?.payload?.customSyspromptLibrary) ? cartridge.payload.customSyspromptLibrary : [];
+    const liveSnippets = liveAll.filter(p => p?.id?.startsWith(prefix));
+    const targetSnippets = targetAll.filter(p => p?.id?.startsWith(prefix));
+
+    const hasPopulatedLiveContent = liveSnippets.some(p => typeof p?.content === 'string' && p.content.length > 0);
+    if (!hasPopulatedLiveContent) return true;
+
+    if (liveSnippets.length !== targetSnippets.length) return false;
+    for (const target of targetSnippets) {
+        const live = liveSnippets.find(p => p.id === target.id);
+        if (!live) return false;
+        if (Boolean(live.enabled) !== (target.enabled !== false)) return false;
+        if ((live.origin || 'custom') !== (target.origin || 'custom')) return false;
+        if (live.content !== target.content) return false;
+    }
+
+    if (s.stockPrompts?.character !== cartridge.payload.stockPrompts?.character) return false;
+    if (s.stockPrompts?.combat !== cartridge.payload.stockPrompts?.combat) return false;
+    if (s.stockPrompts?.party !== cartridge.payload.stockPrompts?.party) return false;
+
+    if (cartridge.payload.cyoaConfig) {
+        if (Boolean(s.cyoaConfig?.useCustomPrompt) !== Boolean(cartridge.payload.cyoaConfig.useCustomPrompt)) return false;
+        if ((s.cyoaConfig?.customPromptText || '') !== (cartridge.payload.cyoaConfig.customPromptText || '')) return false;
+    }
+
+    if (Boolean(s.diceFunctionTool) !== Boolean(cartridge.payload.diceFunctionTool)) return false;
+
+    return true;
+}
+
 /**
  * Restores MultiHog live settings to pure factory D&D 5e configuration,
  * cleansing contaminated stockPrompts, syspromptModules, and blockOrder.
@@ -831,15 +894,15 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
         || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : (globalThis.extension_settings?.rpg_tracker || null));
     if (!settings || typeof settings !== 'object') return false;
 
-    // 1. Remove or disable PbtA and FAE overrides from customSyspromptLibrary, snippet database, and section order
+    // 1. Remove or disable PbtA, FAE, and campaign-scoped D&D context overrides
     if (Array.isArray(settings.customSyspromptLibrary)) {
-        settings.customSyspromptLibrary = settings.customSyspromptLibrary.filter(p => !p.id?.startsWith('pbta_') && !p.id?.startsWith('fae_'));
+        settings.customSyspromptLibrary = settings.customSyspromptLibrary.filter(p => !isCompanionRulesetSnippetId(p?.id));
     }
     if (Array.isArray(settings.syspromptSnippetDatabase)) {
-        settings.syspromptSnippetDatabase = settings.syspromptSnippetDatabase.filter(p => !p.id?.startsWith('pbta_') && !p.id?.startsWith('fae_'));
+        settings.syspromptSnippetDatabase = settings.syspromptSnippetDatabase.filter(p => !isCompanionRulesetSnippetId(p?.id));
     }
     if (Array.isArray(settings.syspromptSectionOrder)) {
-        settings.syspromptSectionOrder = settings.syspromptSectionOrder.filter(k => !k.startsWith('lib:pbta_') && !k.startsWith('lib:fae_'));
+        settings.syspromptSectionOrder = pruneCompanionLibSectionOrder(settings.syspromptSectionOrder, []);
     }
     if (Array.isArray(settings.gameSystemDatabase)) {
         settings.gameSystemDatabase = settings.gameSystemDatabase.filter(p => !p.id?.startsWith('pbta_') && !p.id?.startsWith('fae_'));
@@ -994,12 +1057,108 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
  * @param {object|null} [companionSettings=null]
  * @returns {Promise<boolean>}
  */
+function stripForeignRulesetSnippets(s, keepPrefix) {
+    const isForeign = (id) => Boolean(id && (
+        (!id.startsWith(keepPrefix) && isCompanionRulesetSnippetId(id))
+        || id === 'mhc_dnd_subfooter_override_footer'
+    ));
+    if (Array.isArray(s.customSyspromptLibrary)) {
+        s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !isForeign(p?.id));
+    }
+    if (Array.isArray(s.syspromptSnippetDatabase)) {
+        s.syspromptSnippetDatabase = s.syspromptSnippetDatabase.filter(p => !isForeign(p?.id));
+    }
+    if (Array.isArray(s.syspromptSectionOrder)) {
+        const kept = Array.isArray(s.customSyspromptLibrary)
+            ? s.customSyspromptLibrary.filter(p => p?.id?.startsWith(keepPrefix))
+            : [];
+        s.syspromptSectionOrder = pruneCompanionLibSectionOrder(s.syspromptSectionOrder, kept, { removeDndSubfooter: true });
+    }
+}
+
+function resolveToolModeForChat(s, resolvedChatId, dossier, activeCart, isSameProjectionOwner, hasLiveOverrides) {
+    const storedToolMode = s.chatStates?.[resolvedChatId]?.setup?.diceFunctionTool
+        ?? dossier?.config?.diceFunctionTool
+        ?? activeCart?.config?.diceFunctionTool;
+    return Boolean(
+        hasLiveOverrides && isSameProjectionOwner && typeof s.diceFunctionTool === 'boolean'
+            ? s.diceFunctionTool
+            : (storedToolMode ?? s.diceFunctionTool ?? false)
+    );
+}
+
+async function applyStandaloneCartridgeHydration(s, targetCartridge, resolvedToolMode, resolvedChatId) {
+    if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
+    s.customSyspromptLibrary = s.customSyspromptLibrary.filter(
+        p => !isCompanionRulesetSnippetId(p?.id) && p?.id !== 'mhc_dnd_subfooter_override_footer'
+    );
+    const hydratedSnippets = targetCartridge.payload.customSyspromptLibrary.map(item => ({
+        ...item,
+        enabled: item.enabled !== false,
+        scope: 'chat',
+        _chatSetupMember: true,
+    }));
+    s.customSyspromptLibrary.push(...hydratedSnippets);
+
+    if (!Array.isArray(s.syspromptSnippetDatabase)) s.syspromptSnippetDatabase = [];
+    s.syspromptSnippetDatabase = s.syspromptSnippetDatabase.filter(
+        p => !isCompanionRulesetSnippetId(p?.id) && p?.id !== 'mhc_dnd_subfooter_override_footer'
+    );
+    s.syspromptSnippetDatabase.push(...hydratedSnippets.map(sn => ({ ...sn })));
+
+    if (Array.isArray(s.syspromptSectionOrder)) {
+        s.syspromptSectionOrder = pruneCompanionLibSectionOrder(
+            s.syspromptSectionOrder,
+            hydratedSnippets,
+            { removeDndSubfooter: true },
+        );
+    }
+
+    s.syspromptModules = s.syspromptModules || {};
+    Object.assign(s.syspromptModules, targetCartridge.payload.syspromptModules);
+
+    s.stockPrompts = s.stockPrompts || {};
+    Object.assign(s.stockPrompts, targetCartridge.payload.stockPrompts);
+
+    if (targetCartridge.payload.cyoaConfig) {
+        s.cyoaConfig = s.cyoaConfig || {};
+        Object.assign(s.cyoaConfig, targetCartridge.payload.cyoaConfig);
+    }
+
+    s.rngEnabled = true;
+    s.rngQueueD20 = true;
+    s.rngQueueD100 = false;
+    s.diceFunctionTool = resolvedToolMode;
+    s.diceD100Mode = false;
+
+    s.blockOrder = [...targetCartridge.payload.blockOrder];
+    if (s.modules) {
+        Object.assign(s.modules, targetCartridge.payload.modules);
+    }
+
+    if (resolvedChatId) {
+        await persistPbtaChatState(resolvedChatId, s);
+    }
+}
+
+async function ensurePartitionHasSetupSnippets(s, resolvedChatId, prefix) {
+    if (!resolvedChatId) return;
+    const existingSetup = s.chatStates?.[resolvedChatId]?.setup;
+    const hasSnippets = existingSetup?.customSyspromptLibrary?.some(p => p.id?.startsWith(prefix))
+        || Object.keys(existingSetup?.syspromptSnippetStates || {}).some(k => k.startsWith(prefix) && existingSetup.syspromptSnippetStates[k]);
+    if (!existingSetup || !hasSnippets) {
+        await persistPbtaChatState(resolvedChatId, s);
+    }
+}
+
 export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSettings = null, applyCartridgeFn = null, companionSettings = null) {
     const s = rpgSettings || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext()?.extensionSettings?.rpg_tracker : null);
     if (!s) return false;
 
+    let isSameChatIdFn = (a, b) => String(a || '') === String(b || '');
     try {
-        const { checkHistoryPersistenceBlocked } = await import('./history-integrity-guard.js');
+        const { checkHistoryPersistenceBlocked, isSameChatId } = await import('./history-integrity-guard.js');
+        if (typeof isSameChatId === 'function') isSameChatIdFn = isSameChatId;
         if (await checkHistoryPersistenceBlocked()) {
             logRulesetEvent('ensureActiveChatRulesetConsistency:blocked_skip', { chatId });
             return false;
@@ -1010,24 +1169,37 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     let resolvedChatId = candidateIds[0] || null;
     let pbtaDossier = null;
     let faeDossier = null;
+    let dndDossier = null;
 
     for (const cid of candidateIds) {
-        if (s.chatStates?.[cid]?.pbtaCampaignDossier) {
-            const pbtaRuleset = s.chatStates[cid].pbtaCampaignDossier?.meta?.ruleset;
+        const part = s.chatStates?.[cid];
+        if (!part) continue;
+        if (part.pbtaCampaignDossier) {
+            const pbtaRuleset = part.pbtaCampaignDossier?.meta?.ruleset;
             if (pbtaRuleset === 'fae') {
-                faeDossier = s.chatStates[cid].pbtaCampaignDossier;
+                faeDossier = part.pbtaCampaignDossier;
                 resolvedChatId = cid;
                 break;
-            } else if (pbtaRuleset !== 'dnd5e') {
-                pbtaDossier = s.chatStates[cid].pbtaCampaignDossier;
+            } else if (pbtaRuleset === 'dnd5e') {
+                dndDossier = part.pbtaCampaignDossier;
+                resolvedChatId = cid;
+            } else {
+                pbtaDossier = part.pbtaCampaignDossier;
                 resolvedChatId = cid;
                 break;
             }
         }
-        if (s.chatStates?.[cid]?.faeCampaignDossier) {
-            faeDossier = s.chatStates[cid].faeCampaignDossier;
+        if (part.faeCampaignDossier) {
+            faeDossier = part.faeCampaignDossier;
             resolvedChatId = cid;
             break;
+        }
+        if (!dndDossier) {
+            const partDossier = getPartitionDossier(part);
+            if (partDossier?.meta?.ruleset === 'dnd5e' || partDossier?.meta?.systemKey === 'dnd5e') {
+                dndDossier = partDossier;
+                resolvedChatId = cid;
+            }
         }
     }
 
@@ -1039,6 +1211,7 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
                 setPartitionDossier(s.chatStates[resolvedChatId], faeDossier, 'fae');
             }
         } else if (activeCart.cartridgeId === 'dnd5e' || activeCart.dossier?.meta?.ruleset === 'dnd5e') {
+            dndDossier = activeCart.dossier;
             if (resolvedChatId && s.chatStates?.[resolvedChatId]) {
                 setPartitionDossier(s.chatStates[resolvedChatId], activeCart.dossier, 'dnd5e');
             }
@@ -1065,11 +1238,78 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         activeCartridge: activeCart?.cartridgeId || null,
         hasPbtaDossier: !!pbtaDossier,
         hasFaeDossier: !!faeDossier,
+        hasDndDossier: !!dndDossier,
     });
 
     if (!isPbta && !isFae) {
         if (isLiveSettingsPollutedWithPbtA(s) || isLiveSettingsPollutedWithFae(s)) {
             await cleanseStockDndSettings(s, { chatId: resolvedChatId || chatId, syncSetup: true });
+        }
+
+        // Synchronize D&D 5e campaign context (<tone>/<factions>/<world_rules>) per chat
+        const { snippets: targetDndSnippets, customModuleTag } = dndDossier
+            ? buildCampaignContextSnippets(
+                'dnd5e',
+                { tone: dndDossier.meta?.tone, factions: dndDossier.factions, worldRules: dndDossier.worldRules },
+                dndDossier.config || {},
+            )
+            : { snippets: [], customModuleTag: null };
+
+        const isDndContextId = (id) => Boolean(id && (id.startsWith('dnd5e_campaign_') || id.startsWith('dnd5e_custom_')));
+        const liveDndSnippets = (Array.isArray(s.customSyspromptLibrary) ? s.customSyspromptLibrary : []).filter(p => isDndContextId(p?.id));
+        const dbDndSnippets = (Array.isArray(s.syspromptSnippetDatabase) ? s.syspromptSnippetDatabase : []).filter(p => isDndContextId(p?.id));
+        const snippetsMatch = liveDndSnippets.length === targetDndSnippets.length
+            && dbDndSnippets.length === targetDndSnippets.length
+            && targetDndSnippets.every(t => {
+                const live = liveDndSnippets.find(p => p.id === t.id);
+                const db = dbDndSnippets.find(p => p.id === t.id);
+                return live && db && live.enabled === true && live.origin === 'custom' && live.content === t.content && db.content === t.content;
+            });
+        const missingCustomBlock = Boolean(customModuleTag && (!Array.isArray(s.blockOrder) || !s.blockOrder.includes(customModuleTag)));
+
+        if (!snippetsMatch || missingCustomBlock) {
+            if (Array.isArray(s.customSyspromptLibrary)) {
+                s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !isDndContextId(p?.id));
+            } else if (targetDndSnippets.length > 0) {
+                s.customSyspromptLibrary = [];
+            }
+            if (Array.isArray(s.syspromptSnippetDatabase)) {
+                s.syspromptSnippetDatabase = s.syspromptSnippetDatabase.filter(p => !isDndContextId(p?.id));
+            } else if (targetDndSnippets.length > 0) {
+                s.syspromptSnippetDatabase = [];
+            }
+
+            const hydratedDnd = targetDndSnippets.map(item => ({
+                ...item,
+                enabled: true,
+                scope: 'chat',
+                _chatSetupMember: true,
+            }));
+            if (hydratedDnd.length > 0) {
+                s.customSyspromptLibrary.push(...hydratedDnd);
+                s.syspromptSnippetDatabase.push(...hydratedDnd.map(sn => ({ ...sn })));
+            }
+            if (Array.isArray(s.syspromptSectionOrder)) {
+                s.syspromptSectionOrder = pruneCompanionLibSectionOrder(s.syspromptSectionOrder, hydratedDnd);
+            }
+            if (s.syspromptModules && typeof s.syspromptModules === 'object') {
+                if (hydratedDnd.some(p => p.id === 'dnd5e_custom_world_rules')) {
+                    s.syspromptModules.world_rules = false;
+                } else {
+                    delete s.syspromptModules.world_rules;
+                }
+            }
+            if (customModuleTag) {
+                if (!Array.isArray(s.blockOrder)) {
+                    s.blockOrder = ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'SPELLS', 'XP', 'TIME'];
+                }
+                if (!s.blockOrder.includes(customModuleTag)) {
+                    s.blockOrder.push(customModuleTag);
+                }
+            }
+            if (resolvedChatId && (dndDossier || s.chatStates?.[resolvedChatId]?.setup)) {
+                await persistPbtaChatState(resolvedChatId, s);
+            }
         }
         return false;
     }
@@ -1088,88 +1328,86 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         return false;
     }
 
+    const isSameProjectionOwner = Boolean(resolvedChatId && s.chatStateProjectionOwner && isSameChatIdFn(resolvedChatId, s.chatStateProjectionOwner));
+
     // --- CASE 1: FAE ACTIVE ---
     if (isFae) {
         const hasLiveFaeOverrides = Array.isArray(s.customSyspromptLibrary)
             && s.customSyspromptLibrary.some(p => p.id?.startsWith('fae_') && p.enabled);
 
-        // Strip any lingering PbtA snippets
-        if (Array.isArray(s.customSyspromptLibrary)) {
-            s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id?.startsWith('pbta_'));
-        }
-        if (Array.isArray(s.syspromptSectionOrder)) {
-            s.syspromptSectionOrder = s.syspromptSectionOrder.filter(k => !k.startsWith('lib:pbta_'));
-        }
+        stripForeignRulesetSnippets(s, 'fae_');
 
-        if (!hasLiveFaeOverrides) {
-            console.log(`[MultiHog Companion] Active chat ${resolvedChatId || chatId} has active cartridge FAE, but live customSyspromptLibrary was not hydrated (e.g. reload or setup reset). Rehydrating cartridge...`);
-            const genreKey = activeCart?.genre || faeDossier?.meta?.systemKey || companionSettings?.lastFaeGenre || 'cosmic_horror';
-            const safeId = (resolvedChatId || chatId || 'fae').toLowerCase().replace(/[^a-z0-9]+/g, '_');
-            const overrides = faeDossier ? {
-                id: `fae_${safeId}`,
-                campaignTitle: activeCart?.title || faeDossier.meta?.title,
-                name: activeCart?.systemLabel || (faeDossier.meta?.title ? `FAE: ${faeDossier.meta.title}` : null),
-                systemLabel: activeCart?.systemLabel || faeDossier.meta?.systemLabel,
-                description: faeDossier.meta?.premise,
-                genreKey,
-                config: faeDossier.config || {},
-                character: faeDossier.character || faeDossier.protagonist || {},
-                dossier: faeDossier,
-            } : (activeCart ? {
-                id: `fae_${safeId}`,
-                campaignTitle: activeCart.title,
-                systemLabel: activeCart.systemLabel,
-                genreKey,
-            } : { genreKey });
+        const genreKey = activeCart?.genre || faeDossier?.meta?.systemKey || companionSettings?.lastFaeGenre || 'cosmic_horror';
+        const safeId = (resolvedChatId || chatId || 'fae').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const faeChar = faeDossier?.character || faeDossier?.protagonist || {};
+        const resolvedToolMode = resolveToolModeForChat(s, resolvedChatId, faeDossier, activeCart, isSameProjectionOwner, hasLiveFaeOverrides);
+        const mergedFaeConfig = {
+            ...(activeCart?.config || {}),
+            ...(faeDossier?.config || {}),
+            diceFunctionTool: resolvedToolMode,
+        };
+        const mergedFaeKnobs = {
+            ...(activeCart?.knobs || {}),
+            ...(faeDossier?.config?.knobs || {}),
+            ...((faeDossier?.config?.actionTempo || activeCart?.config?.actionTempo)
+                ? { action_tempo: faeDossier?.config?.actionTempo || activeCart?.config?.actionTempo }
+                : {}),
+        };
+        const overrides = faeDossier ? {
+            id: `fae_${safeId}`,
+            campaignTitle: activeCart?.title || faeDossier.meta?.title,
+            name: activeCart?.systemLabel || (faeDossier.meta?.title ? `FAE: ${faeDossier.meta.title}` : null),
+            systemLabel: activeCart?.systemLabel || faeDossier.meta?.systemLabel,
+            description: faeDossier.meta?.premise,
+            tone: faeDossier.meta?.tone,
+            factions: faeDossier.factions,
+            worldRules: faeDossier.worldRules,
+            pools: faeChar.pools,
+            positive_tags: faeChar.positiveTags,
+            negative_tags: faeChar.negativeTags,
+            cyoaExamples: (Array.isArray(faeDossier.cyoaExamples) && faeDossier.cyoaExamples.length > 0) ? faeDossier.cyoaExamples : null,
+            heroicTier: Boolean(
+                faeDossier.config?.heroicTier
+                ?? faeDossier.config?.heroic_tier
+                ?? faeDossier.config?.knobs?.heroic_tier
+                ?? activeCart?.config?.heroicTier
+                ?? activeCart?.knobs?.heroic_tier
+                ?? false
+            ),
+            heroicDomain: faeChar.heroicDomain || faeChar.heroic_domain || null,
+            actionTempo: faeDossier.config?.actionTempo || faeDossier.config?.knobs?.action_tempo || activeCart?.knobs?.action_tempo || 'gritty_default',
+            genreKey,
+            config: mergedFaeConfig,
+            knobs: mergedFaeKnobs,
+            diceFunctionTool: resolvedToolMode,
+            character: faeChar,
+            dossier: faeDossier,
+        } : (activeCart ? {
+            id: `fae_${safeId}`,
+            campaignTitle: activeCart.title,
+            systemLabel: activeCart.systemLabel,
+            genreKey,
+            config: mergedFaeConfig,
+            knobs: mergedFaeKnobs,
+            heroicTier: Boolean(mergedFaeConfig.heroicTier ?? mergedFaeConfig.heroic_tier ?? mergedFaeKnobs.heroic_tier ?? false),
+            diceFunctionTool: resolvedToolMode,
+        } : {
+            genreKey,
+            config: { diceFunctionTool: resolvedToolMode },
+            diceFunctionTool: resolvedToolMode,
+        });
 
-            const cartridge = buildFaeCartridge(genreKey, overrides);
-            if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
-            s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('fae_') && !p.id.startsWith('pbta_'));
-            const faeSnippets = cartridge.payload.customSyspromptLibrary.map(item => ({
-                ...item,
-                enabled: true,
-                scope: 'chat',
-                _chatSetupMember: true,
-            }));
-            s.customSyspromptLibrary.push(...faeSnippets);
+        const targetFaeCartridge = buildFaeCartridge(genreKey, overrides);
+        const needsFaeHydration = !hasLiveFaeOverrides
+            || (Boolean(faeDossier || activeCart) && !doesLiveLibraryMatchCartridge(s, targetFaeCartridge, 'fae_'));
 
-            s.syspromptModules = s.syspromptModules || {};
-            Object.assign(s.syspromptModules, cartridge.payload.syspromptModules);
-
-            s.stockPrompts = s.stockPrompts || {};
-            Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
-
-            if (cartridge.payload.cyoaConfig) {
-                s.cyoaConfig = s.cyoaConfig || {};
-                Object.assign(s.cyoaConfig, cartridge.payload.cyoaConfig);
-            }
-
-            s.rngEnabled = true;
-            s.rngQueueD20 = true;
-            s.rngQueueD100 = false;
-            s.diceFunctionTool = false;
-            s.diceD100Mode = false;
-
-            s.blockOrder = [...cartridge.payload.blockOrder];
-            if (s.modules) {
-                Object.assign(s.modules, cartridge.payload.modules);
-            }
-
-            if (resolvedChatId) {
-                await persistPbtaChatState(resolvedChatId, s);
-            }
+        if (needsFaeHydration) {
+            console.log(`[MultiHog Companion] Hydrating FAE cartridge for active chat ${resolvedChatId || chatId} (live=${hasLiveFaeOverrides})...`);
+            await applyStandaloneCartridgeHydration(s, targetFaeCartridge, resolvedToolMode, resolvedChatId);
             return true;
         }
 
-        // Overrides are live; make sure setup snapshot is current in the partition
-        if (resolvedChatId) {
-            const existingSetup = s.chatStates?.[resolvedChatId]?.setup;
-            const hasFaeSnippets = existingSetup?.customSyspromptLibrary?.some(p => p.id?.startsWith('fae_'))
-                || Object.keys(existingSetup?.syspromptSnippetStates || {}).some(k => k.startsWith('fae_') && existingSetup.syspromptSnippetStates[k]);
-            if (!existingSetup || !hasFaeSnippets) {
-                await persistPbtaChatState(resolvedChatId, s);
-            }
-        }
+        await ensurePartitionHasSetupSnippets(s, resolvedChatId, 'fae_');
         return true;
     }
 
@@ -1177,92 +1415,58 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
     const hasLivePbtaOverrides = Array.isArray(s.customSyspromptLibrary)
         && s.customSyspromptLibrary.some(p => p.id?.startsWith('pbta_') && p.enabled);
 
-    // Strip any lingering FAE snippets
-    if (Array.isArray(s.customSyspromptLibrary)) {
-        s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id?.startsWith('fae_'));
-    }
-    if (Array.isArray(s.syspromptSectionOrder)) {
-        s.syspromptSectionOrder = s.syspromptSectionOrder.filter(k => !k.startsWith('lib:fae_'));
-    }
+    stripForeignRulesetSnippets(s, 'pbta_');
 
-    if (!hasLivePbtaOverrides) {
-        console.log(`[MultiHog Companion] Active chat ${resolvedChatId || chatId} has active cartridge PbtA, but live customSyspromptLibrary was not hydrated (e.g. reload or setup reset). Rehydrating cartridge...`);
-        const genreKey = activeCart?.genre || pbtaDossier?.meta?.systemKey || 'fantasy';
-        const statsList = Object.keys(pbtaDossier?.protagonist?.stats || {});
-        const safeId = (resolvedChatId || chatId || 'pbta').toLowerCase().replace(/[^a-z0-9]+/g, '_');
-        const overrides = pbtaDossier ? {
-            id: `pbta_${safeId}`,
-            campaignTitle: activeCart?.title || pbtaDossier.meta?.title,
-            name: activeCart?.systemLabel || (pbtaDossier.meta?.title ? `PbtA: ${pbtaDossier.meta.title}` : null),
-            systemLabel: activeCart?.systemLabel || pbtaDossier.meta?.systemLabel,
-            description: pbtaDossier.meta?.premise,
-            tone: pbtaDossier.meta?.tone,
-            factions: pbtaDossier.factions,
-            worldRules: pbtaDossier.worldRules,
-            stats: statsList.length >= 3 ? statsList : null,
-            startingMoves: pbtaDossier.protagonist?.startingMoves,
-            cyoaExamples: (Array.isArray(pbtaDossier.cyoaExamples) && pbtaDossier.cyoaExamples.length > 0) ? pbtaDossier.cyoaExamples : null,
-            config: pbtaDossier.config || {},
-            dossier: pbtaDossier,
-        } : (activeCart ? {
-            id: `pbta_${safeId}`,
-            campaignTitle: activeCart.title,
-            systemLabel: activeCart.systemLabel,
-        } : {});
+    const genreKey = activeCart?.genre || pbtaDossier?.meta?.systemKey || 'fantasy';
+    const statsList = Object.keys(pbtaDossier?.protagonist?.stats || {});
+    const safeId = (resolvedChatId || chatId || 'pbta').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const resolvedPbtaToolMode = resolveToolModeForChat(s, resolvedChatId, pbtaDossier, activeCart, isSameProjectionOwner, hasLivePbtaOverrides);
+    const mergedPbtaConfig = {
+        ...(activeCart?.config || {}),
+        ...(pbtaDossier?.config || {}),
+        diceFunctionTool: resolvedPbtaToolMode,
+    };
+    const overrides = pbtaDossier ? {
+        id: `pbta_${safeId}`,
+        campaignTitle: activeCart?.title || pbtaDossier.meta?.title,
+        name: activeCart?.systemLabel || (pbtaDossier.meta?.title ? `PbtA: ${pbtaDossier.meta.title}` : null),
+        systemLabel: activeCart?.systemLabel || pbtaDossier.meta?.systemLabel,
+        description: pbtaDossier.meta?.premise,
+        tone: pbtaDossier.meta?.tone,
+        factions: pbtaDossier.factions,
+        worldRules: pbtaDossier.worldRules,
+        stats: statsList.length >= 3 ? statsList : null,
+        startingMoves: pbtaDossier.protagonist?.startingMoves,
+        cyoaExamples: (Array.isArray(pbtaDossier.cyoaExamples) && pbtaDossier.cyoaExamples.length > 0) ? pbtaDossier.cyoaExamples : null,
+        config: mergedPbtaConfig,
+        diceFunctionTool: resolvedPbtaToolMode,
+        dossier: pbtaDossier,
+    } : (activeCart ? {
+        id: `pbta_${safeId}`,
+        campaignTitle: activeCart.title,
+        systemLabel: activeCart.systemLabel,
+        config: mergedPbtaConfig,
+        diceFunctionTool: resolvedPbtaToolMode,
+    } : {
+        config: { diceFunctionTool: resolvedPbtaToolMode },
+        diceFunctionTool: resolvedPbtaToolMode,
+    });
 
+    const targetPbtaCartridge = buildPbtACartridge(genreKey, overrides);
+    const needsPbtaHydration = !hasLivePbtaOverrides
+        || (Boolean(pbtaDossier || activeCart) && !doesLiveLibraryMatchCartridge(s, targetPbtaCartridge, 'pbta_'));
+
+    if (needsPbtaHydration) {
+        console.log(`[MultiHog Companion] Hydrating PbtA cartridge for active chat ${resolvedChatId || chatId} (live=${hasLivePbtaOverrides})...`);
         if (typeof applyCartridgeFn === 'function') {
             await applyCartridgeFn(genreKey, overrides);
         } else {
-            // Standalone rehydration directly on settings
-            const cartridge = buildPbtACartridge(genreKey, overrides);
-            if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
-            s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !p.id.startsWith('pbta_') && !p.id.startsWith('fae_'));
-            const pbtaSnippets = cartridge.payload.customSyspromptLibrary.map(item => ({
-                ...item,
-                enabled: true,
-                scope: 'chat',
-                _chatSetupMember: true,
-            }));
-            s.customSyspromptLibrary.push(...pbtaSnippets);
-
-            s.syspromptModules = s.syspromptModules || {};
-            Object.assign(s.syspromptModules, cartridge.payload.syspromptModules);
-
-            s.stockPrompts = s.stockPrompts || {};
-            Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
-
-            if (cartridge.payload.cyoaConfig) {
-                s.cyoaConfig = s.cyoaConfig || {};
-                Object.assign(s.cyoaConfig, cartridge.payload.cyoaConfig);
-            }
-
-            s.rngEnabled = true;
-            s.rngQueueD20 = true;
-            s.rngQueueD100 = false;
-            s.diceFunctionTool = false;
-            s.diceD100Mode = false;
-
-            s.blockOrder = [...cartridge.payload.blockOrder];
-            if (s.modules) {
-                Object.assign(s.modules, cartridge.payload.modules);
-            }
-
-            if (resolvedChatId) {
-                await persistPbtaChatState(resolvedChatId, s);
-            }
+            await applyStandaloneCartridgeHydration(s, targetPbtaCartridge, resolvedPbtaToolMode, resolvedChatId);
         }
         return true;
     }
 
-    // Overrides are live; make sure setup snapshot is current in the partition
-    if (resolvedChatId) {
-        const existingSetup = s.chatStates?.[resolvedChatId]?.setup;
-        const hasPbtaSnippets = existingSetup?.customSyspromptLibrary?.some(p => p.id?.startsWith('pbta_'))
-            || Object.keys(existingSetup?.syspromptSnippetStates || {}).some(k => k.startsWith('pbta_') && existingSetup.syspromptSnippetStates[k]);
-        if (!existingSetup || !hasPbtaSnippets) {
-            await persistPbtaChatState(resolvedChatId, s);
-        }
-    }
+    await ensurePartitionHasSetupSnippets(s, resolvedChatId, 'pbta_');
     return true;
 }
 

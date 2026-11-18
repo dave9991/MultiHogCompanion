@@ -1,3 +1,4 @@
+/// <reference path="./types.d.ts" />
 /**
  * MultiHog Companion — Level-Up Runner & State Committer
  *

@@ -1,3 +1,4 @@
+/// <reference path="./types.d.ts" />
 /**
  * concierge-runner.js — MultiHog Companion
  *

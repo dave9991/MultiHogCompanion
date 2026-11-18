@@ -1,3 +1,4 @@
+/// <reference path="./types.d.ts" />
 /**
  * fae-state-sync.js — MultiHog Companion
  *

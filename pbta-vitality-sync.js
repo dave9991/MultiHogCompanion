@@ -1,3 +1,4 @@
+/// <reference path="./types.d.ts" />
 /**
  * PbtA Vitality & Party Sync Adapter for MultiHog Companion
  *

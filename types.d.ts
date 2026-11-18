@@ -230,9 +230,90 @@ interface CompanionDossier {
     };
     contemplation: DossierContemplation;
     config: DossierConfig;
+    progressionBlueprint?: ProgressionBlueprint | null;
     pools?: Record<string, FaeResourcePool>;
     character?: Record<string, any>;
     knobs?: Record<string, any>;
+    [key: string]: any;
+}
+
+interface ProgressionBlueprintLevel {
+    features: string[];
+    profBonus: number;
+    subclass?: boolean;
+    asi?: boolean;
+    spellSlots?: Record<string, number> | null;
+    [key: string]: any;
+}
+
+interface ProgressionBlueprint {
+    className: string;
+    hitDie: string;
+    primaryStats?: string[];
+    levels: Record<string | number, ProgressionBlueprintLevel>;
+    [key: string]: any;
+}
+
+interface LevelUpProposal {
+    characterName: string;
+    className: string;
+    playbookName?: string;
+    genreKey?: string;
+    pacingXp?: number;
+    pacingScenes?: number;
+    currentLevel: number | null;
+    targetLevel: number | null;
+    hitDie?: string | null;
+    hpChange?: {
+        oldMax: number;
+        gain: number;
+        newMax: number;
+        mode: string;
+    };
+    newFeatures: string[];
+    activeAbilities?: string[];
+    spellSlots?: Record<string, number> | null;
+    isAsi?: boolean;
+    asiOptions?: Record<string, any> | null;
+    partyChanges?: Array<{
+        name: string;
+        hpGain: number;
+        classFeature: string;
+        [key: string]: any;
+    }>;
+    isPbta?: boolean;
+    isFae?: boolean;
+    isRespec?: boolean;
+    stats?: Record<string, number>;
+    statNames?: string[];
+    harm?: DossierHarm;
+    status?: string;
+    conditions?: string[];
+    advancesTaken?: string[];
+    advanceOptions?: Array<Record<string, any>>;
+    pbtaAdvance?: Record<string, any> | null;
+    pools?: Record<string, FaeResourcePool>;
+    knobs?: Record<string, any>;
+    positiveTags?: string[];
+    negativeTags?: string[];
+    scars?: string[];
+    milestoneOptions?: Array<Record<string, any>>;
+    faeMilestone?: Record<string, any> | null;
+    [key: string]: any;
+}
+
+interface CanonEntry {
+    id?: string;
+    name: string;
+    title?: string;
+    kind: 'NPC' | 'MONSTER' | 'LOCATION' | 'FACTION' | 'RULE' | 'EVENT' | 'LORE' | (string & {});
+    comment?: string;
+    aliases?: string[];
+    keys: string[];
+    content: string;
+    importance?: number;
+    vectorized?: boolean;
+    order?: number;
     [key: string]: any;
 }
 
@@ -308,7 +389,7 @@ interface SessionZeroTrackState {
         adventure: any;
     };
     attachedSources: any[];
-    stagedCanonEntries: any[];
+    stagedCanonEntries: CanonEntry[];
     pendingAttachments: any[];
     activeImports: any[];
     rulesetConfirmed: boolean;
@@ -319,7 +400,7 @@ interface LivingWorldTrackState {
     campaignTitle: string | null;
     dossier: CompanionDossier | null;
     chatHistory: Array<Record<string, any>>;
-    stagedCanonEntries: any[];
+    stagedCanonEntries: CanonEntry[];
 }
 
 declare var SillyTavern: {

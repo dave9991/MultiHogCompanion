@@ -1748,3 +1748,161 @@ test('Level-Up System: applyLevelUpCommit synchronizes FAE and PbtA partition do
     assert.strictEqual(pbtaPart.campaignDossier.protagonist.stats.Might, 2);
     assert.deepStrictEqual(pbtaPart.campaignDossier.protagonist.advancesTaken, ['stat_boost']);
 });
+
+test('Level-Up Stage Renderers: Extracted Markup Builders Across D&D, PbtA, FAE & Blueprint Table', async () => {
+    const renderers = await import('../level-up-stage-renderers.js');
+    const levelUpUi = await import('../level-up-ui.js');
+
+    // Verify re-exports from level-up-ui.js stay intact for backward compatibility
+    for (const fnName of [
+        'buildPbtaAdvanceSectionHtml',
+        'buildDndAsiAndPartyHtml',
+        'buildFaeMilestoneAndTuningHtml',
+        'buildLevelUpModalHtml',
+        'buildBlueprintTableHtml',
+    ]) {
+        assert.strictEqual(typeof renderers[fnName], 'function', `${fnName} exported by level-up-stage-renderers.js`);
+        assert.strictEqual(levelUpUi[fnName], renderers[fnName], `${fnName} re-exported by level-up-ui.js`);
+    }
+
+    // 1. D&D 5e ASI + Party Sync rendering and PbtA suppression
+    const dndProposal = {
+        characterName: 'Kaelen <Script>',
+        className: 'Fighter & "Vanguard"',
+        currentLevel: 3,
+        targetLevel: 4,
+        hitDie: 'd10',
+        hpChange: { oldMax: 28, gain: 8, newMax: 36, mode: 'average' },
+        isAsi: true,
+        asiOptions: {
+            optionA: { label: '+2 to STR' },
+            optionB: { label: '+1 to STR & +1 to CON' },
+            recommendedFeats: ['Sentinel', 'Alert'],
+        },
+        partyChanges: [{ name: 'Lyra', hpGain: 6, classFeature: 'Scaled to Tier 1' }],
+    };
+    const { asiSection, partySection } = renderers.buildDndAsiAndPartyHtml({
+        isPbta: false,
+        isFae: false,
+        isRespec: false,
+        proposal: dndProposal,
+    });
+    assert.match(asiSection, /Milestone Advancement: ASI or Feat/);
+    assert.match(asiSection, /Sentinel/);
+    assert.match(partySection, /mhc_party_sync_chk/);
+    assert.match(partySection, /Lyra/);
+
+    const pbtaSuppressed = renderers.buildDndAsiAndPartyHtml({
+        isPbta: true,
+        isFae: false,
+        isRespec: false,
+        proposal: dndProposal,
+    });
+    assert.strictEqual(pbtaSuppressed.asiSection, '');
+    assert.strictEqual(pbtaSuppressed.partySection, '');
+
+    // 2. PbtA Playbook Advancement Picker rendering and respec suppression
+    const pbtaProposal = {
+        characterName: 'Vex',
+        playbookName: 'The Shadow',
+        stats: { Might: 1, Agility: 3, Wits: 0 },
+        statNames: ['Might', 'Agility', 'Wits'],
+        harm: { current: 1, max: 4, armor: 1 },
+        advancesTaken: ['playbook_move'],
+        advanceOptions: [
+            { id: 'stat_boost', label: '+1 to a Playbook Stat', used: 0, maxTimes: 3, exhausted: false },
+            { id: 'playbook_move', label: 'New Playbook Move', used: 1, maxTimes: 2, exhausted: false, suggestedMoves: ['Shadow Step (+Agility) (When you vanish...)'] },
+        ],
+    };
+    const pbtaHtml = renderers.buildPbtaAdvanceSectionHtml({
+        isPbta: true,
+        isRespec: false,
+        proposal: pbtaProposal,
+        pbtaStatNames: pbtaProposal.statNames,
+    });
+    assert.match(pbtaHtml, /mhc-pbta-advance-picker-card/);
+    assert.match(pbtaHtml, /Advances Taken: 1/);
+    assert.match(pbtaHtml, /Agility \(\+3 ➔ Max \+3\)/);
+    assert.strictEqual(
+        renderers.buildPbtaAdvanceSectionHtml({
+            isPbta: true,
+            isRespec: true,
+            proposal: pbtaProposal,
+            pbtaStatNames: pbtaProposal.statNames,
+        }),
+        '',
+    );
+
+    // 3. FAE Milestone Picker & Tuning cards rendering and respec milestone suppression
+    const faeProposal = {
+        characterName: 'Mira',
+        genreKey: 'cosmic_horror',
+        pacingScenes: 4,
+        negativeTags: ['Shaken Nerve'],
+        pools: {
+            sanity: { label: 'Sanity', current: 5, max: 8, barColor: 'purple', zero_debuff: 'Shattered' },
+        },
+        knobs: { flee_grace_toggle: true, base_attrition_shift: 0, overflow_default: 'scar_and_ko' },
+        milestoneOptions: [
+            { id: 'heal_scar', reducedPools: [] },
+            { id: 'new_capability', suggestedTags: ['Forbidden Lore [ancient]'] },
+            { id: 'hardened_reserve', pools: [{ key: 'sanity', label: 'Sanity', current: 5, max: 8, nextMax: 9, disabled: false }] },
+        ],
+    };
+    const faeAdvance = renderers.buildFaeMilestoneAndTuningHtml({
+        isFae: true,
+        isRespec: false,
+        proposal: faeProposal,
+    });
+    assert.match(faeAdvance.faeMilestoneSection, /mhc-fae-milestone-picker-card/);
+    assert.match(faeAdvance.faeMilestoneSection, /Shaken Nerve/);
+    assert.match(faeAdvance.faeTuningSection, /mhc-fae-pools-card/);
+    assert.match(faeAdvance.faeTuningSection, /mhc-fae-knobs-card/);
+
+    const faeRespec = renderers.buildFaeMilestoneAndTuningHtml({
+        isFae: true,
+        isRespec: true,
+        proposal: faeProposal,
+    });
+    assert.strictEqual(faeRespec.faeMilestoneSection, '');
+    assert.match(faeRespec.faeTuningSection, /mhc-fae-pools-card/);
+
+    // 4. Stage 1 Blueprint Table builder
+    const tableHtml = renderers.buildBlueprintTableHtml({
+        activeBlueprint: {
+            className: 'Chrono-Blade <Test>',
+            hitDie: 'd10',
+            levels: {
+                1: { features: ['Temporal Parry (Reduce incoming damage by 1d6; 1/1 per short rest)', 'chrono Sight (Detect nearby anomalies)'], profBonus: 2 },
+                3: { features: ['Paradox Edge (Critical on 19-20)'], subclass: true, profBonus: 2 },
+                20: { features: ['Lord of <Eternity>'], profBonus: 6 },
+            },
+        },
+        targetLevel: 4,
+        currentLevel: 3,
+        expandedTiers: new Set([0]),
+    });
+    assert.match(tableHtml, /mhc-blueprint-table/);
+    assert.match(tableHtml, /mhc-tier-row/);
+    assert.match(tableHtml, /mhc-kind-ability/);
+    assert.match(tableHtml, /mhc-kind-trait/);
+    assert.match(tableHtml, /Lord of &lt;Eternity&gt;/);
+
+    // 5. Full modal HTML combines Stage 1 + Stage 2 with proper visibility & XSS escaping
+    const modalHtml = renderers.buildLevelUpModalHtml({
+        currentStage: 1,
+        isFae: false,
+        isPbta: false,
+        isRespec: false,
+        isLoadingBlueprint: false,
+        dossier: { meta: { conciergeCreated: true } },
+        activeBlueprint: { className: 'Fighter & "Vanguard"', hitDie: 'd10', levels: {} },
+        proposal: dndProposal,
+        pbtaStatNames: [],
+        pbtaStatNamesStr: 'Might, Agility, Wits, Heart, Arcana',
+    });
+    assert.match(modalHtml, /id="mhc-stage-definition" style="display:flex;"/);
+    assert.match(modalHtml, /id="mhc-stage-advancement" style="display:none;"/);
+    assert.match(modalHtml, /Kaelen &lt;Script&gt;/);
+    assert.match(modalHtml, /Fighter &amp; &quot;Vanguard&quot;/);
+});

@@ -315,6 +315,29 @@ function resolveGenreStatsState(genre, rawStats) {
 }
 
 /**
+ * Resolves the effective PbtA genre definition, overlaying any customGenreSpec
+ * produced by the Step 3 Ruleset Architect.
+ *
+ * @param {string} [genreKey='fantasy']
+ * @param {object} [overrides={}]
+ * @returns {object}
+ */
+export function resolveEffectivePbtaGenre(genreKey = 'fantasy', overrides = {}) {
+    const base = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const spec = overrides?.customGenreSpec || overrides?.meta?.customGenreSpec;
+    if (!spec || typeof spec !== 'object') return base;
+    return {
+        ...base,
+        id: genreKey || base.id,
+        label: spec.label || overrides?.systemLabel || base.label,
+        stats: (Array.isArray(spec.stats) && spec.stats.length >= 4) ? spec.stats : base.stats,
+        statDescriptions: spec.statDescriptions || base.statDescriptions,
+        archetypes: (Array.isArray(spec.archetypes) && spec.archetypes.length) ? spec.archetypes : base.archetypes,
+        moves: (Array.isArray(spec.moves) && spec.moves.length) ? spec.moves : base.moves,
+    };
+}
+
+/**
  * Builds the PbtA role prompt section.
  *
  * @param {boolean|object} [isFreeform=false] Whether freeform playstyle is active (or options object)
@@ -327,7 +350,7 @@ export function buildPbtARoleContent(isFreeform = false, genreKey = 'fantasy', o
         genreKey = overrides.genreKey || overrides.genre || 'fantasy';
         isFreeform = Boolean(overrides.isFreeform ?? (overrides.playstyle === 'freeform'));
     }
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const genre = resolveEffectivePbtaGenre(genreKey, overrides);
     const { activeStats, isCustomStats } = resolveGenreStatsState(genre, overrides?.stats);
     const statDescLine = isCustomStats
         ? activeStats.join(', ')
@@ -505,7 +528,7 @@ function parseGenreMoveAndStat(moveStr, activeStats = [], statFallbackIndex = 0)
 export function buildPbtARngContent(options = {}) {
     const toolMode = Boolean(options?.toolMode ?? options?.diceFunctionTool ?? false);
     const genreKey = options?.genreKey || options?.genre || 'fantasy';
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const genre = resolveEffectivePbtaGenre(genreKey, options?.overrides || options);
     const rawStats = Array.isArray(options?.stats) && options.stats.length >= 3
         ? options.stats
         : options?.overrides?.stats;
@@ -901,7 +924,7 @@ export function deriveCyoaExamplesFromMoves(moves = [], contextLabel = '') {
  * @returns {string}
  */
 export function buildPbtACyoaPrompt(genreKey = 'fantasy', overrides = {}) {
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const genre = resolveEffectivePbtaGenre(genreKey, overrides);
     const config = overrides.config || overrides || {};
     const playstyle = config.playstyle || 'cyoa_5';
     const cyoaEmojis = (config.cyoaEmojis !== undefined) ? config.cyoaEmojis : (overrides.cyoaEmojis !== false);
@@ -1066,7 +1089,7 @@ ${orderInstructions}`;
  * @returns {object}
  */
 export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const genre = resolveEffectivePbtaGenre(genreKey, overrides);
     const config = overrides.config || overrides || {};
     const harmMax = config.harmMax || overrides.harmMax || 5;
     const pacingXp = config.pacingXp || overrides.pacingXp || 5;
@@ -1357,7 +1380,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         overrides = genreKey;
         genreKey = overrides.genreKey || overrides.genre || 'fantasy';
     }
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const genre = resolveEffectivePbtaGenre(genreKey, overrides);
     const config = overrides.config || overrides || {};
     const harmMax = config.harmMax || overrides.harmMax || 5;
     const pacingXp = config.pacingXp || overrides.pacingXp || 5;
@@ -1577,7 +1600,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
  * Builds the Quick Start instructions string passed to MultiHog character creation.
  */
 export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName = '', customNotes = '') {
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const genre = resolveEffectivePbtaGenre(genreKey);
     const moveNames = genre.moves.map(m => m.split('—')[0].replace(/\s*\(\+Attribute\)/, '').trim()).join(', ');
     const archetypesSnippet = genre.archetypes.slice(0, 4).join(', ');
 

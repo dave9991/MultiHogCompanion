@@ -6,7 +6,12 @@ import {
     serializeGameSystemToBlueprintBlock,
     normalizeGameSystemDrivers,
     extractGameSystemTemplate,
+    mapWizardDraftToCustomModule,
+    generateBlueprintGameSystemViaWizard,
 } from '../game-system-bridge.js';
+import {
+    buildStage4CharacterBuilderPrompt,
+} from '../concierge-prompt.js';
 import {
     applyDossierUpdates,
     healAndNormalizeDossier,
@@ -180,4 +185,78 @@ test('Concierge Lore Distributor — buildCustomModuleLoreEntry generates rich C
     assert.match(entry.core, /Format Sample:\s*\[RELIC_COMPASS_TRACKER\]/);
     assert.ok(entry.keys.includes('relic compass tracker'));
     assert.ok(entry.keys.includes('relic_compass_tracker'));
+});
+
+test('Game System Wizard Delegation — mapWizardDraftToCustomModule & generateBlueprintGameSystemViaWizard', async () => {
+    const mapped = mapWizardDraftToCustomModule({
+        name: 'Pip-Boy Rad Meter',
+        icon: '☢️',
+        needsTracker: true,
+        driverTime: false,
+        driverGmAnnotation: true,
+        driverStatedFact: false,
+        effectOwner: 'tracker',
+        gmTag: 'rad_meter',
+        gmContent: 'Emit *(Radiation: +25 Rads)* when entering irradiated zones.',
+        trackerTag: 'RAD_METER',
+        trackerLabel: 'Pip-Boy Rad Meter',
+        trackerIcon: '☢️',
+        trackerContent: '[RAD_METER]\nExposure: 0/1000 Rads (Clean)\n[/RAD_METER]',
+    });
+
+    assert.equal(mapped.tag, 'RAD_METER');
+    assert.equal(mapped.label, 'Pip-Boy Rad Meter');
+    assert.equal(mapped.icon, '☢️');
+    assert.deepEqual(mapped.drivers, ['gm_annotation']);
+    assert.match(mapped.instruction, /Radiation: \+25 Rads/);
+    assert.match(mapped.sample, /\[RAD_METER\]/);
+
+    const mockWizardModule = {
+        getEffectiveWizardSystemPrompt: () => 'WIZARD_SYSTEM_PROMPT',
+        parseWizardResponse: () => ({
+            name: 'Suit Oxygen',
+            icon: '🫧',
+            needsTracker: true,
+            driverTime: true,
+            driverGmAnnotation: true,
+            driverStatedFact: false,
+            effectOwner: 'tracker',
+            gmTag: 'suit_oxygen',
+            gmContent: 'Narrate low-oxygen alarms.',
+            trackerTag: 'SUIT_OXYGEN',
+            trackerLabel: 'Suit Oxygen',
+            trackerIcon: '🫧',
+            trackerContent: '[SUIT_OXYGEN]\nO2: 100/100%\n[/SUIT_OXYGEN]',
+        }),
+    };
+
+    let capturedSys = '';
+    const res = await generateBlueprintGameSystemViaWizard({
+        concept: 'Track suit oxygen depleting over time in toxic vaults',
+        dossier: createEmptyDossier(),
+        wizardModule: mockWizardModule,
+        send: async (msgs) => {
+            capturedSys = msgs[0].content;
+            return '<meta name="Suit Oxygen" />';
+        },
+    });
+    assert.equal(capturedSys, 'WIZARD_SYSTEM_PROMPT');
+    assert.equal(res.usedWizardParser, true);
+    assert.equal(res.customModule.tag, 'SUIT_OXYGEN');
+    assert.equal(res.customModule.driverTime, true);
+    assert.deepEqual(res.customModule.drivers, ['time', 'gm_annotation']);
+});
+
+test('Concierge Parser & Step 4 Prompt — [DESIGN_GAME_SYSTEM: ...] delegation', () => {
+    const dossier = createEmptyDossier();
+    const { designGameSystem, hasMutations } = applyDossierUpdates(
+        '[UPDATE_DOSSIER]\nsummary: Delegate rad gauge\n[DESIGN_GAME_SYSTEM: Pip-Boy radiation meter tracking exposure]\n[/UPDATE_DOSSIER]',
+        dossier
+    );
+    assert.equal(hasMutations, true);
+    assert.equal(designGameSystem, 'Pip-Boy radiation meter tracking exposure');
+
+    const step4Prompt = buildStage4CharacterBuilderPrompt(dossier, []);
+    assert.match(step4Prompt, /\[DESIGN_GAME_SYSTEM:/);
+    assert.ok(!step4Prompt.includes('### ⚙️ [CUSTOM_MODULE] Schema'), 'Step 4 Builder should use lean [DESIGN_GAME_SYSTEM] delegation');
 });

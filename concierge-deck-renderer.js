@@ -164,6 +164,8 @@ export function renderBlueprintDeckDom({
                 ? 'Ruleset and engine will be chosen in Step 3 (Adventure)'
                 : `Active Engine: ${adapter.label} (${adapter.diceEngine}) — Use any preset or forge custom setting`);
         $('#mhc_deck_system_tag').text('ANY GENRE / CUSTOM');
+        $('#mhc_deck_tune_ruleset_btn').hide();
+        $('#mhc_deck_ruleset_spec_summary').hide().empty();
         $('#mhc_deck_system_desc').text(meta.premise || (isFae
             ? 'Single-pass 4dF attrition engine — pick any preset or forge custom Resource Pools.'
             : 'Fiction-first 2d6 narrative engine — pick any preset or forge custom stats & moves.'
@@ -177,6 +179,32 @@ export function renderBlueprintDeckDom({
             .attr('title', `Active ${adapter.id.toUpperCase()} Genre: ${sysLabel} (${adapter.diceEngine})`);
         $('#mhc_deck_system_tag').text((meta.systemKey || (isFae ? 'CUSTOM' : 'FANTASY')).toUpperCase());
         $('#mhc_deck_system_desc').text(meta.premise || `${titlePrefix} ${sysLabel} narrative engine.`);
+
+        if (currentNavMode === 'new-adventure' && currentAdventureStep === 'adventure' && meta.rulesetConfirmed) {
+            $('#mhc_deck_tune_ruleset_btn').show();
+            const spec = meta.customGenreSpec;
+            const genreObj = adapter.getGenre(meta.systemKey);
+            const statsArr = spec?.stats || genreObj?.stats;
+            const poolsArr = spec?.pools || (genreObj?.pools ? Object.values(genreObj.pools) : null);
+            const archArr = spec?.archetypes || genreObj?.archetypes || genreObj?.classes;
+            const specParts = [];
+            if (Array.isArray(statsArr) && statsArr.length) {
+                specParts.push(`<div><b>Stats:</b> ${escapeHtml(statsArr.join(', '))}</div>`);
+            } else if (Array.isArray(poolsArr) && poolsArr.length) {
+                specParts.push(`<div><b>Pools:</b> ${escapeHtml(poolsArr.map(p => `${p.label} (${p.max || 8})`).join(', '))}</div>`);
+            }
+            if (Array.isArray(archArr) && archArr.length) {
+                specParts.push(`<div style="margin-top: 2px;"><b>Archetypes:</b> ${escapeHtml(archArr.join(', '))}</div>`);
+            }
+            if (specParts.length) {
+                $('#mhc_deck_ruleset_spec_summary').html(specParts.join('')).show();
+            } else {
+                $('#mhc_deck_ruleset_spec_summary').hide().empty();
+            }
+        } else {
+            $('#mhc_deck_tune_ruleset_btn').hide();
+            $('#mhc_deck_ruleset_spec_summary').hide().empty();
+        }
     }
 
     const defaultCampTitle = isSessionZeroAgnostic ? 'Untitled Campaign' : `Untitled ${titlePrefix} Campaign`;

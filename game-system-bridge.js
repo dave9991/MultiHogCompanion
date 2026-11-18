@@ -361,3 +361,127 @@ export async function openBlueprintGameSystemInWizard(customModule, { onSave = n
         return null;
     }
 }
+
+/**
+ * Maps a parsed MultiHog Game System Wizard draft into the normalized
+ * `dossier.worldRules.customModule` shape used by Session Zero and Launch.
+ *
+ * @param {object} parsed Output from MultiHog's parseWizardResponse() or parseGameSystemXml()
+ * @param {string} [fallbackConcept='']
+ * @returns {object}
+ */
+export function mapWizardDraftToCustomModule(parsed, fallbackConcept = '') {
+    const rawTag = parsed?.trackerTag || parsed?.tag || parsed?.name || fallbackConcept || 'CUSTOM_TRACKER';
+    const tag = String(rawTag).toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/^_+|_+$/g, '') || 'CUSTOM_TRACKER';
+    const label = String(parsed?.trackerLabel || parsed?.label || parsed?.name || tag).trim();
+    const icon = String(parsed?.trackerIcon || parsed?.icon || '📟').trim();
+
+    const driversList = normalizeGameSystemDrivers(parsed?.drivers || {
+        driverTime: parsed?.driverTime,
+        driverGmAnnotation: parsed?.driverGmAnnotation ?? true,
+        driverStatedFact: parsed?.driverStatedFact,
+    });
+    const flags = toWizardDriverFlags(driversList);
+
+    const gmContent = String(parsed?.gmContent || parsed?.gmInstruction || '').trim();
+    const trackerContent = String(parsed?.trackerContent || '').trim();
+    const extractedTemplate = extractGameSystemTemplate(trackerContent, tag);
+    const sampleContent = String(parsed?.sampleContent || parsed?.sample || extractedTemplate || trackerContent).trim();
+    const instruction = gmContent || trackerContent || fallbackConcept;
+
+    return {
+        name: label,
+        label,
+        tag,
+        fieldKey: tag,
+        icon,
+        needsTracker: parsed?.needsTracker !== false,
+        driverTime: flags.driverTime,
+        driverGmAnnotation: flags.driverGmAnnotation,
+        driverStatedFact: flags.driverStatedFact,
+        drivers: driversList,
+        effectOwner: parsed?.effectOwner === 'gm' ? 'gm' : 'tracker',
+        gmTag: (parsed?.gmTag || tag).toLowerCase(),
+        gmContent: gmContent || instruction,
+        instruction,
+        trackerTag: tag,
+        trackerLabel: label,
+        trackerIcon: icon,
+        trackerContent: trackerContent || sampleContent,
+        sampleContent,
+        sample: sampleContent,
+    };
+}
+
+/**
+ * Delegates Custom Module / Game System generation to MultiHog's native
+ * Game System Wizard system prompt & parser using the Concierge's active LLM.
+ *
+ * @param {object} params
+ * @param {string} params.concept Concise mechanic description from [DESIGN_GAME_SYSTEM: ...]
+ * @param {object} [params.dossier]
+ * @param {Function} params.send Async LLM sender accepting messages array
+ * @param {object} [params.wizardModule=null] Optional injected upstream game-systems.js module (for tests)
+ * @returns {Promise<{ customModule: object, rawResponse: string, usedWizardParser: boolean }>}
+ */
+export async function generateBlueprintGameSystemViaWizard({ concept, dossier = null, send, wizardModule = null }) {
+    if (!concept || typeof concept !== 'string' || !concept.trim()) {
+        throw new Error('Game System Wizard delegation requires a non-empty concept description.');
+    }
+    if (typeof send !== 'function') {
+        throw new Error('Game System Wizard delegation requires an active LLM sender.');
+    }
+
+    let gsMod = wizardModule;
+    if (!gsMod) {
+        try {
+            gsMod = await import('../SillyTavern-MultihogDnDFramework/game-systems.js');
+        } catch (_) {
+            gsMod = null;
+        }
+    }
+
+    const effectiveCtx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    const settings = effectiveCtx?.extensionSettings?.rpg_tracker || globalThis.extension_settings?.rpg_tracker || {};
+
+    let wizardSystemPrompt = '';
+    if (typeof gsMod?.getEffectiveWizardSystemPrompt === 'function') {
+        wizardSystemPrompt = gsMod.getEffectiveWizardSystemPrompt(settings);
+    } else if (typeof gsMod?.buildDefaultWizardSystemPrompt === 'function') {
+        wizardSystemPrompt = gsMod.buildDefaultWizardSystemPrompt();
+    } else {
+        wizardSystemPrompt = `You are the MultiHog Game System Wizard. Design a tabletop RPG mechanic with <meta name="..." icon="..." needs_tracker="true" driver_gm_annotation="true" driver_time="false" driver_stated_fact="false" effect_owner="tracker" />, a <gm_section tag="..."> with narration and delta annotation rules, and a <tracker_module tag="..." label="..." icon="..."> containing a [TAG]...[/TAG] HUD template.`;
+    }
+
+    const meta = dossier?.meta || {};
+    const userPrompt = [
+        `Campaign Title: ${meta.title || 'Untitled Campaign'}`,
+        `Ruleset Engine: ${(meta.ruleset || 'pbta').toUpperCase()} (${meta.systemLabel || meta.systemKey || 'standard'})`,
+        meta.premise ? `Premise: ${meta.premise}` : null,
+        meta.tone ? `Tone: ${meta.tone}` : null,
+        '',
+        `Describe the mechanic:`,
+        concept.trim(),
+    ].filter(v => v !== null).join('\n');
+
+    const rawResponse = await send([
+        { role: 'system', name: 'System', content: wizardSystemPrompt },
+        { role: 'user', name: 'Player', content: userPrompt },
+    ]);
+
+    let parsed;
+    let usedWizardParser = false;
+    if (typeof gsMod?.parseWizardResponse === 'function') {
+        parsed = gsMod.parseWizardResponse(String(rawResponse || ''), []);
+        usedWizardParser = true;
+    } else {
+        parsed = parseGameSystemXml(String(rawResponse || ''));
+    }
+
+    const customModule = mapWizardDraftToCustomModule(parsed, concept);
+    return {
+        customModule,
+        rawResponse: String(rawResponse || ''),
+        usedWizardParser,
+    };
+}

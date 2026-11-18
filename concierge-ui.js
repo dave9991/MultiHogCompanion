@@ -105,6 +105,7 @@ import {
     escapeHtml,
 } from './concierge-parser.js';
 import { launchPbtaCampaign, syncPbtaCampaignUpdates, reconstituteDossierWithAi } from './concierge-runner.js';
+import { runRulesetArchitect } from './concierge-ruleset-architect.js';
 import {
     getExistingAdventureNames,
     checkAdventureNameExists,
@@ -118,7 +119,7 @@ import {
     isFaeActive,
     getPartitionDossier,
 } from './pbta-ruleset-persistence.js';
-import { openBlueprintGameSystemInWizard } from './game-system-bridge.js';
+import { openBlueprintGameSystemInWizard, generateBlueprintGameSystemViaWizard } from './game-system-bridge.js';
 import { systemRegistry } from './concierge-system-registry.js';
 import { conciergeStore, getSessionZeroTrack, getLivingWorldTrack } from './concierge-state-store.js';
 import { renderProgressionArchitect } from './progression-architect-ui.js';
@@ -757,6 +758,49 @@ async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBon
 }
 
 /**
+ * Applies a Ruleset Architect result to activeDossier.meta cleanly.
+ * @param {{ systemKey: string, systemLabel: string, customGenreSpec: object|null, summary: string }} result
+ */
+function applyRulesetArchitectResult(result) {
+    if (!result || !activeDossier?.meta) return;
+    activeDossier.meta.systemKey = result.systemKey;
+    activeDossier.meta.systemLabel = result.systemLabel;
+    activeDossier.meta.customGenreSpec = result.customGenreSpec || null;
+    activeDossier.meta.genreEstablished = true;
+    changelog.push(`Ruleset Architect: ${result.summary || result.systemLabel}`);
+}
+
+/**
+ * Delegates a [DESIGN_GAME_SYSTEM: <concept>] directive to MultiHog's native
+ * Game System Wizard prompt & parser, updating activeDossier.worldRules.customModule.
+ * @param {string} concept
+ * @param {Function} sendFn
+ * @returns {Promise<object|null>}
+ */
+async function runDelegatedGameSystemDesign(concept, sendFn) {
+    if (!concept || typeof sendFn !== 'function') return null;
+    try {
+        const res = await generateBlueprintGameSystemViaWizard({
+            concept,
+            dossier: activeDossier,
+            send: sendFn,
+        });
+        if (res?.customModule) {
+            activeDossier.worldRules = activeDossier.worldRules || { axioms: [], customModule: null };
+            activeDossier.worldRules.customModule = res.customModule;
+            changelog.push(`Game System Wizard built [${res.customModule.tag}] "${res.customModule.label}"`);
+            updateBlueprintDeck();
+            saveDraft();
+            return res;
+        }
+    } catch (err) {
+        console.warn('[MultiHog Companion] Game System Wizard delegation failed:', err);
+        toastr?.warning?.(`Game System Wizard could not build "${concept}": ${err.message || err}`);
+    }
+    return null;
+}
+
+/**
  * Runs an autonomous stage Builder + Talker pass to generate stage contents.
  */
 async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstreamDiff = '' } = {}) {
@@ -799,6 +843,11 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
         const report = applyDossierUpdates(processedBuilderRaw, activeDossier);
         if (report.hasMutations) {
             activeDossier = report.updatedDossier;
+        }
+        let wizardDesignResult = null;
+        if (report.designGameSystem) {
+            typingBubble.innerHTML = '<i class="mhc-stage">🧙 MultiHog Game System Wizard is designing the custom HUD tracker...</i>';
+            wizardDesignResult = await runDelegatedGameSystemDesign(report.designGameSystem, sendConciergeRequest);
         }
 
         const autoPassDiagnostic = {
@@ -1802,6 +1851,87 @@ async function handleUserSend() {
 
             // Refresh NameRAG seeds if genre or premise changed during Pass 1
             await refreshNameRagSeedsIfNeeded();
+
+            // ── Stage 1a-bis: Step 3 Ruleset Architect Recalibration (max 1x per turn) ──
+            if (currentNavMode === 'new-adventure' && currentAdventureStep === 'adventure' && builderReport?.recalibrateRuleset) {
+                try {
+                    if (typingEl) {
+                        setStage('<i>⚙️ Ruleset Architect is recalibrating genre, stats &amp; archetypes...</i>');
+                    }
+                    const stagedCanon = getStagedCanonEntries();
+                    const archResult = await runRulesetArchitect({
+                        dossier: activeDossier,
+                        canonEntries: stagedCanon,
+                        send: llm,
+                        tweakRequest: builderReport.recalibrateRuleset,
+                    });
+                    applyRulesetArchitectResult(archResult);
+                    updateBlueprintDeck();
+                    saveDraft();
+
+                    if (typingEl) {
+                        setStage('<i>🎩 Updating Episode 1 blueprint with recalibrated ruleset...</i>');
+                    }
+                    const recalBuilderSys = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon);
+                    const recalMsgs = [
+                        { role: 'system', name: 'System', content: recalBuilderSys },
+                        ...recentHistory().map(formatHistoryMessage),
+                        {
+                            role: 'system',
+                            name: 'System',
+                            content: `[RULESET_ARCHITECT_UPDATED: ${archResult.summary}. Active genre is now "${archResult.systemLabel}". Update any affected Episode 1 stage elements (do NOT re-emit [RECALIBRATE_RULESET]).]`,
+                        },
+                    ];
+                    let recalRaw = await llm(recalMsgs);
+                    if (extension_settings?.multihog_companion?.enableNameRag !== false) {
+                        try {
+                            const resolved = await resolveDossierNamePlaceholders(recalRaw, activeDossier, { returnDetails: true });
+                            recalRaw = resolved.text;
+                            if (resolved.resolutions?.length) latestNameRagResolutions.push(...resolved.resolutions);
+                        } catch (resErr) {
+                            console.warn('[MultiHog Companion] NameRAG error on recalibrated Step 3 pass:', resErr);
+                        }
+                    }
+                    const recalReport = applyDossierUpdates(recalRaw, activeDossier);
+                    diagnosticAttempts.push({
+                        attempt: 'ruleset-recalibration',
+                        rulesetArchitect: archResult,
+                        rawResponse: recalRaw,
+                        errors: recalReport.errors,
+                        hasMutations: recalReport.hasMutations,
+                        builderSummary: recalReport.builderSummary,
+                    });
+                    if (recalReport.hasMutations) {
+                        activeDossier = recalReport.updatedDossier;
+                        recalReport.changes.forEach(c => changelog.push(`[${timeStr}] ${c}`));
+                        updateBlueprintDeck();
+                        saveDraft();
+                        builderSummaryText = `${archResult.summary}; ${recalReport.builderSummary || recalReport.changes.join('; ')}`;
+                    } else {
+                        builderSummaryText = archResult.summary || builderSummaryText;
+                    }
+                } catch (archErr) {
+                    console.warn('[MultiHog Companion] Step 3 Ruleset Architect recalibration failed:', archErr);
+                }
+            }
+
+            // ── Stage 1a-ter: Delegated MultiHog Game System Wizard Pass (max 1x per turn) ──
+            if (builderReport?.designGameSystem) {
+                if (typingEl) {
+                    setStage('<i>🧙 MultiHog Game System Wizard is designing the custom HUD tracker...</i>');
+                }
+                const wizRes = await runDelegatedGameSystemDesign(builderReport.designGameSystem, llm);
+                if (wizRes?.customModule) {
+                    diagnosticAttempts.push({
+                        attempt: 'game-system-wizard',
+                        concept: builderReport.designGameSystem,
+                        rawResponse: wizRes.rawResponse,
+                        usedWizardParser: wizRes.usedWizardParser,
+                        customModule: wizRes.customModule,
+                    });
+                    builderSummaryText = `${builderSummaryText}; Game System Wizard built [${wizRes.customModule.tag}] "${wizRes.customModule.label}"`;
+                }
+            }
 
             // ── Stage 1b: Smart-Gated Blueprint Judge / Critic Pass & Second-Pass Refiner ──
             const isLightweightStage = currentNavMode === 'new-adventure' && (currentAdventureStep === 'initial' || currentAdventureStep === 'canon');
@@ -2924,13 +3054,24 @@ export function bindModalEvents() {
                         backstory: activeDossier.protagonist?.backstory || '',
                     });
 
+                    // Reveal chat column & run Step 3 Ruleset Architect before initial Adventure pass
+                    $('.mhc-chat-column').show();
+                    stageChatHistories.adventure = [];
+                    $('#mhc_chat_messages').empty().append(
+                        '<div id="mhc_typing_indicator" class="mhc-bubble mhc-bubble-assistant"><i class="mhc-stage">⚙️ The Ruleset Architect is calibrating genre, stats &amp; archetypes...</i></div>'
+                    );
+                    const archResult = await runRulesetArchitect({
+                        dossier: activeDossier,
+                        canonEntries: getStagedCanonEntries(),
+                        send: sendConciergeRequest,
+                    });
+                    applyRulesetArchitectResult(archResult);
+                    $('#mhc_typing_indicator').remove();
+
                     updateBlueprintDeck();
                     evaluateStepUnlocks();
                     saveDraft();
 
-                    // Reveal chat column and run initial Stage 3 pass
-                    $('.mhc-chat-column').show();
-                    stageChatHistories.adventure = [];
                     await runStageAutoPass('adventure', 'Please draft our Episode 1 starting crisis, locations, adversaries, and supporting NPCs from our Canon for this ruleset.');
                 } catch (err) {
                     console.error('[MultiHog Companion] Ruleset confirmation error:', err);
@@ -2978,6 +3119,17 @@ export function bindModalEvents() {
                 stageChatHistories.character = [];
                 chatHistory = [];
 
+                $('#mhc_chat_messages').empty().append(
+                    '<div id="mhc_typing_indicator" class="mhc-bubble mhc-bubble-assistant"><i class="mhc-stage">⚙️ The Ruleset Architect is calibrating genre, stats &amp; archetypes...</i></div>'
+                );
+                const archResult = await runRulesetArchitect({
+                    dossier: activeDossier,
+                    canonEntries: getStagedCanonEntries(),
+                    send: sendConciergeRequest,
+                });
+                applyRulesetArchitectResult(archResult);
+                $('#mhc_typing_indicator').remove();
+
                 updateBlueprintDeck();
                 evaluateStepUnlocks();
                 saveDraft();
@@ -2988,6 +3140,48 @@ export function bindModalEvents() {
         }
 
         switchRulesetMode(targetRuleset);
+    });
+
+    // [CATALOG: DOM-13] See LISTENERS.md — Re-run Step 3 Ruleset Architect from Blueprint Deck
+    $('#mhc_concierge_modal').on('click', '#mhc_deck_tune_ruleset_btn', async function (e) {
+        e.stopPropagation();
+        if (isGenerating || !activeDossier?.meta?.rulesetConfirmed) return;
+        const tweakNote = window.prompt(
+            'Optional: Describe any genre, stat, archetype, or custom ruleset changes (leave blank to auto-calibrate from Canon):',
+            ''
+        );
+        if (tweakNote === null) return; // User cancelled
+
+        isGenerating = true;
+        updateSendButtonState();
+        const stream = document.getElementById('mhc_chat_messages');
+        const typingEl = document.createElement('div');
+        typingEl.id = 'mhc_typing_indicator';
+        typingEl.className = 'mhc-bubble mhc-bubble-assistant';
+        typingEl.innerHTML = '<i class="mhc-stage">⚙️ The Ruleset Architect is recalibrating genre, stats &amp; archetypes...</i>';
+        if (stream) {
+            stream.appendChild(typingEl);
+            stream.scrollTop = stream.scrollHeight;
+        }
+        try {
+            const archResult = await runRulesetArchitect({
+                dossier: activeDossier,
+                canonEntries: getStagedCanonEntries(),
+                send: sendConciergeRequest,
+                tweakRequest: tweakNote.trim(),
+            });
+            applyRulesetArchitectResult(archResult);
+            updateBlueprintDeck();
+            saveDraft();
+            toastr?.success(`Ruleset calibrated: ${archResult.systemLabel}`);
+        } catch (err) {
+            console.error('[MultiHog Companion] Manual Ruleset Architect run failed:', err);
+            toastr?.error(`Ruleset Architect failed: ${err.message || err}`);
+        } finally {
+            typingEl.remove();
+            isGenerating = false;
+            updateSendButtonState();
+        }
     });
 
     // Ruleset Switch interaction on system badge click (cycles through all registered adapters)

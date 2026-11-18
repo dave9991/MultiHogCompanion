@@ -190,7 +190,10 @@
                     <div class="mhc-card mhc-card-system mhc-stage-card" data-stage="adventure">
                         <div class="mhc-card-header">
                             <span id="mhc_deck_engine_title" class="mhc-card-title">🎲 PbtA Engine</span>
-                            <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span id="mhc_deck_system_tag" class="mhc-pill">Dungeon World</span>
+                                <button type="button" id="mhc_deck_tune_ruleset_btn" class="menu_button" style="display: none; padding: 1px 6px; font-size: 0.75em; border-color: rgba(56, 189, 248, 0.45); color: #7dd3fc;" title="Re-run Ruleset Architect to customize genre, stats, or archetypes">⚙️ Tune Ruleset</button>
+                            </div>
                         </div>
                         <div id="mhc_header_ruleset_toggle" class="mhc-ruleset-toggle" title="Switch Session Zero Ruleset Engine between D&D 5e, PbtA, and FAE">
                             <div class="mhc-ruleset-grid">
@@ -223,6 +226,7 @@
                         <div id="mhc_adventure_ruleset_gate_hint" class="mhc-gate-hint-banner" style="display: none; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; padding: 6px 10px; border-radius: 6px; font-size: 0.82em; margin-bottom: 6px;">
                             👆 Choose a ruleset engine above to unlock the Episode 1 Adventure builder &amp; chat.
                         </div>
+                        <div id="mhc_deck_ruleset_spec_summary" style="display: none; font-size: 0.78em; opacity: 0.9; background: rgba(0, 0, 0, 0.22); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;"></div>
                         <div class="mhc-deck-title-row" style="margin: 6px 0 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                             <div style="font-size: 1.05em; font-weight: 700; color: #fbbf24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 📖 <span id="mhc_deck_campaign_title" title="Campaign Title">Untitled Campaign</span>

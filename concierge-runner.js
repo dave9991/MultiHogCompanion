@@ -553,6 +553,8 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 ...(dossier.config?.knobs || {}),
                 action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
             },
+            systemLabel: dossier.meta?.systemLabel || '',
+            customGenreSpec: dossier.meta?.customGenreSpec || null,
             dossier,
         };
         const cartridgeOk = await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx, chatId });

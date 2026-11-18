@@ -1364,6 +1364,28 @@ function formatEntityNameWithConcept(rawName, fallback = 'Unnamed') {
     return cleanName || rawName || fallback;
 }
 
+function formatActiveRulesetSpecBrief(meta = {}) {
+    const spec = meta?.customGenreSpec;
+    if (!spec || typeof spec !== 'object') return [];
+    const lines = [];
+    if (Array.isArray(spec.stats) && spec.stats.length) {
+        lines.push(`* Active Stats: ${spec.stats.join(', ')}${spec.statDescriptions ? ` (${spec.statDescriptions})` : ''}`);
+    }
+    if (Array.isArray(spec.pools) && spec.pools.length) {
+        lines.push(`* Active Resource Pools: ${spec.pools.map(p => `${p.label} (${p.max || 8} max, zero: ${p.zero_debuff || 'Crippled'})`).join('; ')}`);
+    }
+    if (Array.isArray(spec.archetypes) && spec.archetypes.length) {
+        lines.push(`* Available Archetypes / Playbooks: ${spec.archetypes.join(', ')}`);
+    }
+    if (Array.isArray(spec.moves) && spec.moves.length) {
+        lines.push(`* Genre Signature Moves: ${spec.moves.join(' | ')}`);
+    }
+    if (spec.maxHarmFate) {
+        lines.push(`* Max Harm Fate: ${spec.maxHarmFate}`);
+    }
+    return lines;
+}
+
 /**
  * Formats an authoritative Campaign Continuity Brief and Production Hand-Off Memo
  * across upstream stages for injection into downstream stage prompts.
@@ -1397,6 +1419,7 @@ export function formatStageContinuityBrief({ dossier, canonEntries = [], stage =
         meta.focalLens ? `* Focal Lens: ${meta.focalLens}` : null,
         meta.tone ? `* Dramatic Tone: ${meta.tone}` : null,
         meta.ruleset ? `* Ruleset Engine: ${meta.ruleset.toUpperCase()} (${meta.systemLabel || meta.systemKey || 'standard'})` : null,
+        ...formatActiveRulesetSpecBrief(meta),
     ].filter(Boolean);
     if (foundationLines.length) {
         sections.push(`#### 🧭 Campaign Foundation (from Framing):\n${foundationLines.join('\n')}`);
@@ -1697,6 +1720,7 @@ You emit an [UPDATE_DOSSIER] block containing ONLY:
 * [ENABLE_CANON: Name]
 * [REMOVE_CANON: Name]
 * [WORLD_RULES] (title, category, axiom, substitutions, negative_constraints, architectural_notes)
+* Optional [DESIGN_GAME_SYSTEM: <1-sentence bespoke gauge/resource description>] (ONLY if a world law introduces a unique mechanical gauge; MultiHog's Game System Wizard builds it automatically)
 * or [NOOP] if no updates are needed.
 
 ### 🚫 STRICT BOUNDARIES & OUTPUT PROTOCOL:
@@ -1966,6 +1990,7 @@ Your ONLY job is to assemble or update the Episode 1 starting stage set:
 * [NPC] (Supporting cast staged for Episode 1)
 * [FACTION] (Factions active in the starting situation)
 * [CYOA] (Optional tailored opening choices)
+* [RECALIBRATE_RULESET: <what changed>] (ONLY if the player asks to change genre, stats, archetypes, or ruleset mold — this invokes the Ruleset Architect sub-agent)
 * or [NOOP] if no changes are needed.
 
 ### 🚫 STRICT BOUNDARIES & OUTPUT PROTOCOL:
@@ -2035,6 +2060,11 @@ ${continuitySection}`;
 }
 
 // ── Stage 4 (👤 Character — Protagonist & Progression Codex) ────────────────────
+
+export const DESIGN_GAME_SYSTEM_DIRECTIVE = `### ⚙️ Custom HUD Tracker Delegation (Optional):
+* ONLY if the protagonist or setting introduces a unique physical resource or mechanical gauge (not generic health, combat, or inventory), emit a 1-line delegation directive inside \`[UPDATE_DOSSIER]\`:
+  \`[DESIGN_GAME_SYSTEM: <1-sentence description of the mechanic, resource, and when it changes>]\`
+* MultiHog's native **Game System Wizard** will automatically build the balanced GM rules, drivers, and HUD tracker card. Use \`[REMOVE_CUSTOM_MODULE]\` to remove an existing tracker.`;
 
 export const CUSTOM_MODULE_SCHEMA = `### ⚙️ [CUSTOM_MODULE] Schema (Optional Game System / HUD Tracker):
 If the protagonist or setting relies on a bespoke mechanical resource, item tracker, or gauge (e.g. Relic Compass charge, Symbiote inventory, Radiation meter, Sanity):
@@ -2131,14 +2161,14 @@ Your ONLY job is to assemble or update the Protagonist character sheet and optio
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
 * 🚫 **FORBIDDEN IN STEP 4:** Focus strictly on [PROTAGONIST] (and optional [CUSTOM_MODULE]). Do NOT re-emit or alter [MAP], [MONSTER], or [KICK] blocks here.
-* Ground the protagonist's bonds, gear, and motivations in the established Canon and Episode 1 Adventure.
+* Ground the protagonist's bonds, gear, and motivations in the established Canon and Episode 1 Adventure. If \`Active Stats\` or \`Available Archetypes / Playbooks\` are listed in the Continuity Brief, use those exact stat names and choose or adapt from those archetypes.
 * 🏷️ **Name Diversity & Targeted Placeholders:** If the player did not specify an exact character name, emit \`name: [[NAME: evocative role or concept]]\` (e.g. \`name: [[NAME: cybernetic street samurai]]\`). NEVER invent cliché placeholder names.
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Protagonist updates>
 
 ${protagonistSchema}
 
-${CUSTOM_MODULE_SCHEMA}${diffSection}
+${DESIGN_GAME_SYSTEM_DIRECTIVE}${diffSection}
 
 ${continuitySection}`;
 }

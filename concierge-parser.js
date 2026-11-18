@@ -91,6 +91,7 @@ export function createEmptyDossier(ruleset = 'pbta', genreKey = null) {
             ruleset: effectiveRuleset,
             systemKey,
             systemLabel: genreObj.label || systemKey,
+            customGenreSpec: null,
             genreEstablished: Boolean(genreKey && genres[genreKey]),
             premise: '',
             tone: '',
@@ -733,6 +734,8 @@ export function applyDossierUpdates(text, dossier) {
         builderSummary: 'No blueprint mutations detected',
         contemplation: null,
         canonMutations: [],
+        recalibrateRuleset: '',
+        designGameSystem: '',
     };
 
     if (!text || typeof text !== 'string') return fallbackResult;
@@ -766,6 +769,8 @@ export function applyDossierUpdates(text, dossier) {
             builderSummary: noopSummary || 'No blueprint changes requested',
             contemplation: null,
             canonMutations: [],
+            recalibrateRuleset: '',
+            designGameSystem: '',
         };
     }
 
@@ -787,7 +792,7 @@ export function applyDossierUpdates(text, dossier) {
             return fallbackResult;
         }
         // Fallback: check if text contains standalone line-start blocks or explicitly closed blocks directly
-        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
+        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|DESIGN_GAME_SYSTEM|RECALIBRATE_RULESET|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
         if (hasDirectBlocks) {
             raw = cleanedText;
         }
@@ -799,6 +804,8 @@ export function applyDossierUpdates(text, dossier) {
     const changes = [];
     const errors = [];
     const canonMutations = [];
+    let recalibrateRuleset = '';
+    let designGameSystem = '';
 
     // 0b. Extract [CONTEMPLATION] architectural reasoning scratchpad (inside or alongside [UPDATE_DOSSIER])
     let extractedContemplation = null;
@@ -2327,16 +2334,34 @@ export function applyDossierUpdates(text, dossier) {
         };
     }
 
+    const recalM = raw.match(/(?:\[RECALIBRATE_RULESET\s*:\s*([^\]]+)\]|^[ \t]*recalibrate_ruleset\s*:\s*([^\n\r]+))/im);
+    if (recalM) {
+        recalibrateRuleset = (recalM[1] || recalM[2] || '').trim();
+        if (recalibrateRuleset) {
+            changes.push(`Requested Ruleset Architect recalibration: ${recalibrateRuleset}`);
+        }
+    }
+
+    const designGsM = raw.match(/(?:\[DESIGN_GAME_SYSTEM\s*:\s*([^\]]+)\]|^[ \t]*design_game_system\s*:\s*([^\n\r]+))/im);
+    if (designGsM) {
+        designGameSystem = (designGsM[1] || designGsM[2] || '').trim();
+        if (designGameSystem) {
+            changes.push(`Requested Game System Wizard design: ${designGameSystem}`);
+        }
+    }
+
     return {
         success: errors.length === 0,
         updatedDossier: updated,
         changes,
         errors,
-        hasMutations: changes.length > 0 || canonMutations.length > 0,
+        hasMutations: changes.length > 0 || canonMutations.length > 0 || Boolean(recalibrateRuleset) || Boolean(designGameSystem),
         isNoop: false,
         builderSummary: builderSummary || (changes.length ? changes.join('; ') : 'Blueprint in sync'),
         contemplation: extractedContemplation,
         canonMutations,
+        recalibrateRuleset,
+        designGameSystem,
     };
 }
 
@@ -2401,6 +2426,9 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
     dossier.meta.focalLens = typeof rawMeta.focalLens === 'string' ? rawMeta.focalLens.trim() : '';
     dossier.meta.framingComplete = Boolean(rawMeta.framingComplete);
     dossier.meta.rulesetConfirmed = Boolean(rawMeta.rulesetConfirmed);
+    dossier.meta.customGenreSpec = (rawMeta.customGenreSpec && typeof rawMeta.customGenreSpec === 'object')
+        ? JSON.parse(JSON.stringify(rawMeta.customGenreSpec))
+        : null;
     dossier.meta.stageNotes = (rawMeta.stageNotes && typeof rawMeta.stageNotes === 'object')
         ? {
             framing: typeof rawMeta.stageNotes.framing === 'string' ? rawMeta.stageNotes.framing.trim() : '',

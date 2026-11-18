@@ -282,7 +282,7 @@ export function parseMarkdownToDossier(markdown) {
     if (systemLineMatch) {
         const fullSysLine = systemLineMatch[1].trim();
         const keyMatch = fullSysLine.match(/[`(]([a-z0-9_\-]+)[`)]/i);
-        if (keyMatch && (PBTA_GENRES[keyMatch[1].toLowerCase()] || FAE_GENRES[keyMatch[1].toLowerCase()])) {
+        if (keyMatch && (PBTA_GENRES[keyMatch[1].toLowerCase()] || FAE_GENRES[keyMatch[1].toLowerCase()] || keyMatch[1].toLowerCase() === 'custom')) {
             dossier.meta.systemKey = keyMatch[1].toLowerCase();
         }
         dossier.meta.systemLabel = fullSysLine.replace(/\s*\(?`?[a-z0-9_\-]+`?\)?\s*$/i, '').trim();

@@ -246,6 +246,8 @@ export function parseClassificationJson(reply) {
         const kind = String(r.kind || '').toUpperCase();
         const isDisabled = Boolean(r.disabled || r.outOfScope || Number(r.importance) === 0);
         const importance = isDisabled ? 1 : Math.min(5, Math.max(1, Math.round(Number(r.importance)) || 3));
+        const rawClean = r.cleanText ?? r.clean_text ?? r.distilled;
+        const cleanText = (typeof rawClean === 'string' && rawClean.trim()) ? rawClean.trim() : undefined;
         out.push({
             id: r.id !== undefined ? String(r.id) : undefined,
             kind: CANON_KINDS.includes(kind) ? kind : 'LORE',
@@ -253,6 +255,8 @@ export function parseClassificationJson(reply) {
             aliases: Array.isArray(r.aliases) ? r.aliases.map(a => String(a).trim()).filter(Boolean).slice(0, 8) : [],
             importance,
             disabled: isDisabled,
+            discard: Boolean(r.discard || r.skip || r.noise),
+            ...(cleanText ? { cleanText } : {}),
         });
     }
     return out;
@@ -296,7 +300,13 @@ export async function classifyChunks(chunks, opts = {}) {
 
         let reply;
         try {
-            let system = `You label tabletop RPG setting notes. For each numbered passage return one JSON object. Reply with ONLY a JSON array: [{"id":"<id>","kind":"NPC|MONSTER|LOCATION|FACTION|RULE|EVENT|LORE","name":"<canonical name>","aliases":["..."],"importance":1-5}]. importance 5 = central to the setting, 1 = trivia.`;
+            let system = `You label tabletop RPG setting notes. For each numbered passage return one JSON object. Reply with ONLY a JSON array: [{"id":"<id>","kind":"NPC|MONSTER|LOCATION|FACTION|RULE|EVENT|LORE","name":"<canonical name>","aliases":["..."],"importance":1-5,"discard":false,"cleanText":"<optional>"}].
+Rules:
+- importance 5 = central to the setting, 1 = minor trivia.
+- Set "discard": true for non-lore boilerplate or meta noise: PDF cover pages, date headers, legal/author disclaimers, tables of contents, forum greetings/meta-commentary, or raw game UI/dialogue keyword lists with no usable in-world lore.
+- RULE is ONLY for in-world physical, magical, or societal laws — NEVER for legal disclaimers or author notes.
+- LOCATION is ONLY for actual in-world places — NEVER for dialogue/keyword lists that merely mention a place.
+- If a passage mixes real in-world lore with out-of-character developer chatter, forum Q&A framing, or messy PDF formatting, set "cleanText" to 2-5 crisp sentences of pure in-world canon (omit "cleanText" if the original text is already clean lore).`;
             if (focalLens) {
                 system += ` Campaign Focal Lens: ${focalLens}. Set "disabled": true and "importance": 1 for passages that are out-of-scope or irrelevant to this focal lens; set "disabled": false and "importance": 3-5 for passages relevant to this lens.`;
             }
@@ -334,17 +344,21 @@ export async function classifyChunks(chunks, opts = {}) {
  * @returns {{ id: string, name: string, comment: string, keys: string[], content: string, kind: string, importance: number, disabled: boolean }}
  */
 export function buildCanonEntry({ chunk, label }) {
+    if (label?.discard) return null;
     const kind = label.kind || 'LORE';
     const name = (label.name || chunk.title || 'Untitled').trim();
     const id = chunk.id || label.id || `${kind}:${name}`;
     const keys = [...new Set([name, ...(label.aliases || []), ...(chunk.keys || [])]
         .map(k => String(k).trim()).filter(Boolean))].slice(0, 12);
+    const content = (typeof label.cleanText === 'string' && label.cleanText.trim())
+        ? label.cleanText.trim()
+        : chunk.text;
     return {
         id,
         name,
         comment: `[${kind}] ${name}`,
         keys,
-        content: chunk.text,
+        content,
         kind,
         importance: label.importance !== undefined ? label.importance : 3,
         disabled: Boolean(label.disabled),
@@ -1040,7 +1054,8 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
             for (const pair of labeledPairs) {
                 const srcName = chunkSourceMap.get(pair.chunk.id) || pair.chunk.source || '';
                 if (!bySource.has(srcName)) bySource.set(srcName, []);
-                bySource.get(srcName).push(buildCanonEntry(pair));
+                const entry = buildCanonEntry(pair);
+                if (entry) bySource.get(srcName).push(entry);
             }
             for (const [name, rec] of _sources.entries()) {
                 if (bySource.has(name)) {
@@ -1096,7 +1111,8 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
             for (const pair of labeledPairs) {
                 const srcName = chunkSourceMap.get(pair.chunk.id) || pair.chunk.source || '';
                 if (!bySource.has(srcName)) bySource.set(srcName, []);
-                bySource.get(srcName).push(buildCanonEntry(pair));
+                const entry = buildCanonEntry(pair);
+                if (entry) bySource.get(srcName).push(entry);
             }
             for (const [name, rec] of _sources.entries()) {
                 if (bySource.has(name)) {
@@ -1224,7 +1240,7 @@ export async function stageCanonSource(source, opts = {}) {
                 const recChunks = rec.chunks || chunkLoreSource(rec.source);
                 rec.chunks = recChunks;
                 const labeled = await classifyChunks(recChunks, opts);
-                rec.labeled = labeled.map(buildCanonEntry);
+                rec.labeled = labeled.map(buildCanonEntry).filter(Boolean);
             }
         } catch (err) {
             _sources.delete(source.name);

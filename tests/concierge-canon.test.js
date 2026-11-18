@@ -324,6 +324,19 @@ assert.strictEqual(canonEntry.id, 'c1');
 assert.strictEqual(canonEntry.disabled, true);
 assert.strictEqual(canonEntry.comment, '[LOCATION] Deep Warrens');
 
+// 5b. parseClassificationJson & buildCanonEntry handle discard (meta noise) and cleanText
+const noiseParsed = parseClassificationJson(JSON.stringify([
+    { id: 'noise1', kind: 'LORE', name: 'Disclaimer', importance: 1, discard: true },
+    { id: 'clean1', kind: 'LOCATION', name: 'Vault 13', importance: 5, cleanText: 'Vault 13 is an isolated underground shelter in southern California.' },
+]));
+assert.strictEqual(noiseParsed[0].discard, true);
+assert.strictEqual(buildCanonEntry({ chunk: { id: 'noise1', text: 'Legal disclaimer...' }, label: noiseParsed[0] }), null);
+const distilledEntry = buildCanonEntry({
+    chunk: { id: 'clean1', text: 'Q: Hey dev, tell me about Vault 13! A: Vault 13 is an isolated underground shelter.' },
+    label: noiseParsed[1],
+});
+assert.strictEqual(distilledEntry.content, 'Vault 13 is an isolated underground shelter in southern California.');
+
 // 6. Entry Management: setStagedCanonEntries, toggleCanonEntryDisabled, upsertCanonEntry, removeCanonEntry
 clearStagedCanon();
 setStagedCanonEntries([canonEntry]);

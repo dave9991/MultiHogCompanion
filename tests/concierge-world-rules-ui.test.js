@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildAxiomCardHtml, escapeHtml } from '../concierge-parser.js';
+import {
+    resetConciergeState,
+    getActiveConciergeDossier,
+    updateBlueprintDeck,
+} from '../concierge-ui.js';
+import { installDomHarness } from './helpers/dom-harness.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,21 +51,72 @@ assert.ok(css.includes('.mhc-module-sample-preview'), 'style.css must define .mh
 
 console.log('✓ style.css defines all required styles for World Rules and Custom Tracker cards');
 
-// ── 3. UI Controller Logic Verification (concierge-ui.js) ─────────────────────
-console.log('Testing concierge-ui.js integration...');
+// ── 3. Behavioral UI Controller Execution (updateBlueprintDeck) ───────────────
+console.log('Testing updateBlueprintDeck behavioral World Rules & Custom Module rendering...');
+{
+    const harness = installDomHarness();
+    try {
+        // 3a. Empty state rendering
+        resetConciergeState({ showGreeting: false, ruleset: 'pbta' });
+        assert.strictEqual(harness.$('#mhc_deck_world_rules_count').text(), '0');
+        assert.ok(
+            harness.$('#mhc_deck_world_rules_list').html().includes('Standard world physics & tropes apply.'),
+            'Empty state must render default hint in #mhc_deck_world_rules_list'
+        );
+        assert.strictEqual(
+            harness.getElement('#mhc_deck_custom_module_card')?.visible,
+            false,
+            '#mhc_deck_custom_module_card must be hidden when no customModule is configured'
+        );
 
-const uiJsPath = path.join(ROOT_DIR, 'concierge-ui.js');
-const uiJs = fs.readFileSync(uiJsPath, 'utf8');
+        // 3b. Populated World Axioms + Custom HUD Module rendering
+        const active = getActiveConciergeDossier();
+        active.worldRules = {
+            axioms: [
+                {
+                    title: 'Biological Technology',
+                    category: 'biology_for_tech',
+                    axiom: 'Mechanical machines are replaced by biotechnology.',
+                    substitutions: ['Cars -> Giant beetles'],
+                    negativeConstraints: ['No combustion engines'],
+                    architecturalNotes: 'Living hive buildings',
+                },
+            ],
+            customModule: {
+                tag: 'RADIATION',
+                label: 'Vault Radiation',
+                instruction: 'Track accumulated rads per scene.',
+                drivers: 'gm_deltas',
+                sampleContent: 'Rads: 2/10',
+            },
+        };
 
-assert.ok(uiJs.includes('mhc_deck_world_rules_count'), 'concierge-ui.js must reference #mhc_deck_world_rules_count');
-assert.ok(uiJs.includes('mhc_deck_world_rules_list'), 'concierge-ui.js must reference #mhc_deck_world_rules_list');
-assert.ok(uiJs.includes('mhc_deck_custom_module_card'), 'concierge-ui.js must reference #mhc_deck_custom_module_card');
-assert.ok(uiJs.includes('mhc_deck_custom_module_tag'), 'concierge-ui.js must reference #mhc_deck_custom_module_tag');
-assert.ok(uiJs.includes('mhc_deck_custom_module_label'), 'concierge-ui.js must reference #mhc_deck_custom_module_label');
-assert.ok(uiJs.includes('mhc_deck_custom_module_instruction'), 'concierge-ui.js must reference #mhc_deck_custom_module_instruction');
-assert.ok(uiJs.includes('buildAxiomCardHtml'), 'concierge-ui.js must wire buildAxiomCardHtml for axiom rendering');
+        updateBlueprintDeck();
 
-console.log('✓ concierge-ui.js contains complete wiring for World Rules & Custom Module rendering');
+        assert.strictEqual(harness.$('#mhc_deck_world_rules_count').text(), '1');
+        const renderedListHtml = harness.$('#mhc_deck_world_rules_list').html();
+        assert.ok(renderedListHtml.includes('🌐 Biological Technology'));
+        assert.ok(renderedListHtml.includes('BIOLOGY_FOR_TECH'));
+        assert.ok(renderedListHtml.includes('No combustion engines'));
+
+        assert.strictEqual(
+            harness.getElement('#mhc_deck_custom_module_card')?.visible,
+            true,
+            '#mhc_deck_custom_module_card must be visible when customModule is configured'
+        );
+        assert.strictEqual(harness.$('#mhc_deck_custom_module_tag').text(), 'RADIATION');
+        assert.strictEqual(harness.$('#mhc_deck_custom_module_label').text(), 'Vault Radiation');
+        assert.strictEqual(harness.$('#mhc_deck_custom_module_instruction').text(), 'Track accumulated rads per scene.');
+        assert.strictEqual(harness.$('#mhc_deck_custom_module_drivers').text(), '⚡ GM Deltas');
+        assert.strictEqual(harness.getElement('#mhc_deck_custom_module_drivers')?.visible, true);
+        assert.strictEqual(harness.$('#mhc_deck_custom_module_sample').text(), 'Rads: 2/10');
+        assert.strictEqual(harness.getElement('#mhc_deck_custom_module_sample')?.visible, true);
+    } finally {
+        harness.cleanup();
+    }
+}
+
+console.log('✓ updateBlueprintDeck behaviorally renders World Rules & Custom Module cards in live DOM');
 
 // ── 4. Rendering Logic Execution ──────────────────────────────────────────────
 console.log('Testing buildAxiomCardHtml production rendering...');

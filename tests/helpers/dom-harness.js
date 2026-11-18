@@ -10,15 +10,55 @@ function createElementRecord(selector) {
         selector,
         textContent: '',
         htmlContent: '',
+        innerHTML: '',
         value: '',
+        className: '',
         visible: true,
+        style: {},
+        scrollTop: 0,
+        scrollHeight: 0,
         css: {},
         attrs: {},
         props: {},
         dataset: {},
         classes: new Set(),
         childrenHtml: [],
+        domChildren: [],
         handlers: new Map(),
+        domListeners: new Map(),
+        addEventListener(ev, fn) {
+            if (typeof fn !== 'function') return;
+            if (!this.domListeners.has(ev)) this.domListeners.set(ev, []);
+            this.domListeners.get(ev).push(fn);
+        },
+        removeEventListener(ev, fn) {
+            const list = this.domListeners.get(ev);
+            if (!list) return;
+            const idx = list.indexOf(fn);
+            if (idx >= 0) list.splice(idx, 1);
+        },
+        appendChild(child) {
+            this.domChildren.push(child);
+            const html = typeof child === 'string'
+                ? child
+                : (child?.innerHTML || child?.htmlContent || '');
+            if (html) {
+                this.childrenHtml.push(html);
+                this.htmlContent += html;
+                this.innerHTML += html;
+            }
+            return child;
+        },
+    };
+}
+
+function createMemoryStorage() {
+    const store = new Map();
+    return {
+        getItem(key) { return store.has(String(key)) ? store.get(String(key)) : null; },
+        setItem(key, value) { store.set(String(key), String(value)); },
+        removeItem(key) { store.delete(String(key)); },
+        clear() { store.clear(); },
     };
 }
 
@@ -102,7 +142,9 @@ export function createStatefulJQueryMock() {
             empty() {
                 record.textContent = '';
                 record.htmlContent = '';
+                record.innerHTML = '';
                 record.childrenHtml = [];
+                record.domChildren = [];
                 return wrapper;
             },
             append(content) {
@@ -126,6 +168,15 @@ export function createStatefulJQueryMock() {
                 record.visible = next;
                 record.css.display = next ? '' : 'none';
                 return wrapper;
+            },
+            fadeIn() {
+                return wrapper.show();
+            },
+            fadeOut() {
+                return wrapper.hide();
+            },
+            slideToggle() {
+                return wrapper.toggle();
             },
             addClass(cls) {
                 for (const name of String(cls || '').split(/\s+/).filter(Boolean)) {
@@ -222,6 +273,8 @@ export function installDomHarness(opts = {}) {
         jQuery: globalThis.jQuery,
         window: globalThis.window,
         document: globalThis.document,
+        localStorage: globalThis.localStorage,
+        sessionStorage: globalThis.sessionStorage,
     };
 
     const jq = createStatefulJQueryMock();
@@ -235,6 +288,7 @@ export function installDomHarness(opts = {}) {
         ...opts.window,
     };
     globalThis.document = {
+        createElement: (tag) => createElementRecord(String(tag || 'div')),
         getElementById: (id) => jq.getElement(`#${id}`) || null,
         querySelector: (sel) => jq.getElement(sel) || null,
         querySelectorAll: (sel) => {
@@ -245,6 +299,16 @@ export function installDomHarness(opts = {}) {
         removeEventListener: () => {},
         ...opts.document,
     };
+    if (opts.localStorage !== undefined) {
+        globalThis.localStorage = opts.localStorage;
+    } else if (globalThis.localStorage === undefined) {
+        globalThis.localStorage = createMemoryStorage();
+    }
+    if (opts.sessionStorage !== undefined) {
+        globalThis.sessionStorage = opts.sessionStorage;
+    } else if (globalThis.sessionStorage === undefined) {
+        globalThis.sessionStorage = createMemoryStorage();
+    }
 
     return {
         $: jq.$,

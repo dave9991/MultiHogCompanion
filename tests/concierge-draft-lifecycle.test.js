@@ -9,9 +9,6 @@
  */
 
 import { strict as assert } from 'assert';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
 import {
     createEmptyDossier,
@@ -19,10 +16,15 @@ import {
     isDossierEmptyOrUntouched,
     healAndNormalizeDossier,
 } from '../concierge-parser.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ROOT_DIR = path.resolve(__dirname, '..');
+import {
+    resetConciergeState,
+    loadValidatedDraft,
+    getDraftStorageKey,
+    switchRulesetMode,
+    updateBlueprintDeck,
+    getActiveConciergeDossier,
+} from '../concierge-ui.js';
+import { installDomHarness } from './helpers/dom-harness.js';
 
 console.log('--- Running Concierge Draft Lifecycle & Integrity Test Suite ---');
 
@@ -175,47 +177,83 @@ console.log('Testing validateDraft integrity checks...');
     console.log('✓ validateDraft enforces strict integrity and heals salvageable schemas');
 }
 
-// ── 3. concierge-ui.js Integration Check ──────────────────────────────────────
-console.log('Testing concierge-ui.js integration...');
+// ── 3. Behavioral UI Controller Lifecycle & Ruleset Specialization ───────────
+console.log('Testing behavioral UI lifecycle, draft storage cleanup, and FAE/PbtA deck specialization...');
 {
-    const uiJsPath = path.join(ROOT_DIR, 'concierge-ui.js');
-    const uiJs = fs.readFileSync(uiJsPath, 'utf8');
+    const harness = installDomHarness();
+    try {
+        // 3a. Ruleset-scoped draft storage keys
+        assert.strictEqual(getDraftStorageKey('pbta'), 'mhc_concierge_draft_pbta');
+        assert.strictEqual(getDraftStorageKey('fae'), 'mhc_concierge_draft_fae');
+        assert.strictEqual(getDraftStorageKey('dnd5e'), 'mhc_concierge_draft_dnd5e');
 
-    // Must export resetConciergeState, loadValidatedDraft, and getDraftStorageKey
-    assert.ok(uiJs.includes('export function resetConciergeState'), 'concierge-ui.js must export resetConciergeState');
-    assert.ok(uiJs.includes('export function loadValidatedDraft'), 'concierge-ui.js must export loadValidatedDraft');
-    assert.ok(uiJs.includes('export function getDraftStorageKey'), 'concierge-ui.js must export getDraftStorageKey');
-    assert.ok(uiJs.includes('mhc_concierge_draft_'), 'concierge-ui.js must scope drafts by ruleset prefix');
+        // 3b. FAE deck specialization: Fictional Leverage label & hidden party/relationships dials
+        resetConciergeState({ showGreeting: false, ruleset: 'fae' });
+        const faeDossier = getActiveConciergeDossier();
+        faeDossier.npcs.push({
+            name: 'Inspector Vance',
+            role: 'Contact',
+            movesOrBoons: 'Police archives access',
+        });
+        updateBlueprintDeck();
+        assert.ok(
+            harness.$('#mhc_deck_npcs_list').html().includes('<b>Fictional Leverage:</b> Police archives access'),
+            'FAE NPC deck card must label movesOrBoons as Fictional Leverage'
+        );
+        assert.strictEqual(
+            harness.getElement('#mhc_dial_party_btn')?.visible,
+            false,
+            'FAE ruleset must hide #mhc_dial_party_btn'
+        );
+        assert.strictEqual(
+            harness.getElement('#mhc_dial_relationships_btn')?.visible,
+            false,
+            'FAE ruleset must hide #mhc_dial_relationships_btn'
+        );
 
-    // switchRulesetMode must clear chatHistory
-    assert.ok(uiJs.includes('chatHistory = [];'), 'switchRulesetMode must clear chatHistory');
+        // 3c. PbtA deck specialization: Boons/Moves label
+        resetConciergeState({ showGreeting: false, ruleset: 'pbta' });
+        const pbtaDossier = getActiveConciergeDossier();
+        pbtaDossier.npcs.push({
+            name: 'Sir Cedric',
+            role: 'Knight',
+            movesOrBoons: 'Shield Wall',
+        });
+        updateBlueprintDeck();
+        assert.ok(
+            harness.$('#mhc_deck_npcs_list').html().includes('<b>Boons/Moves:</b> Shield Wall'),
+            'PbtA NPC deck card must label movesOrBoons as Boons/Moves'
+        );
 
-    // FAE UI Specialization
-    assert.ok(uiJs.includes("const boonsLabel = isFae ? 'Fictional Leverage:' : 'Boons/Moves:';"), 'concierge-ui.js must label Fictional Leverage in FAE');
-    assert.ok(uiJs.includes("$('#mhc_dial_party_btn').hide()"), 'concierge-ui.js must hide party dial in FAE');
-    assert.ok(uiJs.includes("$('#mhc_dial_relationships_btn').hide()"), 'concierge-ui.js must hide relationships dial in FAE');
+        // 3d. resetConciergeState purges ruleset drafts + desk session key and appends greeting
+        localStorage.setItem('mhc_concierge_draft_pbta', JSON.stringify({ stale: true }));
+        localStorage.setItem('mhc_concierge_draft_fae', JSON.stringify({ stale: true }));
+        sessionStorage.setItem('mhc_last_concierge_desk', 'character');
+        resetConciergeState({ showGreeting: true, ruleset: 'pbta' });
 
-    // Must call resetConciergeState on campaign launch success
-    assert.ok(
-        uiJs.includes('resetConciergeState({ showGreeting: true })'),
-        'concierge-ui.js must reset concierge state upon launch and sync completion'
-    );
+        assert.strictEqual(localStorage.getItem('mhc_concierge_draft_pbta'), null, 'resetConciergeState must purge pbta draft');
+        assert.strictEqual(localStorage.getItem('mhc_concierge_draft_fae'), null, 'resetConciergeState must purge fae draft');
+        assert.strictEqual(sessionStorage.getItem('mhc_last_concierge_desk'), null, 'resetConciergeState must clear mhc_last_concierge_desk');
+        assert.strictEqual(loadValidatedDraft('pbta'), null, 'loadValidatedDraft must return null after purge');
+        assert.ok(
+            harness.$('#mhc_chat_messages').html().includes('Welcome to Session Zero!'),
+            'resetConciergeState({ showGreeting: true }) must render greeting bubble'
+        );
 
-    // Untouched check in saveDraft
-    assert.ok(uiJs.includes('isDossierEmptyOrUntouched(activeDossier)'), 'saveDraft must verify isDossierEmptyOrUntouched');
+        // 3e. switchRulesetMode on a touched dossier resets dossier to target ruleset & emits switch notice
+        getActiveConciergeDossier().meta.title = 'Touched World';
+        switchRulesetMode('fae');
+        assert.strictEqual(getActiveConciergeDossier().meta.ruleset, 'fae');
+        assert.notStrictEqual(getActiveConciergeDossier().meta.title, 'Touched World');
+        assert.ok(
+            harness.$('#mhc_chat_messages').html().includes('Switched Session Zero mode'),
+            'switchRulesetMode on a touched dossier must append mode-switch bubble'
+        );
+    } finally {
+        harness.cleanup();
+    }
 
-    // openConciergeModal uses loadValidatedDraft
-    assert.ok(uiJs.includes('loadValidatedDraft()'), 'openConciergeModal must invoke loadValidatedDraft');
-
-    // Load active campaign replacement guardrail
-    assert.ok(uiJs.includes('hasExistingSessionProgress'), 'concierge-ui.js must check hasExistingSessionProgress before loading active campaign');
-    assert.ok(uiJs.includes('resetConciergeState({ showGreeting: false })'), 'concierge-ui.js must reset state cleanly before loading active campaign');
-
-    // Desk and stage persistence
-    assert.ok(uiJs.includes('mhc_last_concierge_desk'), 'concierge-ui.js must track mhc_last_concierge_desk in sessionStorage');
-    assert.ok(uiJs.includes('skipCanonBuild: true'), 'concierge-ui.js must pass skipCanonBuild when resuming steps');
-
-    console.log('✓ concierge-ui.js lifecycle wiring verified');
+    console.log('✓ Behavioral concierge-ui.js lifecycle & FAE/PbtA specialization verified');
 }
 
 console.log('--- ALL CONCIERGE DRAFT LIFECYCLE TESTS PASSED CLEANLY! ---');

@@ -1393,15 +1393,18 @@ export function buildFaeRngBlock({ state = null, genreKey = 'cosmic_horror', lin
 
     const matrixLines = [
         `--- PRE-COMPUTED TURN RESOLUTION MATRIX (Roll #1: 4dF = ${d1 > 0 ? '+' + d1 : d1}, Shift: ${shift >= 0 ? '+' + shift : shift}) ---`,
-        `Base Attrition before Tags: max(0, Threat + 4dF(${d1 > 0 ? '+' + d1 : d1}) + Shift(${shift >= 0 ? '+' + shift : shift}))`,
+        `Pre-computed Attrition below already folds in 4dF(${d1 > 0 ? '+' + d1 : d1}) and Shift(${shift >= 0 ? '+' + shift : shift}):`,
     ];
 
     for (let t = 1; t <= 4; t++) {
-        const baseCost = Math.max(0, t + d1 + shift);
+        const cost0 = Math.max(0, t + d1 + shift);
+        const cost1 = Math.max(0, t + d1 + shift - 1);
+        const cost2 = Math.max(0, t + d1 + shift - 2);
+        const cost3 = Math.max(0, t + d1 + shift - 3);
         const pivotCost = Math.max(0, Math.min(5, t + 1) + d1 + shift);
-        matrixLines.push(`• Threat ${t}: ${baseCost} Attrition (pivot: ${pivotCost})`);
+        matrixLines.push(`• Threat ${t}: ${cost0} Attrition [0 Tags: ${cost0} | 1 Tag (-1): ${cost1} | 2 Tags (-2): ${cost2} | 2 Tags+Adv (-3): ${cost3}] (pivot: ${pivotCost})`);
     }
-    matrixLines.push(`Tag Modifiers: Each matched Positive Tag (max 2 + Advantage) subtracts -1 (min 0). Each matched Negative Tag adds +1.`);
+    matrixLines.push(`Negative Tags: Add +1 to the chosen column per hindering active Scar/Debuff (Advantage [-1] only applies on non-retreat actions; max 2 Positive Tags + 1 Advantage).`);
     matrixLines.push(`Active Pools Status & Outcome Thresholds for Roll #1:`);
 
     for (const [, pool] of Object.entries(activeState.pools)) {
@@ -1490,6 +1493,10 @@ YOUR AGENDA:
 - Be a fan of {{user}}: forward momentum is guaranteed; dice only measure wear-and-tear.
 - Play to find out what happens: respect player Intent and let the fiction evolve honestly.
 
+NARRATIVE-FIRST & DEFT TOUCH OUTSIDE COMBAT:
+- You have explicit permission NOT to test resource pools or roll 4dF on every turn. Outside of active combat or genuine high-stakes danger, use a deft touch: let dialogue, investigation, travel, quiet character beats, and competent actions flow as pure narrative prose (Threat 0 / no roll).
+- Keep mechanics strictly separate from story prose: never bleed internal engine terms ("stepping_stone", "pivot", "pool_at_risk", "zero_debuff", "Threat N") into narrative sentences. Confine mechanics strictly to the single inline *(FAE Action [Pool]: ...)* line (only when a Threat 1–4 test actually occurs) and the two-line status footer.
+
 CORE LAWS OF FAE RESOLUTION:
 1. SINGLE-PASS RESOLUTION: {{user}} declares Task and Intent. You evaluate the fiction, ${resolutionMethod}, and narrate the complete outcome in the same turn. NEVER halt the turn for meta-currency haggling or menu choices.
 2. ENCOUNTER-WIDE RESOLUTION (NO ACTION ECONOMY): FAE has no initiative, combat rounds, or individual creature turns. The Threat describes the ENTIRE encounter as a whole, resolved in a single player turn. When an active Encounter block is present, its stated Threat is used for action rolls against those enemies.
@@ -1544,18 +1551,21 @@ The tool executes 4dF resolution deterministically and returns:
 - NARRATIVE DIRECTIVE: Follow this consequence directive strictly.
 - UPDATED FOOTER POOLS: Reflect these exact pool values in your two-line status footer.
 
-FRICTIONLESS ACTIONS & OPENING SCENE SETUP:
-On Threat 0 (effortless brush-aside, routine conversation, or downtime) or Opening Scene Setup turns, do NOT call resolve_fae_action. Resolve narratively without pool tests.
+FRICTIONLESS ACTIONS, OPENING SETUP & DEFT TOUCH OUTSIDE COMBAT:
+You have explicit permission NOT to roll on every turn. On Threat 0 (effortless brush-aside, dialogue, exploration, atmosphere, or downtime) or Opening Scene Setup turns, do NOT call resolve_fae_action — narrate purely in story prose without pool tests.
 
 ROLL FORMAT (Strict SillyTavern Colorization):
-Always wrap the roll line in single asterisks and parentheses right before narrating its consequence:
-*(FAE Action [Pool]: 4dF [Roll: d1, d2, d3, d4 = Sum] + Threat N - PosTags + NegTags = Attrition X → Outcome)*
+Always wrap the roll line in single asterisks and parentheses right before narrating its consequence (include [+ Shift S] or [- Shift S] whenever GenreShift is non-zero):
+*(FAE Action [Pool]: 4dF [Roll: d1, d2, d3, d4 = Sum] + Threat N [+ Shift S] - PosTags + NegTags = Attrition X → Outcome)*
 </rng_system>`;
     }
 
     return `<rng_system>
 The player NEVER rolls dice. SillyTavern supplies pre-rolled 4dF values in [RNG_QUEUE v7.0 — FAE 4dF ATTRITION ENGINE].
 Each line provides 4 Fudge dice (-1, 0, or +1 each), summing to a total from -4 to +4 on a tight bell curve centered on 0.
+
+DEFT TOUCH OUTSIDE COMBAT:
+You have explicit permission NOT to test pools or roll 4dF on every turn. Do NOT force a roll just because a pre-computed matrix is injected in the prompt. Outside of combat, when {{user}} is talking, exploring, preparing, or acting safely within their competence (Threat 0), ignore the queue/matrix and narrate naturally with zero attrition.
 
 ATTRITION FORMULA:
 Attrition = max(0, Threat + 4dF - MatchedPosTags + MatchedNegTags + GenreShift)
@@ -1566,8 +1576,8 @@ Attrition = max(0, Threat + 4dF - MatchedPosTags + MatchedNegTags + GenreShift)
 - Genre Shift: -1 (Pulp), 0 (Gritty), +1 (Brutal/Horror).
 
 ZERO-MATH PRE-COMPUTED MATRIX:
-SillyTavern injects a pre-calculated turn resolution table directly in the [RNG_QUEUE] block for Roll #1.
-Consult the matrix directly to find the exact Attrition and Outcome tier with zero arithmetic!
+SillyTavern injects a pre-calculated turn resolution table directly in the [RNG_QUEUE] block for Roll #1 with exact final Attrition pre-computed for 0 Tags, 1 Tag (-1), 2 Tags (-2), and 2 Tags+Adv (-3).
+Consult the matching tag column directly to read final Attrition and Outcome tier with zero arithmetic!
 
 OUTCOME TIERS:
 - Attrition 0 → UNFAZED_PROGRESS: Complete forward progress with 0 pool loss! Highlight character mastery and tag protection. (If retreating at 0 pool rolls 0 attrition, escape succeeds cleanly via UNFAZED_PROGRESS).
@@ -1578,8 +1588,8 @@ OUTCOME TIERS:
   • Otherwise execute pool's on_overflow rule (redirect, scar_and_ko, scene_fail, or lethal).
 
 ROLL FORMAT (Strict SillyTavern Colorization):
-Always wrap the roll line in single asterisks and parentheses right before narrating its consequence:
-*(FAE Action [Pool]: 4dF [Roll: d1, d2, d3, d4 = Sum] + Threat N - PosTags + NegTags = Attrition X → Outcome)*
+Always wrap the roll line in single asterisks and parentheses right before narrating its consequence (include [+ Shift S] or [- Shift S] whenever GenreShift is non-zero):
+*(FAE Action [Pool]: 4dF [Roll: d1, d2, d3, d4 = Sum] + Threat N [+ Shift S] - PosTags + NegTags = Attrition X → Outcome)*
 Example: *(FAE Action [Sanity]: 4dF [Roll: +1, 0, +1, 0 = +2] + Threat 3 - 1 (Calm [under gunfire and shock]) = Attrition 4 → BREAKING POINT CLAMP (0/8))*
 </rng_system>`;
 }
@@ -1634,10 +1644,23 @@ POOL SELECTION & THREAT GUARDRAILS:
   • +1 Threat: Player acts recklessly into the Encounter's Instinct, enters an unmitigated Pressure without prep, or attempts a pivot action.
   ${threatReductionLine}
 
-TWO-TIER STRAIN VS TRAUMA RULE:
-- Never narrate broken limbs or permanent damage when HP/Pool > 0.
-- Pool at 0 clamps first; taking damage at 0 triggers overflow (${genre.knobs.overflow_default}).
+TWO-TIER NARRATION (see <role> Law 4): Pool > 0 is Strain only (never disabling wounds); Pool == 0 triggers Breaking Point Clamp; taking loss at 0 triggers overflow (${genre.knobs.overflow_default}).
 </combat>`;
+}
+
+/**
+ * Builds the FAE state_memo usage override for TRACKER STATE 0.
+ * Clarifies that a pool at 0/Max is a Breaking Point that permits risky action,
+ * retreat, or companion/advantage leverage rather than forbidding action.
+ *
+ * @returns {string} XML state_memo block
+ */
+export function buildFaeStateMemoContent() {
+    return `<state_memo>
+- ## TRACKER STATE 0 (Current) - passed every turn, is mechanical law.
+- TRACKER STATE 0 is the authoritative, read-only state at the start of the current turn and already accounts for all prior events. Never audit, reconstruct, or reconcile its pool totals from earlier narration; an external State Tracker handles resource accounting.
+- CRITICAL FAE ZERO-POOL RULE: In FAE, a Resource Pool at 0/Max (Breaking Point) is NOT a depleted spell slot that forbids acting! A protagonist at 0 in a pool CAN still act (risking that pool's on_overflow consequence), retreat (triggering GRACE_RETREAT_WITH_SCAR if Flee Grace is ON), act using a different non-zero pool, or rely on uninjured Companion:/Retainer: tags and earned [Advantage]. Only innate personal tags for the 0 pool are disabled.
+</state_memo>`;
 }
 
 /**
@@ -2017,6 +2040,17 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
             baseTag: '[PARTY]_mechanics',
         },
         {
+            id: 'fae_base_override_state_memo',
+            tag: 'state_memo',
+            content: buildFaeStateMemoContent(),
+            enabled: true,
+            scope: 'chat',
+            icon: 'fa-clipboard-check',
+            description: 'FAE pool state and zero-pool Breaking Point memo rules',
+            origin: 'unlocked_base',
+            baseTag: 'state_memo',
+        },
+        {
             id: 'fae_base_override_constraints',
             tag: 'constraints',
             content: buildFaeConstraintsContent(isFreeform, { heroicTier: isHeroic }),
@@ -2040,8 +2074,10 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         end_of_output_footer: false,
         xp_system: false,
         '[PARTY]_mechanics': false,
+        state_memo: false,
         constraints: false,
         CYOA_mode: !isFreeform,
+        world_progression: true,
         // D&D systems disabled in FAE
         weapon_proficiencies: false,
         attacks_per_round: false,

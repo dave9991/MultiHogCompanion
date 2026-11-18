@@ -359,6 +359,7 @@ test('6. Same-ruleset cross-chat bleed (PbtA <-> PbtA) prunes departed worldRule
         config: { harmMax: 3, pacingXp: 3, partyMode: 'solo' },
     });
     const cartFantasy = buildPbtACartridge('fantasy', {
+        systemLabel: 'Dungeon World',
         tone: 'Mythic moss-grown ruins',
         config: { harmMax: 5, pacingXp: 5, partyMode: 'squad' },
     });

@@ -9,6 +9,7 @@
  */
 
 import {
+    buildPbtARoleContent,
     buildPbtARngContent,
     executePbtaMoveTool,
 } from './pbta-ruleset.js';
@@ -19,8 +20,13 @@ import {
     executeFaeActionTool,
 } from './fae-ruleset.js';
 import { parseFaeStateFromMemo } from './fae-state-sync.js';
-import { detectActiveFaeGenre } from './pbta-companion-bridge.js';
-import { isPbtAActive, isFaeActive } from './pbta-ruleset-persistence.js';
+import { detectActiveGenre, detectActiveFaeGenre } from './pbta-companion-bridge.js';
+import {
+    isPbtAActive,
+    isFaeActive,
+    getCompanionActiveCartridge,
+    getPartitionDossier,
+} from './pbta-ruleset-persistence.js';
 import { resolveAuthoritativeChatId } from './history-integrity-guard.js';
 
 let _stSaveSettingsDebounced = null;
@@ -85,10 +91,10 @@ export function rollD6() {
  *   1: 2d6 → 3 + 5 = 8
  * Replaces MultiHog's polyhedral queue (d20/d4/d6/d8/d10/d12 per line).
  *
- * @param {number} [lineCount=1]
+ * @param {number} [lineCount=3]
  * @returns {string}
  */
-export function buildPbtA2d6Block(lineCount = 1) {
+export function buildPbtA2d6Block(lineCount = 3) {
     const turnId = Date.now();
     const count = Math.max(1, lineCount);
     const lines = [];
@@ -234,6 +240,25 @@ export function syncCompanionDiceFunctionTools() {
     }
 }
 
+function syncSnippetContent(s, snippetId, desiredContent) {
+    let updated = false;
+    if (Array.isArray(s.customSyspromptLibrary)) {
+        const item = s.customSyspromptLibrary.find(p => p.id === snippetId);
+        if (item && item.content !== desiredContent) {
+            item.content = desiredContent;
+            updated = true;
+        }
+    }
+    if (Array.isArray(s.syspromptSnippetDatabase)) {
+        const dbItem = s.syspromptSnippetDatabase.find(p => p.id === snippetId);
+        if (dbItem && dbItem.content !== desiredContent) {
+            dbItem.content = desiredContent;
+            updated = true;
+        }
+    }
+    return updated;
+}
+
 /**
  * Synchronizes the active ruleset's sysprompts and tools with MultiHog's native diceFunctionTool toggle.
  *
@@ -246,6 +271,7 @@ export function syncActiveRulesetRngMode(rpgSettings = null) {
     const fae = isFaeActive(activeChatId);
     const pbta = !fae && isPbtAActive(activeChatId);
     const toolMode = Boolean(s.diceFunctionTool);
+    const isFreeform = s.cyoaConfig?.playstyle === 'freeform';
     let changed = false;
 
     if (fae) {
@@ -254,48 +280,29 @@ export function syncActiveRulesetRngMode(rpgSettings = null) {
         const faeState = parseFaeStateFromMemo(memo, genreKey);
         const isHeroic = Boolean(faeState.knobs?.heroic_tier);
         const desiredRng = buildFaeRngContent({ toolMode });
-        const desiredRole = buildFaeRoleContent(false, { heroicTier: isHeroic, toolMode });
+        const desiredRole = buildFaeRoleContent(isFreeform, { heroicTier: isHeroic, toolMode });
 
-        if (Array.isArray(s.customSyspromptLibrary)) {
-            const rngItem = s.customSyspromptLibrary.find(p => p.id === 'fae_base_override_rng');
-            if (rngItem && rngItem.content !== desiredRng) {
-                rngItem.content = desiredRng;
-                changed = true;
-            }
-            const roleItem = s.customSyspromptLibrary.find(p => p.id === 'fae_base_override_role');
-            if (roleItem && roleItem.content !== desiredRole) {
-                roleItem.content = desiredRole;
-                changed = true;
-            }
-        }
-        if (Array.isArray(s.syspromptSnippetDatabase)) {
-            const rngDb = s.syspromptSnippetDatabase.find(p => p.id === 'fae_base_override_rng');
-            if (rngDb && rngDb.content !== desiredRng) {
-                rngDb.content = desiredRng;
-                changed = true;
-            }
-            const roleDb = s.syspromptSnippetDatabase.find(p => p.id === 'fae_base_override_role');
-            if (roleDb && roleDb.content !== desiredRole) {
-                roleDb.content = desiredRole;
-                changed = true;
-            }
-        }
+        if (syncSnippetContent(s, 'fae_base_override_rng', desiredRng)) changed = true;
+        if (syncSnippetContent(s, 'fae_base_override_role', desiredRole)) changed = true;
     } else if (pbta) {
-        const desiredRng = buildPbtARngContent({ toolMode });
-        if (Array.isArray(s.customSyspromptLibrary)) {
-            const rngItem = s.customSyspromptLibrary.find(p => p.id === 'pbta_base_override_rng');
-            if (rngItem && rngItem.content !== desiredRng) {
-                rngItem.content = desiredRng;
-                changed = true;
-            }
-        }
-        if (Array.isArray(s.syspromptSnippetDatabase)) {
-            const rngDb = s.syspromptSnippetDatabase.find(p => p.id === 'pbta_base_override_rng');
-            if (rngDb && rngDb.content !== desiredRng) {
-                rngDb.content = desiredRng;
-                changed = true;
-            }
-        }
+        const memo = s.currentMemo || s.chatStates?.[activeChatId]?.currentMemo || '';
+        const activeCart = getCompanionActiveCartridge(activeChatId, s);
+        const pbtaDossier = getPartitionDossier(s.chatStates?.[activeChatId]) || activeCart?.dossier || null;
+        const genreKey = activeCart?.genre
+            || pbtaDossier?.meta?.systemKey
+            || detectActiveGenre({ currentMemo: memo, rpgSettings: s })
+            || 'fantasy';
+        const statsList = Object.keys(pbtaDossier?.protagonist?.stats || {});
+        const systemLabel = activeCart?.systemLabel || pbtaDossier?.meta?.systemLabel || null;
+        const pbtaOverrides = {
+            ...(statsList.length >= 3 ? { stats: statsList } : {}),
+            ...(systemLabel ? { systemLabel } : {}),
+        };
+        const desiredRng = buildPbtARngContent({ toolMode, genreKey, overrides: pbtaOverrides });
+        const desiredRole = buildPbtARoleContent(isFreeform, genreKey, pbtaOverrides);
+
+        if (syncSnippetContent(s, 'pbta_base_override_rng', desiredRng)) changed = true;
+        if (syncSnippetContent(s, 'pbta_base_override_role', desiredRole)) changed = true;
     }
 
     if (changed) {
@@ -468,7 +475,7 @@ export function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
         }
     } else {
         const toolMode = Boolean(rpgSettings?.diceFunctionTool);
-        const replacementBlock = toolMode ? '' : buildPbtA2d6Block(1);
+        const replacementBlock = toolMode ? '' : buildPbtA2d6Block(3);
         const startIndex = Math.max(0, chat.length - 3);
         for (let i = chat.length - 1; i >= startIndex; i--) {
             const msg = chat[i];
@@ -490,7 +497,7 @@ export function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
                 }
                 console.log(toolMode
                     ? '[MultiHog Companion] Stripped RNG queue for PbtA Function Tool Call mode.'
-                    : '[MultiHog Companion] Replaced polyhedral RNG queue with single PbtA 2d6 roll.');
+                    : '[MultiHog Companion] Replaced polyhedral RNG queue with PbtA 2d6 rolls.');
                 break;
             }
         }

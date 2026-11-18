@@ -298,11 +298,43 @@ export const PBTA_GENRES = {
 };
 
 /**
+ * Resolves effective stats and whether `rawStats` overrides the genre's canonical stat array.
+ */
+function resolveGenreStatsState(genre, rawStats) {
+    const provided = Array.isArray(rawStats) && rawStats.length >= 3 ? rawStats : null;
+    const matchesGenre = Boolean(
+        provided
+        && provided.length === genre.stats.length
+        && provided.every((sName, i) => String(sName).trim().toLowerCase() === genre.stats[i].toLowerCase())
+    );
+    const isCustomStats = Boolean(provided && !matchesGenre);
+    return {
+        activeStats: provided || genre.stats,
+        isCustomStats,
+    };
+}
+
+/**
  * Builds the PbtA role prompt section.
  *
- * @param {boolean} [isFreeform=false] Whether freeform playstyle is active (omits CYOA buttons)
+ * @param {boolean|object} [isFreeform=false] Whether freeform playstyle is active (or options object)
+ * @param {string} [genreKey='fantasy'] Genre key from PBTA_GENRES
+ * @param {object} [overrides={}] Optional overrides (stats, systemLabel, playstyle, etc.)
  */
-export function buildPbtARoleContent(isFreeform = false) {
+export function buildPbtARoleContent(isFreeform = false, genreKey = 'fantasy', overrides = {}) {
+    if (typeof isFreeform === 'object' && isFreeform !== null) {
+        overrides = isFreeform;
+        genreKey = overrides.genreKey || overrides.genre || 'fantasy';
+        isFreeform = Boolean(overrides.isFreeform ?? (overrides.playstyle === 'freeform'));
+    }
+    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const { activeStats, isCustomStats } = resolveGenreStatsState(genre, overrides?.stats);
+    const statDescLine = isCustomStats
+        ? activeStats.join(', ')
+        : (genre.statDescriptions || activeStats.join(', '));
+    const genreLabel = overrides?.systemLabel || genre.label;
+    const movesList = genre.moves.map(m => `  • ${m}`).join('\n');
+
     const coreLoopStep1 = isFreeform
         ? `1. Describe the situation honestly, then ask what {{user}} does.`
         : `1. Describe the situation honestly and establish the immediate scene and stakes (tactical choices belong exclusively in the <choices> block at the end; do not write "What do you do?" in prose).`;
@@ -314,6 +346,15 @@ YOUR AGENDA:
 - Make the world feel real, fantastic, and dangerous.
 - Make {{user}}'s life exciting: be a fan of the protagonist, never their adversary.
 - Play to find out what happens: never predetermine plot.
+
+NARRATIVE-FIRST & DEFT TOUCH OUTSIDE COMBAT:
+- You have explicit permission NOT to invoke rules or roll dice on every turn. Outside of active combat or genuine high-stakes danger, use a deft touch: let dialogue, exploration, atmosphere, social rapport, and competent routine actions unfold as pure, uninterrupted story with zero dice rolls.
+- Keep mechanics strictly separate from narrative prose: write grounded, immersive fiction free of engine jargon, and isolate any mechanical resolution to its single inline *(Move Name [Stat]: ...)* annotation (only when a Move genuinely triggers) and the end-of-output status footer.
+
+ACTIVE GENRE MOVES & STAT DOMAINS (${genreLabel}):
+- Core Stats: ${statDescLine}
+- Basic Moves (available to {{user}} whenever triggered in the fiction, alongside their Playbook Moves in [CHARACTER]):
+${movesList}
 
 CORE LOOP (every turn):
 ${coreLoopStep1}
@@ -430,6 +471,32 @@ export function executePbtaMoveTool(args = {}) {
 }
 
 /**
+ * Parses a `"Move Name (+Stat) — description"` entry into normalized Move and Stat names.
+ *
+ * @param {string} moveStr
+ * @param {string[]} [activeStats=[]]
+ * @param {number} [statFallbackIndex=0]
+ * @returns {{ moveName: string, statName: string }}
+ */
+function parseGenreMoveAndStat(moveStr, activeStats = [], statFallbackIndex = 0) {
+    const clean = String(moveStr || '').trim();
+    const m = clean.match(/^([^(—]+?)\s*\(([^)]+)\)/);
+    const moveName = (m ? m[1] : clean.split('—')[0]).trim() || 'Act Under Pressure';
+    const fallbackStat = activeStats[statFallbackIndex % Math.max(1, activeStats.length)] || activeStats[0] || 'Stat';
+    let statName = fallbackStat;
+    if (m && m[2]) {
+        const altTokens = m[2].split(/\bor\b|,/i).map(t => t.replace(/[+]/g, '').trim()).filter(Boolean);
+        const firstToken = altTokens[0] || '';
+        if (firstToken && !/^(attribute|stat)$/i.test(firstToken)) {
+            if (!activeStats.length || activeStats.includes(firstToken)) {
+                statName = firstToken;
+            }
+        }
+    }
+    return { moveName, statName };
+}
+
+/**
  * Builds the PbtA RNG system section instructions for consuming 2d6 from SillyTavern.
  *
  * @param {object} [options={}]
@@ -437,16 +504,28 @@ export function executePbtaMoveTool(args = {}) {
  */
 export function buildPbtARngContent(options = {}) {
     const toolMode = Boolean(options?.toolMode ?? options?.diceFunctionTool ?? false);
+    const genreKey = options?.genreKey || options?.genre || 'fantasy';
+    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const rawStats = Array.isArray(options?.stats) && options.stats.length >= 3
+        ? options.stats
+        : options?.overrides?.stats;
+    const { activeStats, isCustomStats } = resolveGenreStatsState(genre, rawStats);
+    const useFantasyCanonical = genreKey === 'fantasy' && !isCustomStats;
 
     if (toolMode) {
+        const toolMoves = useFantasyCanonical
+            ? ['Hack & Slash', 'Act Under Fire', 'Cast a Spell']
+            : genre.moves.slice(0, 3).map((m, idx) => parseGenreMoveAndStat(m, activeStats, idx).moveName);
+        const toolStats = activeStats.slice(0, 3);
+
         return `<rng_system>
 The player NEVER rolls dice. This section is the single authority for how Moves resolve.
 
 FUNCTION TOOL CALL RESOLUTION (roll_pbta_move):
 When {{user}}'s action triggers a Move ("when you X, roll +Stat"), you MUST call the "roll_pbta_move" tool.
 Before calling the tool, evaluate the fiction and identify:
-- move_name: The name of the triggered Move (e.g. "Hack & Slash", "Act Under Fire", "Cast a Spell").
-- stat_name: The governing Stat from [CHARACTER] (e.g. "Might", "Cool", "Arcana").
+- move_name: The name of the triggered Move (e.g. ${toolMoves.map(n => `"${n}"`).join(', ')}).
+- stat_name: The governing Stat from [CHARACTER] (e.g. ${toolStats.map(s => `"${s}"`).join(', ')}).
 - stat_mod: The stat modifier (-1 to +3).
 - forward_bonus: Any active situational forward or hold bonus applied to this roll (default 0).
 
@@ -456,8 +535,8 @@ The tool rolls 2d6 and returns:
 - OUTCOME TIER: Strong Hit (10+), Weak Hit (7–9), or Miss (6-).
 - NARRATIVE DIRECTIVE: Follow this consequence directive strictly. (On Miss, execute a Hard Move and award +1 XP: *(+1 XP — Miss)*).
 
-ROUTINE ACTIONS & ORDINARY CONVERSATION:
-Ordinary conversation, routine tasks, and safe dialogue NEVER trigger a Move or dice roll. Do NOT call roll_pbta_move unless a Move is triggered.
+ROUTINE ACTIONS & DEFT TOUCH OUTSIDE COMBAT:
+Ordinary conversation, routine tasks, atmospheric travel, and safe dialogue NEVER trigger a Move or dice roll. You have explicit permission NOT to roll on every turn — outside of combat, do NOT call roll_pbta_move unless a risky Move genuinely triggers.
 
 ROLL FORMAT (Strict SillyTavern Colorization):
 Always wrap the entire roll line in single asterisks and parentheses:
@@ -465,9 +544,43 @@ Always wrap the entire roll line in single asterisks and parentheses:
 </rng_system>`;
     }
 
+    let rollExamplesBlock;
+    if (useFantasyCanonical) {
+        rollExamplesBlock = `- Miss (6-):
+  *(Cast a Spell [Arcana]: 2d6 [Roll: 2 + 1 = 3] - 1 = 2 → Miss)*
+  *(Defy Danger [Agility]: 2d6 [Roll: 1 + 3 = 4] + 1 = 5 → Miss)*
+- Weak Hit (7–9):
+  *(Hack & Slash [Might]: 2d6 [Roll: 3 + 4 = 7] + 1 = 8 → Weak Hit)*
+  *(Defy Danger [Heart]: 2d6 [Roll: 3 + 5 = 8] + 0 = 8 → Weak Hit)*
+- Strong Hit (10+):
+  *(Volley [Agility]: 2d6 [Roll: 5 + 5 = 10] + 1 = 11 → Strong Hit)*
+  *(Spout Lore [Wits]: 2d6 [Roll: 4 + 5 = 9] + 2 = 11 → Strong Hit)*`;
+    } else {
+        const parsedMoves = genre.moves.map((m, idx) => parseGenreMoveAndStat(m, activeStats, idx));
+        const pick = (i) => parsedMoves[i % parsedMoves.length];
+        const m0 = pick(0);
+        const m1 = pick(1);
+        const m2 = pick(2);
+        const m3 = pick(3);
+        const m4 = pick(4);
+        const m5 = parsedMoves.length >= 6 ? pick(5) : { moveName: pick(0).moveName, statName: activeStats[activeStats.length - 1] || pick(0).statName };
+        rollExamplesBlock = `- Miss (6-):
+  *(${m0.moveName} [${m0.statName}]: 2d6 [Roll: 2 + 1 = 3] - 1 = 2 → Miss)*
+  *(${m1.moveName} [${m1.statName}]: 2d6 [Roll: 1 + 3 = 4] + 1 = 5 → Miss)*
+- Weak Hit (7–9):
+  *(${m2.moveName} [${m2.statName}]: 2d6 [Roll: 3 + 4 = 7] + 1 = 8 → Weak Hit)*
+  *(${m3.moveName} [${m3.statName}]: 2d6 [Roll: 3 + 5 = 8] + 0 = 8 → Weak Hit)*
+- Strong Hit (10+):
+  *(${m4.moveName} [${m4.statName}]: 2d6 [Roll: 5 + 5 = 10] + 1 = 11 → Strong Hit)*
+  *(${m5.moveName} [${m5.statName}]: 2d6 [Roll: 4 + 5 = 9] + 2 = 11 → Strong Hit)*`;
+    }
+
     return `<rng_system>
 The player NEVER rolls dice. This section is the single authority for how Moves resolve.
 SillyTavern injects pre-rolled 2d6 in [RNG_QUEUE v7.0]. Each line is one complete roll, e.g. "1: 2d6 → 3 + 5 = 8".
+
+DEFT TOUCH OUTSIDE COMBAT:
+Do NOT force a Move roll just because pre-rolled dice are present in [RNG_QUEUE]. Outside of active combat, if {{user}} is talking, exploring, or acting safely within their competence, leave the queue untouched and narrate without rolling.
 
 WHEN A MOVE TRIGGERS:
 1. Name the Move and its stat from the [CHARACTER] sheet (the modifier is typically -1 to +3).
@@ -486,15 +599,7 @@ Reveal each Move roll inline in the narrative right before narrating its consequ
 MANDATORY SYNTAX: Always wrap the entire roll line in single asterisks and parentheses: *(Move Name [Stat]: ...)*. This is required for SillyTavern theme colorization. NEVER use bold **Roll:**, NEVER write plain unitalicized text, and NEVER omit the Move name or Stat!
 *(Move Name [Stat]: 2d6 [Roll: Die1 + Die2 = Sum] + Mod = Total → Strong Hit | Weak Hit | Miss)*
 
-- Miss (6-):
-  *(Cast a Spell [Arcana]: 2d6 [Roll: 2 + 1 = 3] - 1 = 2 → Miss)*
-  *(Defy Danger [Agility]: 2d6 [Roll: 1 + 3 = 4] + 1 = 5 → Miss)*
-- Weak Hit (7–9):
-  *(Hack & Slash [Might]: 2d6 [Roll: 3 + 4 = 7] + 1 = 8 → Weak Hit)*
-  *(Defy Danger [Heart]: 2d6 [Roll: 3 + 5 = 8] + 0 = 8 → Weak Hit)*
-- Strong Hit (10+):
-  *(Volley [Agility]: 2d6 [Roll: 5 + 5 = 10] + 1 = 11 → Strong Hit)*
-  *(Spout Lore [Wits]: 2d6 [Roll: 4 + 5 = 9] + 2 = 11 → Strong Hit)*
+${rollExamplesBlock}
 MANDATORY: NEVER hide, omit, or calculate rolls silently in thought. The player MUST visibly see the roll line in the narrative prose!
 
 TERMS:
@@ -630,25 +735,49 @@ export function buildPbtAXpContent() {
 }
 
 /**
- * Builds the PbtA party mechanics and companion bench resolution section.
+ * Builds the PbtA state_memo usage override for TRACKER STATE 0.
+ *
+ * @returns {string} XML state_memo block
  */
-export function buildPbtAPartyContent() {
+export function buildPbtAStateMemoContent() {
+    return `<state_memo>
+- ## TRACKER STATE 0 (Current) - passed every turn, is mechanical law.
+- TRACKER STATE 0 is the authoritative, read-only state at the start of the current turn and already accounts for all prior events. Never audit, reconstruct, or reconcile its totals from earlier narration; an external State Tracker handles sheet updates.
+- Respect active Harm, Armor, Conditions, Hold/Forward, and gear tags/uses shown in TRACKER STATE 0. {{user}} can always act in the fiction unless incapacitated at Max Harm (0 HP) or attempting to spend 0 Hold / 0 uses.
+</state_memo>`;
+}
+
+/**
+ * Builds the PbtA party mechanics and companion bench resolution section.
+ * Aligned with the lean Dungeon World companion schema in State Tracker [PARTY].
+ *
+ * @param {object} [options={}]
+ * @returns {string} XML [PARTY]_mechanics block
+ */
+export function buildPbtAPartyContent(options = {}) {
+    const toolMode = Boolean(options?.toolMode ?? options?.diceFunctionTool ?? false);
+    const benchEtaRollRule = toolMode
+        ? 'Call roll_pbta_move (or pop the next unused 2d6 line if [RNG_QUEUE v7.0] is present) with a situational modifier based on archetype fit (+1 suited to the task, +0 standard, -1 out of their depth or wounded):'
+        : 'Pop the next unused 2d6 pair from [RNG_QUEUE v7.0] (or call roll_pbta_move if function tool mode is active) and add a situational modifier based on archetype fit (+1 suited to the task, +0 standard, -1 out of their depth or wounded):';
+
     return `<[PARTY]_mechanics>
 On joining: state *(Name joins the party)* and declare their profile matching [PARTY] format.
-CRITICAL FORMAT: Every party member MUST start on their own line with Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0. Separate distinct members with a blank line.
+CRITICAL FORMAT: Lean Dungeon World style allies — no full 5-stat arrays. Every party member MUST start on their own line with Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0. Separate distinct members with a blank line.
 Companion damage tracking: MultiHog visualizes HP as a descending vitality bar (5/5 = full health). When a companion takes Harm, increment their Harm and decrement their HP in tandem (e.g. at 1 Harm: 4/5 HP | Harm: 1/5; at 2 Harm: 3/5 HP | Harm: 2/5; at 5 Harm: 0/5 HP | Harm: 5/5, Incapacitated).
 [PARTY]
 Name (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
-Stats: Stat1 +2, Stat2 +1, Stat3 +1, Stat4 +0, Stat5 -1
-((PILLS)) Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
-Gear: Signature weapon/item (tags) | Armor (value)
+((PILLS)) Moves: Signature Move (Trigger and narrative effect)
+((PILLS)) Gear: Signature weapon (Tags, 2 Harm), Protective gear ((+) Armor 1)
+((PILLS)) Bonds: Protagonist Name (Bond or debt detail)
 ((PILLS)) Conditions: None
 Status: Healthy
 
 Second Companion (Archetype): 5/5 HP | Harm: 0/5 | Armor: 0
 Appearance: Key physical features, clothing, or silhouette
-((PILLS)) Moves: Signature Move (Trigger: [Fictional trigger]. Effect: [PbtA effect])
+((PILLS)) Moves: Signature Move (Trigger and narrative effect)
+((PILLS)) Gear: Utility item (Tags)
+((PILLS)) Bonds: Protagonist Name (Bond detail)
 ((PILLS)) Conditions: None
 Status: Healthy
 [/PARTY]
@@ -656,12 +785,12 @@ Status: Healthy
 <leaving_vs_benching>
 Only permanent departure needs annotation: death, explicit final farewell, defection, or closure ruling out reunion → narrate, then *(Left the party: Name — reason)* (exact string; hard delete).
 - Never for temporary separation, however dramatic. Temporary/contactable = Benched (the common case).
-- Upon rejoin, don't declare stats again; only narrate unbenching.
+- Upon rejoin, only narrate unbenching; resume from their existing sheet.
 </leaving_vs_benching>
 
 <bench_ETA_system>
 On benching, estimate an in-world return ETA. Just before return (never once already in-scene), resolve the companion's off-screen mission:
-Pop the next pair of d6 dice from [RNG_QUEUE v7.0] and add the companion's most relevant stat:
+${benchEtaRollRule}
 - 10+ (Strong Hit): Companion returns on time, mission accomplished cleanly without complications or harm.
 - 7–9 (Mixed Success): Companion returns, but with a complication (delayed return, caught heat, debt, marked condition, or +1 Harm taken).
 - 6- (Trouble): Companion returns wounded (+2 Harm or higher), failed objective, captured, or in need of extraction.
@@ -1204,7 +1333,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_role',
             tag: 'role',
-            content: buildPbtARoleContent(isFreeform),
+            content: buildPbtARoleContent(isFreeform, genreKey, overrides),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',
@@ -1215,7 +1344,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_rng',
             tag: 'rng_system',
-            content: buildPbtARngContent({ toolMode: useToolMode }),
+            content: buildPbtARngContent({ toolMode: useToolMode, genreKey, overrides }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-lock-open',
@@ -1269,13 +1398,24 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         {
             id: 'pbta_base_override_party',
             tag: '[PARTY]_mechanics',
-            content: buildPbtAPartyContent(),
+            content: buildPbtAPartyContent({ toolMode: useToolMode }),
             enabled: partyMode !== 'solo',
             scope: 'chat',
             icon: 'fa-lock-open',
             description: 'PbtA companion format and 2d6 bench resolution',
             origin: 'unlocked_base',
             baseTag: '[PARTY]_mechanics',
+        },
+        {
+            id: 'pbta_base_override_state_memo',
+            tag: 'state_memo',
+            content: buildPbtAStateMemoContent(),
+            enabled: true,
+            scope: 'chat',
+            icon: 'fa-lock-open',
+            description: 'PbtA Harm, Hold, and fictional positioning state memo guide',
+            origin: 'unlocked_base',
+            baseTag: 'state_memo',
         },
         {
             id: 'pbta_base_override_constraints',
@@ -1302,8 +1442,10 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         end_of_output_footer: false,
         xp_system: false,
         '[PARTY]_mechanics': false,
+        state_memo: false,
         constraints: false, // Suppress base D&D constraints containing disadvantage/spells
         CYOA_mode: !isFreeform,
+        world_progression: false, // Embedded inside pbta_base_override_role (avoid duplicate)
         // D&D systems disabled in PbtA
         weapon_proficiencies: false,
         attacks_per_round: false,

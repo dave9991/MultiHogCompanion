@@ -128,6 +128,7 @@ import {
     getActiveRulesetId,
     getPartitionDossier,
     setPartitionDossier,
+    isDndFixSnippetId,
     isCompanionRulesetSnippetId,
     pruneCompanionLibSectionOrder,
 } from './pbta-ruleset-persistence.js';
@@ -663,7 +664,7 @@ async function applyRulesetCartridge({
     }
 
     // 2. Install unlocked & custom overrides into customSyspromptLibrary (pruning stale ruleset snippets)
-    const shouldStripSnippet = (id) => isCompanionRulesetSnippetId(id) || id === 'mhc_dnd_subfooter_override_footer';
+    const shouldStripSnippet = (id) => isCompanionRulesetSnippetId(id) || isDndFixSnippetId(id);
     if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
     s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !shouldStripSnippet(p?.id));
     const snippets = cartridge.payload.customSyspromptLibrary.map(item => ({

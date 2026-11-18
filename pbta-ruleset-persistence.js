@@ -815,6 +815,10 @@ export function isLiveSettingsPollutedWithFae(s) {
     return false;
 }
 
+export function isDndFixSnippetId(id) {
+    return id === 'mhc_dnd_subfooter_override_footer' || id === 'mhc_dnd_deft_touch_pacing';
+}
+
 export function isCompanionRulesetSnippetId(id) {
     if (!id || typeof id !== 'string') return false;
     return id.startsWith('pbta_')
@@ -829,7 +833,7 @@ export function pruneCompanionLibSectionOrder(order, keepSnippets = [], { remove
     return order.filter(key => {
         if (typeof key !== 'string' || !key.startsWith('lib:')) return true;
         const id = key.slice(4);
-        if (removeDndSubfooter && id === 'mhc_dnd_subfooter_override_footer') return keepIds.has(id);
+        if (removeDndSubfooter && isDndFixSnippetId(id)) return keepIds.has(id);
         if (isCompanionRulesetSnippetId(id)) return keepIds.has(id);
         return true;
     });
@@ -931,6 +935,9 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
         end_of_output_footer: true,
         xp_system: true,
         '[PARTY]_mechanics': true,
+        state_memo: true,
+        constraints: true,
+        world_progression: true,
         weapon_proficiencies: true,
         attacks_per_round: true,
         saving_throws: true,
@@ -1060,7 +1067,7 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
 function stripForeignRulesetSnippets(s, keepPrefix) {
     const isForeign = (id) => Boolean(id && (
         (!id.startsWith(keepPrefix) && isCompanionRulesetSnippetId(id))
-        || id === 'mhc_dnd_subfooter_override_footer'
+        || isDndFixSnippetId(id)
     ));
     if (Array.isArray(s.customSyspromptLibrary)) {
         s.customSyspromptLibrary = s.customSyspromptLibrary.filter(p => !isForeign(p?.id));
@@ -1090,7 +1097,7 @@ function resolveToolModeForChat(s, resolvedChatId, dossier, activeCart, isSamePr
 async function applyStandaloneCartridgeHydration(s, targetCartridge, resolvedToolMode, resolvedChatId) {
     if (!s.customSyspromptLibrary) s.customSyspromptLibrary = [];
     s.customSyspromptLibrary = s.customSyspromptLibrary.filter(
-        p => !isCompanionRulesetSnippetId(p?.id) && p?.id !== 'mhc_dnd_subfooter_override_footer'
+        p => !isCompanionRulesetSnippetId(p?.id) && !isDndFixSnippetId(p?.id)
     );
     const hydratedSnippets = targetCartridge.payload.customSyspromptLibrary.map(item => ({
         ...item,
@@ -1102,7 +1109,7 @@ async function applyStandaloneCartridgeHydration(s, targetCartridge, resolvedToo
 
     if (!Array.isArray(s.syspromptSnippetDatabase)) s.syspromptSnippetDatabase = [];
     s.syspromptSnippetDatabase = s.syspromptSnippetDatabase.filter(
-        p => !isCompanionRulesetSnippetId(p?.id) && p?.id !== 'mhc_dnd_subfooter_override_footer'
+        p => !isCompanionRulesetSnippetId(p?.id) && !isDndFixSnippetId(p?.id)
     );
     s.syspromptSnippetDatabase.push(...hydratedSnippets.map(sn => ({ ...sn })));
 

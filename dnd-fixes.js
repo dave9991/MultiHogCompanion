@@ -10,6 +10,22 @@
  */
 
 export const DND_SUBFOOTER_OVERRIDE_ID = 'mhc_dnd_subfooter_override_footer';
+export const DND_DEFT_TOUCH_OVERRIDE_ID = 'mhc_dnd_deft_touch_pacing';
+
+/**
+ * Builds the D&D 5e Narrative-First & Deft Touch pacing prompt snippet.
+ * Grants explicit permission outside of combat not to roll dice on every turn
+ * and keeps mechanics cleanly separated from story prose.
+ *
+ * @returns {string}
+ */
+export function getDndDeftTouchPacingContent() {
+    return `<deft_touch_pacing>
+NARRATIVE-FIRST & DEFT TOUCH OUTSIDE COMBAT:
+- You have explicit permission NOT to call for skill checks or roll dice on every turn. Outside of active combat or genuine high-stakes danger, use a deft touch: let dialogue, exploration, world-building, social rapport, and actions well within the character's competence unfold as pure narrative prose without forcing a d20 roll.
+- Keep mechanics strictly separate from the narrative voice: write immersive story prose first, and confine mechanical annotations strictly to their parenthetical *(Check: ...)* lines (only when a roll is genuinely warranted) and the end-of-output status footer.
+</deft_touch_pacing>`;
+}
 
 /**
  * Builds the aligned D&D 5e status footer prompt.
@@ -192,9 +208,22 @@ export async function applyDndSubfooterAlignment(options = {}) {
 
     // Remove any existing override with this ID or targeting end_of_output_footer with unlocked_base
     rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary.filter(
-        item => item && item.id !== DND_SUBFOOTER_OVERRIDE_ID && !(item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer')
+        item => item
+            && item.id !== DND_SUBFOOTER_OVERRIDE_ID
+            && item.id !== DND_DEFT_TOUCH_OVERRIDE_ID
+            && !(item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer')
     );
     rpgSettings.customSyspromptLibrary.push(snippet);
+    rpgSettings.customSyspromptLibrary.push({
+        id: DND_DEFT_TOUCH_OVERRIDE_ID,
+        tag: 'deft_touch_pacing',
+        origin: 'custom',
+        label: '<deft_touch_pacing>',
+        description: 'D&D 5e Deft Touch & Narrative-First Pacing',
+        enabled: true,
+        scope: 'chat',
+        content: getDndDeftTouchPacingContent(),
+    });
 
     // 3. Ensure cyoaConfig with aligned custom prompt
     if (!rpgSettings.cyoaConfig || typeof rpgSettings.cyoaConfig !== 'object') {
@@ -223,10 +252,13 @@ export async function revertDndSubfooterAlignment(options = {}) {
     const rpgSettings = options.rpgSettings || await getMultiHogSettings();
     if (!rpgSettings) return false;
 
-    // 1. Remove the footer override
+    // 1. Remove the footer and deft-touch pacing overrides
     if (Array.isArray(rpgSettings.customSyspromptLibrary)) {
         rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary.filter(
-            item => item && item.id !== DND_SUBFOOTER_OVERRIDE_ID && !(item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer' && item.content?.includes('active subfooters'))
+            item => item
+                && item.id !== DND_SUBFOOTER_OVERRIDE_ID
+                && item.id !== DND_DEFT_TOUCH_OVERRIDE_ID
+                && !(item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer' && item.content?.includes('active subfooters'))
         );
     }
 

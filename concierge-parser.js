@@ -1214,7 +1214,8 @@ export function applyDossierUpdates(text, dossier) {
             changes.push(`Protagonist status set to "${updated.protagonist.status}"`);
         }
 
-        const moves = parseBulletOrListItems(pBlock, 'moves', { splitCommas: false });
+        const startingMoves = parseBulletOrListItems(pBlock, 'starting_moves', { splitCommas: false });
+        const moves = startingMoves.length ? startingMoves : parseBulletOrListItems(pBlock, 'moves', { splitCommas: false });
         if (moves.length && updated.meta?.ruleset !== 'fae') {
             updated.protagonist.startingMoves = moves;
             changes.push(`Protagonist moves updated (${moves.length} moves registered)`);
@@ -2010,21 +2011,21 @@ export function applyDossierUpdates(text, dossier) {
         const kv = parseKeyValueLines(block.content);
         const name = cleanTargetName(kv.name || kv.title || block.inlineArg || '');
         if (!name) continue;
+        const content = (kv.content || kv.description || kv.text || '').trim();
 
         if (kv.action === 'remove' || kv.remove === 'true') {
             canonMutations.push({ action: 'remove', target: name });
             changes.push(`Removed Canon entry "${name}"`);
-        } else if (kv.action === 'disable' || kv.disabled === 'true') {
+        } else if (kv.action === 'disable' || (!content && kv.disabled === 'true')) {
             canonMutations.push({ action: 'disable', target: name });
             changes.push(`Disabled Canon entry "${name}"`);
-        } else if (kv.action === 'enable' || kv.disabled === 'false') {
+        } else if (kv.action === 'enable' || (!content && kv.disabled === 'false')) {
             canonMutations.push({ action: 'enable', target: name });
             changes.push(`Enabled Canon entry "${name}"`);
         } else {
             const kind = (kv.kind || 'LORE').toUpperCase();
             const aliases = kv.aliases ? kv.aliases.split(',').map(s => s.trim()).filter(Boolean) : [];
             const importance = parseInt(kv.importance, 10) || 4;
-            const content = kv.content || kv.description || kv.text || '';
             const disabled = /^(true|yes|1)$/i.test(String(kv.disabled || ''));
             canonMutations.push({
                 action: 'upsert',

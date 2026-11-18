@@ -18,6 +18,7 @@ import {
     formatStageContinuityBrief,
 } from '../concierge-prompt.js';
 import { systemRegistry } from '../concierge-system-registry.js';
+import { buildTalkerInstructionNotice } from '../concierge-markdown-codec.js';
 import '../concierge-system-pbta.js';
 import '../concierge-system-dnd5e.js';
 import '../concierge-system-fae.js';
@@ -149,6 +150,32 @@ assert.deepStrictEqual(repCanonBlocks.canonMutations[2], {
     target: 'Sunken Shrine',
 });
 
+// Also verify [CANON_ENTRY] with disabled: false AND body content parses as upsert (not enable)
+const canonUpsertWithDisabledFalse = `
+[UPDATE_DOSSIER]
+summary: Tweaked Chrono-Dissonance twist timing
+[CANON_ENTRY]
+kind: LORE
+name: The Chrono-Dissonance
+importance: 4
+disabled: false
+content: Keep the opening Arroyo trial identical; anomalies only begin after the protagonist leaves.
+[/CANON_ENTRY]
+`;
+const repUpsertDisabledFalse = applyDossierUpdates(canonUpsertWithDisabledFalse, createEmptyDossier('pbta'));
+assert.strictEqual(repUpsertDisabledFalse.canonMutations.length, 1);
+assert.deepStrictEqual(repUpsertDisabledFalse.canonMutations[0], {
+    action: 'upsert',
+    entry: {
+        kind: 'LORE',
+        name: 'The Chrono-Dissonance',
+        aliases: [],
+        importance: 4,
+        content: 'Keep the opening Arroyo trial identical; anomalies only begin after the protagonist leaves.',
+        disabled: false,
+    },
+});
+
 console.log('8. Testing stripConciergeStateBlocks with [FRAMING] and [CANON_ENTRY]...');
 const rawDialogueWithBlocks = `
 Here is my conversational greeting to the player.
@@ -218,6 +245,51 @@ assert.ok(s2TalkerPrompt.includes('Step 2: `📚 Canon` (Series Bible & World La
 assert.ok(s2TalkerPrompt.includes('Active/Disabled'));
 assert.ok(s2TalkerPrompt.includes('🗺️ Adventure'));
 assert.ok(s2TalkerPrompt.includes('🧭 Initial'));
+
+// 10b. Verify Stage 2 prompts include Campaign Framing, existing theKick context, and 350-char synth# previews
+const stage2TweakDossier = createEmptyDossier('pbta');
+stage2TweakDossier.meta.title = 'Fallout: Arroyo';
+stage2TweakDossier.meta.premise = 'A tribal chosen one quests into the wasteland for a GECK.';
+stage2TweakDossier.meta.focalLens = 'Keep the opening kick faithful; twists happen after departure';
+stage2TweakDossier.meta.tone = 'Retro-futuristic grit';
+stage2TweakDossier.theKick.startingLocation = 'Temple of Trials, Arroyo';
+stage2TweakDossier.theKick.crisis = 'Pass the Elder trial to earn the Vault 13 jumpsuit.';
+const synthTail = 'UNIQUE_BRIDGE_TAIL_MARKER_BEYOND_100_CHARS';
+const synthLongContent = `${'A'.repeat(130)} ${synthTail}`;
+const mixedCanonEntries = [
+    ...Array.from({ length: 22 }, (_, i) => ({
+        id: `FalloutBible#${i}`,
+        kind: 'LORE',
+        name: `Bible Chunk ${i}`,
+        disabled: false,
+        importance: 3,
+        content: `${'B'.repeat(130)} CHUNK_TAIL_${i}`,
+    })),
+    {
+        id: 'synth#0',
+        kind: 'LORE',
+        name: 'The Chrono-Dissonance',
+        disabled: false,
+        importance: 4,
+        content: synthLongContent,
+    },
+];
+const s2TweakBuilderPrompt = buildStage2CanonBuilderPrompt(stage2TweakDossier, mixedCanonEntries, '');
+assert.ok(s2TweakBuilderPrompt.includes('Campaign Framing & Context'));
+assert.ok(s2TweakBuilderPrompt.includes('Fallout: Arroyo'));
+assert.ok(s2TweakBuilderPrompt.includes('A tribal chosen one quests into the wasteland for a GECK.'));
+assert.ok(s2TweakBuilderPrompt.includes('Keep the opening kick faithful; twists happen after departure'));
+assert.ok(s2TweakBuilderPrompt.includes('Retro-futuristic grit'));
+assert.ok(s2TweakBuilderPrompt.includes('Temple of Trials, Arroyo'));
+assert.ok(s2TweakBuilderPrompt.includes('Pass the Elder trial to earn the Vault 13 jumpsuit.'));
+assert.ok(s2TweakBuilderPrompt.includes(synthTail), 'synth# bridge entries must expose up to 350 chars in Stage 2 context');
+assert.ok(!s2TweakBuilderPrompt.includes('CHUNK_TAIL_0'), 'bulk chunked entries must remain capped at 100 chars when >20 entries');
+
+const s2TweakTalkerPrompt = buildStage2CanonTalkerPrompt(stage2TweakDossier, mixedCanonEntries, '');
+assert.ok(s2TweakTalkerPrompt.includes('Fallout: Arroyo'));
+assert.ok(s2TweakTalkerPrompt.includes('Temple of Trials, Arroyo'));
+assert.ok(s2TweakTalkerPrompt.includes('Pass the Elder trial to earn the Vault 13 jumpsuit.'));
+assert.ok(s2TweakTalkerPrompt.includes(synthTail));
 
 console.log('11. Testing Stage 3 Adventure Prompts...');
 const s3DossierDnd = createEmptyDossier('dnd5e');
@@ -341,5 +413,52 @@ assert.ok(s4BuilderFull.includes('Lyon Partisans'));
 console.log('16. Verifying raw prose preservation in stripConciergeStateBlocks (no prefix suppression)...');
 const withPrefixAndBlock = 'Initial_Concierge:\n\n[NOOP][/NOOP]\n\nExcellent. You got the right idea.';
 assert.strictEqual(stripConciergeStateBlocks(withPrefixAndBlock), 'Initial_Concierge:\n\n\n\nExcellent. You got the right idea.');
+
+console.log('17. Testing Stage 3 & 4 Continuity Brief (NameRAG-resolved names, Twin-Names guard, starting_moves)...');
+const twinTestDossier = createEmptyDossier('pbta');
+twinTestDossier.meta.title = 'Broken Chip, Broken World';
+twinTestDossier.theKick.startingLocation = 'Vault 13 Exit Perimeter';
+twinTestDossier.theKick.crisis = 'Hydro-Chip Collapse';
+twinTestDossier.npcs = [
+    { name: '[NAME: eccentric scrap merchant, RESOLVED TO: Barnaby]', role: 'Trader' },
+];
+twinTestDossier.factions = [
+    { name: 'Vault 13 Council' },
+];
+twinTestDossier.protagonist.name = '[NAME: vault dweller experimental probe, RESOLVED TO: Oliver]';
+twinTestDossier.protagonist.playbook = 'VAULT PROBATION (Custom)';
+twinTestDossier.protagonist.species = 'Human';
+twinTestDossier.protagonist.stats = { Cool: 2, Hard: 1, Sharp: 1, Hot: 0, Weird: -1 };
+twinTestDossier.protagonist.startingMoves = ['WASTELAND INTUITION (+Sharp): Read irradiated terrain.'];
+
+const s3AdvTalker = buildStage3AdventureTalkerPrompt(twinTestDossier, sampleCanonEntries);
+assert.ok(s3AdvTalker.includes('Barnaby [concept: eccentric scrap merchant]'), 'Stage 3 Talker must see NameRAG-resolved NPCs');
+assert.ok(s3AdvTalker.includes('Vault 13 Council'), 'Stage 3 Talker must see staged Episode 1 factions');
+assert.ok(s3AdvTalker.includes('Vault 13 Exit Perimeter'), 'Stage 3 Talker must see staged theKick');
+
+const s4CharTalker = buildStage4CharacterTalkerPrompt(twinTestDossier, sampleCanonEntries);
+assert.ok(s4CharTalker.includes('Current Protagonist Sheet'), 'Stage 4 Talker must include Current Protagonist Sheet');
+assert.ok(s4CharTalker.includes('Oliver [concept: vault dweller experimental probe]'), 'Stage 4 Talker must see NameRAG-resolved Protagonist name');
+assert.ok(s4CharTalker.includes('VAULT PROBATION (Custom)'), 'Stage 4 Talker must see Protagonist playbook');
+assert.ok(s4CharTalker.includes('WASTELAND INTUITION (+Sharp)'), 'Stage 4 Talker must see Protagonist startingMoves');
+
+const noticeWithNames = buildTalkerInstructionNotice('MUTATED', 'Assembles protagonist sheet', [], [
+    { tag: 'vault dweller experimental probe', selectedName: 'Oliver' },
+]);
+assert.ok(noticeWithNames.includes('[RESOLVED_NAMES_THIS_TURN: vault dweller experimental probe -> Oliver]'));
+
+const parsedStartingMoves = applyDossierUpdates(`
+[UPDATE_DOSSIER]
+summary: Created PbtA protagonist
+[PROTAGONIST]
+name: Oliver
+playbook: VAULT PROBATION
+starting_moves:
+- WASTELAND INTUITION (+Sharp): Read irradiated terrain.
+- SCAVENGER'S EYE (+Cool): Spot pre-war salvage.
+[/PROTAGONIST]
+`, createEmptyDossier('pbta'));
+assert.strictEqual(parsedStartingMoves.updatedDossier.protagonist.startingMoves.length, 2);
+assert.ok(parsedStartingMoves.updatedDossier.protagonist.startingMoves[0].includes('WASTELAND INTUITION'));
 
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

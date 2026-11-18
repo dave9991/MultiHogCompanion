@@ -650,22 +650,53 @@ export function evaluateStepUnlocks() {
 }
 
 /**
+ * Applies parsed Stage 2 Canon mutations to the staged Canon store.
+ * @param {Array<object>} [canonMutations=[]]
+ */
+function applyCanonMutationsToStore(canonMutations = []) {
+    for (const m of canonMutations) {
+        if (m.action === 'upsert' && m.entry) upsertCanonEntry(m.entry);
+        else if (m.action === 'disable') toggleCanonEntryDisabled(m.target, true);
+        else if (m.action === 'enable') toggleCanonEntryDisabled(m.target, false);
+        else if (m.action === 'remove') removeCanonEntry(m.target);
+    }
+}
+
+/**
+ * Refreshes activeDossier.meta.stageNotes.canon with active factions and latest Canon summary.
+ * @param {object} dossier
+ * @param {string} [canonSummary='']
+ */
+function refreshCanonStageNote(dossier, canonSummary = '') {
+    if (!dossier) return;
+    dossier.meta = dossier.meta || {};
+    dossier.meta.stageNotes = dossier.meta.stageNotes || { framing: '', canon: '', adventure: '' };
+    const activeFactions = getStagedCanonEntries().filter(e => e.kind === 'FACTION' && !e.disabled).map(e => e.name);
+    const parts = [];
+    if (activeFactions.length) {
+        parts.push(`Key active factions in play: ${activeFactions.join(', ')}.`);
+    }
+    if (canonSummary) {
+        parts.push(`Canon updates: ${canonSummary}`);
+    }
+    if (parts.length) {
+        dossier.meta.stageNotes.canon = parts.join(' ');
+    }
+}
+
+/**
  * Runs a single Stage Builder + Talker harmonization pass.
  */
 async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBones = null } = {}) {
     let builderSys = '';
-    let talkerSys = '';
     const stagedCanon = getStagedCanonEntries();
 
     if (stage === 'canon') {
         builderSys = buildStage2CanonBuilderPrompt(activeDossier, stagedCanon, upstreamDiff);
-        talkerSys = buildStage2CanonTalkerPrompt(activeDossier, stagedCanon, upstreamDiff);
     } else if (stage === 'adventure') {
         builderSys = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
-        talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
     } else if (stage === 'character') {
         builderSys = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff });
-        talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff });
     }
 
     const builderMsgs = [
@@ -673,10 +704,12 @@ async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBon
         { role: 'user', name: 'Player', content: upstreamDiff ? `[UPSTREAM_DIFF]:\n${upstreamDiff}\nPlease harmonize this stage with upstream updates.` : 'Please harmonize this stage with upstream updates.' },
     ];
     let builderRaw = await sendConciergeRequest(builderMsgs);
+    let harmonizationResolutions = [];
     if (extension_settings?.multihog_companion?.enableNameRag !== false) {
         try {
             const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true });
             builderRaw = resolved.text;
+            harmonizationResolutions = resolved.resolutions || [];
         } catch (resErr) {
             console.warn('[MultiHog Companion] Placeholder name resolution error in harmonization:', resErr);
         }
@@ -684,22 +717,34 @@ async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBon
     const builderReport = applyDossierUpdates(builderRaw, activeDossier);
 
     if (stage === 'canon' && builderReport?.canonMutations?.length > 0) {
-        for (const m of builderReport.canonMutations) {
-            if (m.action === 'upsert' && m.entry) upsertCanonEntry(m.entry);
-            else if (m.action === 'disable') toggleCanonEntryDisabled(m.target, true);
-            else if (m.action === 'enable') toggleCanonEntryDisabled(m.target, false);
-            else if (m.action === 'remove') removeCanonEntry(m.target);
-        }
+        applyCanonMutationsToStore(builderReport.canonMutations);
         builderReport.hasMutations = true;
     }
 
     if (builderReport.hasMutations) {
         activeDossier = builderReport.updatedDossier;
+        if (stage === 'canon') {
+            refreshCanonStageNote(activeDossier, builderReport.builderSummary || '');
+        }
     }
 
+    // Build Talker system prompt AFTER activeDossier updates so it sees NameRAG-resolved names & state.
+    const latestCanon = getStagedCanonEntries();
+    let talkerSys = '';
+    if (stage === 'canon') {
+        talkerSys = buildStage2CanonTalkerPrompt(activeDossier, latestCanon, upstreamDiff);
+    } else if (stage === 'adventure') {
+        talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, latestCanon, { upstreamDiff, agnosticBones });
+    } else if (stage === 'character') {
+        talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, latestCanon, { upstreamDiff });
+    }
+
+    const talkerNotice = harmonizationResolutions.length
+        ? `\n${buildTalkerInstructionNotice('MUTATED', builderReport.builderSummary || 'Stage harmonized', [], harmonizationResolutions)}`
+        : '';
     const talkerMsgs = [
         { role: 'system', name: 'System', content: talkerSys },
-        { role: 'user', name: 'Player', content: 'What updates were made?' },
+        { role: 'user', name: 'Player', content: `What updates were made?${talkerNotice}` },
     ];
     const talkerRaw = await sendConciergeRequest(talkerMsgs);
     const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || 'Stage harmonized with upstream updates.';
@@ -728,14 +773,11 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
     try {
         const stagedCanon = getStagedCanonEntries();
         let builderSys = '';
-        let talkerSys = '';
 
         if (stage === 'adventure') {
             builderSys = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
-            talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
         } else if (stage === 'character') {
             builderSys = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff });
-            talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff });
         }
 
         const builderMsgs = [
@@ -775,9 +817,20 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
         window._mhcLastBuilderTransaction = autoPassDiagnostic;
         window._lastConciergeBuilderDiagnostic = autoPassDiagnostic;
 
+        // Build Talker system prompt AFTER activeDossier updates so it sees NameRAG-resolved names & state.
+        let talkerSys = '';
+        if (stage === 'adventure') {
+            talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
+        } else if (stage === 'character') {
+            talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, stagedCanon, { upstreamDiff });
+        }
+
         const talkerMsgs = [
             { role: 'system', name: 'System', content: talkerSys },
             { role: 'user', name: 'Player', content: promptText },
+            ...(autoPassResolutions.length
+                ? [{ role: 'system', name: 'System', content: buildTalkerInstructionNotice('MUTATED', report.builderSummary || 'Stage constructed', [], autoPassResolutions) }]
+                : []),
         ];
         const talkerRaw = await sendConciergeRequest(talkerMsgs);
         const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || 'Episode 1 Adventure constructed.';
@@ -870,10 +923,7 @@ export async function setAdventureStep(targetStep, opts = {}) {
             if (activeDossier.meta.premise) {
                 activeDossier.meta.stageNotes.framing = `${activeDossier.meta.premise}${activeDossier.meta.focalLens ? ' Focused on: ' + activeDossier.meta.focalLens : ''}`;
             }
-            const activeFactions = getStagedCanonEntries().filter(e => e.kind === 'FACTION' && !e.disabled).map(e => e.name);
-            if (activeFactions.length) {
-                activeDossier.meta.stageNotes.canon = `Key active factions in play: ${activeFactions.join(', ')}.`;
-            }
+            refreshCanonStageNote(activeDossier);
 
             const canon = getStagedCanonEntries();
             const activeCount = canon.filter(e => !e.disabled).length;
@@ -1420,8 +1470,8 @@ async function handleUserSend() {
     // Big lore: the model sees a compact Canon inventory instead of raw lore/doc blocks.
     const canonEntries = getCurrentMode() === 'archivist' ? getStagedCanonEntries() : [];
     const useCanonInventory = canonEntries.length > 0;
-    const briefingTurn = shouldBrief();
-    if (useCanonInventory && attachmentsToProcess.some(a => a.type === 'lore' || a.type === 'doc')) {
+    const briefingTurn = currentNavMode !== 'new-adventure' && shouldBrief();
+    if (useCanonInventory && (briefingTurn || attachmentsToProcess.some(a => a.type === 'lore' || a.type === 'doc'))) {
         documentPromptAdditions += buildInventoryBlock(canonEntries);
     }
 
@@ -1695,12 +1745,7 @@ async function handleUserSend() {
 
             if (builderReport.hasMutations || builderReport.isNoop) {
                 if (currentNavMode === 'new-adventure' && currentAdventureStep === 'canon' && builderReport.canonMutations?.length > 0) {
-                    for (const m of builderReport.canonMutations) {
-                        if (m.action === 'upsert' && m.entry) upsertCanonEntry(m.entry);
-                        else if (m.action === 'disable') toggleCanonEntryDisabled(m.target, true);
-                        else if (m.action === 'enable') toggleCanonEntryDisabled(m.target, false);
-                        else if (m.action === 'remove') removeCanonEntry(m.target);
-                    }
+                    applyCanonMutationsToStore(builderReport.canonMutations);
                     builderReport.hasMutations = true;
                 }
                 break;
@@ -1745,6 +1790,9 @@ async function handleUserSend() {
 
         if (finalStatus === 'MUTATED') {
             activeDossier = builderReport.updatedDossier;
+            if (currentNavMode === 'new-adventure' && currentAdventureStep === 'canon' && builderReport.canonMutations?.length > 0) {
+                refreshCanonStageNote(activeDossier, builderReport.builderSummary || builderReport.changes?.join('; ') || '');
+            }
             const now = new Date();
             const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
             builderReport.changes.forEach(c => changelog.push(`[${timeStr}] ${c}`));
@@ -1881,7 +1929,7 @@ async function handleUserSend() {
             setStage('<i>🎩 The Concierge is contemplating the fiction...</i>');
         }
 
-        const talkerInstruction = buildTalkerInstructionNotice(finalStatus, builderSummaryText, builderReport?.errors);
+        const talkerInstruction = buildTalkerInstructionNotice(finalStatus, builderSummaryText, builderReport?.errors, latestNameRagResolutions);
 
         let talkerPromptContent = '';
         if (currentNavMode === 'new-adventure') {

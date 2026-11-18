@@ -912,9 +912,12 @@ export function classifyBuilderReport(report) {
  * @param {string[]} [errors]
  * @returns {string}
  */
-export function buildTalkerInstructionNotice(status, summaryText = '', errors = []) {
+export function buildTalkerInstructionNotice(status, summaryText = '', errors = [], nameRagResolutions = []) {
+    const resolvedLines = Array.isArray(nameRagResolutions) && nameRagResolutions.length
+        ? `\n[RESOLVED_NAMES_THIS_TURN: ${nameRagResolutions.map(r => `${r.tag || r.placeholder} -> ${r.selectedName}`).join(', ')}]`
+        : '';
     if (status === 'MUTATED' || status === 'NOOP') {
-        return `[BUILDER_REPORT: ${summaryText}]`;
+        return `[BUILDER_REPORT: ${summaryText}]${resolvedLines}`;
     }
     if (status === 'SYNTAX_ERROR') {
         const errStr = errors && errors.length ? ` (${errors.join('; ')})` : '';

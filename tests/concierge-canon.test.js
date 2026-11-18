@@ -10,6 +10,7 @@ import {
     snapshotFraming, computeFramingDiff, snapshotCanon, computeCanonDiff,
     snapshotAdventure, computeAdventureDiff, extractAgnosticAdventureBones,
     normalizeEntityName, detectDuplicateCandidates, arbitrateDuplicateCandidates,
+    shouldBrief, isBriefed,
 } from '../concierge-canon.js';
 import { normalizeCharacterCard } from '../concierge-card-reader.js';
 
@@ -641,5 +642,62 @@ assert.strictEqual(globalThis.window._mhcLastBuilderTransaction.stage, 'canon');
 assert.strictEqual(globalThis.window._mhcLastBuilderTransaction.finalStatus, 'CANON_INGEST');
 assert.ok(globalThis.window._mhcLastBuilderTransaction.summary.includes('Series Bible generated'));
 assert.ok(globalThis.window._mhcLastBuilderTransaction.attempts[0].deduplication, 'Deduplication audit must be present in transaction');
+
+// 12. Regression tests: Archivist briefing flag after buildCanonFromFraming, normalized upsertCanonEntry, and computeCanonDiff snippets
+assert.strictEqual(isBriefed(), true, 'buildCanonFromFraming must mark Archivist briefing complete');
+assert.strictEqual(shouldBrief(), false, 'shouldBrief() must be false after buildCanonFromFraming');
+
+clearStagedCanon();
+stageRawCanonSource({ name: 'HugeBible', type: 'doc', text: '# Wasteland\n' + 'Massive Fallout bible lore.\n\n'.repeat(1200) });
+const bigBriefRes = await buildCanonFromFraming({
+    title: 'Fallout: Arroyo',
+    premise: 'A vault descendant leaves Arroyo to restore the GECK.',
+    focalLens: 'Keep the opening kick identical; twists happen only after leaving Arroyo',
+    tone: 'Retro-futuristic grit',
+}, {
+    synthesizeBridge: true,
+    send: async (messages) => {
+        const sys = messages[0].content;
+        if (sys.includes('label tabletop RPG')) {
+            const matches = [...messages[1].content.matchAll(/ID:\s*([^\n]+)/g)];
+            return JSON.stringify(matches.map(m => ({ id: m[1].trim(), kind: 'LORE', name: 'Wasteland History', importance: 3 })));
+        }
+        return JSON.stringify([
+            { kind: 'LORE', name: 'The Chrono-Dissonance', aliases: [], importance: 4, content: 'Original bridge twist.' },
+        ]);
+    },
+});
+assert.ok(bigBriefRes.entries.length > 0);
+assert.strictEqual(isBriefed(), true, 'Big-lore buildCanonFromFraming must mark isBriefed() === true');
+assert.strictEqual(shouldBrief(), false, 'Big-lore buildCanonFromFraming must prevent shouldBrief() hijack');
+
+// Normalized & cross-kind upsertCanonEntry
+const preCount = getStagedCanonEntries().length;
+const updatedBridge = upsertCanonEntry({
+    kind: 'EVENT',
+    name: 'Chrono-Dissonance',
+    content: 'The opening kick in Arroyo stays unchanged; twists begin only after leaving the village.',
+    importance: 5,
+    disabled: false,
+});
+assert.ok(updatedBridge, 'upsertCanonEntry must match normalized name across kind changes');
+assert.strictEqual(getStagedCanonEntries().length, preCount, 'upsertCanonEntry must update in-place without adding duplicate');
+assert.strictEqual(updatedBridge.kind, 'EVENT');
+assert.strictEqual(updatedBridge.comment, '[EVENT] Chrono-Dissonance');
+assert.ok(updatedBridge.content.includes('twists begin only after leaving the village'));
+
+// computeCanonDiff includes content snippets while keeping label arrays
+const snapDiffA = snapshotCanon([
+    { comment: '[LORE] The Chrono-Dissonance', name: 'The Chrono-Dissonance', kind: 'LORE', content: 'Old twist', disabled: false },
+]);
+const snapDiffB = snapshotCanon([
+    { comment: '[LORE] The Chrono-Dissonance', name: 'The Chrono-Dissonance', kind: 'LORE', content: 'Opening kick unchanged; twists start after leaving.', disabled: false },
+    { comment: '[RULE] Departure Gate', name: 'Departure Gate', kind: 'RULE', content: 'No timeline glitches before leaving Arroyo.', disabled: false },
+]);
+const detailedDiff = computeCanonDiff(snapDiffA, snapDiffB);
+assert.deepStrictEqual(detailedDiff.modified, ['[LORE] The Chrono-Dissonance']);
+assert.deepStrictEqual(detailedDiff.added, ['[RULE] Departure Gate']);
+assert.ok(detailedDiff.block.includes('Opening kick unchanged; twists start after leaving.'), 'computeCanonDiff block must include modified content snippet');
+assert.ok(detailedDiff.block.includes('No timeline glitches before leaving Arroyo.'), 'computeCanonDiff block must include added content snippet');
 
 console.log('✅ Concierge Canon test suite passed.');

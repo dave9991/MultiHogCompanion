@@ -1292,17 +1292,21 @@ function formatCanonEntriesForContext(entries = []) {
     if (!Array.isArray(entries) || entries.length === 0) {
         return 'No Canon entries established yet.';
     }
+    const isCompactTotal = entries.length <= 20;
     return entries.map(e => {
         const kind = (e.kind || 'LORE').toUpperCase();
         const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(e.name);
         const name = (isResolvedToken && tag) ? `${cleanName} [concept: ${tag}]` : (cleanName || e.name || 'Untitled');
         const status = e.disabled ? 'DISABLED' : 'ACTIVE';
         const importance = e.importance !== undefined ? e.importance : 4;
-        const preview = (e.content || e.description || e.text || '')
+        const entryId = String(e.id || '');
+        const isSynthOrManual = entryId.startsWith('synth#') || !entryId.includes('#');
+        const maxLen = (isCompactTotal || isSynthOrManual) ? 350 : 100;
+        const normalized = (e.content || e.description || e.text || '')
             .replace(/\r?\n+/g, ' ')
-            .trim()
-            .slice(0, 100);
-        return `* [${kind}] ${name} | ${status} | importance: ${importance} | "${preview}${preview.length >= 100 ? '...' : ''}"`;
+            .trim();
+        const preview = normalized.slice(0, maxLen);
+        return `* [${kind}] ${name} | ${status} | importance: ${importance} | "${preview}${normalized.length > maxLen ? '...' : ''}"`;
     }).join('\n');
 }
 
@@ -1343,6 +1347,19 @@ export const PRODUCTION_PIPELINE_OVERVIEW = `### 🎬 Creative Team & Production
 4. 👤 Protagonist: Character sheet, starting moves/abilities, personal bonds & stakes.`;
 
 /**
+ * Formats an entity or protagonist name using parseResolvedNameToken so NameRAG-resolved
+ * names appear cleanly with their original concept tag.
+ * @param {string} rawName
+ * @param {string} [fallback='Unnamed']
+ * @returns {string}
+ */
+function formatEntityNameWithConcept(rawName, fallback = 'Unnamed') {
+    const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(rawName);
+    if (isResolvedToken && tag) return `${cleanName} [concept: ${tag}]`;
+    return cleanName || rawName || fallback;
+}
+
+/**
  * Formats an authoritative Campaign Continuity Brief and Production Hand-Off Memo
  * across upstream stages for injection into downstream stage prompts.
  *
@@ -1355,12 +1372,15 @@ export const PRODUCTION_PIPELINE_OVERVIEW = `### 🎬 Creative Team & Production
 export function formatStageContinuityBrief({ dossier, canonEntries = [], stage = 'character' } = {}) {
     const meta = dossier?.meta || {};
     const axioms = dossier?.worldRules?.axioms || [];
+    const customModule = dossier?.worldRules?.customModule || null;
     const activeCanon = Array.isArray(canonEntries) ? canonEntries.filter(e => !e.disabled) : [];
     const disabledCanon = Array.isArray(canonEntries) ? canonEntries.filter(e => e.disabled) : [];
     const theKick = dossier?.theKick || {};
     const monsters = dossier?.monsters || [];
     const maps = dossier?.maps || [];
     const npcs = dossier?.npcs || [];
+    const factions = dossier?.factions || [];
+    const protagonist = dossier?.protagonist || null;
     const stageNotes = meta.stageNotes || {};
 
     const sections = [];
@@ -1404,8 +1424,8 @@ export function formatStageContinuityBrief({ dossier, canonEntries = [], stage =
         sections.push(`#### 📚 Series Bible & World Laws (from Canon):\n${canonParts.join('\n\n')}`);
     }
 
-    // 4. Episode 1 Adventure State (Only relevant for Step 4 Character)
-    if (stage === 'character') {
+    // 4. Episode 1 Adventure State (Shared across Step 3 Adventure & Step 4 Character)
+    if (stage === 'adventure' || stage === 'character') {
         const advLines = [];
         if (theKick.startingLocation || theKick.crisis) {
             advLines.push(`* Starting Location: ${theKick.startingLocation || 'Unspecified'}`);
@@ -1416,21 +1436,54 @@ export function formatStageContinuityBrief({ dossier, canonEntries = [], stage =
             advLines.push(`* Staged Locations / Maps: ${maps.map(m => m.site || m.name || 'Location').join(', ')}`);
         }
         if (monsters.length > 0) {
-            advLines.push(`* Staged Adversaries / Hazards: ${monsters.map(m => {
-                const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(m.name);
-                const tagNote = (isResolvedToken && tag) ? ` [concept: ${tag}]` : '';
-                return `${cleanName || m.name || 'Adversary'}${tagNote}`;
-            }).join(', ')}`);
+            advLines.push(`* Staged Adversaries / Hazards: ${monsters.map(m => formatEntityNameWithConcept(m.name, 'Adversary')).join(', ')}`);
         }
         if (npcs.length > 0) {
-            advLines.push(`* Staged Supporting NPCs: ${npcs.map(n => {
-                const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(n.name);
-                const tagNote = (isResolvedToken && tag) ? ` [concept: ${tag}]` : '';
-                return `${cleanName}${tagNote} (${n.role || 'Cast'})`;
-            }).join(', ')}`);
+            advLines.push(`* Staged Supporting NPCs: ${npcs.map(n => `${formatEntityNameWithConcept(n.name, 'NPC')} (${n.role || 'Cast'})`).join(', ')}`);
+        }
+        if (factions.length > 0) {
+            advLines.push(`* Staged Episode 1 Factions: ${factions.map(f => formatEntityNameWithConcept(f.name, 'Faction')).join(', ')}`);
         }
         if (advLines.length) {
             sections.push(`#### 🗺️ Episode 1 Adventure Stage Set (from Adventure):\n${advLines.join('\n')}`);
+        }
+    }
+
+    // 5. Current Protagonist Sheet & Custom Module (Step 4 Character)
+    if (stage === 'character' && protagonist) {
+        const protoLines = [];
+        if (protagonist.name) {
+            protoLines.push(`* Name: ${formatEntityNameWithConcept(protagonist.name, 'Unnamed')}`);
+        }
+        const role = protagonist.playbook || protagonist.class || protagonist.archetype;
+        if (role) protoLines.push(`* Playbook / Class / Archetype: ${role}`);
+        if (protagonist.species) protoLines.push(`* Species: ${protagonist.species}`);
+        if (protagonist.gender) protoLines.push(`* Gender: ${protagonist.gender}`);
+        if (protagonist.stats && Object.keys(protagonist.stats).length) {
+            protoLines.push(`* Stats: ${Object.entries(protagonist.stats).map(([k, v]) => `${k} ${v >= 0 ? `+${v}` : v}`).join(', ')}`);
+        }
+        if (Array.isArray(protagonist.startingMoves) && protagonist.startingMoves.length) {
+            protoLines.push(`* Starting Moves: ${protagonist.startingMoves.join(' | ')}`);
+        }
+        if (Array.isArray(protagonist.features) && protagonist.features.length) {
+            protoLines.push(`* Features: ${protagonist.features.join(' | ')}`);
+        }
+        if (Array.isArray(protagonist.abilities) && protagonist.abilities.length) {
+            protoLines.push(`* Abilities: ${protagonist.abilities.join(' | ')}`);
+        }
+        if (Array.isArray(protagonist.positiveTags) && protagonist.positiveTags.length) {
+            protoLines.push(`* Positive Tags: ${protagonist.positiveTags.join(' | ')}`);
+        }
+        if (Array.isArray(protagonist.gear) && protagonist.gear.length) {
+            protoLines.push(`* Gear: ${protagonist.gear.join(', ')}`);
+        } else if (protagonist.equipment) {
+            protoLines.push(`* Equipment: ${protagonist.equipment}`);
+        }
+        if (protoLines.length) {
+            sections.push(`#### 👤 Current Protagonist Sheet (AUTHORITATIVE GROUND TRUTH):\n${protoLines.join('\n')}`);
+        }
+        if (customModule && (customModule.tag || customModule.label)) {
+            sections.push(`#### ⚙️ Custom Tracker Module:\n* [${customModule.tag || 'MODULE'}] ${customModule.label || ''}: ${customModule.instruction || ''}`);
         }
     }
 
@@ -1575,6 +1628,33 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 // ── Stage 2 (📚 Canon — Series Bible & World Laws Archivist) ───────────────────
 
 /**
+ * Formats Step 1 Framing metadata and any existing Step 3 Episode 1 Kick for Stage 2 Canon context.
+ * @param {object} dossier
+ * @returns {string}
+ */
+function formatStage2FramingAndKickContext(dossier) {
+    const meta = dossier?.meta || {};
+    const theKick = dossier?.theKick || {};
+    const lines = [
+        `* Title: ${meta.title || 'Untitled Campaign'}`,
+        meta.premise ? `* Premise: ${meta.premise}` : null,
+        meta.focalLens ? `* Focal Lens: ${meta.focalLens}` : null,
+        meta.tone ? `* Tone: ${meta.tone}` : null,
+    ].filter(Boolean);
+
+    if (theKick.startingLocation || theKick.crisis) {
+        lines.push('* Current Episode 1 Kick (from Step 3 Adventure):');
+        if (theKick.startingLocation) lines.push(`  - Starting Location: ${theKick.startingLocation}`);
+        if (theKick.crisis) lines.push(`  - Opening Crisis: ${theKick.crisis}`);
+        if (theKick.openingPrompt) lines.push(`  - Turn 1 Prompt: ${theKick.openingPrompt}`);
+    }
+
+    return lines.length
+        ? `\n\n### 🧭 Campaign Framing & Context:\n${lines.join('\n')}`
+        : '';
+}
+
+/**
  * Stage 2 Builder: Series bible and world laws archivist.
  * Emits strictly [CANON_ENTRY], [DISABLE_CANON], [ENABLE_CANON], [REMOVE_CANON], [WORLD_RULES], or [NOOP].
  *
@@ -1584,9 +1664,9 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
  * @returns {string}
  */
 export function buildStage2CanonBuilderPrompt(dossier, canonEntries = [], upstreamDiff = '') {
-    const meta = dossier?.meta || {};
     const axioms = dossier?.worldRules?.axioms || [];
     const diffText = formatUpstreamDiffText(upstreamDiff);
+    const framingContext = formatStage2FramingAndKickContext(dossier);
 
     const diffBlock = diffText
         ? `\n\n### [UPSTREAM_DIFF]:\n${diffText}`
@@ -1604,6 +1684,7 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 
 ### 🎯 Your Single Mission:
 Your ONLY job is to extract, expand, refine, and curate the persistent **Series Bible Lorebook** and **World Laws (Axioms)**.
+* When the player asks to tweak, constrain, or refine how the world lore, timeline, twists, or opening setup work in canon, emit a [CANON_ENTRY] updating the relevant entry (reuse its exact \`name\` to overwrite it in-place) or add a new [CANON_ENTRY] / [WORLD_RULES] axiom encoding that constraint so downstream Adventure & Character stages harmonize with it.
 You emit an [UPDATE_DOSSIER] block containing ONLY:
 * [CANON_ENTRY] (kind, name, importance, content, aliases, disabled)
 * [DISABLE_CANON: Name]
@@ -1653,13 +1734,15 @@ negative_constraints:
 - What is strictly impossible or forbidden under this law
 architectural_notes: How society, structures, and daily life adapt to this law
 [/WORLD_RULES]
-\`\`\`
+\`\`\`${framingContext}
 
 ### 📚 [CURRENT_SERIES_BIBLE_CANON]:
 ${formatCanonEntriesForContext(canonEntries)}
 
 ### ⚖️ [CURRENT_WORLD_AXIOMS]:
-${formatAxiomsForContext(axioms)}${diffBlock}`;
+${formatAxiomsForContext(axioms)}
+
+${RESOLVED_NAME_FORMAT_GUIDANCE}${diffBlock}`;
 }
 
 /**
@@ -1671,9 +1754,9 @@ ${formatAxiomsForContext(axioms)}${diffBlock}`;
  * @returns {string}
  */
 export function buildStage2CanonTalkerPrompt(dossier, canonEntries = [], upstreamDiff = '') {
-    const meta = dossier?.meta || {};
     const axioms = dossier?.worldRules?.axioms || [];
     const diffText = formatUpstreamDiffText(upstreamDiff);
+    const framingContext = formatStage2FramingAndKickContext(dossier);
 
     const diffBlock = diffText
         ? `\n\n### [UPSTREAM_DIFF]:\n${diffText}`
@@ -1700,13 +1783,15 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
    - When the user is satisfied with their world bible, invite them to click **\`🗺️ Adventure\`** in the top stepper bar to choose their ruleset and stage Episode 1!
 3. **Cross-Tab Nudges (Navigation Assistance):**
    - If the player asks to scrap or overhaul their entire campaign premise or focal pivot, nudge them in plain English: *"To redefine our core premise or campaign focal lens, click back to the **🧭 Initial** tab up top!"*
-   - If the player asks to stat out monsters, build dungeons, or create their character sheet, remind them in plain English: *"We'll stat out our Episode 1 crisis, maps, and adversaries in the next step—click **🗺️ Adventure** in the top stepper bar whenever you're ready (or **👤 Character** once unlocked)!"*
+   - If the player asks to stat out monsters, build dungeons, or create their character sheet, remind them in plain English: *"We'll stat out our Episode 1 crisis, maps, and adversaries in the next step—click **🗺️ Adventure** in the top stepper bar whenever you're ready (or **👤 Character** once unlocked)!"*${framingContext}
 
 ### 📚 Current Series Bible Deck & World Axioms:
 ${formatCanonEntriesForContext(canonEntries)}
 
 ### ⚖️ Current World Axioms:
-${formatAxiomsForContext(axioms)}${diffBlock}`;
+${formatAxiomsForContext(axioms)}
+
+${RESOLVED_NAME_FORMAT_GUIDANCE}${diffBlock}`;
 }
 
 // ── Stage 3 (🗺️ Adventure — Episode 1 Stage Set & Ruleset Engine) ───────────────
@@ -1928,6 +2013,7 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 ### 🚫 Hard Boundaries for Step 3:
 1. **Focus on Episode 1 Stage Set:**
    - Discuss starting locations, adversaries, imminent danger, and the opening kick.
+   - Always refer to staged NPCs, adversaries, factions, and locations by their exact established names shown in the Continuity Brief below—never invent alternate names.
    - Do NOT emit [UPDATE_DOSSIER] blocks or code syntax. The background Builder handles state updates.
    - Do NOT build or discuss the protagonist's full character sheet mechanics here — that is reserved for **Step 4 (\`👤 Character\`)**.
 2. **Cross-Tab Nudges (Navigation Assistance):**
@@ -2082,6 +2168,7 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 ### 🚫 Hard Boundaries for Step 4:
 1. **Focus on the Protagonist & Launch Preparation:**
    - Point out the Protagonist Sheet and the **\`📜 Progression Codex\`** tab in the right pane.
+   - Always refer to the Protagonist by their exact established name (and playbook/archetype) shown in Current Protagonist Sheet below—never invent a different name.
    - Do NOT emit [UPDATE_DOSSIER] blocks or code syntax. The background Builder handles state updates.
    - When the player is thrilled with their character, remind them that they can click the **\`🚀 Finalize & Launch Campaign\`** button in the footer to begin their adventure!
 2. **Cross-Tab Nudges (Strictly Reactive Navigation Assistance):**

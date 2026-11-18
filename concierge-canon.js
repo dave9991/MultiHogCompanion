@@ -827,11 +827,15 @@ export function extractSourcesStructuralOutline(maxTokens = 1200) {
  */
 export function setStagedCanonEntries(entries) {
     _sources = new Map();
+    const list = Array.isArray(entries) ? [...entries] : [];
     _sources.set('__manual_canon__', {
         source: { name: '__manual_canon__', type: 'doc' },
         chunks: [],
-        labeled: Array.isArray(entries) ? [...entries] : [],
+        labeled: list,
     });
+    if (list.length > 0) {
+        _briefed = true;
+    }
 }
 
 /**
@@ -860,7 +864,7 @@ export function toggleCanonEntryDisabled(commentOrName, disabled) {
 }
 
 /**
- * Upserts a Canon entry into _sources (matching by comment or kind + name).
+ * Upserts a Canon entry into _sources (matching by comment, kind + name, exact name, or normalized entity name).
  * @param {object} rawEntry
  * @returns {object|null}
  */
@@ -869,11 +873,12 @@ export function upsertCanonEntry(rawEntry) {
     const kind = String(rawEntry.kind || 'LORE').toUpperCase();
     const name = String(rawEntry.name || rawEntry.title || 'Untitled').trim();
     const comment = String(rawEntry.comment || `[${kind}] ${name}`).trim();
+    const aliases = Array.isArray(rawEntry.aliases) ? rawEntry.aliases : [];
     const formatted = {
         id: rawEntry.id || `${kind}:${name}`,
         name,
         comment,
-        keys: Array.isArray(rawEntry.keys) ? rawEntry.keys : [name],
+        keys: Array.isArray(rawEntry.keys) ? rawEntry.keys : [name, ...aliases],
         content: String(rawEntry.content || rawEntry.text || ''),
         kind,
         importance: rawEntry.importance !== undefined ? Number(rawEntry.importance) : 3,
@@ -882,6 +887,8 @@ export function upsertCanonEntry(rawEntry) {
 
     const targetComment = comment.toLowerCase();
     const targetKindName = `[${kind}] ${name}`.toLowerCase();
+    const targetNameLower = name.toLowerCase();
+    const targetNormName = normalizeEntityName(name);
 
     for (const rec of _sources.values()) {
         if (!Array.isArray(rec.labeled)) continue;
@@ -889,8 +896,24 @@ export function upsertCanonEntry(rawEntry) {
             const e = rec.labeled[i];
             const eComment = String(e.comment || '').trim().toLowerCase();
             const eKindName = `[${e.kind || ''}] ${e.name || ''}`.trim().toLowerCase();
-            if (eComment === targetComment || eKindName === targetKindName) {
-                rec.labeled[i] = { ...e, ...formatted };
+            const eNameLower = String(e.name || '').trim().toLowerCase();
+            const eNormName = normalizeEntityName(e.name || '');
+            const matches = eComment === targetComment
+                || eKindName === targetKindName
+                || (targetNameLower && eNameLower === targetNameLower)
+                || (targetNormName && eNormName && eNormName === targetNormName);
+            if (matches) {
+                const mergedKeys = [...new Set([
+                    ...(Array.isArray(e.keys) ? e.keys : []),
+                    ...formatted.keys,
+                    name,
+                ].map(k => String(k).trim()).filter(Boolean))].slice(0, 12);
+                rec.labeled[i] = {
+                    ...e,
+                    ...formatted,
+                    id: rawEntry.id || e.id || formatted.id,
+                    keys: mergedKeys,
+                };
                 return rec.labeled[i];
             }
         }
@@ -1136,6 +1159,9 @@ export async function buildCanonFromFraming(framingBrief = {}, opts = {}) {
     }
 
     const finalEntries = getStagedCanonEntries();
+    if (finalEntries.length > 0) {
+        _briefed = true;
+    }
     const totalChunkCount = [..._sources.values()].reduce((acc, r) => acc + (r.chunks?.length || 0), 0);
 
     // Record formal Step 2 transaction for Debug Inspector
@@ -1526,6 +1552,9 @@ export function computeCanonDiff(oldSnap, newSnap) {
     const enabled = [];
     const removed = [];
     const axiomsChanged = [];
+    const addedDetails = [];
+    const modifiedDetails = [];
+    const formatSnippet = (content) => String(content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
 
     const oldMap = new Map();
     for (const e of oldEntries) {
@@ -1543,6 +1572,8 @@ export function computeCanonDiff(oldSnap, newSnap) {
         const label = newE.comment || newE.name || key;
         if (!oldMap.has(key)) {
             added.push(label);
+            const snippet = formatSnippet(newE.content);
+            addedDetails.push(snippet ? `${label}: "${snippet}"` : label);
         } else {
             const oldE = oldMap.get(key);
             if (!oldE.disabled && newE.disabled) {
@@ -1552,6 +1583,8 @@ export function computeCanonDiff(oldSnap, newSnap) {
             }
             if (oldE.content !== newE.content || oldE.name !== newE.name || oldE.kind !== newE.kind) {
                 modified.push(label);
+                const snippet = formatSnippet(newE.content);
+                modifiedDetails.push(snippet ? `${label}: "${snippet}"` : label);
             }
         }
     }
@@ -1588,11 +1621,17 @@ export function computeCanonDiff(oldSnap, newSnap) {
     let block = '';
     if (hasChanges) {
         const lines = [];
-        if (added.length) lines.push(`Added: ${added.join(', ')}`);
+        if (added.length) {
+            lines.push('Added:');
+            addedDetails.forEach(d => lines.push(`* ${d}`));
+        }
         if (removed.length) lines.push(`Removed: ${removed.join(', ')}`);
         if (disabled.length) lines.push(`Disabled: ${disabled.join(', ')}`);
         if (enabled.length) lines.push(`Enabled: ${enabled.join(', ')}`);
-        if (modified.length) lines.push(`Modified: ${modified.join(', ')}`);
+        if (modified.length) {
+            lines.push('Modified:');
+            modifiedDetails.forEach(d => lines.push(`* ${d}`));
+        }
         if (axiomsChanged.length) {
             lines.push(`Axioms Changed:`);
             axiomsChanged.forEach(a => lines.push(`* ${a}`));

@@ -1728,7 +1728,7 @@ You emit an [UPDATE_DOSSIER] block containing ONLY:
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
 * 🚫 **NEVER output Episode 1 stat blocks here:** NEVER emit [MONSTER], [MAP], [KICK], or [PROTAGONIST] cards in Step 2. Those belong in Step 3 (\`🗺️ Adventure\`) and Step 4 (\`👤 Character\`).
-* 🏷️ **Name Diversity & Targeted Placeholders (People Only):** For individual \`NPC\` entries or distinct named characters, NEVER invent generic placeholder names (e.g., "Dr. Thorne", "Commander Vance"). Instead, emit \`name\` using a targeted placeholder tag: \`name: [[NAME: evocative role or concept]]\` (e.g., \`[[NAME: grizzled wasteland doctor]]\`, \`[[NAME: nomadic raider matriarch]]\`). NameRAG will automatically inject authentic, culturally resonant names. **Do NOT use \`[[NAME: ...]]\` for Factions/Organizations, Locations, Rules, Events, or Lore** — give those clear descriptive names directly.
+* 🏷️ **Name Diversity & Targeted Placeholders (Character Names Only):** NameRAG generates **individual person/character names** (protagonist, NPCs, companions, named leaders/founders). Use \`[[NAME: evocative role or concept]]\` (e.g., \`[[NAME: grizzled wasteland doctor]]\`, \`[[NAME: nomadic raider matriarch]]\`) ONLY for individual people (such as \`NPC\` names or a named leader inside a Faction's description). NameRAG **cannot** name organizations, places, laws, or events — **Do NOT use \`[[NAME: ...]]\` as the title/name of a Faction, Location, Rule, Event, or Lore entry** (give those clear descriptive names directly).
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Canon & World Rule updates>
 * If no updates were requested:
@@ -1743,7 +1743,7 @@ summary: Added House Baratheon faction and ironwood ecology axiom
 
 [CANON_ENTRY]
 kind: FACTION | LOCATION | NPC | RULE | EVENT | LORE
-name: Name of Entity or Fact (or [[NAME: evocative role or concept]])
+name: Name of Entity or Fact (use [[NAME: evocative role or concept]] ONLY for individual people/NPCs)
 importance: 1-5 (default 4)
 aliases: alias 1, alias 2
 disabled: false
@@ -2001,7 +2001,7 @@ Your ONLY job is to assemble or update the Episode 1 starting stage set:
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Adventure changes>
 * Ground every adversary, location, and NPC in the established active Canon entries.
-* 🏷️ **Name Diversity & Targeted Placeholders:** For newly introduced NPCs, adversaries, or distinct characters in Episode 1, emit targeted placeholders: \`name: [[NAME: evocative role or concept]]\` (e.g. \`[NPC] name: [[NAME: eccentric scrap merchant]]\`). NameRAG will resolve authentic names automatically. Do NOT invent generic cliché names.
+* 🏷️ **Name Diversity & Targeted Placeholders (Character Names Only):** NameRAG generates **individual person/character names** (NPCs, named adversaries, faction leaders) and **cannot** name organizations or places. Emit \`name: [[NAME: evocative role or concept]]\` ONLY for individual people/characters (e.g. \`[NPC] name: [[NAME: eccentric scrap merchant]]\`, or a leader mentioned inside \`notes:\`); **never** use \`[[NAME: ...]]\` as the title of a \`[FACTION]\` or \`[MAP]\` site. Do NOT invent generic cliché names.
 
 ${rulesetDirectives}
 

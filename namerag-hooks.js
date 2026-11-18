@@ -264,12 +264,22 @@ export function extractContextForPlaceholder(rawText, token) {
     const isCompanionToken = /\[\[NAME:\s*companion\s*\]\]/i.test(token);
 
     // Find the enclosing block containing this token
-    const blockRegex = /\[(PROTAGONIST|NPC|MONSTER|CANON_ENTRY|UPSERT_CANON_ENTRY)(?::\s*[^\]]+)?\]([\s\S]*?)(?:\[\/\1\]|$)/gi;
+    const blockRegex = /\[(PROTAGONIST|NPC|MONSTER|FACTION|MAP|CANON_ENTRY|UPSERT_CANON_ENTRY)(?::\s*[^\]]+)?\]([\s\S]*?)(?:\[\/\1\]|$)/gi;
     let bMatch;
     while ((bMatch = blockRegex.exec(rawText)) !== null) {
         let blockType = bMatch[1].toUpperCase();
         const blockContent = bMatch[2];
-        if (blockContent.includes(token)) {
+        const headerLine = bMatch[0].split(/\r?\n/)[0] || '';
+        if (blockContent.includes(token) || headerLine.includes(token)) {
+            if (blockType === 'FACTION' || blockType === 'MAP') {
+                const isTitleLine = headerLine.includes(token)
+                    || new RegExp(`^\\s*(?:name|site)\\s*:[^\\n\\r]*${escape(token)}`, 'mi').test(blockContent);
+                if (isTitleLine) {
+                    return { blockType, contextSummary: '', gender: undefined, isNonPersonEntity: true };
+                }
+                // Token appears inside notes/agenda/description (e.g. a named faction leader) -> allow NameRAG!
+                return { blockType: 'NPC', contextSummary: blockContent.replace(token, '').trim().slice(0, 300), gender: detectGenderFromText(blockContent), isNonPersonEntity: false };
+            }
             // Check if this token represents a companion/retainer or is inside positive_tags/look
             const compTagRegex = new RegExp(`(?:Companion|Retainer):\\s*[^,\\n\\r]*?${escape(token)}[^,\\n\\r]*`, 'i');
             const compTagMatch = blockContent.match(compTagRegex);
@@ -363,10 +373,14 @@ export function extractContextForPlaceholder(rawText, token) {
                     contextSummary = lines.slice(0, 8).join(' ');
                 }
 
+                const isNonPersonKind = ['FACTION', 'LOCATION', 'RULE', 'EVENT', 'LORE'].includes(canonKind);
+                const isCanonTitleLine = new RegExp(`^\\s*name\\s*:[^\\n\\r]*${escape(token)}`, 'mi').test(blockContent)
+                    || headerLine.includes(token);
                 return {
                     blockType: canonKind === 'NPC' ? 'NPC' : (canonKind === 'FACTION' ? 'FACTION' : 'CANON_ENTRY'),
                     contextSummary,
                     gender: explicitGender,
+                    isNonPersonEntity: isNonPersonKind && isCanonTitleLine,
                 };
             }
 
@@ -421,10 +435,13 @@ export function extractContextForPlaceholder(rawText, token) {
                 if (!gender && contextSummary) {
                     gender = detectGenderFromText(contextSummary);
                 }
+                const isNonPersonKind = ['FACTION', 'LOCATION', 'RULE', 'EVENT', 'LORE'].includes(canonKind);
+                const isJsonNameField = new RegExp(`"name"\\s*:\\s*"[^"]*${escape(token)}`, 'i').test(jsonCandidate);
                 return {
                     blockType: canonKind === 'NPC' ? 'NPC' : (canonKind === 'FACTION' ? 'FACTION' : 'CANON_ENTRY'),
                     contextSummary,
                     gender,
+                    isNonPersonEntity: isNonPersonKind && isJsonNameField,
                 };
             }
         }
@@ -560,7 +577,7 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
     const resolutions = [];
 
     for (const ph of placeholders) {
-        const { blockType, contextSummary, gender } = extractContextForPlaceholder(rawBuilderOutput, ph.token);
+        const { blockType, contextSummary, gender, isNonPersonEntity } = extractContextForPlaceholder(rawBuilderOutput, ph.token);
         const query = buildQueryFromPlaceholderContext({
             tag: ph.tag,
             genre,
@@ -588,6 +605,14 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
         } else if (isCompanionToken && establishedCompanionName) {
             chosenName = establishedCompanionName;
             source = 'Existing Dossier (Preserved)';
+            candidatePool = [chosenName];
+        } else if (isNonPersonEntity) {
+            // Non-person guard: Factions, Locations, Maps, Rules, Events, and Lore must NEVER receive personal NameRAG names.
+            const rawTag = (ph.tag || '').trim();
+            chosenName = rawTag
+                ? rawTag.replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
+                : 'Unnamed Landmark';
+            source = 'Descriptive Concept (Non-Person Guard)';
             candidatePool = [chosenName];
         }
 
@@ -641,6 +666,7 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
         const cleanTag = (ph.tag || '').trim();
         const GENERIC_SLOT_TAGS = new Set(['protagonist', 'companion', 'general', 'npc', 'pc', 'monster', 'adversary', 'ally']);
         if (
+            !isNonPersonEntity &&
             cleanTag &&
             !GENERIC_SLOT_TAGS.has(cleanTag.toLowerCase()) &&
             source !== 'Existing Dossier (Preserved)'

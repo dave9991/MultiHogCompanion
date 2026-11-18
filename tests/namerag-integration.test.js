@@ -590,7 +590,7 @@ const talkerCtx = buildConciergeTalkerContext(updatedDossier, []);
 assert.ok(talkerCtx.includes(RESOLVED_NAME_FORMAT_GUIDANCE), 'Talker context must explain [NAME: ..., RESOLVED TO: ...] format');
 
 const stage2Prompt = buildStage2CanonBuilderPrompt(updatedDossier, canonEntries);
-assert.ok(stage2Prompt.includes('Do NOT use `[[NAME: ...]]` for Factions/Organizations'), 'Step 2 Canon Builder must restrict [[NAME: ...]] to people only');
+assert.ok(stage2Prompt.includes('Do NOT use `[[NAME: ...]]` as the title/name of a Faction'), 'Step 2 Canon Builder must explain NameRAG cannot name Factions/Locations as titles');
 assert.ok(stage2Prompt.includes('Sheridan Vance [concept: veteran fire captain / shift commander]'), 'Step 2 continuity brief must unwrap canon names cleanly');
 
 const stage3Prompt = buildStage3AdventureBuilderPrompt(updatedDossier, canonEntries);
@@ -633,5 +633,33 @@ const { buildStage3AdventureTalkerPrompt, TALKER_DESIGN_ONLY_BOUNDARY } = await 
 const step3TalkerPrompt = buildStage3AdventureTalkerPrompt(handoffDossierRes.updatedDossier, canonEntries);
 assert.ok(step3TalkerPrompt.includes(TALKER_DESIGN_ONLY_BOUNDARY), 'Step 3 Talker must include out-of-character design-only boundary');
 console.log('✓ Concept handoff canonicalization, PbtA HP->Harm mapping, and Talker no-roleplay boundary verified cleanly');
+
+// 13j. Non-person entity guard: Factions, Locations, and Maps must NEVER receive personal NameRAG names
+const nonPersonJsonReply = JSON.stringify([
+    { kind: 'FACTION', name: '[[NAME: exiled hydrological engineers]]', content: 'Cistern technicians.' },
+    { kind: 'LOCATION', name: '[[NAME: rusted interstate oasis]]', content: 'A desert trading post.' },
+    { kind: 'NPC', name: '[[NAME: grizzled wasteland doctor]]', content: 'Tends to radiation burns.' },
+]);
+const nonPersonResolved = await resolveDossierNamePlaceholders(nonPersonJsonReply, { meta: { systemKey: 'post_apocalyptic' } }, { returnDetails: true });
+assert.ok(nonPersonResolved.text.includes('"Exiled Hydrological Engineers"'), 'FACTION must unwrap to descriptive Title Case, not a person name');
+assert.ok(nonPersonResolved.text.includes('"Rusted Interstate Oasis"'), 'LOCATION must unwrap to descriptive Title Case, not a person name');
+assert.ok(nonPersonResolved.text.includes('[NAME: grizzled wasteland doctor, RESOLVED TO:'), 'NPC must still resolve via NameRAG');
+
+const nonPersonBlockReply = `[UPDATE_DOSSIER]
+[FACTION]
+name: [[NAME: ironclad salvage guild]]
+notes: Led by [[NAME: ruthless aqueduct overseer]]
+standing: Neutral
+[/FACTION]
+[MAP]
+site: [[NAME: sunken freeway interchange]]
+kind: RUINS
+[/MAP]
+[/UPDATE_DOSSIER]`;
+const nonPersonBlockResolved = await resolveDossierNamePlaceholders(nonPersonBlockReply, { meta: { systemKey: 'post_apocalyptic' } });
+assert.ok(nonPersonBlockResolved.includes('name: Ironclad Salvage Guild'), '[FACTION] title must not receive personal NameRAG name');
+assert.ok(nonPersonBlockResolved.includes('[NAME: ruthless aqueduct overseer, RESOLVED TO:'), 'Leader inside [FACTION] notes must still resolve via NameRAG');
+assert.ok(nonPersonBlockResolved.includes('site: Sunken Freeway Interchange'), '[MAP] site must not receive personal NameRAG name');
+console.log('✓ Non-person entity guard verified for JSON and [FACTION]/[MAP] blocks (including leader-in-body exception)');
 
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

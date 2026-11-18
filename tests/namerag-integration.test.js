@@ -597,4 +597,41 @@ const stage3Prompt = buildStage3AdventureBuilderPrompt(updatedDossier, canonEntr
 assert.ok(stage3Prompt.includes(RESOLVED_NAME_FORMAT_GUIDANCE), 'Step 3 Adventure Builder must include resolved name format guidance');
 console.log('✓ Canon inventory/focus unwrapping and Concierge resolved-name prompt guidance verified cleanly');
 
+// 13i. [concept: ...] handoff canonicalization, PbtA Monster hp: 4/4 -> currentHarm=0, and Talker no-roleplay boundary
+const parsedConceptEcho = parseResolvedNameToken('Braylin [concept: paranoid ex-surface cartographer]');
+assert.strictEqual(parsedConceptEcho.cleanName, 'Braylin');
+assert.strictEqual(parsedConceptEcho.tag, 'paranoid ex-surface cartographer');
+assert.strictEqual(parsedConceptEcho.isResolvedToken, true);
+
+const handoffDossierRes = applyDossierUpdates(`[UPDATE_DOSSIER]
+[NPC]
+name: Braylin [concept: paranoid ex-surface cartographer]
+role: Ally
+[/NPC]
+[MONSTER]
+name: WannaMingo Fugitive
+hp: 4/4
+armor: 1
+[/MONSTER]
+[MONSTER]
+name: Wounded Raider
+hp: 3/4
+[/MONSTER]
+[/UPDATE_DOSSIER]`, createEmptyDossier('pbta'));
+
+assert.strictEqual(
+    handoffDossierRes.updatedDossier.npcs[0].name,
+    '[NAME: paranoid ex-surface cartographer, RESOLVED TO: Braylin]',
+    'Echoed [concept: ...] must canonicalize back into [NAME: ..., RESOLVED TO: ...] for clean UI badge rendering'
+);
+assert.strictEqual(handoffDossierRes.updatedDossier.monsters[0].harm, 4);
+assert.strictEqual(handoffDossierRes.updatedDossier.monsters[0].currentHarm, 0, 'Full HP (4/4) must map to 0 Harm, not 4/4 wounded');
+assert.strictEqual(handoffDossierRes.updatedDossier.monsters[1].harm, 4);
+assert.strictEqual(handoffDossierRes.updatedDossier.monsters[1].currentHarm, 1, 'Damaged HP (3/4) must map to 1 Harm');
+
+const { buildStage3AdventureTalkerPrompt, TALKER_DESIGN_ONLY_BOUNDARY } = await import('../concierge-prompt.js');
+const step3TalkerPrompt = buildStage3AdventureTalkerPrompt(handoffDossierRes.updatedDossier, canonEntries);
+assert.ok(step3TalkerPrompt.includes(TALKER_DESIGN_ONLY_BOUNDARY), 'Step 3 Talker must include out-of-character design-only boundary');
+console.log('✓ Concept handoff canonicalization, PbtA HP->Harm mapping, and Talker no-roleplay boundary verified cleanly');
+
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

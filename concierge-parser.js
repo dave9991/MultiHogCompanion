@@ -27,6 +27,15 @@ import {
 } from './concierge-block-lexer.js';
 import { escapeHtml } from './mhc-utils.js';
 
+function canonicalizeResolvedName(raw) {
+    if (!raw || typeof raw !== 'string') return raw;
+    const mConcept = raw.trim().match(/^(.+?)\s*\[concept:\s*(.+?)\]$/i);
+    if (mConcept) {
+        return `[NAME: ${mConcept[2].trim()}, RESOLVED TO: ${mConcept[1].trim()}]`;
+    }
+    return raw;
+}
+
 export {
     cleanTargetName,
     stripConciergeStateBlocks,
@@ -1086,6 +1095,7 @@ export function applyDossierUpdates(text, dossier) {
         const pBlock = protoBlocks[0].content;
         const kv = parseKeyValueLines(pBlock);
 
+        if (kv.name) kv.name = canonicalizeResolvedName(kv.name);
         if (kv.name && updated.protagonist.name !== kv.name) {
             changes.push(`Protagonist name: "${kv.name}" (was "${updated.protagonist.name || 'Unnamed'}")`);
             updated.protagonist.name = kv.name;
@@ -1422,7 +1432,7 @@ export function applyDossierUpdates(text, dossier) {
         const nBlock = match.content;
         const kv = parseKeyValueLines(nBlock);
         if (!kv.name && inlineName) kv.name = inlineName;
-        kv.name = cleanTargetName(kv.name);
+        kv.name = canonicalizeResolvedName(cleanTargetName(kv.name));
         if (!kv.name) continue;
 
         // Check if this NPC block requests removal
@@ -1557,7 +1567,7 @@ export function applyDossierUpdates(text, dossier) {
         const mBlock = match.content;
         const kv = parseKeyValueLines(mBlock);
         if (!kv.name && match.inlineArg) kv.name = match.inlineArg.trim();
-        kv.name = cleanTargetName(kv.name);
+        kv.name = canonicalizeResolvedName(cleanTargetName(kv.name));
         if (!kv.name) continue;
 
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
@@ -1581,17 +1591,30 @@ export function applyDossierUpdates(text, dossier) {
                 if (!isNaN(h)) mMaxHarm = h;
             }
         }
-        if (kv.layers || kv.hp) {
-            const rawLayers = kv.layers || kv.hp;
-            const slashMatch = String(rawLayers).match(/^(\d+)\s*\/\s*(\d+)$/);
+        if (kv.layers) {
+            const slashMatch = String(kv.layers).match(/^(\d+)\s*\/\s*(\d+)$/);
             if (slashMatch) {
                 mCurHarm = parseInt(slashMatch[1], 10);
                 mMaxHarm = parseInt(slashMatch[2], 10);
             } else {
-                const l = parseInt(rawLayers, 10);
+                const l = parseInt(kv.layers, 10);
                 if (!isNaN(l)) {
                     mCurHarm = l;
                     mMaxHarm = l;
+                }
+            }
+        } else if (kv.hp) {
+            const slashMatch = String(kv.hp).match(/^(\d+)\s*\/\s*(\d+)$/);
+            if (slashMatch) {
+                const curHp = parseInt(slashMatch[1], 10);
+                const maxHp = parseInt(slashMatch[2], 10);
+                mMaxHarm = maxHp;
+                mCurHarm = Math.max(0, maxHp - curHp);
+            } else {
+                const h = parseInt(kv.hp, 10);
+                if (!isNaN(h)) {
+                    mMaxHarm = h;
+                    mCurHarm = 0;
                 }
             }
         }
@@ -1780,7 +1803,7 @@ export function applyDossierUpdates(text, dossier) {
         const fBlock = match.content;
         const kv = parseKeyValueLines(fBlock);
         if (!kv.name && match.inlineArg) kv.name = match.inlineArg.trim();
-        kv.name = cleanTargetName(kv.name);
+        kv.name = canonicalizeResolvedName(cleanTargetName(kv.name));
         if (!kv.name) continue;
 
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
@@ -2009,7 +2032,7 @@ export function applyDossierUpdates(text, dossier) {
 
     for (const block of canonEntryBlocks) {
         const kv = parseKeyValueLines(block.content);
-        const name = cleanTargetName(kv.name || kv.title || block.inlineArg || '');
+        const name = canonicalizeResolvedName(cleanTargetName(kv.name || kv.title || block.inlineArg || ''));
         if (!name) continue;
         const content = (kv.content || kv.description || kv.text || '').trim();
 

@@ -1226,7 +1226,12 @@ ${formattedBlueprint}
 ${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
 }
 
-export const RESOLVED_NAME_FORMAT_GUIDANCE = `* **Resolved Name Format (\`[NAME: <concept>, RESOLVED TO: <Name>]\`):** Whenever an entity or Canon entry shows \`[NAME: <concept>, RESOLVED TO: <Name>]\` (or \`<Name> [concept: <concept>]\`), **\`<Name>\` is their official, NameRAG-assigned canonical name** and \`<concept>\` is only their original role/archetype. Always address and refer to them by \`<Name>\` in prose, moves, and updates, and NEVER revert a resolved name back to a \`[[NAME: ...]]\` placeholder.`;
+export const RESOLVED_NAME_FORMAT_GUIDANCE = `* **Resolved Name Format (\`[NAME: <concept>, RESOLVED TO: <Name>]\`):** Whenever an entity or Canon entry shows \`[NAME: <concept>, RESOLVED TO: <Name>]\` (or \`<Name> [concept: <concept>]\`), **\`<Name>\` is their official, NameRAG-assigned canonical name** and \`<concept>\` is only their original role/archetype. Always address and refer to them by \`<Name>\` in prose, moves, and updates, NEVER copy \`[concept: ...]\` into \`name:\`, and NEVER revert a resolved name back to a \`[[NAME: ...]]\` placeholder.`;
+
+export const TALKER_DESIGN_ONLY_BOUNDARY = `0. **Out-of-Character Design Desk ONLY (NEVER Roleplay):**
+   - You are facilitating Session Zero campaign setup, NOT running a live game session.
+   - NEVER narrate Turn 1 gameplay, NEVER ask *"What do you do?"* / *"What is your immediate action?"* in-character, NEVER ask the player to roll dice (e.g. 2d6 / d20), and NEVER output a playable CYOA choice menu.
+   - Discuss, summarize, and refine the blueprint out-of-character; live play begins only after the player clicks **Finalize & Launch Campaign**.`;
 
 /**
  * Builds the full system context payload for Agent 2: The Talker.
@@ -1592,6 +1597,7 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 ---
 
 ### 🚫 Hard Boundaries for Step 1:
+${TALKER_DESIGN_ONLY_BOUNDARY}
 1. **100% Ruleset-Agnostic:**
    - NEVER discuss dice mechanics, stats, or specific game systems (D&D 5e, PbtA, FAE) here.
    - Ruleset selection occurs later in **Step 3 (\`🗺️ Adventure\`)**.
@@ -1775,6 +1781,7 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 ---
 
 ### 🚫 Hard Boundaries for Step 2:
+${TALKER_DESIGN_ONLY_BOUNDARY}
 1. **Focus on the Series Bible:**
    - Summarize updates to the Canon Lorebook Deck and World Axioms shown in the right pane.
    - Do NOT emit [UPDATE_DOSSIER] blocks or code syntax. The background Builder handles state updates.
@@ -2011,6 +2018,7 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 ---
 
 ### 🚫 Hard Boundaries for Step 3:
+${TALKER_DESIGN_ONLY_BOUNDARY}
 1. **Focus on Episode 1 Stage Set:**
    - Discuss starting locations, adversaries, imminent danger, and the opening kick.
    - Always refer to staged NPCs, adversaries, factions, and locations by their exact established names shown in the Continuity Brief below—never invent alternate names.
@@ -2166,6 +2174,7 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 ---
 
 ### 🚫 Hard Boundaries for Step 4:
+${TALKER_DESIGN_ONLY_BOUNDARY}
 1. **Focus on the Protagonist & Launch Preparation:**
    - Point out the Protagonist Sheet and the **\`📜 Progression Codex\`** tab in the right pane.
    - Always refer to the Protagonist by their exact established name (and playbook/archetype) shown in Current Protagonist Sheet below—never invent a different name.

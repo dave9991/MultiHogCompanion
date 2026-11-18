@@ -63,6 +63,12 @@ export function parseResolvedNameToken(raw) {
         return { cleanName: m2[1].trim(), tag: m2[2].trim(), isResolvedToken: true };
     }
 
+    // 2b. Continuity brief echo: Name [concept: tag]
+    const mConcept = str.match(/^(.+?)\s*\[concept:\s*(.+?)\]$/i);
+    if (mConcept) {
+        return { cleanName: mConcept[1].trim(), tag: mConcept[2].trim(), isResolvedToken: true };
+    }
+
     // 3. Fallback for unstripped [[NAME: tag]]
     const m3 = str.match(/\[\[NAME(?::\s*([^\]]+))?\]\]/i);
     if (m3) {

@@ -5,6 +5,15 @@ import {
     getMultihogPlayerName,
     extractNameFromMemo,
 } from '../persona-matching.js';
+import {
+    syncPersonaToChat,
+    syncPortraitToPersona,
+} from '../persona-portrait-sync.js';
+import {
+    buildPbtA2d6Block,
+    getPendingFaeToolResolution,
+    clearPendingFaeToolResolution,
+} from '../ruleset-rng-interceptor.js';
 import { isAdventureActive } from '../adventure-chat.js';
 
 test('Portrait Sync - Resolution Priority & Precedence', async (t) => {
@@ -218,5 +227,97 @@ test('Portrait Sync - Resolution Priority & Precedence', async (t) => {
             getMultihogPlayerPortrait(chatId, 'Edmund Wilson', rpgTracker),
             '/user/images/2026-10-24@21h58m06s662ms.png'
         );
+    });
+
+    await t.test('11. Extracted persona-portrait-sync & ruleset-rng-interceptor modules execute cleanly', async () => {
+        const prevST = globalThis.SillyTavern;
+        const prevFetch = globalThis.fetch;
+        const prevFile = globalThis.File;
+        const prevFormData = globalThis.FormData;
+
+        try {
+            let lockedCmd = null;
+            let metaSaved = false;
+            const toasts = [];
+            const mockCtx = {
+                chatMetadata: {},
+                saveMetadataDebounced: () => { metaSaved = true; },
+                executeSlashCommandsWithOptions: async (cmd) => { lockedCmd = cmd; },
+                getRequestHeaders: () => ({}),
+            };
+            globalThis.SillyTavern = { getContext: () => mockCtx };
+
+            // Early return when already bound to same avatar
+            mockCtx.chatMetadata.persona = 'hero.png';
+            const skipped = await syncPersonaToChat('chat_sync_1', { name: 'Hero', avatar: 'hero.png' }, {
+                showToast: (type, msg) => toasts.push({ type, msg }),
+            });
+            assert.strictEqual(skipped, false);
+
+            // Locks new persona avatar and executes /persona-lock on
+            mockCtx.chatMetadata.persona = 'other.png';
+            const changed = await syncPersonaToChat('chat_sync_1', { name: 'Hero', avatar: 'hero.png' }, {
+                showToast: (type, msg) => toasts.push({ type, msg }),
+            });
+            assert.strictEqual(changed, true);
+            assert.strictEqual(mockCtx.chatMetadata.persona, 'hero.png');
+            assert.strictEqual(metaSaved, true);
+            assert.strictEqual(lockedCmd, '/persona-lock on');
+            assert.strictEqual(toasts.length, 1);
+
+            // syncPortraitToPersona skips upload when already synced unless force: true
+            mockCtx.chatMetadata.multihog_companion = {
+                synced_portrait: '/user/images/hero.png',
+                synced_persona: 'hero.png',
+            };
+            const skippedPortrait = await syncPortraitToPersona(
+                'chat_sync_1',
+                { name: 'Hero', avatar: 'hero.png' },
+                '/user/images/hero.png',
+                { showToast: (type, msg) => toasts.push({ type, msg }) }
+            );
+            assert.strictEqual(skippedPortrait, false);
+
+            // With force: true, fetches image & uploads avatar
+            globalThis.File = class MockFile {
+                constructor(parts, name, opts) { this.parts = parts; this.name = name; this.type = opts?.type; }
+            };
+            globalThis.FormData = class MockFormData {
+                constructor() { this.fields = {}; }
+                append(k, v) { this.fields[k] = v; }
+            };
+            globalThis.fetch = async (url) => {
+                if (url === '/api/avatars/upload') {
+                    return { ok: true, statusText: 'OK' };
+                }
+                return { ok: true, statusText: 'OK', blob: async () => new Blob(['png'], { type: 'image/png' }) };
+            };
+            const forcedPortrait = await syncPortraitToPersona(
+                'chat_sync_1',
+                { name: 'Hero', avatar: 'hero.png' },
+                '/user/images/hero.png',
+                { force: true, showToast: (type, msg) => toasts.push({ type, msg }) }
+            );
+            assert.strictEqual(forcedPortrait, true);
+            assert.strictEqual(toasts.length, 2);
+
+            // ruleset-rng-interceptor: buildPbtA2d6Block & pending FAE tool state
+            const rngBlock = buildPbtA2d6Block(2);
+            assert.ok(rngBlock.includes('[RNG_QUEUE v7.0 — PbtA 2d6]'));
+            assert.ok(rngBlock.includes('1: 2d6 → '));
+            assert.ok(rngBlock.includes('2: 2d6 → '));
+
+            clearPendingFaeToolResolution('chat_sync_1');
+            assert.strictEqual(getPendingFaeToolResolution('chat_sync_1'), null);
+        } finally {
+            if (prevST === undefined) delete globalThis.SillyTavern;
+            else globalThis.SillyTavern = prevST;
+            if (prevFetch === undefined) delete globalThis.fetch;
+            else globalThis.fetch = prevFetch;
+            if (prevFile === undefined) delete globalThis.File;
+            else globalThis.File = prevFile;
+            if (prevFormData === undefined) delete globalThis.FormData;
+            else globalThis.FormData = prevFormData;
+        }
     });
 });

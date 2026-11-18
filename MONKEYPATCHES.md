@@ -36,7 +36,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 | :--- | :--- | :--- | :--- | :--- |
 | **ADR-MP-01** | `window.fetch` Interception | Network API | `pbta-companion-bridge.js:165` | 🔴 **HIGH**: Global network interceptor. |
 | **ADR-MP-02** | `/imagine` Slash Command Callback Wrapping | Command Parser | `index.js:1070` | 🟡 **MODERATE**: Wrapped object property. |
-| **ADR-MP-03** | PbtA 2d6 & FAE 4dF Single-Roll Queue & Tool Call Injection (`generate_interceptor`) | LLM Prompt Pipeline | `index.js:2737` | 🟢 **LOW**: Official SillyTavern manifest hook. |
+| **ADR-MP-03** | PbtA 2d6 & FAE 4dF Single-Roll Queue & Tool Call Injection (`generate_interceptor`) | LLM Prompt Pipeline | [`ruleset-rng-interceptor.js`](./ruleset-rng-interceptor.js) | 🟢 **LOW**: Official SillyTavern manifest hook. |
 | **ADR-MP-04** | DOM `stopImmediatePropagation` Hijacking | UI Event Bus | `namerag-hooks.js:426` | 🔴 **HIGH**: Silently suppresses upstream listeners. |
 | **ADR-MP-05** | In-Memory `stockPrompts` Mutation | Upstream Settings Object | `character-creator-sanitizer.js:25` | 🟡 **MODERATE**: In-place settings rewriting. |
 | **ADR-MP-06** | `window._mhcPendingFreshRestart` Global Flag | Window Global State | `adventure-chat.js:391` | 🟡 **MODERATE**: Cross-tick global semaphore. |
@@ -126,7 +126,7 @@ SillyTavern adds native support for contextual resolution hooks in slash command
 <a id="adr-mp-03-sillytavern-pipeline-generation-interceptor-generate_interceptor--pbta-2d6-rng-injection"></a>
 
 * **Status:** Active / Clean
-* **Location:** [`index.js`](file:///home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/index.js#L2737-L2890) (`mhcGenerationInterceptor`)
+* **Location:** [`ruleset-rng-interceptor.js`](./ruleset-rng-interceptor.js) (`mhcGenerationInterceptor`, re-exported by [`index.js`](./index.js))
 * **Patch Type:** SillyTavern Pipeline Hook (Registered via `manifest.json` and `globalThis`)
 
 #### Context & Justification

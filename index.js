@@ -688,10 +688,13 @@ async function applyRulesetCartridge({
     s.syspromptModules = s.syspromptModules || {};
     Object.assign(s.syspromptModules, cartridge.payload.syspromptModules);
 
-    // 4. Update stock prompts (character, party, combat)
+    // 4. Update stock prompts (character, party, combat) and ruleset State Tracker core template
     s.stockPrompts = s.stockPrompts || {};
     Object.assign(s.stockPrompts, cartridge.payload.stockPrompts);
     sanitizeCharacterStockPrompt(s.stockPrompts, overrides?.charName || overrides?.character?.name || '');
+    if (cartridge.payload.systemPromptTemplate) {
+        s.systemPromptTemplate = cartridge.payload.systemPromptTemplate;
+    }
 
     // 4b. Update CYOA config if defined in cartridge payload
     if (cartridge.payload.cyoaConfig) {

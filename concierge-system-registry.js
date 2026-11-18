@@ -75,7 +75,7 @@ class ConciergeSystemRegistry {
         if (/Harm\s*:\s*\d+\/\d+|\(Harm:\s*\d+\/\d+\)|\bMoves\s*:|\[PBTA_|Hack & Slash/i.test(memoText)) {
             return 'pbta';
         }
-        if (/\b(?:Attr|Saves|Proficiencies)\s*:|\bHD\s*:\s*\d*d\d+|\bTotal\s*:\s*\d+\s*\/\s*\d+\s*XP\s*\(Level/i.test(memoText)) {
+        if (/\b(?:Attr|Saves|Proficiencies)\s*:|\bHD\s*:\s*\d*d\d+|\bTotal\s*:\s*\d+\s*\/\s*\d+\s*XP\s*\(Level|\bLevel\s*:\s*\d+\s*\|\s*XP\s*:/i.test(memoText)) {
             return 'dnd5e';
         }
         return fallback;

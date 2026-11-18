@@ -1882,9 +1882,19 @@ export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {})
     const cleanTarget = stripMarkdownNameArtifacts(rawTarget);
     const targetName = isValidCharacterName(cleanTarget) ? cleanTarget : 'Character Name';
 
-    const knobsLine = isHeroic
-        ? `FAE Knobs: Heroic: ON | Flee Grace: ${genre.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${genre.knobs.base_attrition_shift >= 0 ? '+' + genre.knobs.base_attrition_shift : genre.knobs.base_attrition_shift} | Overflow: ${genre.knobs.overflow_default}`
-        : `FAE Knobs: Flee Grace: ${genre.knobs.flee_grace_toggle ? 'ON' : 'OFF'} | Shift: ${genre.knobs.base_attrition_shift >= 0 ? '+' + genre.knobs.base_attrition_shift : genre.knobs.base_attrition_shift} | Overflow: ${genre.knobs.overflow_default}`;
+    const fleeGrace = overrides?.knobs?.flee_grace_toggle ?? genre.knobs.flee_grace_toggle;
+    const shiftRaw = overrides?.knobs?.base_attrition_shift ?? genre.knobs.base_attrition_shift;
+    const overflowVal = overrides?.knobs?.overflow_default ?? genre.knobs.overflow_default;
+    const tempoStr = overrides?.knobs?.action_tempo
+        || overrides?.actionTempo
+        || overrides?.action_tempo
+        || overrides?.config?.actionTempo
+        || overrides?.config?.action_tempo
+        || genre.knobs?.action_tempo
+        || 'gritty_default';
+
+    const baseKnobsStr = `FAE Knobs: Flee Grace: ${fleeGrace ? 'ON' : 'OFF'} | Shift: ${shiftRaw >= 0 ? '+' + shiftRaw : shiftRaw} | Overflow: ${overflowVal} | Tempo: ${tempoStr} | Idle: 0t | Breather: READY`;
+    const knobsLine = isHeroic ? `${baseKnobsStr} | Heroic: ON` : baseKnobsStr;
 
     const heroicDomainLine = isHeroic
         ? `Heroic Domain: ${overrides?.heroicDomain || overrides?.heroic_domain || overrides?.character?.heroic_domain || overrides?.character?.heroicDomain || genre.defaultHeroicDomain || 'Archetype [specific domains]'}\n`
@@ -1893,6 +1903,8 @@ export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {})
     const heroicPillInstruction = isHeroic
         ? '\n- Heroic Domain: Archetype [specific domains] is pure pre-math leverage and is kept on its own line, separate from Positive Tags.'
         : '';
+
+    const heroicKnobSyncNote = isHeroic ? ' `Heroic: ON`,' : '';
 
     return {
         character: `Main character's core stats. MECHANICS ONLY.
@@ -1907,6 +1919,10 @@ ${heroicDomainLine}((PILLS)) Positive Tags: ${sampleTags}
 Status: Healthy
 [/CHARACTER]
 
+POOL & KNOB SYNCHRONIZATION:
+- Synchronize pool values from the inline \`*(FAE Action [Pool]: ...)*\` resolution and the two-line status footer; keep Line 1 \`cur/max HP\` identical to \`Pool: ${primary.label} (cur/max)\`, and clamp pools at \`0/max\`.
+- Always preserve \`Tempo:\`, \`Idle:\`, \`Breather:\`,${heroicKnobSyncNote} and any unspent \`| [Advantage: ...]\` token on the \`FAE Knobs:\` line.
+
 PILL FORMATTING:
 - Positive Tags: Name (descriptive detail) or Trait [context qualifier] (~25–30% situational scope, e.g. Strong [for lifting, hauling, or breaching doors], Calm [under gunfire and shock]). Can include personal traits, signature gear, or companions, e.g. Companion: Name (Role — detail). Auto-qualify broad traits via Tier A Trait Qualification Protocol.
 - Companions & Party (Zero-Bookkeeping Model): FAE never uses a [PARTY] block or individual companion HP/pools. Record active companions, friends, or hirelings directly inside [CHARACTER]'s ((PILLS)) Positive Tags as "Companion: Name [role/specialty]" or "Retainer: Name [role/specialty]". If a companion is wounded or sidelined at a Breaking Point, record "(-) Companion Wounded: Name" in Scars & Debuffs.
@@ -1914,11 +1930,16 @@ PILL FORMATTING:
 
 CRITICAL: Always output the character's actual proper name on the first line — NEVER output literal "{{user}}", "Character Name", or "User", and NEVER wrap the character name or first line in markdown bold (**).`,
 
-        combat: `Active encounter and situational obstacles in FAE.
+        combat: `Active encounter and situational obstacles in FAE (Unified Encounter Block).
 Format:
 [COMBAT]
 ${genre.sampleEncounter}
-[/COMBAT]`,
+[/COMBAT]
+
+ENCOUNTER RESOLUTION & LAYER UPDATES:
+- STEPPING-STONE (-1 Encounter HP Layer): When a Stepping-Stone action succeeds against a multi-layer encounter (e.g. 2/2 HP -> 1/2 HP), decrement the encounter's \`X/Y HP\` by 1, cross off or remove the breached obstacle in \`Status: ... [Barriers: ...]\`, and keep the encounter active.
+- FULL RESOLUTION (Encounter Layers -> 0) or Bypass / Escape: Output \`[COMBAT]END_COMBAT[/COMBAT]\` whenever the encounter reaches 0 layers or the party overcomes, bypasses, or retreats from the threat.
+- UNIFIED ENCOUNTER BLOCK: FAE tracks all present foes and hazards in one Encounter Block (never split combatants into separate \`ENEMIES:\`, \`NON-PARTY ALLIES\`, or \`DEFEATED COMBATANTS:\` lists — end the encounter with \`[COMBAT]END_COMBAT[/COMBAT]\` when defeated or escaped).`,
 
         inventory: `Character signature gear and resources.
 Every signature weapon or item acts as a Positive Tag:
@@ -1931,6 +1952,56 @@ Supplies:
 
         party: `Companions in FAE use the Zero-Bookkeeping Model and are tracked directly as "Companion: Name [role/specialty]" or "Retainer: Name [role/specialty]" inside [CHARACTER]'s Positive Tags (never as separate [PARTY] stat blocks or individual HP pools). Do NOT output a [PARTY] block.`,
     };
+}
+
+/**
+ * Builds an FAE-aligned systemPromptTemplate for the MultiHog State Tracker LLM.
+ * Enforces Single-Pass Attrition Resource Pools, Two-Tier Strain vs. Scar/Trauma rules,
+ * Zero-Bookkeeping companions inside [CHARACTER], and unified Encounter Blocks.
+ *
+ * @returns {string}
+ */
+export function buildFaeSystemPromptTemplate() {
+    return `You are the State Extractor Model for a Freeform Attrition Engine (FAE) campaign. Your task is to maintain a structured State Memo based on the roleplay narrative, inline 4dF action resolution, and status footer.
+<core_directives>
+IGNORE NARRATIVE FLUFF: Do not track temporary dialogue or flavor beats. Only track persistent FAE state changes: Resource Pools (with Line 1 cur/max HP matching the primary pool), Scenes/XP progress inside [CHARACTER], FAE Knobs, ((PILLS)) Positive Tags (including Companion:/Retainer: tags), ((PILLS)) Scars & Debuffs (and active [Advantage: ...]), unified Encounter state in [COMBAT], and signature gear in [INVENTORY].
+SINGLE-PASS ATTRITION & POOLS: FAE does NOT use D&D combat round counters, turn durations, AC restoration anchors, or spell slots. Pools absorb Strain silently; Scars persist until healed at a Haven/Milestone.
+CREATION: You MAY create a section ([COMBAT] or [INVENTORY]) when the narrative starts an encounter or acquires signature gear. Never create a [PARTY] or [XP] block in FAE.
+DELETION: To REMOVE a section entirely (or close an encounter), output \`[COMBAT]END_COMBAT[/COMBAT]\` for [COMBAT] or \`[TAG]REMOVED[/TAG]\` for other sections.
+</core_directives>
+<modules>
+You must track the following enabled modules:
+{{modulesText}}
+NEVER ignore a module.
+</modules>
+<rules>
+1. Read the PRIOR MEMO and the NARRATIVE OUTPUT carefully (including \`*(FAE Action [Pool]: ...)*\` resolution lines and the two-line italicized footer).
+2. Determine which sections changed. Only output sections that actually changed.
+3. Use strict [TAG]...[/TAG] structure based on the modules requested above. ALWAYS include the closing tag.
+4. Omit unchanged sections entirely. Do NOT output a section if its contents did not change.
+5. BLOCK PERSISTENCE: If any field inside [CHARACTER], [COMBAT], or [INVENTORY] changes, re-output the ENTIRE changed block with all unchanged fields, pools, FAE Knobs tokens, and pills preserved verbatim. Never drop \`Tempo:\`, \`Idle:\`, or \`Breather:\` from \`FAE Knobs:\`.
+6. Clamp every Resource Pool at \`0/max\` (never negative) and keep Line 1 \`cur/max HP\` equal to \`Pool: Primary (cur/max)\`.
+7. If there are absolutely NO CHANGES to any section, you MUST output exactly: \`NO_CHANGES_DETECTED\`
+8. Output ONLY the changed sections (or NO_CHANGES_DETECTED). No preamble, no explanation, no commentary.
+</rules>
+<list_formatting>
+Match each module's exact layout from <modules>:
+1. [INVENTORY] uses \`-\` bullets grouped under \`Signature Gear (Tags):\` and \`Supplies:\`.
+2. [CHARACTER] uses \`((BAR:color))\` lines for secondary Resource Pools and \`((PILLS))\` lines for Positive Tags and Scars & Debuffs. Record allies inside \`((PILLS)) Positive Tags:\` as \`Companion: Name [role/specialty]\` or \`Retainer: Name [role/specialty]\` — NEVER emit a \`[PARTY]\` block or a bulleted D&D party list.
+</list_formatting>
+<buff_debuff_logic>
+TWO-TIER ATTRITION (STRAIN VS. TRAUMA):
+- STRAIN (Pool >= 1 after loss): Simply decrement the targeted Resource Pool (and Line 1 HP if primary). Do NOT invent wounds, round counters, or \`(-)\` pills in Scars & Debuffs for normal Strain.
+- TRAUMA / SCAR (Pool reaches 0/max Breaking Point, loses >0 while already at 0, or executes GRACE_RETREAT_WITH_SCAR): Clamp pool at 0, add the resulting \`(-) Scar: Detail (Trauma)\` or \`(-) Companion Wounded: Name\` pill to \`((PILLS)) Scars & Debuffs:\`, and update \`Status:\` (e.g. \`(-) Injured (Breaking Point)\` or \`(-) Strained & Injured\`).
+- TEMPORARY ADVANTAGE: Preserve earned \`(+) Advantage: Detail (-1 Attrition on next action)\` in Scars & Debuffs (and \`| [Advantage: Detail]\` on \`FAE Knobs:\` if present) until spent or cleared on a non-retreat action.
+- ZERO DURATION COUNTERS: Never write D&D turn timers, round counters, or AC/stat restoration anchors.
+</buff_debuff_logic>
+<progression_logic>
+Track \`Scenes: X/Y | XP: X/Y\` directly on Line 1 of [CHARACTER] and preserve every \`FAE Knobs:\` field (\`Flee Grace | Shift | Overflow | Tempo | Idle | Breather\`). NEVER output a separate [XP] block.
+</progression_logic>
+<custom_formatting>
+Use the exact graphical rendering markers requested in <modules>: \`((BAR:color))\`, \`((PILLS))\`, \`((PLS))\`, \`((B))\`, \`((XB))\`, \`((BDG))\`, \`((HGT))\`.
+</custom_formatting>`;
 }
 
 /**
@@ -2090,7 +2161,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         world_rules: false,
     };
 
-    const baseBlockOrder = ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
+    const baseBlockOrder = ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'TIME'];
     if (customModuleTag && !baseBlockOrder.includes(customModuleTag)) {
         baseBlockOrder.push(customModuleTag);
     }
@@ -2100,6 +2171,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         syspromptModules,
         syspromptSectionOrder: [],
         stockPrompts: buildFaeStockPrompts(genreKey, { ...overrides, heroicTier: isHeroic }),
+        systemPromptTemplate: buildFaeSystemPromptTemplate(),
         cyoaConfig: {
             playstyle,
             useCustomPrompt: !isFreeform,
@@ -2121,10 +2193,11 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
             combat: true,
             character: true,
             party: false,
+            'benched party': false,
             inventory: true,
             abilities: false,
             spells: false,
-            xp: true,
+            xp: false,
             time: true,
         },
     };

@@ -746,6 +746,12 @@ export function isLiveSettingsPollutedWithPbtA(s) {
         return true;
     }
 
+    // 1b. Check systemPromptTemplate for PbtA State Extractor directives
+    const tpl = String(s.systemPromptTemplate || '');
+    if (/FICTION-FIRST STATE:/i.test(tpl) || /PbtA does NOT use combat round counters/i.test(tpl)) {
+        return true;
+    }
+
     // 2. Check if core D&D modules were disabled by PbtA cartridge
     const mods = s.syspromptModules;
     if (mods && typeof mods === 'object') {
@@ -791,6 +797,12 @@ export function isLiveSettingsPollutedWithFae(s) {
         || /FAE Knobs:/i.test(promptsStr)
         || /Positive Tags:/i.test(promptsStr)
         || /Leverage Barriers/i.test(promptsStr)) {
+        return true;
+    }
+
+    // 1b. Check systemPromptTemplate for FAE State Extractor directives
+    const tpl = String(s.systemPromptTemplate || '');
+    if (/SINGLE-PASS ATTRITION & POOLS:/i.test(tpl) || /FAE does NOT use D&D combat round counters/i.test(tpl)) {
         return true;
     }
 
@@ -871,6 +883,13 @@ export function doesLiveLibraryMatchCartridge(s, cartridge, prefix) {
     if (s.stockPrompts?.character !== cartridge.payload.stockPrompts?.character) return false;
     if (s.stockPrompts?.combat !== cartridge.payload.stockPrompts?.combat) return false;
     if (s.stockPrompts?.party !== cartridge.payload.stockPrompts?.party) return false;
+
+    if (cartridge.payload.systemPromptTemplate
+        && typeof s.systemPromptTemplate === 'string'
+        && s.systemPromptTemplate.length > 0
+        && s.systemPromptTemplate !== cartridge.payload.systemPromptTemplate) {
+        return false;
+    }
 
     if (cartridge.payload.cyoaConfig) {
         if (Boolean(s.cyoaConfig?.useCustomPrompt) !== Boolean(cartridge.payload.cyoaConfig.useCustomPrompt)) return false;
@@ -973,6 +992,13 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
         }
     }
 
+    // 4b. Restore State Tracker systemPromptTemplate from factory defaults
+    if (factory?.systemPromptTemplate) {
+        settings.systemPromptTemplate = factory.systemPromptTemplate;
+    } else if (/FICTION-FIRST STATE:|SINGLE-PASS ATTRITION & POOLS:|does NOT use (?:D&D )?combat round counters/i.test(String(settings.systemPromptTemplate || ''))) {
+        delete settings.systemPromptTemplate;
+    }
+
     // 5. Restore cyoaConfig
     if (factory?.cyoaConfig) {
         settings.cyoaConfig = JSON.parse(JSON.stringify(factory.cyoaConfig));
@@ -987,7 +1013,20 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
     if (factory?.modules && settings.modules) {
         Object.assign(settings.modules, factory.modules);
     } else if (settings.modules) {
-        settings.modules.spells = true;
+        Object.assign(settings.modules, {
+            character: true,
+            party: true,
+            'benched party': true,
+            combat: true,
+            inventory: true,
+            abilities: true,
+            spells: true,
+            time: true,
+            xp: true,
+            quests: true,
+        });
+    } else if (factory?.modules) {
+        settings.modules = { ...factory.modules };
     }
 
     // 7. Restore RNG defaults
@@ -1126,6 +1165,9 @@ async function applyStandaloneCartridgeHydration(s, targetCartridge, resolvedToo
 
     s.stockPrompts = s.stockPrompts || {};
     Object.assign(s.stockPrompts, targetCartridge.payload.stockPrompts);
+    if (targetCartridge.payload.systemPromptTemplate) {
+        s.systemPromptTemplate = targetCartridge.payload.systemPromptTemplate;
+    }
 
     if (targetCartridge.payload.cyoaConfig) {
         s.cyoaConfig = s.cyoaConfig || {};

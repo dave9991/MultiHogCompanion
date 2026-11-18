@@ -281,12 +281,14 @@ test('8. formatInitialMemo produces standard Day 0 MultiHog D&D state memo compl
     assert.match(blocks.CHARACTER, /HD:\s*d10\s*\(1\/1\)/);
     assert.match(blocks.CHARACTER, /Status:\s*Healthy/);
     assert.match(blocks.ABILITIES, /Second Wind/);
-    assert.match(blocks.XP, /Total:\s*0\s*\/\s*300\s*XP\s*\(Level 1\)/);
-    assert.match(blocks.INVENTORY, /- Chain Mail \(AC 16\) \[E\]/);
-    assert.match(blocks.INVENTORY, /- Longsword \[E\]/);
-    assert.match(blocks.INVENTORY, /- Shield \(\+2 AC\) \[E\]/);
-    assert.match(blocks.INVENTORY, /- Adventurer's pack/);
-    assert.match(blocks.INVENTORY, /- 15 gp/);
+    assert.match(blocks.XP, /Level:\s*1\s*\|\s*XP:\s*0\/300/);
+    assert.match(blocks.INVENTORY, /^Gear:/m);
+    assert.match(blocks.INVENTORY, /- 🦺 \[Common\] \[E\] Chain Mail \(AC 16\) \(~75 GP\)/);
+    assert.match(blocks.INVENTORY, /- 🗡️ \[Common\] \[E\] Longsword \(~15 GP\)/);
+    assert.match(blocks.INVENTORY, /- 🛡️ \[Common\] \[E\] Shield \(\+2 AC\) \(~10 GP\)/);
+    assert.match(blocks.INVENTORY, /^Other Items:/m);
+    assert.match(blocks.INVENTORY, /- 🎒 \[Common\] Adventurer's pack \(~2 GP\)/);
+    assert.match(blocks.INVENTORY, /- 💰 15 GP/);
     assert.match(blocks.LOCATION, /Crypt Entrance/);
 
     // 5. Caster verification: spells block with Level 1 (2/2):

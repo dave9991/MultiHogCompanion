@@ -1144,7 +1144,8 @@ Status: Healthy
 PILL FORMATTING (the tracker turns these into hoverable pills):
 - Separate multiple attacks, abilities, or statuses with commas, and put each one's detail in trailing parentheses: Name (detail). The detail appears on hover. Keep commas out of the detail text unless they are inside the parentheses.
 - Status entries start with (-) for harmful conditions (red) or (+) for beneficial ones (green), e.g. Status: (-) Winded (-1 forward on the next Act Under Fire), (+) Enraged (+1 Harm dealt). Use plain "Healthy" when unaffected.
-- Optional extra lines for special threats, same Name (detail) style: ((PILLS)) Abilities: Heavy Hauler (Holds a grabbed target in place), Weakness: White birch fire (Ignores Armor).`,
+- Optional extra lines for special threats, same Name (detail) style: ((PILLS)) Abilities: Heavy Hauler (Holds a grabbed target in place), Weakness: White birch fire (Ignores Armor).
+- DEFEATED COMBATANTS: Mark defeated enemies (at 0 HP / Max Harm) as Status: Defeated and do not omit them while combat continues. Output \`[COMBAT]END_COMBAT[/COMBAT]\` when combat ends (never put members of [PARTY] into [COMBAT]).`,
 
         inventory: `Character possessions, equipment, weapons, and wealth.
 MANDATORY FORMAT FOR EVERY ITEM:
@@ -1171,6 +1172,55 @@ Other Items:
 - 💵 500 Credits
 [/INVENTORY]`,
     };
+}
+
+/**
+ * Builds a PbtA-aligned systemPromptTemplate for the MultiHog State Tracker LLM.
+ * Replaces D&D round duration counters, AC restoration anchors, and bulleted [PARTY]
+ * formatting with PbtA Harm/HP inverse tracking, fictional conditions, and ((PILLS)) schemas.
+ *
+ * @returns {string}
+ */
+export function buildPbtASystemPromptTemplate() {
+    return `You are the State Extractor Model for a Powered by the Apocalypse (PbtA) campaign. Your task is to maintain a structured State Memo based on the roleplay narrative, inline move rolls, and status footer.
+<core_directives>
+IGNORE NARRATIVE FLUFF: Do not track temporary dialogue or choreography. Only track persistent PbtA state changes: Harm, inverse HP, Armor, fictional Conditions, Hold/Forward, XP inside [CHARACTER], companion moves/bonds/Harm in [PARTY], active threats in [COMBAT], and gear uses/wealth in [INVENTORY].
+FICTION-FIRST STATE: PbtA does NOT use combat round counters, turn durations, or D&D spell slots. Conditions persist until resolved, treated, healed, or cleared by narrative action (never decrement counters per turn).
+CREATION: You MAY create a section that did not exist in the Prior Memo when the narrative warrants it based on your enabled modules (for example [COMBAT] when threats engage, or [INVENTORY] when new items are acquired).
+DELETION: To REMOVE a section entirely, you MUST output: \`[TAG]REMOVED[/TAG]\`.
+</core_directives>
+<modules>
+You must track the following enabled modules:
+{{modulesText}}
+NEVER ignore a module.
+</modules>
+<rules>
+1. Read the PRIOR MEMO and the NARRATIVE OUTPUT carefully (including inline \`*(Move Name [Stat]: ...)*\` rolls, \`*(+1 XP — ...)*\` markers, and the status footer).
+2. Determine which sections changed. Only output sections that actually changed.
+3. Use strict [TAG]...[/TAG] structure based on the modules requested above. ALWAYS include the closing tag.
+4. Omit unchanged sections entirely. Do NOT output a section if its contents did not change.
+5. BLOCK PERSISTENCE: For multi-item sections ([PARTY], [INVENTORY], [COMBAT]), if any single item or member within that section changes, you MUST re-output the ENTIRE section containing all current members or items. Never omit existing members or items unless explicitly removed (\`*(Left the party: Name — reason)*\` for [PARTY], or consumed/dropped for [INVENTORY]). In [COMBAT], preserve ENEMIES:/NON-PARTY ALLIES: grouping, never include members already listed in [PARTY], mark threats at Max Harm as Status: Defeated, and output \`[COMBAT]END_COMBAT[/COMBAT]\` when combat ends.
+6. Keep HP and Harm strictly inverse on [CHARACTER], [PARTY], and [COMBAT] header lines (\`HP = max - Harm\`). When at Max Harm (\`0/max HP | Harm: max/max\`), set \`Status: (-) Incapacitated\` (or threat \`Status: Defeated\`).
+7. Keep Hold/Forward current and clear consumed \`+1 forward\` or \`Hold\` once spent in the narrative.
+8. If there are absolutely NO CHANGES to any section, you MUST output exactly: \`NO_CHANGES_DETECTED\`
+9. Output ONLY the changed sections (or NO_CHANGES_DETECTED). No preamble, no explanation, no commentary.
+</rules>
+<list_formatting>
+Match each module's exact layout from <modules>:
+1. [INVENTORY] uses \`-\` bullets grouped under \`Gear:\` and \`Other Items:\`, keeping rarity tags (\`[Common]\`, \`[Signature]\`), \`[E]\` equipped tags, PbtA weapon/armor tags in parentheses, and \`(~X currency)\` worth.
+2. [PARTY] and [COMBAT] NEVER collapse members into single \`- Name (Resource/Max, Effect)\` bullets — each member/threat begins on its own header line (\`Name ...: cur/max HP | Harm: cur/max | Armor: X\`) followed by \`((PILLS))\` lines separated by blank lines.
+</list_formatting>
+<buff_debuff_logic>
+FICTIONAL CONDITIONS ONLY: Never add D&D turn timers, round-duration counters, damage-over-time tickers, or AC restoration anchors.
+CONDITION & STATUS LABELING: Prefix harmful conditions with \`(-)\` and beneficial boons/modifiers with \`(+)\`, placing the trigger or mechanical effect in parentheses: \`(-) Shaken (-1 forward on Mind)\`, \`(+) Inspired (+1 forward)\`. Use plain \`Healthy\` when unaffected.
+REMOVAL BY FICTION: Only clear a condition when the narrative explicitly heals, soothes, removes, or resolves it (or when a Level Advance erases a Condition).
+</buff_debuff_logic>
+<progression_logic>
+Track \`XP: current/max\` inside [CHARACTER] (matching the footer's XP counter). When the character advances and resets XP, also apply any chosen stat (+1, max +3), new Move, or healed Condition inside [CHARACTER]. NEVER output a separate [XP] block.
+</progression_logic>
+<custom_formatting>
+Use the exact graphical rendering markers requested in <modules>: \`((PILLS))\`, \`((PLS))\`, \`((B))\`, \`((XB))\`, \`((BDG))\`, \`((HGT))\`, \`((BAR:color))\`. Place comma-separated items on \`((PILLS))\` lines with details in trailing parentheses.
+</custom_formatting>`;
 }
 
 /**
@@ -1459,8 +1509,8 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
     };
 
     const baseBlockOrder = partyMode === 'solo'
-        ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'XP', 'TIME']
-        : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'XP', 'TIME'];
+        ? ['COMBAT', 'CHARACTER', 'INVENTORY', 'ABILITIES', 'TIME']
+        : ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'TIME'];
     if (customModuleTag && !baseBlockOrder.includes(customModuleTag)) {
         baseBlockOrder.push(customModuleTag);
     }
@@ -1470,6 +1520,7 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
         syspromptModules,
         syspromptSectionOrder: [],
         stockPrompts: buildPbtAStockPrompts(genreKey, overrides),
+        systemPromptTemplate: buildPbtASystemPromptTemplate(),
         cyoaConfig: {
             playstyle,
             useCustomPrompt: !isFreeform,
@@ -1493,10 +1544,11 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
             combat: true,
             character: true,
             party: partyMode !== 'solo',
+            'benched party': partyMode !== 'solo',
             inventory: true,
             abilities: false, // In PbtA, abilities ARE Playbook Moves (avoids D&D daily spell/ability counters)
             spells: false,    // Magic is handled via Arcana / Weird Moves
-            xp: true,
+            xp: false,        // PbtA tracks XP: 0/5 directly inside [CHARACTER]
             time: true,
         },
     };

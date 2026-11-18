@@ -109,9 +109,71 @@ export function getDndStatModifier(score) {
     return calculateDndModifier(score);
 }
 
+const DND_RARITY_TAG_RX = /^\[(Common|Uncommon|Rare|Epic|Legendary|Artifact)\]\s*/i;
+const DND_LEADING_EMOJI_RX = /^(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s*)+/u;
+const DND_CURRENCY_LINE_RX = /^(?:💰|💵|🪙)?\s*(?:([$£€])\s*([\d,]+)(?:\s*(dollars?|usd|euros?|eur|pounds?|gbp))?|([\d,]+)\s*(gp|sp|cp|pp|ep|gold(?:\s+pieces?)?|silver(?:\s+pieces?)?|copper(?:\s+pieces?)?|dollars?|usd|credits?|caps?))\s*$/i;
+const DND_WORTH_SUFFIX_RX = /\s*\(~[^)]+\)\s*$|\s*\(Worth:\s*[^)]+\)\s*$/i;
+
+function pickDndItemEmoji(item, isGear) {
+    const s = String(item || '').toLowerCase();
+    if (/\b(?:shield|buckler)\b/.test(s)) return '🛡️';
+    if (/\b(?:armor|mail|plate|leather|breastplate|chain|robe|cloak|helm|gauntlets|greaves)\b/.test(s)) return '🦺';
+    if (/\b(?:bow|shortbow|longbow|crossbow|sling)\b/.test(s)) return '🏹';
+    if (/\b(?:scroll|tome|grimoire|spellbook|book)\b/.test(s)) return '📜';
+    if (/\b(?:focus|orb|totem|holy symbol|amulet)\b/.test(s)) return '🔮';
+    if (/\b(?:wand|staff|quarterstaff|rod)\b/.test(s)) return '🪄';
+    if (/\b(?:axe|greataxe|handaxe|battleaxe)\b/.test(s)) return '🪓';
+    if (/\b(?:mace|hammer|warhammer|club|flail|maul)\b/.test(s)) return '🔨';
+    if (/\b(?:sword|longsword|shortsword|greatsword|dagger|rapier|scimitar|spear|halberd|weapon|blade)\b/.test(s)) return '🗡️';
+    if (/\b(?:potion|elixir|vial|antitoxin)\b/.test(s)) return '🧪';
+    if (/\b(?:rope|grappling)\b/.test(s)) return '🪢';
+    if (/\b(?:torch|lantern)\b/.test(s)) return '🔦';
+    if (/\b(?:tools|thieves)\b/.test(s)) return '🧰';
+    return isGear ? '🗡️' : '🎒';
+}
+
+function estimateDndItemWorth(item, isGear) {
+    const s = String(item || '').toLowerCase();
+    if (/\bplate\b/.test(s) && !/breastplate|half/.test(s)) return '1,500 GP';
+    if (/\bhalf plate\b/.test(s)) return '750 GP';
+    if (/\bbreastplate\b/.test(s)) return '400 GP';
+    if (/\bsplint\b/.test(s)) return '200 GP';
+    if (/\bchain mail\b/.test(s)) return '75 GP';
+    if (/\b(?:scale mail|chain shirt|greatsword|heavy crossbow|longbow)\b/.test(s)) return '50 GP';
+    if (/\bstudded leather\b/.test(s)) return '45 GP';
+    if (/\b(?:greataxe|potion)\b/.test(s)) return '50 GP';
+    if (/\b(?:rapier|hand crossbow|light crossbow|shortbow|component pouch|thieves|tools|focus)\b/.test(s)) return '25 GP';
+    if (/\b(?:longsword|scimitar|warhammer|weapon|blade)\b/.test(s)) return '15 GP';
+    if (/\b(?:shield|buckler|shortsword|battleaxe|flail|leather)\b/.test(s)) return '10 GP';
+    if (/\b(?:mace|handaxe|spear|adventurer's pack|adventurer's kit|pack|kit|quarterstaff|dagger|club|sling)\b/.test(s)) {
+        return /\b(?:mace|handaxe|spear)\b/.test(s) ? '5 GP' : '2 GP';
+    }
+    if (/\b(?:rope|torch|rations|waterskin|bedroll)\b/.test(s)) return '1 GP';
+    return isGear ? '15 GP' : '5 GP';
+}
+
+function formatDndCurrencyLine(rawItem) {
+    const m = rawItem.match(DND_CURRENCY_LINE_RX);
+    if (!m) return null;
+    if (m[1]) {
+        const sym = m[1];
+        const amt = m[2];
+        return sym === '$' ? `- 💵 $${amt}` : `- 💰 ${sym}${amt}`;
+    }
+    const amt = m[4];
+    const unitRaw = m[5].toLowerCase();
+    if (/^(?:dollars?|usd)$/.test(unitRaw)) return `- 💵 $${amt}`;
+    let unit = unitRaw.toUpperCase();
+    if (unit.startsWith('GOLD')) unit = 'GP';
+    else if (unit.startsWith('SILVER')) unit = 'SP';
+    else if (unit.startsWith('COPPER')) unit = 'CP';
+    return `- 💰 ${amt} ${unit}`;
+}
+
 /**
- * Normalizes equipment items into individual `- Item` inventory lines,
- * tagging weapons, armor, and gear with `[E]` (equipped).
+ * Normalizes equipment items into MultiHog DEFAULT_STOCK_PROMPTS.inventory format:
+ * `Gear:` (worn/wielded with emoji, [Rarity], [E], and worth) and `Other Items:`
+ * (supplies and bare currency `💰 X GP`).
  *
  * @param {string|string[]} equipmentRaw
  * @returns {string[]}
@@ -136,20 +198,57 @@ export function normalizeDndInventoryLines(equipmentRaw) {
         ];
     }
     const bulletRx = /^[-*+•–—]\s*/;
-    const cleanItems = items.map(it => it.replace(bulletRx, '').trim()).filter(Boolean);
+    const cleanItems = items
+        .map(it => it.replace(bulletRx, '').trim())
+        .filter(it => it && !/^(?:gear|other items)\s*:$/i.test(it));
 
-    const GEAR_MATCH_RX = /\b(mail|armor|leather|shield|sword|longsword|shortsword|greatsword|axe|greataxe|handaxe|mace|warhammer|dagger|rapier|scimitar|bow|shortbow|longbow|crossbow|quarterstaff|staff|focus|wand|symbol|totem|greaves|helm|gauntlets|cloak|robe)\b/i;
-    const NON_EQUIP_RX = /\b(pack|pouch|gold|gp|sp|cp|rations|rope|bedroll|tools|torch|potion|scroll|waterskin)\b/i;
+    const GEAR_MATCH_RX = /\b(mail|armor|leather|shield|buckler|sword|longsword|shortsword|greatsword|axe|greataxe|handaxe|battleaxe|mace|warhammer|dagger|rapier|scimitar|spear|bow|shortbow|longbow|crossbow|quarterstaff|staff|focus|wand|symbol|totem|greaves|helm|gauntlets|cloak|robe|weapon)\b/i;
+    const NON_EQUIP_RX = /\b(pack|pouch|gold|gp|sp|cp|rations|rope|bedroll|tools|torch|potion|scroll|waterskin|kit)\b/i;
 
-    return cleanItems.map(item => {
-        if (/\[E\]/i.test(item)) {
-            return `- ${item}`;
+    const gearLines = [];
+    const otherLines = [];
+
+    for (const rawItem of cleanItems) {
+        const currencyLine = formatDndCurrencyLine(rawItem);
+        if (currencyLine) {
+            otherLines.push(currencyLine);
+            continue;
         }
-        if (GEAR_MATCH_RX.test(item) && !NON_EQUIP_RX.test(item)) {
-            return `- ${item} [E]`;
+
+        let rest = rawItem;
+        const emojiMatch = rest.match(DND_LEADING_EMOJI_RX);
+        let emoji = emojiMatch ? emojiMatch[0].trim() : '';
+        if (emojiMatch) rest = rest.slice(emojiMatch[0].length).trim();
+
+        const rarityMatch = rest.match(DND_RARITY_TAG_RX);
+        const rarityTag = rarityMatch ? `[${rarityMatch[1].charAt(0).toUpperCase()}${rarityMatch[1].slice(1).toLowerCase()}]` : '[Common]';
+        if (rarityMatch) rest = rest.slice(rarityMatch[0].length).trim();
+
+        const hasExplicitE = /\[E\]/i.test(rest);
+        if (hasExplicitE) {
+            rest = rest.replace(/\s*\[E\]\s*/gi, ' ').trim();
         }
-        return `- ${item}`;
-    });
+
+        const isGear = hasExplicitE || (GEAR_MATCH_RX.test(rest) && !NON_EQUIP_RX.test(rest));
+        if (!emoji) emoji = pickDndItemEmoji(rest, isGear);
+
+        const worthSuffix = DND_WORTH_SUFFIX_RX.test(rest) ? '' : ` (~${estimateDndItemWorth(rest, isGear)})`;
+
+        if (isGear) {
+            gearLines.push(`- ${emoji} ${rarityTag} [E] ${rest}${worthSuffix}`);
+        } else {
+            otherLines.push(`- ${emoji} ${rarityTag} ${rest}${worthSuffix}`);
+        }
+    }
+
+    const result = [];
+    if (gearLines.length > 0) {
+        result.push('Gear:', ...gearLines);
+    }
+    if (otherLines.length > 0) {
+        result.push('Other Items:', ...otherLines);
+    }
+    return result;
 }
 
 export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
@@ -698,7 +797,7 @@ ${abilitiesBlock}
         }
 
         memo += `\n\n[XP]
-Total: 0 / 300 XP (Level 1)
+Level: 1 | XP: 0/300
 [/XP]
 
 [INVENTORY]

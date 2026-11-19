@@ -6,7 +6,7 @@
  * Core Capabilities:
  * 1. Groups global SillyTavern world info files into cohesive Campaign Sets:
  *    - 1 Primary Dossier (Campaign_{Title})
- *    - Up to 8 MultiHog Partition Books ({Prefix}_{Locations|NPCs|Quests|Factions|Events|Rules|Skeleton|Canon})
+ *    - Up to 9 MultiHog Partition Books ({Prefix}_{Locations|NPCs|Bestiary|Quests|Factions|Events|Rules|Skeleton|Canon})
  * 2. Identifies Misaligned Sets where a chat was renamed or still points to older protagonist dossiers.
  * 3. Identifies True Orphaned Sets where no matching chat exists across any SillyTavern character.
  * 4. Protects character-bound books and standalone non-campaign lorebooks from deletion.
@@ -23,7 +23,7 @@ import {
 } from './campaign-lore-sync.js';
 
 export const MULTIHOG_PARTITIONS = Object.freeze([
-    'npcs', 'locations', 'factions', 'quests', 'events', 'rules', 'skeleton', 'canon'
+    'npcs', 'bestiary', 'locations', 'factions', 'quests', 'events', 'rules', 'skeleton', 'canon'
 ]);
 
 /**

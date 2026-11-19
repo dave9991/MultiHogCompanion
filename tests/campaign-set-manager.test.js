@@ -28,6 +28,12 @@ assert.strictEqual(parsedNPCs.isPartition, true);
 assert.strictEqual(parsedNPCs.prefix, 'Mariposa_Mutiny');
 assert.strictEqual(parsedNPCs.partition, 'npcs');
 
+assert.ok(MULTIHOG_PARTITIONS.includes('bestiary'), 'MULTIHOG_PARTITIONS must include bestiary');
+const parsedBestiary = parsePartitionBookName('The_Sunken_Vault_Bestiary');
+assert.strictEqual(parsedBestiary.isPartition, true);
+assert.strictEqual(parsedBestiary.prefix, 'The_Sunken_Vault');
+assert.strictEqual(parsedBestiary.partition, 'bestiary');
+
 const parsedNotPartition = parsePartitionBookName('Eldoria');
 assert.strictEqual(parsedNotPartition.isPartition, false);
 
@@ -41,6 +47,7 @@ const mockWorldNames = [
     'Campaign_The Sunken Vault',
     'The_Sunken_Vault_Locations',
     'The_Sunken_Vault_NPCs',
+    'The_Sunken_Vault_Bestiary',
     'The_Sunken_Vault_Quests',
 
     // Lou - FAE (Misaligned Set)
@@ -53,6 +60,7 @@ const mockWorldNames = [
     'Mariposa_Mutiny_Canon',
     'Mariposa_Mutiny_Locations',
     'Mariposa_Mutiny_NPCs',
+    'Mariposa_Mutiny_Bestiary',
     'Mariposa_Mutiny_Quests',
     'Mariposa_Mutiny_Skeleton',
 
@@ -95,7 +103,7 @@ assert.strictEqual(report.activeSets.length, 1, 'Should find 1 active healthy se
 const sunkenVault = report.activeSets[0];
 assert.strictEqual(sunkenVault.chatTitle, 'The Sunken Vault');
 assert.strictEqual(sunkenVault.dossierBooks.length, 1);
-assert.strictEqual(sunkenVault.partitionBooks.length, 3);
+assert.strictEqual(sunkenVault.partitionBooks.length, 4);
 
 // Verify Misaligned Sets
 assert.strictEqual(report.misalignedSets.length, 1, 'Should find 1 misaligned set');
@@ -107,7 +115,7 @@ assert.strictEqual(louChat.boundDossier, 'Campaign_Lou\'s Adventure');
 // Verify Orphan Sets
 const mariposa = report.orphanSets.find(o => o.prefix === 'Mariposa_Mutiny');
 assert.ok(mariposa, 'Mariposa Mutiny orphan group must be identified');
-assert.strictEqual(mariposa.books.length, 6, 'Mariposa Mutiny must include dossier and all partitions');
+assert.strictEqual(mariposa.books.length, 7, 'Mariposa Mutiny must include dossier and all partitions');
 
 const aelion = report.orphanSets.find(o => o.prefix === 'Aelion_Crown_Guard_s_Adventure');
 assert.ok(aelion, 'Stale protagonist dossier must be identified as orphan');

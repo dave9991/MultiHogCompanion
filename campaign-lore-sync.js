@@ -393,7 +393,7 @@ export async function purgeCampaignLorebooks(prefix, ctx = null) {
     const targetSet = new Set();
 
     const prefixes = Array.from(new Set([cleanPrefix, whitespacePrefix, strictPrefix].filter(Boolean)));
-    const standardSuffixes = ['_NPCs', '_Factions', '_Locations', '_Quests', '_Rules', '_Skeleton'];
+    const standardSuffixes = ['_NPCs', '_Bestiary', '_Factions', '_Locations', '_Quests', '_Rules', '_Skeleton'];
 
     // Standard candidate names across all prefix variations and standard suffixes + Campaign_ variants
     const candidateSet = new Set();

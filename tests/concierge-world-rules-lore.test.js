@@ -125,7 +125,8 @@ const testDossier = {
 };
 
 const dist = prepareCampaignLorebookDistributions(testDossier);
-assert.strictEqual(dist.npcs.length, 2, 'Should contain 1 NPC and 1 Monster');
+assert.strictEqual(dist.npcs.length, 1, 'Should contain 1 NPC (excluding monsters)');
+assert.strictEqual(dist.bestiary.length, 1, 'Should contain 1 Monster in bestiary');
 assert.strictEqual(dist.factions.length, 1, 'Should contain 1 Faction');
 assert.strictEqual(dist.locations.length, 1, 'Should contain 1 Location');
 assert.strictEqual(dist.quests.length, 1, 'Should contain 1 Starting Quest');

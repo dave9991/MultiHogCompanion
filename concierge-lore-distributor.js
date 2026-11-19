@@ -3,7 +3,8 @@
  *
  * Formats and distributes Session Zero Campaign Dossier entities across
  * MultiHog's native modular campaign lorebooks:
- * - {prefix}_NPCs      (NPCs & Monsters)
+ * - {prefix}_NPCs      (Supporting NPCs & Social Rivals)
+ * - {prefix}_Bestiary  (Monsters, Packs, Constructs, & Hazards)
  * - {prefix}_Factions  (Factions & Organizations)
  * - {prefix}_Locations (Dungeons, Settlements, & Sites)
  * - {prefix}_Quests    (Starting Crisis / Emergent Quests)
@@ -379,20 +380,22 @@ export function buildDossierWorldInfoEntry(dossierMarkdown, targetUid = null) {
 }
 
 /**
- * Prepares all entity packages across the 4 native campaign lorebook categories.
+ * Prepares all entity packages across MultiHog's native modular campaign lorebook categories.
  *
  * @param {object} dossier
  * @param {object} [sectionNames]
  * @returns {{
  *   npcs: Array<{ name: string, core: string, full: string, keys: string[] }>,
+ *   bestiary: Array<{ name: string, core: string, full: string, keys: string[] }>,
  *   factions: Array<{ name: string, core: string, full: string, keys: string[] }>,
  *   locations: Array<{ name: string, core: string, full: string, keys: string[] }>,
  *   quests: Array<{ name: string, core: string, full: string, keys: string[] }>,
+ *   worldRules: Array<{ name: string, core: string, full: string, keys: string[] }>,
  * }}
  */
 export function prepareCampaignLorebookDistributions(dossier, sectionNames = null) {
     if (!dossier || typeof dossier !== 'object') {
-        return { npcs: [], factions: [], locations: [], quests: [], worldRules: [] };
+        return { npcs: [], bestiary: [], factions: [], locations: [], quests: [], worldRules: [] };
     }
 
     const npcs = (dossier.npcs || []).map(n => {
@@ -472,12 +475,55 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
     }
 
     return {
-        npcs: [...npcs, ...monsters],
+        npcs,
+        bestiary: monsters,
         factions,
         locations: locationEntries,
         quests: questEntries,
         worldRules: worldRuleEntries,
     };
+}
+
+/**
+ * Formats dossier.monsters into a concise threat context brief for Map Architect,
+ * guiding native CREATURE, GROUP, or HAZARD asset placement without pushing monsters
+ * into social NPC drawers.
+ *
+ * @param {object} dossier
+ * @returns {string}
+ */
+export function buildMapThreatBrief(dossier) {
+    const monsters = dossier?.monsters;
+    if (!Array.isArray(monsters) || monsters.length === 0) return '';
+
+    const items = [];
+    for (const m of monsters) {
+        if (!m) continue;
+        const cleanName = parseResolvedNameToken(m.name).cleanName.trim();
+        if (!cleanName) continue;
+
+        const detailParts = [];
+        if (m.notes && String(m.notes).trim()) {
+            detailParts.push(String(m.notes).replace(/\s+/g, ' ').trim().slice(0, 90));
+        } else if (Array.isArray(m.attacks) && m.attacks.length) {
+            detailParts.push(String(m.attacks[0]).replace(/\s+/g, ' ').trim().slice(0, 70));
+        } else if (typeof m.attacks === 'string' && m.attacks.trim()) {
+            detailParts.push(m.attacks.replace(/\s+/g, ' ').trim().slice(0, 70));
+        } else if (Array.isArray(m.pressures) && m.pressures.length) {
+            detailParts.push(String(m.pressures[0]).replace(/\s+/g, ' ').trim().slice(0, 70));
+        }
+
+        if (m.weakness && m.weakness !== 'Unknown') {
+            detailParts.push(`weakness: ${String(m.weakness).trim().slice(0, 50)}`);
+        }
+
+        const itemStr = detailParts.length ? `${cleanName} (${detailParts.join('; ')})` : cleanName;
+        items.push(itemStr);
+        if (items.length >= 6) break;
+    }
+
+    if (!items.length) return '';
+    return ` Staged Threats & Hazards (seed as CREATURE, GROUP, or HAZARD assets where appropriate; do not force every threat into the entrance): ${items.join('; ')}.`;
 }
 
 

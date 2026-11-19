@@ -139,7 +139,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 ### FEAT-05: Dynamic Campaign Lorebook Sync
 * **Overview:** Automatically organizes and partitions SillyTavern World Info (Lorebooks) to match the active MultiHog adventure chat title.
 * **Core Capabilities:**
-  * **Chat-Linked Partitioning:** Ensures that NPC entries, location lore, and faction codices are bound exclusively to their corresponding adventure chat.
+  * **Chat-Linked Partitioning:** Ensures that NPC entries (`{prefix}_NPCs`), bestiary adversaries & hazards (`{prefix}_Bestiary`), location lore (`{prefix}_Locations`), quests (`{prefix}_Quests`), rules (`{prefix}_Rules`), world skeletons (`{prefix}_Skeleton`), Canon (`{prefix}_Canon`), and faction codices (`{prefix}_Factions`) are bound exclusively to their corresponding adventure chat (keeping monsters/hazards out of the social NPCs drawer).
   * **Zero Lore Bleed:** When switching from Campaign A to Campaign B, unlinks stale lorebooks so the LLM context is never poisoned by out-of-world knowledge.
   * **Automatic Migration on Rename:** Listens for chat renames and clones/migrates the linked lorebooks in lockstep.
 * **Associated Workarounds:**
@@ -230,7 +230,7 @@ MultiHog Companion separates **Intent** from **Mechanism** across four synchroni
 <a id="feat-11-campaign-set-manager--orphan-cleanup"></a>
 * **Overview:** Provides an interactive auditing and maintenance interface to organize global SillyTavern lorebooks into structured Campaign Sets, identify misaligned chat stacks, safely purge orphaned MultiHog partitions, and safeguard non-campaign world info.
 * **Core Capabilities:**
-  * **Campaign Set Categorization:** Automatically groups lorebooks into 4 quadrants:
+  * **Campaign Set Categorization:** Automatically groups lorebooks into 4 quadrants (recognizing `{Prefix}_{Locations|NPCs|Bestiary|Quests|Factions|Events|Rules|Skeleton|Canon}`):
     1. **Active Campaign Sets:** Healthy stacks where the bound dossier (`Campaign_{Title}`) and partition lorebooks (`{Prefix}_{Partition}`) match the current Game Master's adventure chats.
     2. **Misaligned Sets:** Adventures where chat renames or earlier protagonist-based dossiers left mismatched book names or duplicate dossiers. Offers an in-place **Align Set Now** action with verified cloning.
     3. **Orphaned Sets:** MultiHog campaign stacks (`{Prefix}_{Partition}`) and stale dossiers with zero matching chats across any character card in SillyTavern. Supports group-level deletion, selective item checkboxes, and bulk deletion.

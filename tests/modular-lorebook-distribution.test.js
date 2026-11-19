@@ -4,7 +4,8 @@
  * Verification suite for Phase 1:
  * 1. Token optimization: Campaign Dossier in World Info must have `constant: false`
  * 2. Proper category distribution:
- *    - NPCs & Monsters -> {prefix}_NPCs
+ *    - NPCs -> {prefix}_NPCs (zero monsters/hazards)
+ *    - Monsters & Hazards -> {prefix}_Bestiary
  *    - Factions -> {prefix}_Factions
  *    - Locations & Maps -> {prefix}_Locations
  *    - Starting Crisis -> {prefix}_Quests
@@ -19,6 +20,7 @@ import {
     buildStartingQuestEntry,
     buildDossierWorldInfoEntry,
     prepareCampaignLorebookDistributions,
+    buildMapThreatBrief,
 } from '../concierge-lore-distributor.js';
 
 console.log('--- Running Modular Lorebook Distribution Test Suite ---');
@@ -122,10 +124,22 @@ const fullDossier = {
 
 const dist = prepareCampaignLorebookDistributions(fullDossier);
 
-// Check NPCs & Monsters
-assert.strictEqual(dist.npcs.length, 2, 'Should contain 1 NPC and 1 Monster');
+// Check NPCs & Bestiary separation
+assert.strictEqual(dist.npcs.length, 1, 'Should contain 1 NPC (zero monsters)');
 assert.strictEqual(dist.npcs[0].name, 'Marta Okonkwo');
-assert.strictEqual(dist.npcs[1].name, 'Ash Wendigo');
+assert.strictEqual(dist.npcs.some(n => n.name === 'Ash Wendigo'), false, 'Monsters must not enter NPCs distribution');
+
+assert.ok(Array.isArray(dist.bestiary), 'Should produce bestiary array');
+assert.strictEqual(dist.bestiary.length, 1, 'Should contain 1 Monster in bestiary');
+assert.strictEqual(dist.bestiary[0].name, 'Ash Wendigo');
+assert.ok(dist.bestiary[0].core.includes('Combat Profile'), 'Bestiary entry should retain combat profile');
+assert.ok(dist.bestiary[0].keys.includes('Ash Wendigo'), 'Bestiary keys should include monster name');
+
+// Check Map Threat Brief helper
+const threatBrief = buildMapThreatBrief(fullDossier);
+assert.ok(threatBrief.includes('Ash Wendigo'), 'Map threat brief should mention staged monster');
+assert.ok(threatBrief.includes('CREATURE, GROUP, or HAZARD'), 'Map threat brief should guide native Map Architect kinds');
+assert.strictEqual(buildMapThreatBrief({ ...fullDossier, monsters: [] }), '', 'Map threat brief should be empty when no monsters exist');
 
 // Check Factions
 assert.strictEqual(dist.factions.length, 2, 'Should contain 2 factions');

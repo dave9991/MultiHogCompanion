@@ -6,8 +6,8 @@
  * Handles the automated handoff when "Launch Campaign" is clicked:
  * 1. Installs PbtA cartridge & 2d6 RNG rules
  * 2. Creates & binds player persona and Lorebook Agent player card
- * 3. Sequentially runs Map Architect for queued sites
- * 4. Upserts staged monsters into the NPC Library
+ * 3. Sequentially runs Map Architect for queued sites (seeded with Bestiary threat context)
+ * 4. Upserts staged NPCs into the NPC Library and monsters into {prefix}_Bestiary
  * 5. Injects the Campaign Dossier into World Info (GM permanent memory)
  * 6. Drops the player into the fiction with Turn 0 opening scene
  */
@@ -24,12 +24,12 @@ import './concierge-system-dnd5e.js';
 import {
     loadMainNpcSectionNames,
     buildNpcEntryContent,
-    buildMonsterEntryContent,
     buildNpcKeys,
 } from './concierge-npc-format.js';
 import {
     buildDossierWorldInfoEntry,
     prepareCampaignLorebookDistributions,
+    buildMapThreatBrief,
     buildWorldSkeletonEntries,
 } from './concierge-lore-distributor.js';
 import {
@@ -247,11 +247,13 @@ async function upsertWorldInfoBook(bookName, items = []) {
 }
 
 /**
- * Distributes dossier entities across the 4 native campaign lorebooks:
- * - {prefix}_NPCs      (NPCs & Monsters)
+ * Distributes dossier entities across MultiHog's native modular campaign lorebooks:
+ * - {prefix}_NPCs      (Supporting NPCs & Social Rivals)
+ * - {prefix}_Bestiary  (Monsters, Packs, Drones, & Hazards)
  * - {prefix}_Factions  (Factions)
  * - {prefix}_Locations (Maps / Sites)
  * - {prefix}_Quests    (Starting Crisis)
+ * - {prefix}_Rules     (World Axioms & Custom Trackers)
  * @returns {Promise<Record<string, { bookName: string, uid: number|string, fullId: string }>>}
  */
 async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames = null) {
@@ -263,6 +265,7 @@ async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, secti
             : (chatId || '');
 
         const npcBookName = prefix ? `${prefix}_NPCs` : 'NPCs';
+        const bestiaryBookName = prefix ? `${prefix}_Bestiary` : 'Bestiary';
         const factionBookName = prefix ? `${prefix}_Factions` : 'Factions';
         const locBookName = prefix ? `${prefix}_Locations` : 'Locations';
         const questBookName = prefix ? `${prefix}_Quests` : 'Quests';
@@ -272,6 +275,7 @@ async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, secti
 
         const [npcMap] = await Promise.all([
             upsertWorldInfoBook(npcBookName, dist.npcs),
+            ...(dist.bestiary?.length ? [upsertWorldInfoBook(bestiaryBookName, dist.bestiary)] : []),
             upsertWorldInfoBook(factionBookName, dist.factions),
             upsertWorldInfoBook(locBookName, dist.locations),
             upsertWorldInfoBook(questBookName, dist.quests),
@@ -652,6 +656,10 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
 
         // ── 3. Primary Map Architect Generation (Staggered Launch) ─────────────
         const maps = dossier.maps || [];
+        const monsters = dossier.monsters || [];
+        const sectionNamesForLaunch = (dossier.npcs?.length || monsters.length)
+            ? await loadMainNpcSectionNames()
+            : null;
         if (maps.length) {
             try {
                 const mapArch = await import('../SillyTavern-MultihogDnDFramework/map-architect.js');
@@ -665,10 +673,29 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                     if (primaryMap?.site) {
                         onProgress(`🗺️ Generating starting map: ${primaryMap.site}...`, 45);
                         try {
+                            let mapLorebookNames = [];
+                            if (monsters.length > 0) {
+                                try {
+                                    const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+                                    const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
+                                        ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
+                                        : (chatId || '');
+                                    const bestiaryBookName = prefix ? `${prefix}_Bestiary` : 'Bestiary';
+                                    const preDist = prepareCampaignLorebookDistributions(dossier, sectionNamesForLaunch);
+                                    if (preDist.bestiary?.length) {
+                                        await upsertWorldInfoBook(bestiaryBookName, preDist.bestiary);
+                                        mapLorebookNames = [bestiaryBookName];
+                                    }
+                                } catch (bestiaryErr) {
+                                    console.warn('[PbtA Concierge] Could not pre-seed Bestiary before Map Architect:', bestiaryErr);
+                                }
+                            }
+
                             const archNotes = (dossier.worldRules?.axioms || [])
                                 .map(a => a.architecturalNotes ? a.architecturalNotes.trim() : '')
                                 .filter(Boolean);
                             const archContext = archNotes.length > 0 ? ` Living Architecture & Infrastructure: ${archNotes.join('; ')}.` : '';
+                            const threatContext = buildMapThreatBrief(dossier);
 
                             await mapArch.runMapArchitect({
                                 site: primaryMap.site,
@@ -676,8 +703,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                                 kind: primaryMap.kind || 'SETTLEMENT',
                                 scale: 'SMALL',
                                 threat: primaryMap.threat || 'MODERATE',
-                                prompt: `${primaryMap.prompt || primaryMap.briefDescription}${archContext}`,
-                                brief_description: `${primaryMap.briefDescription || primaryMap.prompt}${archContext}`,
+                                prompt: `${primaryMap.prompt || primaryMap.briefDescription}${archContext}${threatContext}`,
+                                brief_description: `${primaryMap.briefDescription || primaryMap.prompt}${archContext}${threatContext}`,
+                                ...(mapLorebookNames.length ? { lorebookNames: mapLorebookNames } : {}),
                             });
                         } catch (mapErr) {
                             console.warn(`[PbtA Concierge] Map Architect skipped starting map "${primaryMap.site}":`, mapErr);
@@ -693,34 +721,33 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             }
         }
 
-        // ── 4. Register Supporting NPCs, Monsters & Factions (library + lorebook) ──
+        // ── 4. Register Supporting NPCs (library) & Bestiary/Factions/Locations/Quests (lorebook) ──
         const npcs = dossier.npcs || [];
-        const monsters = dossier.monsters || [];
         const factions = dossier.factions || [];
         let npcMapping = {};
         if (npcs.length || monsters.length || factions.length) {
-            onProgress('👥 Registering supporting cast & adversaries in library...', 70);
-            const sectionNames = await loadMainNpcSectionNames();
-            try {
-                const npcLib = await import('../SillyTavern-MultihogDnDFramework/npc-library.js');
-                if (typeof npcLib.saveNpcToLibrary === 'function') {
-                    // Main's saveNpcToLibrary(settings, record) upserts by name and persists settings.
-                    const libEntries = [
-                        ...npcs.map(n => ({ name: n.name, content: buildNpcEntryContent(n, sectionNames).core, notes: n.notes || '' })),
-                        ...monsters.map(m => ({ name: m.name, content: buildMonsterEntryContent(m, sectionNames, { ruleset: dossier.meta?.ruleset }).core, notes: m.notes || '' })),
-                    ];
-                    for (const e of libEntries) {
-                        if (!e.name || !e.content) continue;
-                        await npcLib.saveNpcToLibrary(null, { name: e.name, content: e.content, keys: buildNpcKeys(e.name), notes: e.notes });
+            onProgress('👥 Registering supporting cast & bestiary entries...', 70);
+            const sectionNames = sectionNamesForLaunch || await loadMainNpcSectionNames();
+            if (npcs.length) {
+                try {
+                    const npcLib = await import('../SillyTavern-MultihogDnDFramework/npc-library.js');
+                    if (typeof npcLib.saveNpcToLibrary === 'function') {
+                        // Main's saveNpcToLibrary(settings, record) upserts by name and persists settings.
+                        // Keep NPC Library strictly for recurring named NPCs — never monsters/hazards.
+                        const libEntries = npcs.map(n => ({ name: n.name, content: buildNpcEntryContent(n, sectionNames).core, notes: n.notes || '' }));
+                        for (const e of libEntries) {
+                            if (!e.name || !e.content) continue;
+                            await npcLib.saveNpcToLibrary(null, { name: e.name, content: e.content, keys: buildNpcKeys(e.name), notes: e.notes });
+                        }
+                    } else {
+                        console.warn('[PbtA Concierge] Main NPC library API (saveNpcToLibrary) not found — skipping library registration. Main extension may have changed.');
                     }
-                } else {
-                    console.warn('[PbtA Concierge] Main NPC library API (saveNpcToLibrary) not found — skipping library registration. Main extension may have changed.');
+                } catch (err) {
+                    console.warn('[PbtA Concierge] NPC library registration failed:', err);
                 }
-            } catch (err) {
-                console.warn('[PbtA Concierge] NPC / Monster library registration failed:', err);
             }
 
-            // Also inject across the 4 native campaign lorebooks ({prefix}_NPCs, _Factions, _Locations, _Quests)
+            // Inject across MultiHog's native campaign lorebooks ({prefix}_NPCs, _Bestiary, _Factions, _Locations, _Quests, _Rules)
             try {
                 npcMapping = await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
             } catch (loreErr) {

@@ -26,14 +26,40 @@ import {
     normalizeMalformedDossierClosers,
 } from './concierge-block-lexer.js';
 import { escapeHtml } from './mhc-utils.js';
+import { parseResolvedNameToken } from './namerag-hooks.js';
 
 function canonicalizeResolvedName(raw) {
     if (!raw || typeof raw !== 'string') return raw;
-    const mConcept = raw.trim().match(/^(.+?)\s*\[concept:\s*(.+?)\]$/i);
+    const trimmed = raw.trim();
+    const mConcept = trimmed.match(/^(.+?)\s*\[concept:\s*(.+?)\]$/i);
     if (mConcept) {
         return `[NAME: ${mConcept[2].trim()}, RESOLVED TO: ${mConcept[1].trim()}]`;
     }
+    if (/^\[{1,2}NAME:\s*(.+?)\]{1,2}$/i.test(trimmed) && /,\s*RESOLVED TO:\s*/i.test(trimmed)) {
+        const { cleanName, tag, isResolvedToken } = parseResolvedNameToken(trimmed);
+        if (isResolvedToken && cleanName && tag) {
+            return `[NAME: ${tag}, RESOLVED TO: ${cleanName}]`;
+        }
+    }
     return raw;
+}
+
+function entityNamesMatch(a, b) {
+    if (!a || !b || typeof a !== 'string' || typeof b !== 'string') return false;
+    if (a.trim().toLowerCase() === b.trim().toLowerCase()) return true;
+    const pa = parseResolvedNameToken(a);
+    const pb = parseResolvedNameToken(b);
+    const ka = (pa.cleanName || a).trim().toLowerCase();
+    const kb = (pb.cleanName || b).trim().toLowerCase();
+    if (!ka || !kb || ka !== kb) return false;
+    // If BOTH are distinct evolved NameRAG tokens with different concept tags, keep them separate
+    // (guards against merging two distinct entities if NameRAG/fallback returns a duplicate name).
+    if (pa.isResolvedToken && pb.isResolvedToken && pa.tag && pb.tag) {
+        if (pa.tag.trim().toLowerCase() !== pb.tag.trim().toLowerCase()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 export {
@@ -556,8 +582,10 @@ The Kick: Unset
     lines.push(`Config: playstyle=${cfg.playstyle ?? 'cyoa_5'}, harm_max=${cfg.harmMax ?? 5}, party_mode=${cfg.partyMode ?? 'squad'}, cyoa_emojis=${cfg.cyoaEmojis !== false}, art_style=${cfg.artStyle || '(none)'}, pacing_xp=${cfg.pacingXp ?? 5}, simulation_depth=${cfg.simulationDepth ?? 'active_fronts'}, relationships=${cfg.relationships !== false ? 'on' : 'off'}${fatePart}${knobsPart}`);
     if (meta.tone) lines.push(`Tone: ${meta.tone}`);
 
+    const cleanContextName = (raw) => (raw ? (parseResolvedNameToken(raw).cleanName || raw) : raw);
+
     if (adapter.isProtagonistConfigured(p)) {
-        lines.push(...adapter.formatProtagonistForContext(p, dossier));
+        lines.push(...adapter.formatProtagonistForContext({ ...p, name: cleanContextName(p.name) }, dossier));
     } else {
         lines.push('Protagonist: Unset');
     }
@@ -566,7 +594,7 @@ The Kick: Unset
         lines.push(`NPCs (${npcs.length}):`);
         npcs.forEach(n => {
             lines.push('[NPC]');
-            lines.push(`name: ${n.name}`);
+            lines.push(`name: ${cleanContextName(n.name)}`);
             const fields = [
                 ['role', n.role], ['archetype', n.archetype], ['gender', n.gender], ['species', n.species], ['appearance', n.appearance],
                 ['equipment', n.equipment], ['demeanor', n.demeanor], ['background', n.background],
@@ -595,7 +623,7 @@ The Kick: Unset
     if (monsters.length) {
         lines.push(`Monsters (${monsters.length}):`);
         monsters.forEach(m => {
-            lines.push(...adapter.formatMonsterForContext(m, dossier));
+            lines.push(...adapter.formatMonsterForContext({ ...m, name: cleanContextName(m.name) }, dossier));
         });
     } else {
         lines.push('Monsters: None');
@@ -622,7 +650,7 @@ The Kick: Unset
         lines.push(`Factions (${dossier.factions.length}):`);
         dossier.factions.forEach(f => {
             lines.push('[FACTION]');
-            lines.push(`name: ${f.name}`);
+            lines.push(`name: ${cleanContextName(f.name)}`);
             if (f.agenda) lines.push(`agenda: ${f.agenda}`);
             if (f.standing) lines.push(`standing: ${f.standing}`);
             if (f.notes) lines.push(`notes: ${f.notes}`);
@@ -1427,7 +1455,7 @@ export function applyDossierUpdates(text, dossier) {
         const targetName = cleanTargetName(rm[1] || rm[2] || '');
         if (targetName) {
             const beforeLen = updated.npcs.length;
-            updated.npcs = updated.npcs.filter(n => n.name.toLowerCase() !== targetName.toLowerCase());
+            updated.npcs = updated.npcs.filter(n => !entityNamesMatch(n.name, targetName));
             if (updated.npcs.length < beforeLen) {
                 changes.push(`Removed NPC "${targetName}"`);
             }
@@ -1445,7 +1473,7 @@ export function applyDossierUpdates(text, dossier) {
         // Check if this NPC block requests removal
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
             const beforeLen = updated.npcs.length;
-            updated.npcs = updated.npcs.filter(n => n.name.toLowerCase() !== kv.name.toLowerCase());
+            updated.npcs = updated.npcs.filter(n => !entityNamesMatch(n.name, kv.name));
             if (updated.npcs.length < beforeLen) {
                 changes.push(`Removed NPC "${kv.name}"`);
             }
@@ -1519,10 +1547,14 @@ export function applyDossierUpdates(text, dossier) {
             status: kv.status ? kv.status.trim() : (nHarm?.current > 0 ? '(-) Wounded' : ''),
         };
 
-        const existingIdx = updated.npcs.findIndex(n => n.name.toLowerCase() === npcObj.name.toLowerCase());
+        const existingIdx = updated.npcs.findIndex(n => entityNamesMatch(n.name, npcObj.name));
         if (existingIdx >= 0) {
             // Partial follow-up edit: only overwrite fields the Concierge actually supplied
             const patch = {};
+            const healedExistingName = canonicalizeResolvedName(updated.npcs[existingIdx].name);
+            if (healedExistingName !== updated.npcs[existingIdx].name) {
+                patch.name = healedExistingName;
+            }
             const given = (...ks) => ks.some(k => kv[k] !== undefined && kv[k] !== '');
             if (given('role')) patch.role = npcObj.role;
             if (given('gender')) patch.gender = npcObj.gender;
@@ -1563,7 +1595,7 @@ export function applyDossierUpdates(text, dossier) {
         const targetName = cleanTargetName(rm[1] || rm[2] || '');
         if (targetName) {
             const beforeLen = updated.monsters.length;
-            updated.monsters = updated.monsters.filter(m => m.name.toLowerCase() !== targetName.toLowerCase());
+            updated.monsters = updated.monsters.filter(m => !entityNamesMatch(m.name, targetName));
             if (updated.npcs && updated.monsters.length < beforeLen) {
                 changes.push(`Removed Adversary "${targetName}"`);
             }
@@ -1579,7 +1611,7 @@ export function applyDossierUpdates(text, dossier) {
 
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
             const beforeLen = updated.monsters.length;
-            updated.monsters = updated.monsters.filter(m => m.name.toLowerCase() !== kv.name.toLowerCase());
+            updated.monsters = updated.monsters.filter(m => !entityNamesMatch(m.name, kv.name));
             if (updated.monsters.length < beforeLen) {
                 changes.push(`Removed Adversary "${kv.name}"`);
             }
@@ -1674,9 +1706,13 @@ export function applyDossierUpdates(text, dossier) {
             fullFinishTriggers: rawFinish || '',
         };
 
-        const existingIdx = updated.monsters.findIndex(m => m.name.toLowerCase() === monsterObj.name.toLowerCase());
+        const existingIdx = updated.monsters.findIndex(m => entityNamesMatch(m.name, monsterObj.name));
         if (existingIdx >= 0) {
             const patch = {};
+            const healedExistingName = canonicalizeResolvedName(updated.monsters[existingIdx].name);
+            if (healedExistingName !== updated.monsters[existingIdx].name) {
+                patch.name = healedExistingName;
+            }
             if (kv.harm || kv.layers || kv.hp || kv.current_harm !== undefined || kv.harm_current !== undefined || kv.wounds !== undefined) {
                 patch.harm = monsterObj.harm;
                 patch.currentHarm = monsterObj.currentHarm;
@@ -1799,7 +1835,7 @@ export function applyDossierUpdates(text, dossier) {
         const targetName = cleanTargetName(rm[1] || rm[2] || '');
         if (targetName) {
             const beforeLen = updated.factions.length;
-            updated.factions = updated.factions.filter(f => f.name.toLowerCase() !== targetName.toLowerCase());
+            updated.factions = updated.factions.filter(f => !entityNamesMatch(f.name, targetName));
             if (updated.factions.length < beforeLen) {
                 changes.push(`Removed Faction "${targetName}"`);
             }
@@ -1815,7 +1851,7 @@ export function applyDossierUpdates(text, dossier) {
 
         if (kv.action === 'remove' || kv.remove === 'true' || kv.status === 'remove') {
             const beforeLen = updated.factions.length;
-            updated.factions = updated.factions.filter(f => f.name.toLowerCase() !== kv.name.toLowerCase());
+            updated.factions = updated.factions.filter(f => !entityNamesMatch(f.name, kv.name));
             if (updated.factions.length < beforeLen) {
                 changes.push(`Removed Faction "${kv.name}"`);
             }
@@ -1829,9 +1865,13 @@ export function applyDossierUpdates(text, dossier) {
             notes: kv.notes || kv.description || '',
         };
 
-        const existingIdx = updated.factions.findIndex(f => f.name.toLowerCase() === factionObj.name.toLowerCase());
+        const existingIdx = updated.factions.findIndex(f => entityNamesMatch(f.name, factionObj.name));
         if (existingIdx >= 0) {
             const patch = {};
+            const healedExistingName = canonicalizeResolvedName(updated.factions[existingIdx].name);
+            if (healedExistingName !== updated.factions[existingIdx].name) {
+                patch.name = healedExistingName;
+            }
             if (kv.agenda || kv.goal) patch.agenda = factionObj.agenda;
             if (kv.standing || kv.reputation || kv.influence) patch.standing = factionObj.standing;
             if (kv.notes || kv.description) patch.notes = factionObj.notes;
@@ -2572,8 +2612,9 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
 
     // 4. Arrays
     dossier.npcs = Array.isArray(dossier.npcs) ? dossier.npcs : [];
+    const dedupedNpcs = [];
     dossier.npcs.forEach(n => {
-        n.name = (n.name || 'Unnamed NPC').trim();
+        n.name = canonicalizeResolvedName((n.name || 'Unnamed NPC').trim());
         n.role = (n.role || 'Ally').trim();
         if (n.species) {
             n.species = sanitizeSpeciesValue(n.species) || n.species.trim();
@@ -2583,7 +2624,27 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
         }
         n.friendship = clampRelationshipScore(n.friendship);
         n.affection = clampRelationshipScore(n.affection);
+
+        const existing = dedupedNpcs.find(e => entityNamesMatch(e.name, n.name));
+        if (existing) {
+            const hasResolvedToken = (val) => typeof val === 'string' && /\[NAME:\s*.+?,\s*RESOLVED TO:/i.test(val);
+            if (!hasResolvedToken(existing.name) && hasResolvedToken(n.name)) {
+                existing.name = n.name;
+            }
+            for (const [k, v] of Object.entries(n)) {
+                if (k === 'name') continue;
+                const cur = existing[k];
+                const isMissing = cur === undefined || cur === null || cur === '' || (Array.isArray(cur) && cur.length === 0);
+                const hasIncoming = v !== undefined && v !== null && v !== '' && (!Array.isArray(v) || v.length > 0);
+                if (isMissing && hasIncoming) {
+                    existing[k] = v;
+                }
+            }
+        } else {
+            dedupedNpcs.push(n);
+        }
     });
+    dossier.npcs = dedupedNpcs;
 
     dossier.monsters = Array.isArray(dossier.monsters) ? dossier.monsters : [];
     adapter.normalizeMonsters(dossier.monsters, dossier.meta.systemKey, dossier);

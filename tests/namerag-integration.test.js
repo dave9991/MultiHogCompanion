@@ -753,4 +753,104 @@ assert.ok(
 );
 console.log('✓ Canon Name Preservation prompts and hybrid NameRAG safety guard verified cleanly');
 
+// 13l. Double-bracket / Refiner re-roll regression guard, clean-name patching, context unwrapping, healing, and Step 3 Critic/Refiner boundary
+const doubleBracketRefinerOutput = `[UPDATE_DOSSIER]
+[NPC]
+name: [[NAME:condescending Vault City economic liaison, RESOLVED TO: Zaelyn]]
+role: Vault City Representative / Administrative Foil
+gender: female
+[/NPC]
+[/UPDATE_DOSSIER]`;
+
+const unwrappedRes = await resolveDossierNamePlaceholders(
+    doubleBracketRefinerOutput,
+    { meta: { systemKey: 'post_apocalyptic', ruleset: 'fae' } },
+    { returnDetails: true, canonEntries: importedCanonEntries }
+);
+assert.ok(
+    unwrappedRes.text.includes('name: [NAME: condescending Vault City economic liaison, RESOLVED TO: Zaelyn]'),
+    'Double-bracketed already-resolved token must unwrap to single-bracket resolved token without re-rolling'
+);
+assert.ok(!unwrappedRes.text.includes('RESOLVED TO: Zaelyn, RESOLVED TO:'), 'Must never chain a second RESOLVED TO');
+const unwrappedRecord = unwrappedRes.resolutions.find(r => r.selectedName === 'Zaelyn');
+assert.strictEqual(unwrappedRecord?.source, 'Already Resolved (Unwrapped)');
+
+const chainedParsed = parseResolvedNameToken('[NAME: condescending Vault City economic liaison, RESOLVED TO: Zaelyn, RESOLVED TO: Ashunte]');
+assert.strictEqual(chainedParsed.cleanName, 'Zaelyn');
+assert.strictEqual(chainedParsed.tag, 'condescending Vault City economic liaison');
+assert.strictEqual(chainedParsed.isResolvedToken, true);
+
+const {
+    formatDossierForContext,
+    healAndNormalizeDossier,
+} = await import('../concierge-parser.js');
+const {
+    buildConciergeCriticContext,
+    buildConciergeRefinerContext,
+} = await import('../concierge-prompt.js');
+
+// Clean-name patching and removal for resolved-token NPCs
+const pass1Zaelyn = applyDossierUpdates(`[UPDATE_DOSSIER]
+[NPC]
+name: [NAME: condescending Vault City economic liaison, RESOLVED TO: Zaelyn]
+role: Vault City Representative / Administrative Foil
+notes: Carries pre-war sanctions.
+[/NPC]
+[/UPDATE_DOSSIER]`, createEmptyDossier('fae')).updatedDossier;
+
+const pass2Patched = applyDossierUpdates(`[UPDATE_DOSSIER]
+[NPC]
+name: Zaelyn
+role: Vault City Representative / Administrative Foil
+gender: female
+[/NPC]
+[/UPDATE_DOSSIER]`, pass1Zaelyn).updatedDossier;
+
+assert.strictEqual(pass2Patched.npcs.length, 1, 'Clean-name patch must update Zaelyn in-place without creating a duplicate NPC');
+assert.strictEqual(pass2Patched.npcs[0].gender, 'female');
+assert.strictEqual(
+    pass2Patched.npcs[0].name,
+    '[NAME: condescending Vault City economic liaison, RESOLVED TO: Zaelyn]',
+    'Patching by clean name must preserve the [NAME: ..., RESOLVED TO: ...] badge token'
+);
+
+const afterRemove = applyDossierUpdates('[UPDATE_DOSSIER]\n[REMOVE_NPC: Zaelyn]\n[/UPDATE_DOSSIER]', pass2Patched).updatedDossier;
+assert.strictEqual(afterRemove.npcs.length, 0, '[REMOVE_NPC: Zaelyn] must remove resolved-token NPC cleanly');
+
+// formatDossierForContext must unwrap [NAME: ..., RESOLVED TO: ...] so Judge/Refiner never see internal brackets
+const ctxOut = formatDossierForContext(pass2Patched);
+assert.ok(ctxOut.includes('name: Zaelyn'), 'formatDossierForContext must expose clean name: Zaelyn');
+assert.ok(!ctxOut.includes('RESOLVED TO:'), 'formatDossierForContext must not leak RESOLVED TO: into Judge/Refiner context');
+assert.ok(!ctxOut.includes('[NAME:'), 'formatDossierForContext must not leak [NAME: into Judge/Refiner context');
+
+// healAndNormalizeDossier must collapse already-corrupted duplicate saved drafts
+const corruptedDraft = createEmptyDossier('fae');
+corruptedDraft.npcs = [
+    {
+        name: '[NAME: condescending Vault City economic liaison, RESOLVED TO: Zaelyn]',
+        role: 'Vault City Representative / Administrative Foil',
+        gender: '',
+        notes: 'Carries pre-war sanctions.',
+    },
+    {
+        name: '[NAME: condescending Vault City economic liaison, RESOLVED TO: Zaelyn, RESOLVED TO: Ashunte]',
+        role: 'Vault City Representative / Administrative Foil',
+        gender: 'female',
+    },
+];
+const healedDraft = healAndNormalizeDossier(corruptedDraft);
+assert.strictEqual(healedDraft.npcs.length, 1, 'healAndNormalizeDossier must deduplicate corrupted Zaelyn/Ashunte pair');
+assert.strictEqual(healedDraft.npcs[0].name, '[NAME: condescending Vault City economic liaison, RESOLVED TO: Zaelyn]');
+assert.strictEqual(healedDraft.npcs[0].gender, 'female', 'Missing gender from duplicate entry must merge into kept entry');
+assert.strictEqual(healedDraft.npcs[0].notes, 'Carries pre-war sanctions.');
+
+// Step 3 Critic & Refiner stage boundary for [PROTAGONIST]
+const step3CriticCtx = buildConciergeCriticContext(pass2Patched, 'how about we add a new partner?', 'Added liaison', null, { stage: 'adventure' });
+const step3RefinerCtx = buildConciergeRefinerContext(pass2Patched, [], { score: 81, grade: 'B', weaknesses: [], directives: [] }, '', { stage: 'adventure' });
+assert.ok(step3CriticCtx.includes('STEP 3: ADVENTURE STAGE SCOPE BOUNDARY'), 'Step 3 Critic must include adventure scope boundary');
+assert.ok(step3CriticCtx.includes('DO NOT audit, critique, penalize, or issue directives for `[PROTAGONIST]`'), 'Step 3 Critic must forbid auditing [PROTAGONIST]');
+assert.ok(step3RefinerCtx.includes('STRICT STAGE 3 BOUNDARY') && step3RefinerCtx.includes('NEVER emit `[PROTAGONIST]`'), 'Step 3 Refiner must forbid emitting [PROTAGONIST]');
+
+console.log('✓ Double-bracket NameRAG guard, clean-name patching, context unwrapping, draft healing, and Step 3 Critic/Refiner boundary verified cleanly');
+
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

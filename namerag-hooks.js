@@ -51,10 +51,14 @@ export function parseResolvedNameToken(raw) {
         str = str.slice(1, -1).trim();
     }
 
-    // 1. Standard: [NAME: tag, RESOLVED TO: Name]
-    const m1 = str.match(/\[NAME:\s*(.+?),\s*RESOLVED TO:\s*(.+?)\]/i);
-    if (m1) {
-        return { cleanName: m1[2].trim(), tag: m1[1].trim(), isResolvedToken: true };
+    // 1. Standard (plus accidental double-bracket or chained RESOLVED TO):
+    //    [NAME: tag, RESOLVED TO: Name] / [[NAME: tag, RESOLVED TO: Name]] / [NAME: tag, RESOLVED TO: A, RESOLVED TO: B]
+    const m1 = str.match(/\[{1,2}NAME:\s*(.+?)\]{1,2}/i);
+    if (m1 && /,\s*RESOLVED TO:\s*/i.test(m1[1])) {
+        const segments = m1[1].split(/,\s*RESOLVED TO:\s*/i).map(s => s.trim()).filter(Boolean);
+        if (segments.length >= 2) {
+            return { cleanName: segments[1], tag: segments[0], isResolvedToken: true };
+        }
     }
 
     // 2. Alternate: [REALNAME: Name, NAME: tag] or [REALNAME: Name, TAG: tag]
@@ -718,8 +722,34 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
             /^\[\[NAME:\s*companion\s*\]\]$/i.test(ph.token) ||
             (blockType === 'COMPANION' && /^\[\[NAME\]\]$/i.test(ph.token));
 
-        const matchedCanonName = matchPlaceholderToCanonName(resolvedOutput, ph, canonLookup);
         const cleanTag = (ph.tag || '').trim();
+
+        // Guard: if the LLM double-bracketed an already-resolved token (e.g. [[NAME: concept, RESOLVED TO: Zaelyn]]),
+        // unwrap it to a single-bracket resolved token without querying NameRAG a second time.
+        if (/,\s*RESOLVED TO:\s*/i.test(cleanTag)) {
+            const segments = cleanTag.split(/,\s*RESOLVED TO:\s*/i).map(s => s.trim()).filter(Boolean);
+            if (segments.length >= 2) {
+                const origTag = segments[0];
+                const origName = segments[1];
+                const unwrapped = `[NAME: ${origTag}, RESOLVED TO: ${origName}]`;
+                usedNames.add(origName.toLowerCase());
+                resolvedOutput = resolvedOutput.split(ph.token).join(unwrapped);
+                resolutions.push({
+                    placeholder: ph.token,
+                    tag: origTag,
+                    blockType,
+                    query,
+                    gender,
+                    source: 'Already Resolved (Unwrapped)',
+                    candidates: [origName],
+                    selectedName: origName,
+                    replacement: unwrapped,
+                });
+                continue;
+            }
+        }
+
+        const matchedCanonName = matchPlaceholderToCanonName(resolvedOutput, ph, canonLookup);
 
         if (isProtagonistToken && hasEstablishedProtagonist) {
             chosenName = existingProtoName;

@@ -1947,6 +1947,7 @@ async function handleUserSend() {
                     if (typingEl) {
                         setStage('<i>⚖️ The Concierge is grading blueprint depth &amp; entanglement...</i>');
                     }
+                    const activeStageScope = currentNavMode === 'new-adventure' ? currentAdventureStep : null;
                     const criticMessages = [
                         {
                             role: 'system',
@@ -1956,6 +1957,7 @@ async function handleUserSend() {
                                 displayUserText,
                                 builderSummaryText,
                                 builderReport.contemplation || activeDossier.contemplation,
+                                { stage: activeStageScope },
                             ),
                         },
                         {
@@ -1976,7 +1978,7 @@ async function handleUserSend() {
                             {
                                 role: 'system',
                                 name: 'System',
-                                content: buildConciergeRefinerContext(activeDossier, changelog, critiqueResult, activeNameRagSeeds),
+                                content: buildConciergeRefinerContext(activeDossier, changelog, critiqueResult, activeNameRagSeeds, { stage: activeStageScope }),
                             },
                             ...recentHistory().map(formatHistoryMessage),
                             {

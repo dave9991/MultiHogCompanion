@@ -997,9 +997,11 @@ directives:
  * @param {string} [userPromptText]
  * @param {string} [builderSummary]
  * @param {object} [contemplation]
+ * @param {object} [options]
+ * @param {string|null} [options.stage=null] Current workflow stage ('adventure', 'character', etc.)
  * @returns {string}
  */
-export function buildConciergeCriticContext(activeDossier, userPromptText = '', builderSummary = '', contemplation = null) {
+export function buildConciergeCriticContext(activeDossier, userPromptText = '', builderSummary = '', contemplation = null, { stage = null } = {}) {
     const ruleset = systemRegistry.detectRuleset(activeDossier);
     const basePrompt = buildConciergeCriticPrompt(ruleset);
     const formattedBlueprint = formatDossierForContext(activeDossier);
@@ -1015,7 +1017,11 @@ export function buildConciergeCriticContext(activeDossier, userPromptText = '', 
         ? `\n======================================================================\n🧠 [ARCHITECT_CONTEMPLATION_NOTES] (PASS 1 INTENT)\n======================================================================\n${contLines.join('\n')}\n`
         : '';
 
-    return `${basePrompt}
+    const stageBoundaryNote = stage === 'adventure'
+        ? `\n\n======================================================================\n🚧 [STEP 3: ADVENTURE STAGE SCOPE BOUNDARY]\n======================================================================\nWe are currently in **Step 3 (\`🗺️ Adventure\`)**. The protagonist character sheet (stats, pools, positive/negative tags, archetype) has NOT been built yet and belongs strictly to **Step 4 (\`👤 Character\`)**.\n* DO NOT audit, critique, penalize, or issue directives for \`[PROTAGONIST]\` (even if \`[CURRENT_LIVE_BLUEPRINT]\` shows Protagonist: Unset or placeholder pools).\n* Audit ONLY Step 3 Episode 1 scope: \`[KICK]\`, \`[MAP]\`, \`[MONSTER]\`, \`[NPC]\`, \`[FACTION]\`, and \`[CONFIG]\`.`
+        : '';
+
+    return `${basePrompt}${stageBoundaryNote}
 ${contemplationSection}
 ======================================================================
 💬 [PLAYER_REQUEST_CONTEXT]
@@ -1038,9 +1044,11 @@ ${formattedBlueprint}`;
  * @param {string[]} changelog
  * @param {object} critique Parsed critique object from parseDossierCritique
  * @param {string} [activeNameRagSeeds]
+ * @param {object} [options]
+ * @param {string|null} [options.stage=null] Current workflow stage ('adventure', 'character', etc.)
  * @returns {string}
  */
-export function buildConciergeRefinerContext(activeDossier, changelog, critique, activeNameRagSeeds = '') {
+export function buildConciergeRefinerContext(activeDossier, changelog, critique, activeNameRagSeeds = '', { stage = null } = {}) {
     const isFae = activeDossier?.meta?.ruleset === 'fae';
     const baseContext = buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds);
     const weaknessesList = (critique?.weaknesses || []).map(w => `- ${w}`).join('\n') || '- Deepen cross-entity connections and fictional specificity.';
@@ -1051,6 +1059,9 @@ export function buildConciergeRefinerContext(activeDossier, changelog, critique,
     const cleanupDirective = isFae
         ? '3. If the Judge flagged a naming collision, duplicate entity, or unnecessary block (such as an unwanted [WORLD_RULES]), use `[REMOVE_NPC: Name]`, `[REMOVE_MONSTER: Name]`, `[REMOVE_FACTION: Name]`, `[REMOVE_MAP: Site]`, or `[REMOVE_WORLD_RULE: Title]` to remove the collided/unwanted entry before emitting the corrected entity.'
         : '3. If the Judge flagged a naming collision, duplicate entity, or unnecessary block (such as an unwanted [WORLD_RULES] or [CUSTOM_MODULE]), use `[REMOVE_NPC: Name]`, `[REMOVE_MONSTER: Name]`, `[REMOVE_FACTION: Name]`, `[REMOVE_MAP: Site]`, `[REMOVE_WORLD_RULE: Title]`, or `[REMOVE_CUSTOM_MODULE]` to remove the collided/unwanted entry before emitting the corrected entity.';
+    const stageDirective = stage === 'adventure'
+        ? `\n6. **STRICT STAGE 3 BOUNDARY:** We are in Step 3 (\`🗺️ Adventure\`). NEVER emit \`[PROTAGONIST]\` here — protagonist sheets, pools, and tags are built in Step 4 (\`👤 Character\`).`
+        : '';
 
     return `${baseContext}
 
@@ -1070,7 +1081,7 @@ INSTRUCTIONS FOR PASS 2 (REFINER):
 2. Keep existing entity names when enriching valid entities in-place (do NOT re-emit \`[[NAME:placeholder]]\` tokens for existing entities or invent duplicates — use their exact established \`name:\` or \`site:\` from [CURRENT_LIVE_BLUEPRINT] so your improvements patch them in place!).
 ${cleanupDirective}
 4. You only need to emit the blocks and fields being deepened, connected, removed, or added.
-5. Start your [UPDATE_DOSSIER] block with \`summary: <1-sentence summary of the second-pass refinements>\`.
+5. Start your [UPDATE_DOSSIER] block with \`summary: <1-sentence summary of the second-pass refinements>\`.${stageDirective}
 ======================================================================`;
 }
 

@@ -587,4 +587,100 @@ assert.strictEqual(
     'shouldRunContemplativeJudgePass must count "Added FAE Encounter ..." in the monsters category'
 );
 
+console.log('20. Testing Phase 2 Stage 1 & Stage 2 Audit fixes (CONC-012, CONC-013)...');
+const s1CleanPrompt = buildStage1InitialBuilderPrompt(createEmptyDossier('pbta'), '');
+assert.ok(s1CleanPrompt.includes('[/UPDATE_DOSSIER]'), 'CONC-012: Stage 1 syntax example must include closing [/UPDATE_DOSSIER]');
+assert.ok(!s1CleanPrompt.includes('ready_for_canon: true | false'), 'CONC-012: Stage 1 example must not include literal ready_for_canon: true | false pipe template');
+
+const s2CleanPrompt = buildStage2CanonBuilderPrompt(createEmptyDossier('pbta'), sampleCanonEntries);
+assert.ok(s2CleanPrompt.includes('[/UPDATE_DOSSIER]'), 'CONC-012: Stage 2 syntax example must include closing [/UPDATE_DOSSIER]');
+assert.ok(s2CleanPrompt.includes('[REMOVE_WORLD_RULE: Title]'), 'CONC-012: Stage 2 prompt must document [REMOVE_WORLD_RULE: Title]');
+assert.ok(!s2CleanPrompt.includes('kind: FACTION | LOCATION'), 'CONC-012: Stage 2 example must not contain literal kind pipe template');
+assert.ok(!s2CleanPrompt.includes('category: technology | physiology'), 'CONC-012: Stage 2 example must not contain literal category pipe template');
+
+// CONC-013: [UPSERT_CANON_ENTRY] parser support
+const upsertParsed = applyDossierUpdates(`
+[UPDATE_DOSSIER]
+[UPSERT_CANON_ENTRY]
+kind: FACTION
+name: The Caravan Guild
+importance: 4
+content: Controls southern water shipments.
+[/UPSERT_CANON_ENTRY]
+[/UPDATE_DOSSIER]
+`, createEmptyDossier('pbta'));
+assert.strictEqual(upsertParsed.canonMutations.length, 1, 'CONC-013: [UPSERT_CANON_ENTRY] must parse into canonMutations');
+assert.strictEqual(upsertParsed.canonMutations[0].action, 'upsert');
+assert.strictEqual(upsertParsed.canonMutations[0].entry.name, 'The Caravan Guild');
+
+// CONC-013: NameRAG-aware Canon store upsert, toggle, and removal by clean name
+const {
+    clearStagedCanon,
+    upsertCanonEntry,
+    toggleCanonEntryDisabled,
+    removeCanonEntry,
+    getStagedCanonEntries,
+} = await import('../concierge-canon.js');
+clearStagedCanon();
+upsertCanonEntry({
+    kind: 'NPC',
+    name: '[NAME: veteran fire captain, RESOLVED TO: Sheridan Vance]',
+    content: 'Initial station commander.',
+});
+assert.strictEqual(getStagedCanonEntries().length, 1);
+
+// Follow-up clean-name upsert must update in-place and preserve NameRAG badge token
+upsertCanonEntry({
+    kind: 'NPC',
+    name: 'Sheridan Vance',
+    content: 'Veteran commander injured during the Blackout.',
+});
+const stagedAfterUpsert = getStagedCanonEntries();
+assert.strictEqual(stagedAfterUpsert.length, 1, 'CONC-013: Clean-name upsert must not duplicate resolved Canon entry');
+assert.strictEqual(stagedAfterUpsert[0].name, '[NAME: veteran fire captain, RESOLVED TO: Sheridan Vance]', 'Badge token preserved on clean-name upsert');
+assert.ok(stagedAfterUpsert[0].content.includes('injured during the Blackout'));
+
+const toggled = toggleCanonEntryDisabled('Sheridan Vance', true);
+assert.ok(toggled && toggled.disabled === true, 'CONC-013: toggleCanonEntryDisabled must match by clean NameRAG name');
+assert.strictEqual(removeCanonEntry('Sheridan Vance'), true, 'CONC-013: removeCanonEntry must match by clean NameRAG name');
+assert.strictEqual(getStagedCanonEntries().length, 0);
+clearStagedCanon();
+
+console.log('21. Testing Phase 3 Stage 3 & Stage 4 Audit fixes (CONC-017, CONC-020)...');
+for (const rs of ['dnd5e', 'fae', 'pbta']) {
+    const s3Prompt = buildStage3AdventureBuilderPrompt(createEmptyDossier(rs), sampleCanonEntries);
+    assert.ok(!s3Prompt.includes('danger:'), `CONC-017: Stage 3 ${rs} prompt must emit threat: rather than legacy danger:`);
+    assert.ok(s3Prompt.includes('threat:'), `CONC-017: Stage 3 ${rs} prompt must document canonical threat: key`);
+
+    const s4Prompt = buildStage4CharacterBuilderPrompt(createEmptyDossier(rs), sampleCanonEntries);
+    assert.ok(s4Prompt.includes('[/UPDATE_DOSSIER]'), `CONC-020: Stage 4 ${rs} prompt must include closing [/UPDATE_DOSSIER]`);
+    assert.ok(s4Prompt.includes('[/PROTAGONIST]'), `CONC-020: Stage 4 ${rs} prompt must include closing [/PROTAGONIST]`);
+    assert.ok(s4Prompt.includes('[DESIGN_GAME_SYSTEM:'), `CONC-020: Stage 4 ${rs} prompt must align with [DESIGN_GAME_SYSTEM:]`);
+    assert.ok(!s4Prompt.includes('Optional [CUSTOM_MODULE]'), `CONC-020: Stage 4 ${rs} prompt must not contradict DESIGN_GAME_SYSTEM_DIRECTIVE`);
+}
+
+// CONC-017: Parser handles both canonical threat: and legacy danger: synonyms
+const parsedMaps = applyDossierUpdates(`
+[UPDATE_DOSSIER]
+[MAP: Forgotten Shrine]
+kind: DUNGEON
+danger: Tense
+brief_description: Shadow-draped altar.
+[/MAP]
+[MAP: Dusty Outpost]
+kind: SETTLEMENT
+danger: Medium
+[/MAP]
+[MAP: Abyssal Pit]
+threat: DEADLY
+[/MAP]
+[/UPDATE_DOSSIER]
+`, createEmptyDossier('fae'));
+const mapShrine = parsedMaps.updatedDossier.maps.find(m => m.site === 'Forgotten Shrine');
+const mapOutpost = parsedMaps.updatedDossier.maps.find(m => m.site === 'Dusty Outpost');
+const mapPit = parsedMaps.updatedDossier.maps.find(m => m.site === 'Abyssal Pit');
+assert.strictEqual(mapShrine?.threat, 'HIGH', 'CONC-017: legacy danger: Tense maps to HIGH');
+assert.strictEqual(mapOutpost?.threat, 'MODERATE', 'CONC-017: legacy danger: Medium maps to MODERATE');
+assert.strictEqual(mapPit?.threat, 'DEADLY', 'Canonical threat: DEADLY preserved');
+
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

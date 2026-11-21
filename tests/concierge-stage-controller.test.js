@@ -108,6 +108,7 @@ function getOrCreateMockElement(selector) {
             textVal: '',
             htmlVal: '',
             attrs: {},
+            props: {},
             childrenList: [],
             handlers: [],
             show() { this.visible = true; return this; },
@@ -120,7 +121,7 @@ function getOrCreateMockElement(selector) {
             val(v) { if (v !== undefined) { this.textVal = String(v); return this; } return this.textVal; },
             attr(k, v) { if (v !== undefined) { this.attrs[k] = v; return this; } return this.attrs[k]; },
             css() { return this; },
-            prop(k, v) { if (v !== undefined) return this; return false; },
+            prop(k, v) { if (v !== undefined) { this.props[k] = v; return this; } return Boolean(this.props[k]); },
             empty() { this.childrenList = []; return this; },
             append(ch) { this.childrenList.push(ch); return this; },
             appendChild(ch) { this.childrenList.push(ch); return ch; },
@@ -622,5 +623,161 @@ store.applyDraftToSessionZero({
 assert.strictEqual(store.sessionZeroTrack.currentAdventureStep, 'adventure');
 assert.strictEqual(store.sessionZeroTrack.unlockedSteps.adventure, true);
 assert.strictEqual(store.sessionZeroTrack.stagedCanonEntries[0].name, 'Silver Watch');
+
+console.log('11. Testing CONC-010 (Step 3 gate behind Step 2 unlock) & CONC-014 (Pre-imported Step 2 initialization)...');
+const { setStagedCanonEntries, clearStagedCanon } = await import('../concierge-canon.js');
+resetConciergeState({ showGreeting: false });
+clearStagedCanon();
+setStagedCanonEntries([
+    {
+        id: 'FACTION:Vault City',
+        kind: 'FACTION',
+        name: 'Vault City',
+        comment: '[FACTION] Vault City',
+        content: 'An isolationist technocracy on the frontier.',
+        disabled: false,
+    },
+]);
+evaluateStepUnlocks();
+const gatedState = getConciergeStageState();
+assert.strictEqual(gatedState.unlockedSteps.canon, false, 'Canon remains locked when framing is incomplete');
+assert.strictEqual(gatedState.unlockedSteps.adventure, false, 'CONC-010: Adventure must NOT unlock while Canon is still locked');
+
+// Complete framing -> Step 2 unlocks -> entering Step 2 with pre-imported lore initializes welcome bubble + stageNotes.canon
+const liveDossier = getActiveConciergeDossier();
+liveDossier.meta.premise = 'Patrol the eastern border as a Ranger.';
+liveDossier.meta.focalLens = 'Arroyo Crossing';
+liveDossier.meta.framingComplete = true;
+evaluateStepUnlocks();
+assert.strictEqual(getConciergeStageState().unlockedSteps.canon, true, 'Framing complete unlocks Step 2 Canon');
+
+await setAdventureStep('canon');
+const chatChildren = document.getElementById('mhc_chat_messages').children();
+assert.ok(chatChildren.length > 0, 'CONC-014: Entering Step 2 with pre-imported Canon must render Series Bible welcome bubble');
+assert.ok(chatChildren.some(el => (el.innerHTML || el.htmlVal || '').includes('Series Bible Canon Ready')), 'Welcome bubble text must announce loaded Series Bible');
+assert.strictEqual(getConciergeStageState().unlockedSteps.adventure, true, 'Step 3 Adventure unlocks after Step 2 is entered with Canon');
+assert.ok((getActiveConciergeDossier().meta.stageNotes.canon || '').includes('Vault City'), 'Step 2 entry must populate stageNotes.canon with active factions');
+clearStagedCanon();
+
+console.log('12. Testing Phase 3 CONC-015 (Header Badge Safety), CONC-016 (Launch Gate), & CONC-018 (Factions/Calibration Snapshots)...');
+const { extractAgnosticAdventureBones, snapshotAdventure, computeAdventureDiff } = await import('../concierge-canon.js');
+resetConciergeState({ showGreeting: false });
+const phase3Dossier = getActiveConciergeDossier();
+phase3Dossier.meta.title = 'Frontier Law';
+phase3Dossier.meta.premise = 'A patrol along the saline border.';
+phase3Dossier.meta.focalLens = 'Arroyo Crossing';
+phase3Dossier.meta.framingComplete = true;
+phase3Dossier.meta.ruleset = 'pbta';
+phase3Dossier.meta.rulesetConfirmed = true;
+phase3Dossier.meta.systemKey = 'post_apocalyptic';
+phase3Dossier.meta.systemLabel = 'Apocalypse Frontier';
+phase3Dossier.theKick = { startingLocation: 'Arroyo Crossing', crisis: 'Raiders breach the sluice' };
+phase3Dossier.factions = [{ name: 'Vault City', goal: 'Annex the sluice', disposition: 'Guarded', notes: 'Well-armed' }];
+phase3Dossier.protagonist.name = '';
+
+await setAdventureStep('adventure', { force: true, skipHarmonization: true });
+evaluateStepUnlocks();
+const launchBtnMock = getOrCreateMockElement('#mhc_launch_campaign_btn');
+assert.strictEqual(getConciergeStageState().unlockedSteps.character, true, 'Step 4 unlocks once rulesetConfirmed + Episode 1 content exist');
+assert.strictEqual(launchBtnMock.prop('disabled'), true, 'CONC-016: Launch button must remain disabled in Step 3 without named protagonist');
+assert.ok((launchBtnMock.attr('title') || '').includes('Complete Step 4'), 'Disabled Launch button explains Step 4 requirement');
+
+await setAdventureStep('character', { force: true, skipHarmonization: true });
+evaluateStepUnlocks();
+assert.strictEqual(launchBtnMock.prop('disabled'), true, 'CONC-016: Launch button must remain disabled on empty Step 4 entry until protagonist is named');
+
+phase3Dossier.protagonist.name = 'Elena Vance';
+evaluateStepUnlocks();
+assert.strictEqual(launchBtnMock.prop('disabled'), false, 'CONC-016: Launch button enables once Step 4 has a named protagonist');
+
+// CONC-015: Clicking header system badge in new-adventure mode must NOT wipe activeDossier
+getOrCreateMockElement('#mhc_header_system_badge').trigger('click');
+assert.strictEqual(getActiveConciergeDossier().meta.title, 'Frontier Law', 'CONC-015: Clicking header badge in new-adventure mode must not reset dossier');
+
+// CONC-018: Agnostic bones & adventure snapshots preserve factions + ruleset calibration
+const bones = extractAgnosticAdventureBones(phase3Dossier);
+assert.strictEqual(bones.factions.length, 1);
+assert.strictEqual(bones.factions[0].name, 'Vault City');
+
+const snapBefore = snapshotAdventure(phase3Dossier);
+phase3Dossier.meta.systemKey = 'noir_intrigue';
+phase3Dossier.meta.systemLabel = 'Noir Intrigue';
+phase3Dossier.factions.push({ name: 'Caravan Guild', goal: 'Keep water flowing' });
+const advDiff = computeAdventureDiff(snapBefore, snapshotAdventure(phase3Dossier));
+assert.strictEqual(advDiff.hasChanges, true, 'CONC-018: computeAdventureDiff detects calibration and faction edits');
+assert.ok(advDiff.block.includes('Ruleset calibration changed'));
+assert.ok(advDiff.block.includes('Added Factions: Caravan Guild'));
+
+console.log('13. Testing Phase 4 CONC-024 (Living World Badge Safety) & CONC-021/022 (Runner Sync & Launch Partition Invariants)...');
+// CONC-024: Header system badge in living-world mode must NOT reset/wipe the loaded campaign
+globalThis.SillyTavern.getContext = () => ({
+    getCurrentChatId: () => 'chat_concierge_100',
+    chatMetadata: { chat_id: 'chat_concierge_100' },
+    extensionSettings: {
+        rpg_tracker: {
+            chatStates: {
+                chat_concierge_100: {
+                    campaignDossier: conciergeDossier,
+                },
+            },
+        },
+    },
+});
+const lwEntered = await switchToTrack('living-world');
+assert.strictEqual(lwEntered, true, 'Switching to living-world for CONC-024 check must succeed');
+getOrCreateMockElement('#mhc_header_system_badge').trigger('click');
+assert.strictEqual(getActiveConciergeDossier().meta.title, 'Sunken Citadel Delve', 'CONC-024: Clicking header badge in living-world mode must NOT wipe campaign');
+assert.strictEqual(getConciergeStageState().currentNavMode, 'living-world');
+await switchToTrack('new-adventure');
+
+// CONC-021: syncPbtaCampaignUpdates runs cleanly with options, strips NameRAG tokens, and records adapter.id for D&D 5e
+const { configureRuntimeActions } = await import('../../SillyTavern-MultihogDnDFramework/src/app/runtime-bridge.js');
+configureRuntimeActions({
+    saveSettings: () => {},
+    refreshRenderedView: () => {},
+    syncMemoView: () => {},
+    autoApplySysprompt: async () => {},
+});
+const { syncPbtaCampaignUpdates } = await import('../concierge-runner.js');
+const syncRpgSettings = {
+    chatStates: {
+        chat_sync_dnd: {},
+    },
+};
+const syncChatMeta = { chat_id: 'chat_sync_dnd' };
+globalThis.SillyTavern.getContext = () => ({
+    getCurrentChatId: () => 'chat_sync_dnd',
+    chatId: 'chat_sync_dnd',
+    chatMetadata: syncChatMeta,
+    extensionSettings: {
+        rpg_tracker: syncRpgSettings,
+        multihog_companion: {},
+    },
+});
+const dndSyncDossier = {
+    meta: {
+        title: 'Citadel 5e',
+        ruleset: 'dnd5e',
+        systemKey: 'grimdark',
+        systemLabel: 'Grimdark 5e',
+        premise: 'Hold the gate.',
+        customGenreSpec: { stats: ['STR', 'DEX'] },
+    },
+    protagonist: { name: '[NAME: veteran soldier, RESOLVED TO: Kaelen]', hp: 12, ac: 16 },
+    npcs: [{ name: '[NAME: quartermaster, RESOLVED TO: Mara]', role: 'Ally' }],
+    monsters: [{ name: '[NAME: ridge stalker, RESOLVED TO: Ash Hound]', harm: 3 }],
+    factions: [{ name: '[NAME: iron cabal, RESOLVED TO: Iron Pact]', agenda: 'Hold the gate' }],
+};
+const syncRes = await syncPbtaCampaignUpdates(dndSyncDossier, () => {}, { rpgSettings: syncRpgSettings });
+assert.strictEqual(syncRes.success, true, `CONC-021: syncPbtaCampaignUpdates must succeed without ReferenceError (${syncRes.message})`);
+assert.ok(syncRes.message.includes('D&D 5e'), 'CONC-021: D&D 5e sync message must reflect active adapter');
+assert.strictEqual(syncChatMeta.CompanionActiveCartridge?.cartridgeId, 'dnd5e', 'CONC-021: CompanionActiveCartridge must preserve dnd5e cartridgeId');
+assert.strictEqual(syncChatMeta.CompanionActiveCartridge?.dossier?.protagonist?.name, 'Kaelen', 'CONC-021: NameRAG token stripped from protagonist on sync');
+assert.strictEqual(syncChatMeta.CompanionActiveCartridge?.dossier?.factions?.[0]?.name, 'Iron Pact', 'CONC-021: NameRAG token stripped from factions on sync');
+
+// CONC-022: Verify concierge-runner.js launch registers Bestiary in standardSuffixes and distributes lorebooks/Canon/Skeleton unconditionally
+const runnerSrc = fs.readFileSync(path.join(ROOT_DIR, 'concierge-runner.js'), 'utf8');
+assert.ok(runnerSrc.includes("'Bestiary'"), 'CONC-022: standardSuffixes in launchPbtaCampaign must include Bestiary');
+assert.ok(!/if\s*\(\s*npcs\.length\s*\|\|\s*monsters\.length\s*\|\|\s*factions\.length\s*\)\s*\{[\s\S]*?injectDossierEntitiesIntoCampaignLorebooks/.test(runnerSrc), 'CONC-022: Lorebook distribution must not be gated behind npcs/monsters/factions non-empty check');
 
 console.log('--- ALL CONCIERGE 4-STEP UI CONTROLLER TESTS PASSED CLEANLY! ---');

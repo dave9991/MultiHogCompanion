@@ -259,8 +259,9 @@ export function classifyTurnAbort(err) {
  *
  * @param {string[]} starts
  * @param {() => void} [onSelectStart=null]
+ * @param {() => boolean} [isBusy=null]
  */
-export function renderStartChipsDom(starts, onSelectStart = null) {
+export function renderStartChipsDom(starts, onSelectStart = null, isBusy = null) {
     if (typeof $ === 'undefined') return;
     $('.mhc-start-chips').remove();
     if (!starts?.length) return;
@@ -268,6 +269,7 @@ export function renderStartChipsDom(starts, onSelectStart = null) {
     for (const label of starts) {
         const chip = $('<button type="button" class="mhc-chip mhc-start-chip" style="cursor:pointer;"></button>').text(`▶ ${label}`);
         chip.on('click', () => {
+            if (typeof isBusy === 'function' && isBusy()) return;
             $('.mhc-start-chips').remove();
             $('#mhc_chat_input').val(`Let's start with: ${label}`);
             if (typeof onSelectStart === 'function') onSelectStart();
@@ -286,14 +288,16 @@ export function renderStartChipsDom(starts, onSelectStart = null) {
  *
  * @param {Array<{ name: string }>} found
  * @param {() => void} [onSelectPromote=null]
+ * @param {() => boolean} [isBusy=null]
  */
-export function renderPromoteChipsDom(found, onSelectPromote = null) {
+export function renderPromoteChipsDom(found, onSelectPromote = null, isBusy = null) {
     if (typeof $ === 'undefined') return;
     $('.mhc-start-chips').remove();
     const wrap = $('<div class="mhc-start-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"></div>');
     const chip = $('<button type="button" class="mhc-chip mhc-start-chip" style="cursor:pointer;"></button>')
         .text(`📥 Pull in from Canon: ${found.map(e => e.name).join(', ')}`);
     chip.on('click', () => {
+        if (typeof isBusy === 'function' && isBusy()) return;
         $('.mhc-start-chips').remove();
         $('#mhc_chat_input').val(`Build out ${found.map(e => e.name).join(' and ')} from the canon.`);
         if (typeof onSelectPromote === 'function') onSelectPromote();

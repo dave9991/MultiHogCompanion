@@ -830,7 +830,7 @@ export function applyDossierUpdates(text, dossier) {
             return fallbackResult;
         }
         // Fallback: check if text contains standalone line-start blocks or explicitly closed blocks directly
-        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|DESIGN_GAME_SYSTEM|RECALIBRATE_RULESET|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
+        const hasDirectBlocks = /(?:^|\n)[ \t]*\[(?:CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|UPSERT_CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|DESIGN_GAME_SYSTEM|RECALIBRATE_RULESET|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$)/i.test(cleanedText);
         if (hasDirectBlocks) {
             raw = cleanedText;
         }
@@ -870,7 +870,7 @@ export function applyDossierUpdates(text, dossier) {
     // Pre-extract section blocks so top-level metadata keys (title:, system:, premise:, tone:, summary:)
     // never accidentally match keys inside [WORLD_RULES], [CUSTOM_MODULE], [PROTAGONIST], etc.
     const framingBlocks = matchDossierSectionBlocks(raw, 'FRAMING', 'FRAMING');
-    const canonEntryBlocks = matchDossierSectionBlocks(raw, 'CANON_(?:ENTRY|UPDATE)(?::\\s*([^\\]\\r\\n]+))?', 'CANON_(?:ENTRY|UPDATE)');
+    const canonEntryBlocks = matchDossierSectionBlocks(raw, '(?:CANON_(?:ENTRY|UPDATE)|UPSERT_CANON_ENTRY)(?::\\s*([^\\]\\r\\n]+))?', '(?:CANON_(?:ENTRY|UPDATE)|UPSERT_CANON_ENTRY)');
     const protoBlocks = matchDossierSectionBlocks(raw, 'PROTAGONIST', 'PROTAGONIST');
     const npcBlocks = matchDossierSectionBlocks(raw, 'NPC(?::\\s*([^\\]\\r\\n]+))?', 'NPC');
     const monsterBlocks = matchDossierSectionBlocks(raw, 'MONSTER(?::\\s*([^\\]\\r\\n]+))?', 'MONSTER');
@@ -1802,7 +1802,15 @@ export function applyDossierUpdates(text, dossier) {
         }
 
         const kindUpper = (kv.kind || 'INTERIOR').toUpperCase();
-        const threatUpper = (kv.threat || 'MODERATE').toUpperCase();
+        const rawThreatUpper = (kv.threat || kv.danger || 'MODERATE').toUpperCase();
+        const threatSynonyms = {
+            MEDIUM: 'MODERATE',
+            TENSE: 'HIGH',
+            EXTREME: 'DEADLY',
+            CALM: 'SAFE',
+            PEACEFUL: 'SAFE',
+        };
+        const threatUpper = threatSynonyms[rawThreatUpper] || rawThreatUpper;
 
         const mapObj = {
             site: kv.site,
@@ -1818,7 +1826,7 @@ export function applyDossierUpdates(text, dossier) {
         if (existingIdx >= 0) {
             const patch = {};
             if (kv.kind) patch.kind = mapObj.kind;
-            if (kv.threat) patch.threat = mapObj.threat;
+            if (kv.threat || kv.danger) patch.threat = mapObj.threat;
             if (kv.entrance) patch.entrance = mapObj.entrance;
             if (kv.prompt) { patch.prompt = mapObj.prompt; }
             if (kv.brief_description || kv.prompt) patch.briefDescription = mapObj.briefDescription;

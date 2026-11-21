@@ -577,8 +577,8 @@ export function evaluateStepUnlocks() {
         }
     }
 
-    // Step 3 (Adventure) unlocks if already unlocked OR staged Canon entries exist OR worldRules axioms exist
-    if (!unlockedSteps.adventure) {
+    // Step 3 (Adventure) unlocks only after Step 2 (Canon) is unlocked AND staged Canon entries or worldRules axioms exist
+    if (!unlockedSteps.adventure && unlockedSteps.canon) {
         const hasCanon = getStagedCanonEntries().length > 0;
         const hasAxioms = Array.isArray(activeDossier?.worldRules?.axioms) && activeDossier.worldRules.axioms.length > 0;
         if (hasCanon || hasAxioms) {
@@ -639,11 +639,15 @@ export function evaluateStepUnlocks() {
         curBtn.addClass('active');
     }
 
-    // Launch button state
+    // Launch button state (CONC-016: require unlockedSteps.character AND named protagonist in new-adventure mode)
     const launchBtn = $('#mhc_launch_campaign_btn');
-    const isReady = !isGenerating && (currentNavMode !== 'new-adventure' || currentAdventureStep === 'character' || unlockedSteps.character);
+    const hasNamedProtagonist = Boolean(activeDossier?.protagonist?.name?.trim());
+    const isReady = !isGenerating && (currentNavMode !== 'new-adventure' || (unlockedSteps.character && hasNamedProtagonist));
     if (typeof launchBtn.prop === 'function') {
         launchBtn.prop('disabled', !isReady);
+    }
+    if (typeof launchBtn.attr === 'function') {
+        launchBtn.attr('title', isReady ? 'Finalize & Launch Campaign' : 'Complete Step 4 (Character) with a named protagonist to launch.');
     }
     if (typeof launchBtn.css === 'function') {
         launchBtn.css({ opacity: isReady ? '1' : '0.5', 'pointer-events': isReady ? 'auto' : 'none' });
@@ -659,9 +663,15 @@ function setConciergeBusyState(busy) {
     isGenerating = Boolean(busy);
     const lockSelectors = [
         '#mhc_new_adventure_stepper .mhc-step-btn',
+        '#mhc_header_system_badge',
+        '#mhc_pick_st_char_btn',
+        '#mhc_pick_st_lore_btn',
         '#mhc_deck_tune_ruleset_btn',
         '.mhc-ruleset-card',
         '.mhc-ruleset-btn',
+        '.mhc-dial-pill',
+        '#mhc_sync_active_campaign_btn',
+        '#mhc_fork_campaign_btn',
         '#mhc_reset_session_btn',
     ];
     for (const sel of lockSelectors) {
@@ -723,79 +733,136 @@ function refreshCanonStageNote(dossier, canonSummary = '') {
 }
 
 /**
+ * Refreshes activeDossier.meta.stageNotes.adventure from current starting location and crisis.
+ * @param {object} dossier
+ */
+function refreshAdventureStageNote(dossier) {
+    if (!dossier?.theKick?.crisis) return;
+    dossier.meta = dossier.meta || {};
+    dossier.meta.stageNotes = dossier.meta.stageNotes || { framing: '', canon: '', adventure: '' };
+    const loc = dossier.theKick.startingLocation ? ` in ${dossier.theKick.startingLocation}` : '';
+    dossier.meta.stageNotes.adventure = `Opening crisis${loc}: ${dossier.theKick.crisis}`;
+}
+
+/**
  * Runs a single Stage Builder + Talker harmonization pass.
  */
 async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBones = null } = {}) {
     setConciergeBusyState(true);
+    const stream = document.getElementById('mhc_chat_messages');
+    const typingBubble = document.createElement('div');
+    typingBubble.className = 'mhc-bubble mhc-bubble-assistant';
+    typingBubble.id = 'mhc_typing_indicator';
+    const harmLabel = stage === 'character'
+        ? '🔄 Harmonizing Protagonist with upstream updates...'
+        : stage === 'adventure'
+            ? '🔄 Harmonizing Episode 1 Adventure with updated Canon...'
+            : '🔄 Harmonizing Series Bible Canon...';
+    typingBubble.innerHTML = `<i class="mhc-stage">${harmLabel}</i>`;
+    if (stream) {
+        stream.appendChild(typingBubble);
+        stream.scrollTop = stream.scrollHeight;
+    }
+
     try {
-    let builderSys = '';
-    const stagedCanon = getStagedCanonEntries();
+        let builderSys = '';
+        const stagedCanon = getStagedCanonEntries();
 
-    if (stage === 'canon') {
-        builderSys = buildStage2CanonBuilderPrompt(activeDossier, stagedCanon, upstreamDiff);
-    } else if (stage === 'adventure') {
-        builderSys = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
-    } else if (stage === 'character') {
-        builderSys = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff });
-    }
-
-    const builderMsgs = [
-        { role: 'system', name: 'System', content: builderSys },
-        { role: 'user', name: 'Player', content: upstreamDiff ? `[UPSTREAM_DIFF]:\n${upstreamDiff}\nPlease harmonize this stage with upstream updates.` : 'Please harmonize this stage with upstream updates.' },
-    ];
-    let builderRaw = await sendConciergeRequest(builderMsgs);
-    let harmonizationResolutions = [];
-    if (extension_settings?.multihog_companion?.enableNameRag !== false) {
-        try {
-            const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true, canonEntries: stagedCanon });
-            builderRaw = resolved.text;
-            harmonizationResolutions = resolved.resolutions || [];
-        } catch (resErr) {
-            console.warn('[MultiHog Companion] Placeholder name resolution error in harmonization:', resErr);
-        }
-    }
-    const builderReport = applyDossierUpdates(builderRaw, activeDossier);
-
-    if (stage === 'canon' && builderReport?.canonMutations?.length > 0) {
-        applyCanonMutationsToStore(builderReport.canonMutations);
-        builderReport.hasMutations = true;
-    }
-
-    if (builderReport.hasMutations) {
-        activeDossier = builderReport.updatedDossier;
         if (stage === 'canon') {
-            refreshCanonStageNote(activeDossier, builderReport.builderSummary || '');
+            builderSys = buildStage2CanonBuilderPrompt(activeDossier, stagedCanon, upstreamDiff);
+        } else if (stage === 'adventure') {
+            builderSys = buildStage3AdventureBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff, agnosticBones });
+        } else if (stage === 'character') {
+            builderSys = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon, { upstreamDiff });
         }
-    }
 
-    // Build Talker system prompt AFTER activeDossier updates so it sees NameRAG-resolved names & state.
-    const latestCanon = getStagedCanonEntries();
-    let talkerSys = '';
-    if (stage === 'canon') {
-        talkerSys = buildStage2CanonTalkerPrompt(activeDossier, latestCanon, upstreamDiff);
-    } else if (stage === 'adventure') {
-        talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, latestCanon, { upstreamDiff, agnosticBones });
-    } else if (stage === 'character') {
-        talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, latestCanon, { upstreamDiff });
-    }
+        const builderUserContent = upstreamDiff
+            ? `[UPSTREAM_DIFF]:\n${upstreamDiff}\nPlease harmonize this stage with upstream updates.`
+            : 'Please harmonize this stage with upstream updates.';
+        const builderMsgs = [
+            { role: 'system', name: 'System', content: builderSys },
+            { role: 'user', name: 'Player', content: builderUserContent },
+        ];
+        let builderRaw = await sendConciergeRequest(builderMsgs);
+        let harmonizationResolutions = [];
+        if (extension_settings?.multihog_companion?.enableNameRag !== false) {
+            try {
+                const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true, canonEntries: stagedCanon });
+                builderRaw = resolved.text;
+                harmonizationResolutions = resolved.resolutions || [];
+            } catch (resErr) {
+                console.warn('[MultiHog Companion] Placeholder name resolution error in harmonization:', resErr);
+            }
+        }
+        const builderReport = applyDossierUpdates(builderRaw, activeDossier);
 
-    const harmChanges = builderReport.changes || [];
-    const talkerNotice = (harmonizationResolutions.length || harmChanges.length)
-        ? `\n${buildTalkerInstructionNotice('MUTATED', builderReport.builderSummary || 'Stage harmonized', [], harmonizationResolutions, harmChanges)}`
-        : '';
-    const talkerMsgs = [
-        { role: 'system', name: 'System', content: talkerSys },
-        { role: 'user', name: 'Player', content: `What updates were made?${talkerNotice}` },
-    ];
-    const talkerRaw = await sendConciergeRequest(talkerMsgs);
-    const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || 'Stage harmonized with upstream updates.';
+        if (stage === 'canon' && builderReport?.canonMutations?.length > 0) {
+            applyCanonMutationsToStore(builderReport.canonMutations);
+            builderReport.hasMutations = true;
+        }
 
-    $('#mhc_chat_messages').empty();
-    appendChatBubble('assistant', cleanTalker);
-    chatHistory = [{ role: 'assistant', content: cleanTalker }];
-    stageChatHistories[stage] = [...chatHistory];
-    updateBlueprintDeck();
+        if (builderReport.hasMutations) {
+            activeDossier = builderReport.updatedDossier;
+            if (stage === 'canon') {
+                refreshCanonStageNote(activeDossier, builderReport.builderSummary || '');
+            } else if (stage === 'adventure') {
+                refreshAdventureStageNote(activeDossier);
+            }
+        }
+
+        if (builderReport.designGameSystem) {
+            typingBubble.innerHTML = '<i class="mhc-stage">🧙 MultiHog Game System Wizard is designing the custom HUD tracker...</i>';
+            await runDelegatedGameSystemDesign(builderReport.designGameSystem, sendConciergeRequest);
+        }
+
+        const harmDiagnostic = {
+            timestamp: new Date().toISOString(),
+            mode: 'harmonization',
+            stage,
+            userPrompt: builderUserContent,
+            rawResponse: builderRaw,
+            nameRagResolutions: harmonizationResolutions,
+            errors: builderReport.errors,
+            hasMutations: builderReport.hasMutations,
+            isNoop: builderReport.isNoop,
+            builderSummary: builderReport.builderSummary,
+            activeDossierSnapshot: JSON.parse(JSON.stringify(activeDossier)),
+        };
+        window._mhcLastBuilderTransaction = harmDiagnostic;
+        window._lastConciergeBuilderDiagnostic = harmDiagnostic;
+
+        // Build Talker system prompt AFTER activeDossier updates so it sees NameRAG-resolved names & state.
+        const latestCanon = getStagedCanonEntries();
+        let talkerSys = '';
+        if (stage === 'canon') {
+            talkerSys = buildStage2CanonTalkerPrompt(activeDossier, latestCanon, upstreamDiff);
+        } else if (stage === 'adventure') {
+            talkerSys = buildStage3AdventureTalkerPrompt(activeDossier, latestCanon, { upstreamDiff, agnosticBones });
+        } else if (stage === 'character') {
+            talkerSys = buildStage4CharacterTalkerPrompt(activeDossier, latestCanon, { upstreamDiff });
+        }
+
+        const harmChanges = builderReport.changes || [];
+        const talkerNotice = (harmonizationResolutions.length || harmChanges.length)
+            ? `\n${buildTalkerInstructionNotice('MUTATED', builderReport.builderSummary || 'Stage harmonized', [], harmonizationResolutions, harmChanges)}`
+            : '';
+        const talkerMsgs = [
+            { role: 'system', name: 'System', content: talkerSys },
+            { role: 'user', name: 'Player', content: `What updates were made?${talkerNotice}` },
+        ];
+        const talkerRaw = await sendConciergeRequest(talkerMsgs);
+        const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || 'Stage harmonized with upstream updates.';
+
+        typingBubble.remove();
+        $('#mhc_chat_messages').empty();
+        appendChatBubble('assistant', cleanTalker);
+        chatHistory = [{ role: 'assistant', content: cleanTalker }];
+        stageChatHistories[stage] = [...chatHistory];
+        evaluateStepUnlocks();
+        updateBlueprintDeck();
+        saveDraft();
     } finally {
+        typingBubble.remove();
         setConciergeBusyState(false);
     }
 }
@@ -852,7 +919,10 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
     const typingBubble = document.createElement('div');
     typingBubble.className = 'mhc-bubble mhc-bubble-assistant';
     typingBubble.id = 'mhc_typing_indicator';
-    typingBubble.innerHTML = '<i class="mhc-stage">🎩 The Concierge is constructing Episode 1 Adventure...</i>';
+    const autoStageLabel = stage === 'character'
+        ? '🎩 The Concierge is forging your Protagonist...'
+        : '🎩 The Concierge is constructing Episode 1 Adventure...';
+    typingBubble.innerHTML = `<i class="mhc-stage">${autoStageLabel}</i>`;
     if (stream) {
         stream.appendChild(typingBubble);
         stream.scrollTop = stream.scrollHeight;
@@ -927,7 +997,8 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
                 : []),
         ];
         const talkerRaw = await sendConciergeRequest(talkerMsgs);
-        const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || 'Episode 1 Adventure constructed.';
+        const fallbackMsg = stage === 'character' ? 'Protagonist sheet constructed.' : 'Episode 1 Adventure constructed.';
+        const cleanTalker = stripConciergeStateBlocks(stripThinkingContent(talkerRaw || '')).trim() || fallbackMsg;
 
         typingBubble.remove();
         $('#mhc_chat_messages').empty();
@@ -937,12 +1008,7 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
         if (stage === 'adventure') {
             lastSyncedSnapshots.adventure = snapshotAdventure(activeDossier);
             lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
-            if (activeDossier?.theKick?.crisis) {
-                activeDossier.meta = activeDossier.meta || {};
-                activeDossier.meta.stageNotes = activeDossier.meta.stageNotes || { framing: '', canon: '', adventure: '' };
-                const loc = activeDossier.theKick.startingLocation ? ` in ${activeDossier.theKick.startingLocation}` : '';
-                activeDossier.meta.stageNotes.adventure = `Opening crisis${loc}: ${activeDossier.theKick.crisis}`;
-            }
+            refreshAdventureStageNote(activeDossier);
         }
         evaluateStepUnlocks();
         updateBlueprintDeck();
@@ -1048,6 +1114,28 @@ export async function setAdventureStep(targetStep, opts = {}) {
                 console.error('[MultiHog Companion] Canon harmonization error:', err);
                 toastr?.error(`Failed harmonizing Canon: ${err.message}`);
             }
+        } else if ((!stageChatHistories.canon || stageChatHistories.canon.length === 0) && getStagedCanonEntries().length > 0 && !opts.skipCanonBuild) {
+            lastSyncedSnapshots.framing = snapshotFraming(activeDossier);
+            lastSyncedSnapshots.canon = snapshotCanon(getStagedCanonEntries(), activeDossier?.worldRules);
+            unlockedSteps.adventure = true;
+
+            activeDossier.meta = activeDossier.meta || {};
+            activeDossier.meta.stageNotes = activeDossier.meta.stageNotes || { framing: '', canon: '', adventure: '' };
+            if (activeDossier.meta.premise) {
+                activeDossier.meta.stageNotes.framing = `${activeDossier.meta.premise}${activeDossier.meta.focalLens ? ' Focused on: ' + activeDossier.meta.focalLens : ''}`;
+            }
+            refreshCanonStageNote(activeDossier);
+
+            const canon = getStagedCanonEntries();
+            const activeCount = canon.filter(e => !e.disabled).length;
+            const disabledCount = canon.filter(e => e.disabled).length;
+            const cats = [...new Set(canon.map(e => e.kind))].join(', ') || 'LORE';
+
+            $('#mhc_chat_messages').empty();
+            const welcomeText = `📚 **Series Bible Canon Ready!**\n\nLoaded **${canon.length}** imported canon entries (${cats}).\n• **${activeCount}** active entries in play.\n• **${disabledCount}** background/deferred entries.\n\nYou can review, expand, or toggle entries in the Series Bible on the right, ask me to refine canon or world axioms here, or click **3. 🗺️ Adventure** up top to choose your ruleset engine and forge Episode 1!`;
+            appendChatBubble('assistant', welcomeText);
+            chatHistory = [{ role: 'assistant', content: welcomeText }];
+            stageChatHistories.canon = [...chatHistory];
         } else {
             chatHistory = [...(stageChatHistories.canon || [])];
             renderChatHistoryFromState();
@@ -1415,14 +1503,14 @@ function populateInspirationDropdowns() {
  * Render "where to start" quick-reply chips under the latest assistant bubble.
  */
 function renderStartChips(starts) {
-    renderStartChipsDom(starts, () => handleUserSend());
+    renderStartChipsDom(starts, () => handleUserSend(), () => isGenerating);
 }
 
 /**
  * Offer one-click "pull in from Canon" chips for entries the Concierge asked to promote.
  */
 function renderPromoteChips(found) {
-    renderPromoteChipsDom(found, () => handleUserSend());
+    renderPromoteChipsDom(found, () => handleUserSend(), () => isGenerating);
 }
 
 /**
@@ -1459,7 +1547,7 @@ export async function handleCommitImportedLore() {
 
     const turn = { controller: new AbortController(), cancelled: false };
     activeTurn = turn;
-    isGenerating = true;
+    setConciergeBusyState(true);
     $('#mhc_import_commit_btn').prop('disabled', true).text('⏳ Generating Overview...');
     $('#mhc_import_add_more_btn').hide();
     $('#mhc_import_use_vibe_btn').hide();
@@ -1519,11 +1607,11 @@ export async function handleCommitImportedLore() {
             toastr?.error(`Overview generation failed: ${err.message}`);
         }
     } finally {
-        isGenerating = false;
         activeTurn = null;
         $('#mhc_stop_btn').hide();
         $('#mhc_import_cancel_btn').text('⏹ Cancel Import');
         $('#mhc_import_add_more_btn').show();
+        setConciergeBusyState(false);
     }
 }
 
@@ -1892,6 +1980,8 @@ async function handleUserSend() {
             activeDossier = builderReport.updatedDossier;
             if (currentNavMode === 'new-adventure' && currentAdventureStep === 'canon' && builderReport.canonMutations?.length > 0) {
                 refreshCanonStageNote(activeDossier, builderReport.builderSummary || builderReport.changes?.join('; ') || '');
+            } else if (currentNavMode === 'new-adventure' && currentAdventureStep === 'adventure') {
+                refreshAdventureStageNote(activeDossier);
             }
             const now = new Date();
             const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -2830,6 +2920,7 @@ export function bindModalEvents() {
 
     // Inspiration Toolbar: ST Character Picker
     $('#mhc_pick_st_char_btn').on('click', () => {
+        if (isGenerating) return;
         $('#mhc_st_char_select').toggle();
     });
 
@@ -2884,6 +2975,7 @@ export function bindModalEvents() {
 
     // Inspiration Toolbar: ST Lorebook Picker
     $('#mhc_pick_st_lore_btn').on('click', () => {
+        if (isGenerating) return;
         $('#mhc_st_lore_select').toggle();
     });
 
@@ -3170,6 +3262,7 @@ export function bindModalEvents() {
                         tone: activeDossier.meta?.tone,
                         framingComplete: true,
                         rulesetConfirmed: true,
+                        stageNotes: JSON.parse(JSON.stringify(activeDossier.meta?.stageNotes || { framing: '', canon: '', adventure: '' })),
                     };
                     const preservedWorldRules = JSON.parse(JSON.stringify(activeDossier.worldRules || { axioms: [], customModule: null }));
 
@@ -3181,6 +3274,7 @@ export function bindModalEvents() {
                     if (bones.maps) activeDossier.maps = bones.maps;
                     if (bones.npcs) activeDossier.npcs = bones.npcs;
                     if (bones.monsters) activeDossier.monsters = bones.monsters;
+                    if (bones.factions) activeDossier.factions = bones.factions;
 
                     stageChatHistories.adventure = [];
                     stageChatHistories.character = [];
@@ -3255,10 +3349,18 @@ export function bindModalEvents() {
         }
     });
 
-    // Ruleset Switch interaction on system badge click (cycles through all registered adapters)
+    // Ruleset Switch interaction on system badge click (CONC-015 / CONC-024: non-destructive in Session Zero & Living World)
     $('#mhc_header_system_badge').on('click', () => {
         if (isGenerating) return;
-        if (currentNavMode === 'new-adventure' && (currentAdventureStep === 'initial' || currentAdventureStep === 'canon')) {
+        if (currentNavMode === 'new-adventure') {
+            if (currentAdventureStep === 'initial' || currentAdventureStep === 'canon') {
+                return;
+            }
+            toastr?.info('Use the Step 3 Ruleset Engine selector or ⚙️ Tune Ruleset to change rulesets safely.');
+            return;
+        }
+        if (currentNavMode === 'living-world') {
+            toastr?.info('Active campaign ruleset is locked in Living World mode. Use 🍴 Fork as New Campaign to start a variant with another ruleset.');
             return;
         }
         const curRuleset = systemRegistry.detectRuleset(activeDossier);
@@ -3528,6 +3630,7 @@ export function bindModalEvents() {
 
     // Fork as New Campaign (clones Living World into Session Zero Sandbox)
     $('#mhc_fork_campaign_btn').on('click', async () => {
+        if (isGenerating) return;
         await forkActiveCampaignToSessionZero();
     });
 
@@ -3583,25 +3686,32 @@ export function bindModalEvents() {
         const label = $('#mhc_launch_progress_label');
         const bar = $('#mhc_launch_progress_bar');
 
+        const launchedRulesetKey = systemRegistry.detectRuleset(activeDossier);
+        const launchedRulesetLabel = systemRegistry.get(launchedRulesetKey)?.label || (launchedRulesetKey === 'fae' ? 'FAE' : (launchedRulesetKey === 'pbta' ? 'PbtA' : 'D&D 5e'));
+
+        setConciergeBusyState(true);
         overlay.show();
         const progressCb = (msg, pct) => {
             label.text(msg);
             bar.css('width', `${pct}%`);
         };
 
-        const res = await launchPbtaCampaign(activeDossier, progressCb, { wipeOldTitle });
-        setTimeout(() => {
-            overlay.hide();
+        try {
+            const res = await launchPbtaCampaign(activeDossier, progressCb, { wipeOldTitle });
             if (res.success) {
                 resetConciergeState({ showGreeting: true });
                 $('#mhc_concierge_modal').fadeOut(250);
-                const rulesetKey = activeDossier?.meta?.ruleset || 'dnd5e';
-                const rulesetLabel = systemRegistry.get(rulesetKey)?.label || (rulesetKey === 'fae' ? 'FAE' : (rulesetKey === 'pbta' ? 'PbtA' : 'D&D 5e'));
-                toastr?.success(`${rulesetLabel} Campaign ready! The game is now beginning.`, 'Adventure Launched');
+                toastr?.success(`${launchedRulesetLabel} Campaign ready! The game is now beginning.`, 'Adventure Launched');
             } else {
                 toastr?.error(`Launch error: ${res.message}`, 'Launch Failed');
             }
-        }, 600);
+        } catch (err) {
+            console.error('[MultiHog Companion] Launch execution error:', err);
+            toastr?.error(`Launch error: ${err.message || err}`, 'Launch Failed');
+        } finally {
+            overlay.hide();
+            setConciergeBusyState(false);
+        }
     }
 
     // Helper to display adventure name conflict dialog
@@ -3663,6 +3773,11 @@ export function bindModalEvents() {
 
     // Finalize & Launch Campaign
     $('#mhc_launch_campaign_btn').on('click', async () => {
+        if (isGenerating) return;
+        if (currentNavMode === 'new-adventure' && (!unlockedSteps.character || !activeDossier?.protagonist?.name?.trim())) {
+            toastr?.warning?.('Complete Step 4 (Character) with a named protagonist before launching.');
+            return;
+        }
         const castEmpty = !(activeDossier?.npcs?.length) && !(activeDossier?.monsters?.length);
         if (castEmpty) {
             const launchOk = await showConciergeConfirm({
@@ -3691,36 +3806,43 @@ export function bindModalEvents() {
         await executeCampaignLaunch();
     });
 
-    // Sync Active Campaign (in-place update without resetting chat)
+    // Sync Active Campaign (in-place update without resetting chat or wiping Session Zero draft)
     $('#mhc_sync_active_campaign_btn').on('click', async () => {
-        const activeRunning = await loadActiveCampaignDossier();
-        if (!activeRunning) {
-            const isFae = activeDossier?.meta?.ruleset === 'fae';
-            toastr?.error(`No active ${isFae ? 'FAE' : 'PbtA'} campaign found in this chat to synchronize with.`, 'Sync Blocked');
-            return;
-        }
-
+        if (isGenerating) return;
         const overlay = $('#mhc_launch_progress_overlay');
         const label = $('#mhc_launch_progress_label');
         const bar = $('#mhc_launch_progress_bar');
 
-        overlay.show();
-        const progressCb = (msg, pct) => {
-            label.text(msg);
-            bar.css('width', `${pct}%`);
-        };
+        setConciergeBusyState(true);
+        try {
+            const activeRunning = await loadActiveCampaignDossier();
+            if (!activeRunning) {
+                const activeAdapter = systemRegistry.get(systemRegistry.detectRuleset(activeDossier));
+                toastr?.error(`No active ${activeAdapter.label} campaign found in this chat to synchronize with.`, 'Sync Blocked');
+                return;
+            }
 
-        const res = await syncPbtaCampaignUpdates(activeDossier, progressCb);
-        setTimeout(() => {
-            overlay.hide();
+            overlay.show();
+            const progressCb = (msg, pct) => {
+                label.text(msg);
+                bar.css('width', `${pct}%`);
+            };
+
+            const res = await syncPbtaCampaignUpdates(activeDossier, progressCb);
             if (res.success) {
-                resetConciergeState({ showGreeting: true });
+                conciergeStore.snapshotToLivingWorld({ dossier: activeDossier, chatHistory });
                 $('#mhc_concierge_modal').fadeOut(250);
                 toastr?.success(res.message, 'Campaign Synchronized');
             } else {
                 toastr?.error(`Sync error: ${res.message}`, 'Sync Failed');
             }
-        }, 500);
+        } catch (err) {
+            console.error('[MultiHog Companion] Active campaign sync error:', err);
+            toastr?.error(`Sync error: ${err.message || err}`, 'Sync Failed');
+        } finally {
+            overlay.hide();
+            setConciergeBusyState(false);
+        }
     });
 
     // Copy Antigravity Debug Trace

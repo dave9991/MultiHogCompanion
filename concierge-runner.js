@@ -459,6 +459,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
     (dossier.monsters || []).forEach(m => {
         if (m.name) m.name = parseResolvedNameToken(m.name).cleanName;
     });
+    (dossier.factions || []).forEach(f => {
+        if (f.name) f.name = parseResolvedNameToken(f.name).cleanName;
+    });
 
     dossier.meta = dossier.meta || {};
     dossier.meta.conciergeCreated = true;
@@ -721,49 +724,47 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             }
         }
 
-        // ── 4. Register Supporting NPCs (library) & Bestiary/Factions/Locations/Quests (lorebook) ──
+        // ── 4. Register Supporting NPCs (library) & All Partition Lorebooks/Canon/Skeleton ──
         const npcs = dossier.npcs || [];
         const factions = dossier.factions || [];
         let npcMapping = {};
-        if (npcs.length || monsters.length || factions.length) {
-            onProgress('👥 Registering supporting cast & bestiary entries...', 70);
-            const sectionNames = sectionNamesForLaunch || await loadMainNpcSectionNames();
-            if (npcs.length) {
-                try {
-                    const npcLib = await import('../SillyTavern-MultihogDnDFramework/npc-library.js');
-                    if (typeof npcLib.saveNpcToLibrary === 'function') {
-                        // Main's saveNpcToLibrary(settings, record) upserts by name and persists settings.
-                        // Keep NPC Library strictly for recurring named NPCs — never monsters/hazards.
-                        const libEntries = npcs.map(n => ({ name: n.name, content: buildNpcEntryContent(n, sectionNames).core, notes: n.notes || '' }));
-                        for (const e of libEntries) {
-                            if (!e.name || !e.content) continue;
-                            await npcLib.saveNpcToLibrary(null, { name: e.name, content: e.content, keys: buildNpcKeys(e.name), notes: e.notes });
-                        }
-                    } else {
-                        console.warn('[PbtA Concierge] Main NPC library API (saveNpcToLibrary) not found — skipping library registration. Main extension may have changed.');
+        onProgress('👥 Distributing cast, locations, lorebooks & world skeleton...', 70);
+        const sectionNames = sectionNamesForLaunch || ((npcs.length || monsters.length) ? await loadMainNpcSectionNames() : null);
+        if (npcs.length) {
+            try {
+                const npcLib = await import('../SillyTavern-MultihogDnDFramework/npc-library.js');
+                if (typeof npcLib.saveNpcToLibrary === 'function') {
+                    // Main's saveNpcToLibrary(settings, record) upserts by name and persists settings.
+                    // Keep NPC Library strictly for recurring named NPCs — never monsters/hazards.
+                    const libEntries = npcs.map(n => ({ name: n.name, content: buildNpcEntryContent(n, sectionNames).core, notes: n.notes || '' }));
+                    for (const e of libEntries) {
+                        if (!e.name || !e.content) continue;
+                        await npcLib.saveNpcToLibrary(null, { name: e.name, content: e.content, keys: buildNpcKeys(e.name), notes: e.notes });
                     }
-                } catch (err) {
-                    console.warn('[PbtA Concierge] NPC library registration failed:', err);
+                } else {
+                    console.warn('[PbtA Concierge] Main NPC library API (saveNpcToLibrary) not found — skipping library registration. Main extension may have changed.');
                 }
+            } catch (err) {
+                console.warn('[PbtA Concierge] NPC library registration failed:', err);
             }
+        }
 
-            // Inject across MultiHog's native campaign lorebooks ({prefix}_NPCs, _Bestiary, _Factions, _Locations, _Quests, _Rules)
-            try {
-                npcMapping = await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
-            } catch (loreErr) {
-                console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
-            }
+        // Always distribute across MultiHog's native campaign lorebooks (_NPCs, _Bestiary, _Factions, _Locations, _Quests, _Rules)
+        try {
+            npcMapping = await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
+        } catch (loreErr) {
+            console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
+        }
 
-            // Archivist mode: full imported lore → {prefix}_Canon (vector-matchable)
-            await injectCanonBook(chatId);
+        // Archivist mode: full imported lore → {prefix}_Canon (vector-matchable)
+        await injectCanonBook(chatId);
 
-            // ── 4b. Seed Day 0 World Skeleton ({prefix}_Skeleton) for World Progression ──
-            onProgress('🌍 Seeding Day 0 World Skeleton for macro progression...', 78);
-            try {
-                await injectWorldSkeleton(chatId, dossier);
-            } catch (skelErr) {
-                console.warn('[PbtA Concierge] World Skeleton injection skipped:', skelErr);
-            }
+        // ── 4b. Seed Day 0 World Skeleton ({prefix}_Skeleton) for World Progression ──
+        onProgress('🌍 Seeding Day 0 World Skeleton for macro progression...', 78);
+        try {
+            await injectWorldSkeleton(chatId, dossier);
+        } catch (skelErr) {
+            console.warn('[PbtA Concierge] World Skeleton injection skipped:', skelErr);
         }
 
         // ── 5. Inject Dossier into World Info & State ───────────────────────────
@@ -869,7 +870,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                     const cleanPrefix = (chatId || '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
                     rpgSettings.chatStates[chatId].renamedCampaignPrefix = cleanPrefix;
 
-                    const standardSuffixes = ['NPCs', 'Locations', 'Quests', 'Factions', 'Rules', 'Skeleton', 'Canon', 'World'];
+                    const standardSuffixes = ['NPCs', 'Bestiary', 'Locations', 'Quests', 'Factions', 'Rules', 'Skeleton', 'Canon', 'World'];
                     const campaignBooksSet = new Set(rpgSettings.chatStates[chatId].campaignBooks || []);
                     standardSuffixes.forEach(suf => campaignBooksSet.add(`${cleanPrefix}_${suf}`));
                     rpgSettings.chatStates[chatId].campaignBooks = [...campaignBooksSet];
@@ -997,9 +998,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
             if (typeof setCompanionActiveCartridge === 'function' && chatId) {
                 await setCompanionActiveCartridge(chatId, {
-                    cartridgeId: isFae ? 'fae' : 'pbta',
+                    cartridgeId: adapter.id,
                     genre: systemKey,
-                    systemLabel: dossier.meta?.systemLabel || (isFae ? 'FAE' : 'PbtA'),
+                    systemLabel: dossier.meta?.systemLabel || adapter.label,
                     title: adventureTitle,
                     dossier: JSON.parse(JSON.stringify(dossier)),
                 });
@@ -1061,15 +1062,28 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
  * @param {(stepText: string, pct: number) => void} [onProgress] Progress callback
  * @returns {Promise<{ success: boolean, message: string }>}
  */
-export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {}) {
+export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {}, options = {}) {
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     const { healAndNormalizeDossier } = await import('./concierge-parser.js');
     const { applyPbtACartridge } = await import('./index.js');
     const { formatInitialPbtaMemo } = await import('./pbta-ruleset.js');
     const { forceRenderTrackerView } = await import('./index.js');
     const { normalizePbtaMemo, syncLivePbtaMemoVitality } = await import('./pbta-vitality-sync.js');
+    const { parseResolvedNameToken } = await import('./namerag-hooks.js');
 
     const dossier = healAndNormalizeDossier(rawDossier);
+    if (dossier.protagonist?.name) {
+        dossier.protagonist.name = parseResolvedNameToken(dossier.protagonist.name).cleanName;
+    }
+    (dossier.npcs || []).forEach(n => {
+        if (n.name) n.name = parseResolvedNameToken(n.name).cleanName;
+    });
+    (dossier.monsters || []).forEach(m => {
+        if (m.name) m.name = parseResolvedNameToken(m.name).cleanName;
+    });
+    (dossier.factions || []).forEach(f => {
+        if (f.name) f.name = parseResolvedNameToken(f.name).cleanName;
+    });
     dossier.meta = dossier.meta || {};
     dossier.meta.conciergeCreated = true;
     dossier.meta.isStub = false;
@@ -1163,8 +1177,10 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 ...(dossier.config?.knobs || {}),
                 action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
             },
+            customGenreSpec: dossier.meta?.customGenreSpec || null,
+            dossier,
         };
-        await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx });
+        await adapter.installCartridge(systemKey, cartridgeOverrides, { ...options, ctx, chatId });
 
         const isFreeform = (dossier.config?.playstyle === 'freeform');
         const rpgSync = ctx?.extensionSettings?.rpg_tracker;
@@ -1265,9 +1281,9 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
                 const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
                 if (typeof setCompanionActiveCartridge === 'function' && chatId) {
                     await setCompanionActiveCartridge(chatId, {
-                        cartridgeId: isFae ? 'fae' : 'pbta',
+                        cartridgeId: adapter.id,
                         genre: systemKey,
-                        systemLabel: dossier.meta?.systemLabel || (isFae ? 'FAE' : 'PbtA'),
+                        systemLabel: dossier.meta?.systemLabel || adapter.label,
                         title: dossier.meta?.title || null,
                         dossier: JSON.parse(JSON.stringify(dossier)),
                     });
@@ -1279,9 +1295,11 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {})
         }
 
         onProgress('✨ Active campaign successfully synchronized!', 100);
-        const syncMsg = isFae
-            ? 'Active FAE campaign successfully synchronized!'
-            : `Active campaign synchronized with Harm capacity ${dossier.config?.harmMax || 5}!`;
+        const syncMsg = adapter.id === 'dnd5e'
+            ? 'Active D&D 5e campaign successfully synchronized!'
+            : isFae
+                ? 'Active FAE campaign successfully synchronized!'
+                : `Active campaign synchronized with Harm capacity ${dossier.config?.harmMax || 5}!`;
         return { success: true, message: syncMsg };
     } catch (err) {
         console.error('[PbtA Concierge] Active campaign sync failed:', err);

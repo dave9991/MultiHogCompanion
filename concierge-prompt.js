@@ -1585,7 +1585,7 @@ Inspect [ATTACHED_SOURCES_OUTLINE] (if present) and the player's dialogue:
    - The user is starting from scratch with a prompt or brief idea.
    - Once the core premise, tone, and focal hook are clear from dialogue, record them and set ready_for_canon: true.
 
-### 📋 Directives & Syntax:
+### 📋 Directives & Syntax (set \`ready_for_canon\` to \`true\` or \`false\` — pick ONE value, never copy \`"true | false"\`):
 \`\`\`text
 [UPDATE_DOSSIER]
 summary: Established campaign framing around <focal lens>
@@ -1594,8 +1594,9 @@ title: Punchy 2-4 word campaign title
 premise: 1-2 sentence core campaign premise
 focal_lens: Specific dramatic angle, theater, or local pivot
 tone: Atmospheric tone and genre flavor (e.g. Grim & Gritty, Lighthearted Swashbuckling)
-ready_for_canon: true | false
+ready_for_canon: true
 [/FRAMING]
+[/UPDATE_DOSSIER]
 \`\`\`
 
 ### [CURRENT_FRAMING_STATE]:
@@ -1732,6 +1733,7 @@ You emit an [UPDATE_DOSSIER] block containing ONLY:
 * [ENABLE_CANON: Name]
 * [REMOVE_CANON: Name]
 * [WORLD_RULES] (title, category, axiom, substitutions, negative_constraints, architectural_notes)
+* [REMOVE_WORLD_RULE: Title] (removes an unwanted or superseded world axiom by exact title)
 * Optional [DESIGN_GAME_SYSTEM: <1-sentence bespoke gauge/resource description>] (ONLY if a world law introduces a unique mechanical gauge; MultiHog's Game System Wizard builds it automatically)
 * or [NOOP] if no updates are needed.
 
@@ -1748,15 +1750,15 @@ You emit an [UPDATE_DOSSIER] block containing ONLY:
   summary: No Canon changes requested
   [/NOOP]
 
-### 📋 Directives & Syntax:
+### 📋 Directives & Syntax (pick ONE concrete \`kind\`: \`FACTION\`, \`LOCATION\`, \`NPC\`, \`RULE\`, \`EVENT\`, or \`LORE\`; ONE concrete \`category\`: \`technology\`, \`physiology\`, \`metaphysics\`, \`ecology\`, \`social\`, or \`general\` — never copy \`|\` option lists):
 \`\`\`text
 [UPDATE_DOSSIER]
 summary: Added House Baratheon faction and ironwood ecology axiom
 
 [CANON_ENTRY]
-kind: FACTION | LOCATION | NPC | RULE | EVENT | LORE
+kind: FACTION
 name: Name of Entity or Fact (use [[NAME: evocative role or concept]] ONLY for individual people/NPCs)
-importance: 1-5 (default 4)
+importance: 4
 aliases: alias 1, alias 2
 disabled: false
 content: 2-4 sentences establishing this canon fact, history, or entity in the world bible.
@@ -1765,10 +1767,11 @@ content: 2-4 sentences establishing this canon fact, history, or entity in the w
 [DISABLE_CANON: Name of Entry]
 [ENABLE_CANON: Name of Entry]
 [REMOVE_CANON: Name of Entry]
+[REMOVE_WORLD_RULE: Title of Axiom]
 
 [WORLD_RULES]
 title: Atmospheric / Scientific Law Name
-category: technology | physiology | metaphysics | ecology | social | general
+category: ecology
 axiom: 1-2 sentence immutable universal truth of this universe
 substitutions:
 - Fictional replacement for normal real-world assumptions
@@ -1776,6 +1779,7 @@ negative_constraints:
 - What is strictly impossible or forbidden under this law
 architectural_notes: How society, structures, and daily life adapt to this law
 [/WORLD_RULES]
+[/UPDATE_DOSSIER]
 \`\`\`${framingContext}
 
 ### 📚 [CURRENT_SERIES_BIBLE_CANON]:
@@ -1869,11 +1873,12 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
   description: Cunning lookout perched in the rafters.
   [/MONSTER]
   \`\`\`
-* Maps: Site name, danger level, sensory details:
+* Maps: Site name, kind, threat level, sensory details (\`kind\`: \`DUNGEON\` / \`SETTLEMENT\` / \`INTERIOR\` / \`WILDERNESS\`; \`threat\`: \`NONE\` / \`SAFE\` / \`LOW\` / \`MODERATE\` / \`HIGH\` / \`DANGEROUS\` / \`DEADLY\`):
   \`\`\`text
   [MAP: Sunken Crypts]
   site: Sunken Crypts
-  danger: Medium
+  kind: DUNGEON
+  threat: MODERATE
   brief_description: Damp subterranean tombs flooded with brackish water.
   [/MAP]
   \`\`\`
@@ -1907,11 +1912,12 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
   full_finish_triggers: Bypass: Torchbearer drives it back with fire (1 turn) | Total: Deplete both layers to slay
   [/MONSTER]
   \`\`\`
-* Maps: Site name, danger level, sensory details:
+* Maps: Site name, kind, threat level, sensory details (\`kind\`: \`DUNGEON\` / \`SETTLEMENT\` / \`INTERIOR\` / \`WILDERNESS\`; \`threat\`: \`NONE\` / \`SAFE\` / \`LOW\` / \`MODERATE\` / \`HIGH\` / \`DANGEROUS\` / \`DEADLY\`):
   \`\`\`text
   [MAP: Forgotten Shrine]
   site: Forgotten Shrine
-  danger: Tense
+  kind: DUNGEON
+  threat: HIGH
   brief_description: Crumbling stone pillars shrouded in eternal dusk.
   [/MAP]
   \`\`\`
@@ -1945,11 +1951,12 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
   description: Starved hounds driven by uncanny hunger.
   [/MONSTER]
   \`\`\`
-* Maps: Site name, danger level, sensory details:
+* Maps: Site name, kind, threat level, sensory details (\`kind\`: \`DUNGEON\` / \`SETTLEMENT\` / \`INTERIOR\` / \`WILDERNESS\`; \`threat\`: \`NONE\` / \`SAFE\` / \`LOW\` / \`MODERATE\` / \`HIGH\` / \`DANGEROUS\` / \`DEADLY\`):
   \`\`\`text
   [MAP: The Abandoned Mill]
   site: The Abandoned Mill
-  danger: High
+  kind: INTERIOR
+  threat: HIGH
   brief_description: Rotting timber, rushing river sluice, and creaking waterwheel.
   [/MAP]
   \`\`\`
@@ -2118,40 +2125,59 @@ export function buildStage4CharacterBuilderPrompt(dossier, canonEntries = [], { 
     let protagonistSchema = '';
     if (effectiveRuleset === 'dnd5e') {
         protagonistSchema = `### 🎲 D&D 5e Protagonist Directives:
-* Emits [PROTAGONIST] with:
-  name: <Character Name> (Explicit name, never leave as "Protagonist")
-  class: <Class> (Fighter, Rogue, Wizard, Cleric, etc.)
-  species: <Species>
-  gender: <Gender>
-  hp: 12/12
-  ac: 16
-  hitDie: d10
-  stats: STR 16, DEX 14, CON 14, INT 10, WIS 12, CHA 8
-  features: (Passive traits formatted as - Trait (Description))
-  abilities: (Active powers with rest recovery, e.g. - Second Wind (Heal 1d10+1; 1/1 per short rest))
-  equipment: Chain mail, longsword, shield, 15 gp`;
+\`\`\`text
+[PROTAGONIST]
+name: [[NAME: veteran frontier paladin]]
+class: Fighter
+species: Human
+gender: Female
+hp: 12/12
+ac: 16
+hitDie: d10
+stats: STR 16, DEX 14, CON 14, INT 10, WIS 12, CHA 8
+features:
+- Defense Fighting Style (+1 AC while wearing armor)
+abilities:
+- Second Wind (Heal 1d10+1; 1/1 per short rest)
+equipment: Chain mail, longsword, shield, 15 gp
+[/PROTAGONIST]
+\`\`\``;
     } else if (effectiveRuleset === 'fae') {
         protagonistSchema = `### 🎲 FAE Protagonist Directives:
-* Emits [PROTAGONIST] with:
-  name: <Character Name>
-  archetype: <Archetype>
-  species: <Species>
-  gender: <Gender>
-  positive_tags: (3-4 specific tags with situational qualifiers: Trait [when...])
-  negative_tags: (0-1 starting scar or debuff)
-  heroic_domain: (If heroic_tier is true, e.g. Archetype [specific domains])
-  pools: (Resource pools matching genre)`;
+\`\`\`text
+[PROTAGONIST]
+name: [[NAME: scarred relic salvager]]
+archetype: Relic Salvager
+species: Human
+gender: Non-binary
+positive_tags:
+- Keen Trapfinder [when inspecting ruins or mechanisms]
+- Iron Nerves [when under sudden ambush]
+- Nimble Climber [when traversing rubble or rigging]
+negative_tags:
+- Hairline Fracture [from a past collapse]
+heroic_domain: (Only set if heroic_tier is true, e.g. Vault Delver [relics & ancient seals])
+pools:
+- Health: 3/3
+- Sanity: 3/3
+[/PROTAGONIST]
+\`\`\``;
     } else {
         protagonistSchema = `### 🎲 PbtA Protagonist Directives:
-* Emits [PROTAGONIST] with:
-  name: <Character Name>
-  playbook: <Playbook>
-  species: <Species>
-  gender: <Gender>
-  stats: Cool +2, Hard +1, Sharp +1, Hot 0, Weird -1
-  starting_moves: (2-3 authentic moves with triggers "When you...", rolls, and 10+ / 7-9 / 6- outcomes)
-  gear: Signature weapon (2 Harm, close), leather jacket (1 Armor), lockpicks
-  harm: 0/5`;
+\`\`\`text
+[PROTAGONIST]
+name: [[NAME: streetwise courier]]
+playbook: The Courier
+species: Human
+gender: Male
+stats: Cool +2, Hard +1, Sharp +1, Hot 0, Weird -1
+starting_moves:
+- Fast Talk: When you bluff or stall an official under pressure, roll +Hot (10+ they buy it cleanly; 7-9 they want a favor or proof first; 6- alarms rise).
+- Slip the Cordons: When you sprint or duck past pursuers through tight terrain, roll +Cool (10+ clean escape; 7-9 escape with 1 Harm or dropped gear; 6- cornered).
+gear: Brass knuckles (2 Harm, hand), reinforced coat (1 Armor), lockpicks
+harm: 0/5
+[/PROTAGONIST]
+\`\`\``;
     }
 
     const diffSection = diffText
@@ -2170,16 +2196,24 @@ ${PRODUCTION_PIPELINE_OVERVIEW}
 * **Upstream Collaboration:** Ground the protagonist directly in the established Series Bible factions, world laws, and the immediate Episode 1 crisis staged by the team!
 
 ### 🎯 Your Single Mission:
-Your ONLY job is to assemble or update the Protagonist character sheet and optional Custom Tracker Module:
+Your ONLY job is to assemble or update the Protagonist character sheet and optional Custom Tracker delegation:
 * [PROTAGONIST] (Fully statted for ${effectiveRuleset.toUpperCase()})
-* Optional [CUSTOM_MODULE] (Custom inventory or thematic tracker)
+* Optional \`[DESIGN_GAME_SYSTEM: <concept>]\` or \`[REMOVE_CUSTOM_MODULE]\` (only when a unique signature resource/gauge is warranted or removed)
 * or [NOOP] if no changes are needed.
 
 ### 🚫 STRICT BOUNDARIES & OUTPUT PROTOCOL:
-* Output ONLY an [UPDATE_DOSSIER] block (or [NOOP]) wrapped in code fences or plain text.
+* Output ONLY a single well-formed \`[UPDATE_DOSSIER] ... [/UPDATE_DOSSIER]\` block (or \`[NOOP]\`) wrapped in code fences or plain text — always start with opening \`[UPDATE_DOSSIER]\` before \`summary:\` and end with \`[/UPDATE_DOSSIER]\`:
+  \`\`\`text
+  [UPDATE_DOSSIER]
+  summary: <One concise sentence summarizing Protagonist updates>
+  [PROTAGONIST]
+  ...
+  [/PROTAGONIST]
+  [/UPDATE_DOSSIER]
+  \`\`\`
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
-* 🚫 **FORBIDDEN IN STEP 4:** Focus strictly on [PROTAGONIST] (and optional [CUSTOM_MODULE]). Do NOT re-emit or alter [MAP], [MONSTER], or [KICK] blocks here.
+* 🚫 **FORBIDDEN IN STEP 4:** Focus strictly on \`[PROTAGONIST]\` (and optional \`[DESIGN_GAME_SYSTEM: ...]\` / \`[REMOVE_CUSTOM_MODULE]\`). Do NOT re-emit or alter \`[MAP]\`, \`[MONSTER]\`, \`[NPC]\`, \`[FACTION]\`, or \`[KICK]\` blocks here.
 * Ground the protagonist's bonds, gear, and motivations in the established Canon and Episode 1 Adventure. If \`Active Stats\` or \`Available Archetypes / Playbooks\` are listed in the Continuity Brief, use those exact stat names and choose or adapt from those archetypes.
 * 🏷️ **Name Diversity & Targeted Placeholders:** If the player did not specify an exact character name, emit \`name: [[NAME: evocative role or concept]]\` (e.g. \`name: [[NAME: cybernetic street samurai]]\`). NEVER invent cliché placeholder names.
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:

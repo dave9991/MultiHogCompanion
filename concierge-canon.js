@@ -852,23 +852,33 @@ export function setStagedCanonEntries(entries) {
     }
 }
 
+function canonEntryMatchesTarget(entry, rawTarget) {
+    const target = String(rawTarget || '').trim().toLowerCase();
+    if (!target || !entry) return false;
+    const targetClean = (parseResolvedNameToken(rawTarget).cleanName || rawTarget).trim().toLowerCase();
+    const comment = String(entry.comment || '').trim().toLowerCase();
+    const id = String(entry.id || '').trim().toLowerCase();
+    const name = String(entry.name || '').trim().toLowerCase();
+    const entryClean = (parseResolvedNameToken(entry.name || '').cleanName || entry.name || '').trim().toLowerCase();
+    return comment === target
+        || id === target
+        || name === target
+        || (Boolean(entryClean) && (entryClean === target || entryClean === targetClean));
+}
+
 /**
- * Finds matching entry in _sources labeled arrays by comment, id, or name (case-insensitive)
+ * Finds matching entry in _sources labeled arrays by comment, id, raw name, or clean NameRAG name
  * and toggles entry.disabled.
  * @param {string} commentOrName
  * @param {boolean} disabled
  * @returns {object|null}
  */
 export function toggleCanonEntryDisabled(commentOrName, disabled) {
-    const target = String(commentOrName || '').trim().toLowerCase();
-    if (!target) return null;
+    if (!String(commentOrName || '').trim()) return null;
     for (const rec of _sources.values()) {
         if (!Array.isArray(rec.labeled)) continue;
         for (const entry of rec.labeled) {
-            const comment = String(entry.comment || '').trim().toLowerCase();
-            const id = String(entry.id || '').trim().toLowerCase();
-            const name = String(entry.name || '').trim().toLowerCase();
-            if (comment === target || id === target || name === target) {
+            if (canonEntryMatchesTarget(entry, commentOrName)) {
                 entry.disabled = Boolean(disabled);
                 return entry;
             }
@@ -878,7 +888,8 @@ export function toggleCanonEntryDisabled(commentOrName, disabled) {
 }
 
 /**
- * Upserts a Canon entry into _sources (matching by comment, kind + name, exact name, or normalized entity name).
+ * Upserts a Canon entry into _sources (matching by comment, kind + name, exact name, clean NameRAG name, or normalized entity name).
+ * Preserves existing `[NAME: concept, RESOLVED TO: Name]` badge tokens when refined by clean name.
  * @param {object} rawEntry
  * @returns {object|null}
  */
@@ -903,6 +914,7 @@ export function upsertCanonEntry(rawEntry) {
     const targetKindName = `[${kind}] ${name}`.toLowerCase();
     const targetNameLower = name.toLowerCase();
     const targetNormName = normalizeEntityName(name);
+    const hasResolvedSyntax = (val) => typeof val === 'string' && /\[NAME:\s*.+?,\s*RESOLVED TO:/i.test(val);
 
     for (const rec of _sources.values()) {
         if (!Array.isArray(rec.labeled)) continue;
@@ -915,16 +927,24 @@ export function upsertCanonEntry(rawEntry) {
             const matches = eComment === targetComment
                 || eKindName === targetKindName
                 || (targetNameLower && eNameLower === targetNameLower)
-                || (targetNormName && eNormName && eNormName === targetNormName);
+                || (targetNormName && eNormName && eNormName === targetNormName)
+                || canonEntryMatchesTarget(e, name);
             if (matches) {
+                const preservedName = hasResolvedSyntax(e.name) && !hasResolvedSyntax(name) ? e.name : formatted.name;
+                const preservedComment = hasResolvedSyntax(e.name) && !hasResolvedSyntax(name) && e.comment
+                    ? `[${kind}] ${preservedName}`
+                    : formatted.comment;
+                const cleanName = (parseResolvedNameToken(preservedName).cleanName || preservedName).trim();
                 const mergedKeys = [...new Set([
                     ...(Array.isArray(e.keys) ? e.keys : []),
                     ...formatted.keys,
-                    name,
+                    cleanName,
                 ].map(k => String(k).trim()).filter(Boolean))].slice(0, 12);
                 rec.labeled[i] = {
                     ...e,
                     ...formatted,
+                    name: preservedName,
+                    comment: preservedComment,
                     id: rawEntry.id || e.id || formatted.id,
                     keys: mergedKeys,
                 };
@@ -953,18 +973,12 @@ export function upsertCanonEntry(rawEntry) {
  * @returns {boolean}
  */
 export function removeCanonEntry(commentOrName) {
-    const target = String(commentOrName || '').trim().toLowerCase();
-    if (!target) return false;
+    if (!String(commentOrName || '').trim()) return false;
     let removed = false;
     for (const rec of _sources.values()) {
         if (!Array.isArray(rec.labeled)) continue;
         const initialLen = rec.labeled.length;
-        rec.labeled = rec.labeled.filter(entry => {
-            const comment = String(entry.comment || '').trim().toLowerCase();
-            const id = String(entry.id || '').trim().toLowerCase();
-            const name = String(entry.name || '').trim().toLowerCase();
-            return !(comment === target || id === target || name === target);
-        });
+        rec.labeled = rec.labeled.filter(entry => !canonEntryMatchesTarget(entry, commentOrName));
         if (rec.labeled.length < initialLen) removed = true;
     }
     return removed;
@@ -1666,10 +1680,13 @@ export function computeCanonDiff(oldSnap, newSnap) {
 export function snapshotAdventure(dossier) {
     return {
         ruleset: dossier?.meta?.ruleset || '',
+        systemKey: dossier?.meta?.systemKey || '',
+        systemLabel: dossier?.meta?.systemLabel || '',
         kick: dossier?.theKick || {},
         maps: (dossier?.maps || []).map(m => ({ site: m.site || m.name || '', briefDescription: m.briefDescription || m.prompt || '' })),
         monsters: (dossier?.monsters || []).map(m => ({ name: m.name || '', description: m.description || m.instinct || '' })),
         npcs: (dossier?.npcs || []).map(n => ({ name: n.name || '', role: n.role || '', description: n.description || '' })),
+        factions: (dossier?.factions || []).map(f => ({ name: f.name || '', agenda: f.agenda || f.goal || '', standing: f.standing || f.disposition || 'Neutral' })),
     };
 }
 
@@ -1684,6 +1701,9 @@ export function computeAdventureDiff(oldSnap, newSnap) {
 
     if ((oldSnap?.ruleset || '') !== (newSnap?.ruleset || '')) {
         lines.push(`Ruleset changed: "${oldSnap?.ruleset || ''}" -> "${newSnap?.ruleset || ''}"`);
+    }
+    if ((oldSnap?.systemKey || '') !== (newSnap?.systemKey || '') || (oldSnap?.systemLabel || '') !== (newSnap?.systemLabel || '')) {
+        lines.push(`Ruleset calibration changed: "${oldSnap?.systemLabel || oldSnap?.systemKey || ''}" -> "${newSnap?.systemLabel || newSnap?.systemKey || ''}"`);
     }
 
     const oldKick = oldSnap?.kick || {};
@@ -1718,6 +1738,13 @@ export function computeAdventureDiff(oldSnap, newSnap) {
     const removedNpcs = oldNpcs.filter(n => n && !newNpcs.includes(n));
     if (addedNpcs.length) lines.push(`Added NPCs: ${addedNpcs.join(', ')}`);
     if (removedNpcs.length) lines.push(`Removed NPCs: ${removedNpcs.join(', ')}`);
+
+    const oldFactions = (oldSnap?.factions || []).map(f => f.name || '');
+    const newFactions = (newSnap?.factions || []).map(f => f.name || '');
+    const addedFactions = newFactions.filter(f => f && !oldFactions.includes(f));
+    const removedFactions = oldFactions.filter(f => f && !newFactions.includes(f));
+    if (addedFactions.length) lines.push(`Added Factions: ${addedFactions.join(', ')}`);
+    if (removedFactions.length) lines.push(`Removed Factions: ${removedFactions.join(', ')}`);
 
     const hasChanges = lines.length > 0;
     const block = hasChanges ? `[UPSTREAM_ADVENTURE_DIFF]\n${lines.join('\n')}\n[/UPSTREAM_ADVENTURE_DIFF]` : '';
@@ -1768,6 +1795,12 @@ export function extractAgnosticAdventureBones(dossier) {
         monsters: (dossier?.monsters || []).map(m => ({
             name: m.name || '',
             concept: m.description || m.instinct || m.species || '',
+        })),
+        factions: (dossier?.factions || []).map(f => ({
+            name: f.name || '',
+            agenda: f.agenda || f.goal || '',
+            standing: f.standing || f.disposition || 'Neutral',
+            notes: f.notes || '',
         })),
     };
 }

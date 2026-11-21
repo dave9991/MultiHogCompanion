@@ -879,7 +879,7 @@ export function shouldRunContemplativeJudgePass({
         if (/^(?:PbtA Engine|Campaign title|Premise|Campaign tone)/i.test(ch)) categories.add('meta');
         else if (/^Protagonist/i.test(ch)) categories.add('protagonist');
         else if (/NPC/i.test(ch)) categories.add('npcs');
-        else if (/Adversary|monsters/i.test(ch)) categories.add('monsters');
+        else if (/Adversary|FAE Encounter|monsters/i.test(ch)) categories.add('monsters');
         else if (/Location|maps/i.test(ch)) categories.add('maps');
         else if (/Faction/i.test(ch)) categories.add('factions');
         else if (/The Kick/i.test(ch)) categories.add('kick');
@@ -910,14 +910,19 @@ export function classifyBuilderReport(report) {
  * @param {'MUTATED'|'NOOP'|'SYNTAX_ERROR'|'UNRECOGNIZED_OUTPUT'} status
  * @param {string} [summaryText]
  * @param {string[]} [errors]
+ * @param {Array<object>} [nameRagResolutions]
+ * @param {string[]} [appliedChanges]
  * @returns {string}
  */
-export function buildTalkerInstructionNotice(status, summaryText = '', errors = [], nameRagResolutions = []) {
+export function buildTalkerInstructionNotice(status, summaryText = '', errors = [], nameRagResolutions = [], appliedChanges = []) {
     const resolvedLines = Array.isArray(nameRagResolutions) && nameRagResolutions.length
         ? `\n[RESOLVED_NAMES_THIS_TURN: ${nameRagResolutions.map(r => `${r.tag || r.placeholder} -> ${r.selectedName}`).join(', ')}]`
         : '';
+    const changesLine = (status === 'MUTATED' && Array.isArray(appliedChanges) && appliedChanges.length > 0)
+        ? `\n[APPLIED_BLUEPRINT_CHANGES: ${appliedChanges.join('; ')} — Report ONLY changes confirmed here; never claim an entity was removed or added if it is absent from this list.]`
+        : '';
     if (status === 'MUTATED' || status === 'NOOP') {
-        return `[BUILDER_REPORT: ${summaryText}]${resolvedLines}`;
+        return `[BUILDER_REPORT: ${summaryText}]${changesLine}${resolvedLines}`;
     }
     if (status === 'SYNTAX_ERROR') {
         const errStr = errors && errors.length ? ` (${errors.join('; ')})` : '';

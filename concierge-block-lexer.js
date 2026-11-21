@@ -7,7 +7,7 @@
 
 import { stripThinkingContent } from './concierge-connection.js';
 
-export const NEXT_DOSSIER_BLOCK_LOOKAHEAD = String.raw`(?=\n[ \t]*\[(?:\/?(?:UPDATE_DOSSIER|CONCIERGE_STATE|CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON))(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$))`;
+export const NEXT_DOSSIER_BLOCK_LOOKAHEAD = String.raw`(?=\n[ \t]*\[(?:\/?(?:UPDATE_DOSSIER|CONCIERGE_STATE|CONTEMPLATION|FRAMING|CANON_UPDATE|CANON_ENTRY|UPSERT_CANON_ENTRY|CONFIG|CYOA|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|RECALIBRATE_RULESET|DESIGN_GAME_SYSTEM|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON|REMOVE_NPC|REMOVE_MONSTER|REMOVE_MAP|REMOVE_FACTION|REMOVE_WORLD_RULE|REMOVE_CUSTOM_MODULE|REMOVE_GAME_SYSTEM|CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES))(?::[^\n\]]+)?\][ \t]*(?:\r?\n|$))`;
 
 /**
  * Strips quotes, backticks, and markdown wrapping from entity names.
@@ -41,7 +41,7 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[CONCIERGE_STATE\][\s\S]*?(?:\[\/CONCIERGE_STATE\]|$)/gi, '')
         .replace(/\[CONTEMPLATION\][\s\S]*?(?:\[\/CONTEMPLATION\]|$)/gi, '')
         .replace(/\[FRAMING\][\s\S]*?(?:\[\/FRAMING\]|$)/gi, '')
-        .replace(/\[CANON_(?:ENTRY|UPDATE)(?::[^\n\]]+)?\][\s\S]*?(?:\[\/CANON_(?:ENTRY|UPDATE)\]|$)/gi, '')
+        .replace(/\[(?:CANON_(?:ENTRY|UPDATE)|UPSERT_CANON_ENTRY)(?::[^\n\]]+)?\][\s\S]*?(?:\[\/(?:CANON_(?:ENTRY|UPDATE)|UPSERT_CANON_ENTRY)\]|$)/gi, '')
         .replace(/\[(?:DISABLE|ENABLE|REMOVE)_CANON:[^\n\]]+\]/gi, '')
         .replace(/\[DOSSIER_CRITIQUE\][\s\S]*?(?:\[\/DOSSIER_CRITIQUE\]|$)/gi, '')
         .replace(/\[PROTAGONIST(?::[^\n\]]+)?\][\s\S]*?(?:\[\/PROTAGONIST\]|$)/gi, '')
@@ -53,10 +53,11 @@ export function stripConciergeStateBlocks(text) {
         .replace(/\[CYOA\][\s\S]*?(?:\[\/CYOA\]|$)/gi, '')
         .replace(/\[CONFIG\][\s\S]*?(?:\[\/CONFIG\]|$)/gi, '')
         .replace(/\[WORLD_RULES?\][\s\S]*?(?:\[\/WORLD_RULES?\]|$)/gi, '')
-        .replace(/\[CUSTOM_MODULE\][\s\S]*?(?:\[\/CUSTOM_MODULE\]|$)/gi, '')
+        .replace(/\[(?:CUSTOM_MODULE|GAME_SYSTEM)\][\s\S]*?(?:\[\/(?:CUSTOM_MODULE|GAME_SYSTEM)\]|$)/gi, '')
         .replace(/\[REMOVE_(?:NPC|MONSTER|MAP|FACTION|WORLD_RULE):[^\n\]]+\]/gi, '')
-        .replace(/\[REMOVE_CUSTOM_MODULE\]/gi, '')
+        .replace(/\[REMOVE_(?:CUSTOM_MODULE|GAME_SYSTEM)\]/gi, '')
         .replace(/\[(?:CLEAR_NPCS|CLEAR_MONSTERS|CLEAR_MAPS|CLEAR_FACTIONS|CLEAR_WORLD_RULES)\]/gi, '')
+        .replace(/\[(?:RECALIBRATE_RULESET|DESIGN_GAME_SYSTEM):[^\n\]]*\]/gi, '')
         .replace(/\[NOOP\][\s\S]*?(?:\[\/NOOP\]|$)/gi, '')
         .replace(/\[BUILDER_REPORT:[^\n\]]+\]/gi, '')
         .replace(/\[PROMOTE_CANON:[^\n\]]*\]/gi, '')
@@ -248,7 +249,7 @@ export function matchDossierSectionBlocks(raw, tagRegexStr, closeTagRegexStr) {
 export function normalizeMalformedDossierClosers(text) {
     if (!text || typeof text !== 'string') return text;
     return text.replace(
-        /^[ \t]*\/(PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|CYOA|CONFIG|CONTEMPLATION|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|FRAMING|CANON_UPDATE|CANON_ENTRY|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON)[ \t]*$/gim,
+        /^[ \t]*\/(UPDATE_DOSSIER|CONCIERGE_STATE|NOOP|PROTAGONIST|NPC|MONSTER|MAP|FACTION|KICK|CYOA|CONFIG|CONTEMPLATION|WORLD_RULES?|CUSTOM_MODULE|GAME_SYSTEM|FRAMING|CANON_UPDATE|CANON_ENTRY|UPSERT_CANON_ENTRY|REMOVE_CANON|DISABLE_CANON|ENABLE_CANON)[ \t]*$/gim,
         (_, tag) => `[/${tag.toUpperCase()}]`,
     );
 }

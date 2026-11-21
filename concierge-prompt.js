@@ -1885,12 +1885,12 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
   opening_prompt: Describe how you react as the lanterns shatter and arrows strike the bar counter.
   [/KICK]
   \`\`\`
-* Config / Campaign Dials:
+* Config / Campaign Dials (omit \`[CONFIG]\` unless changing a dial; pick ONE concrete value per field — never copy option lists with \`|\`; \`playstyle\`: \`cyoa_5\`/\`cyoa_3\`/\`freeform\`, \`simulation_depth\`: \`active_fronts\`/\`living_world\`/\`static\`, \`party_mode\`: \`solo\`/\`squad\`/\`duo\`):
   \`\`\`text
   [CONFIG]
-  playstyle: cyoa_5 | cyoa_3 | freeform
-  simulation_depth: active_fronts | living_world | static
-  party_mode: solo | squad | duo
+  playstyle: cyoa_5
+  simulation_depth: active_fronts
+  party_mode: squad
   [/CONFIG]
   \`\`\``;
     } else if (effectiveRuleset === 'fae') {
@@ -1923,14 +1923,14 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
   opening_prompt: The final embers die out and darkness closes in—what do you do?
   [/KICK]
   \`\`\`
-* Config / Knobs:
+* Config / Knobs (omit \`[CONFIG]\` unless changing a dial; pick ONE concrete value per field — never copy option lists with \`|\`; \`flee_grace_toggle\`: \`true\`/\`false\`, \`base_attrition_shift\`: \`0\`/\`1\`/\`-1\`, \`action_tempo\`: \`gritty_default\`/\`action_serial\`/\`slow_burn\`/\`slice_of_life\`, \`overflow_default\`: \`scar_and_ko\`/\`lethal\`/\`scene_fail\`, \`heroic_tier\`: \`true\`/\`false\`):
   \`\`\`text
   [CONFIG]
-  flee_grace_toggle: true | false
-  base_attrition_shift: 0 | 1 | -1
-  action_tempo: gritty_default | action_serial | slow_burn | slice_of_life
-  overflow_default: scar_and_ko | lethal | scene_fail
-  heroic_tier: true | false
+  flee_grace_toggle: true
+  base_attrition_shift: 0
+  action_tempo: gritty_default
+  overflow_default: scar_and_ko
+  heroic_tier: false
   [/CONFIG]
   \`\`\``;
     } else {
@@ -1961,13 +1961,13 @@ export function buildStage3AdventureBuilderPrompt(dossier, canonEntries = [], { 
   opening_prompt: The floor groans under your boots—what do you do?
   [/KICK]
   \`\`\`
-* Config:
+* Config (omit \`[CONFIG]\` unless changing a dial; pick ONE concrete value per field — never copy option lists with \`|\`; \`playstyle\`: \`cyoa_5\`/\`cyoa_3\`/\`freeform\`, \`simulation_depth\`: \`active_fronts\`/\`living_world\`/\`static\`, \`party_mode\`: \`solo\`/\`squad\`/\`duo\`):
   \`\`\`text
   [CONFIG]
-  playstyle: cyoa_5 | cyoa_3 | freeform
+  playstyle: cyoa_5
   harm_max: 5
-  simulation_depth: active_fronts | living_world | static
-  party_mode: solo | squad | duo
+  simulation_depth: active_fronts
+  party_mode: squad
   [/CONFIG]
   \`\`\``;
     }
@@ -2002,11 +2002,18 @@ Your ONLY job is to assemble or update the Episode 1 starting stage set:
 * [NPC] (Named individuals with social/relationship stakes — allies, contacts, and hostile human rivals)
 * [FACTION] (Factions active in the starting situation)
 * [CYOA] (Optional tailored opening choices)
-* [RECALIBRATE_RULESET: <what changed>] (ONLY if the player asks to change genre, stats, archetypes, or ruleset mold — this invokes the Ruleset Architect sub-agent)
+* Entity Removal / Clearing: \`[REMOVE_MONSTER: Name]\`, \`[CLEAR_MONSTERS]\`, \`[REMOVE_NPC: Name]\`, \`[CLEAR_NPCS]\`, \`[REMOVE_MAP: Site]\`, \`[REMOVE_FACTION: Name]\` (or \`remove_monster: Name\` / \`remove_npc: Name\`) — when the player asks to remove or clear adversaries, NPCs, maps, or factions, you MUST emit these removal directives rather than writing a dummy block with \`status: Cleared\`.
+* [RECALIBRATE_RULESET: <what changed>] (ONLY emit this tag if the player explicitly asks to change genre, stats, archetypes, or ruleset mold — OMIT it completely otherwise; NEVER emit \`[RECALIBRATE_RULESET: none]\`)
 * or [NOOP] if no changes are needed.
 
 ### 🚫 STRICT BOUNDARIES & OUTPUT PROTOCOL:
-* Output ONLY an [UPDATE_DOSSIER] block (or [NOOP]) wrapped in code fences or plain text.
+* Output ONLY a single well-formed \`[UPDATE_DOSSIER] ... [/UPDATE_DOSSIER]\` block (or \`[NOOP]\`) wrapped in code fences or plain text — always start with the opening \`[UPDATE_DOSSIER]\` tag before \`summary:\` and end with \`[/UPDATE_DOSSIER]\`:
+  \`\`\`text
+  [UPDATE_DOSSIER]
+  summary: <One concise sentence summarizing Adventure changes>
+  ...
+  [/UPDATE_DOSSIER]
+  \`\`\`
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
 * 🚫 **STRICTLY FORBIDDEN IN STEP 3: NEVER emit [PROTAGONIST] here.** The protagonist character sheet and progression codex are built in **Step 4 (\`👤 Character\`)**.

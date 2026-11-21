@@ -68,6 +68,11 @@ console.log('Testing buildTalkerInstructionNotice anti-hallucination notices...'
 const noticeMutated = buildTalkerInstructionNotice('MUTATED', 'Added Silver Longsword');
 assert.strictEqual(noticeMutated, '[BUILDER_REPORT: Added Silver Longsword]');
 
+const noticeWithAppliedChanges = buildTalkerInstructionNotice('MUTATED', 'Cleared monsters', [], [], ['Updated NPC "Mouad"']);
+assert.ok(noticeWithAppliedChanges.includes('[BUILDER_REPORT: Cleared monsters]'));
+assert.ok(noticeWithAppliedChanges.includes('[APPLIED_BLUEPRINT_CHANGES: Updated NPC "Mouad"'));
+assert.ok(noticeWithAppliedChanges.includes('Report ONLY changes confirmed here'));
+
 const noticeNoop = buildTalkerInstructionNotice('NOOP', 'No blueprint changes requested');
 assert.strictEqual(noticeNoop, '[BUILDER_REPORT: No blueprint changes requested]');
 
@@ -294,6 +299,23 @@ try {
     assert.ok(nameRagHtml.includes('<b style="color: #4ade80;">Sera (picked)</b>'));
     assert.ok(nameRagHtml.includes('Lyra'));
     assert.ok(harness.getElement('#mhc_debug_dossier_json')?.textContent.includes('"Port Ambush"'));
+
+    // Multi-pass transaction (Pass 1 + Ruleset Recalibration + Stage 1b Refiner) must not render "Attempt 3/2"
+    renderDebugInspectorDom({
+        timestamp: '19:55:00',
+        finalStatus: 'MUTATED',
+        builderSummary: 'Refined adventure',
+        attempts: [
+            { attempt: 1, rawResponse: '[UPDATE_DOSSIER]\nsummary: Pass 1\n[/UPDATE_DOSSIER]' },
+            { attempt: 'ruleset-recalibration', rawResponse: '[UPDATE_DOSSIER]\nsummary: Recal\n[/UPDATE_DOSSIER]' },
+            { attempt: '1b (Refiner)', rawResponse: '[UPDATE_DOSSIER]\nsummary: Refiner\n[/UPDATE_DOSSIER]' },
+        ],
+    }, { activeDossier: {} });
+    assert.strictEqual(
+        harness.getElement('#mhc_debug_attempt_count')?.textContent,
+        'Pass 1 (1/2) + ruleset-recalibration + 1b (Refiner)',
+        'Extra sub-agent/refiner passes must render cleanly instead of Attempt 3/2'
+    );
 } finally {
     harness.cleanup();
 }

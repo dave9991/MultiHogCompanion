@@ -18,7 +18,9 @@ import {
     formatStageContinuityBrief,
 } from '../concierge-prompt.js';
 import { systemRegistry } from '../concierge-system-registry.js';
-import { buildTalkerInstructionNotice } from '../concierge-markdown-codec.js';
+import { buildTalkerInstructionNotice, shouldRunContemplativeJudgePass } from '../concierge-markdown-codec.js';
+import { matchDossierSectionBlocks, normalizeMalformedDossierClosers } from '../concierge-block-lexer.js';
+import { ConciergeStateStore } from '../concierge-state-store.js';
 import '../concierge-system-pbta.js';
 import '../concierge-system-dnd5e.js';
 import '../concierge-system-fae.js';
@@ -460,5 +462,129 @@ starting_moves:
 `, createEmptyDossier('pbta'));
 assert.strictEqual(parsedStartingMoves.updatedDossier.protagonist.startingMoves.length, 2);
 assert.ok(parsedStartingMoves.updatedDossier.protagonist.startingMoves[0].includes('WASTELAND INTUITION'));
+
+console.log('18. Testing Phase 0 Step 3 prompt removal directives, sentinel/pipe guards, and multi-block [UPDATE_DOSSIER] extraction...');
+const s3FaePrompt = buildStage3AdventureBuilderPrompt(createEmptyDossier('fae'), sampleCanonEntries);
+assert.ok(s3FaePrompt.includes('[CLEAR_MONSTERS]') && s3FaePrompt.includes('[REMOVE_MONSTER: Name]'), 'Step 3 prompt must document [CLEAR_MONSTERS] and [REMOVE_MONSTER: Name]');
+assert.ok(s3FaePrompt.includes('NEVER emit `[RECALIBRATE_RULESET: none]`'), 'Step 3 prompt must warn against [RECALIBRATE_RULESET: none]');
+assert.ok(!s3FaePrompt.includes('flee_grace_toggle: true | false'), 'Step 3 FAE [CONFIG] example must not contain literal pipe templates');
+
+// Sentinel filtering for [RECALIBRATE_RULESET] / [DESIGN_GAME_SYSTEM] + pipe template [CONFIG] guard
+const sentinelBase = createEmptyDossier('fae');
+sentinelBase.config.knobs.flee_grace_toggle = false;
+sentinelBase.config.knobs.base_attrition_shift = 1;
+const sentinelParsed = applyDossierUpdates(`
+[UPDATE_DOSSIER]
+summary: Cleared threats without touching ruleset or dials
+[CONFIG]
+flee_grace_toggle: true | false
+base_attrition_shift: 0 | 1 | -1
+action_tempo: gritty_default | action_serial | slow_burn | slice_of_life
+overflow_default: scar_and_ko | lethal | scene_fail
+heroic_tier: true | false
+[/CONFIG]
+[RECALIBRATE_RULESET: none]
+[DESIGN_GAME_SYSTEM: n/a]
+[/UPDATE_DOSSIER]
+`, sentinelBase);
+assert.strictEqual(sentinelParsed.recalibrateRuleset, '', '[RECALIBRATE_RULESET: none] must be ignored');
+assert.strictEqual(sentinelParsed.designGameSystem, '', '[DESIGN_GAME_SYSTEM: n/a] must be ignored');
+assert.strictEqual(sentinelParsed.updatedDossier.config.knobs.flee_grace_toggle, false, 'Pipe template true | false must not flip flee_grace_toggle');
+assert.strictEqual(sentinelParsed.updatedDossier.config.knobs.base_attrition_shift, 1, 'Pipe template 0 | 1 | -1 must not overwrite base_attrition_shift');
+
+// Stray leading summary + [/UPDATE_DOSSIER] before real [UPDATE_DOSSIER]...[/UPDATE_DOSSIER], and multiple closed blocks
+const seededMonsters = applyDossierUpdates(`
+[UPDATE_DOSSIER]
+[MONSTER: Dust Wolf Pack]
+threat_level: 1
+[/MONSTER]
+[NPC]
+name: Mouad
+role: Auditor
+[/NPC]
+[/UPDATE_DOSSIER]
+`, createEmptyDossier('fae')).updatedDossier;
+assert.strictEqual(seededMonsters.monsters.length, 1);
+
+const strayAndMultiRes = applyDossierUpdates(`
+summary: Stripped queued adversaries and updated Mouad gender.
+[/UPDATE_DOSSIER]
+
+[UPDATE_DOSSIER]
+summary: Stripped queued adversaries.
+[CLEAR_MONSTERS]
+[/UPDATE_DOSSIER]
+
+[UPDATE_DOSSIER]
+[NPC]
+name: Mouad
+gender: male
+[/NPC]
+[/UPDATE_DOSSIER]
+`, seededMonsters);
+assert.strictEqual(strayAndMultiRes.updatedDossier.monsters.length, 0, 'Closed [UPDATE_DOSSIER] after stray closer must apply [CLEAR_MONSTERS]');
+assert.strictEqual(strayAndMultiRes.updatedDossier.npcs[0].gender, 'male', 'Second closed [UPDATE_DOSSIER] block must also be merged and parsed');
+
+console.log('19. Testing Phase 1 Spine Audit fixes (CONC-005..CONC-009): lexer lookahead/strip/closers, draft healing, FAE Judge category...');
+const unclosedNpcBeforeDirectives = `
+[NPC]
+name: Mouad
+role: Auditor
+[CLEAR_MONSTERS]
+[REMOVE_NPC: Old Guard]
+[RECALIBRATE_RULESET: Weird West]
+[DESIGN_GAME_SYSTEM: Frontier Permit Meter]
+`;
+const parsedNpcBlocks = matchDossierSectionBlocks(unclosedNpcBeforeDirectives, 'NPC(?::\\s*([^\\]\\r\\n]+))?', 'NPC');
+assert.strictEqual(parsedNpcBlocks.length, 1);
+assert.ok(!parsedNpcBlocks[0].content.includes('[CLEAR_MONSTERS]'), 'Unclosed [NPC] must stop before [CLEAR_MONSTERS]');
+assert.ok(!parsedNpcBlocks[0].content.includes('[REMOVE_NPC:'), 'Unclosed [NPC] must stop before [REMOVE_NPC]');
+assert.ok(!parsedNpcBlocks[0].content.includes('[RECALIBRATE_RULESET:'), 'Unclosed [NPC] must stop before [RECALIBRATE_RULESET]');
+assert.ok(!parsedNpcBlocks[0].content.includes('[DESIGN_GAME_SYSTEM:'), 'Unclosed [NPC] must stop before [DESIGN_GAME_SYSTEM]');
+
+const strippedLeaks = stripConciergeStateBlocks(`Prose before
+[RECALIBRATE_RULESET: Weird West]
+[DESIGN_GAME_SYSTEM: Frontier Permit Meter]
+[GAME_SYSTEM]
+tag: PERMITS
+[/GAME_SYSTEM]
+[REMOVE_GAME_SYSTEM]
+[UPSERT_CANON_ENTRY]
+kind: LORE
+name: Test
+[/UPSERT_CANON_ENTRY]
+Prose after`);
+assert.ok(!strippedLeaks.includes('RECALIBRATE_RULESET') && !strippedLeaks.includes('DESIGN_GAME_SYSTEM') && !strippedLeaks.includes('GAME_SYSTEM') && !strippedLeaks.includes('REMOVE_GAME_SYSTEM') && !strippedLeaks.includes('UPSERT_CANON_ENTRY'), 'stripConciergeStateBlocks must remove all sub-agent and alias blocks');
+assert.ok(strippedLeaks.includes('Prose before') && strippedLeaks.includes('Prose after'));
+
+const repairedClosers = normalizeMalformedDossierClosers('/update_dossier\n/noop\n/upsert_canon_entry');
+assert.ok(repairedClosers.includes('[/UPDATE_DOSSIER]'));
+assert.ok(repairedClosers.includes('[/NOOP]'));
+assert.ok(repairedClosers.includes('[/UPSERT_CANON_ENTRY]'));
+
+const store = new ConciergeStateStore();
+const corruptedRestore = createEmptyDossier('fae');
+corruptedRestore.npcs = [
+    { name: '[NAME: Vault City liaison, RESOLVED TO: Zaelyn]', role: 'Foil', gender: '' },
+    { name: '[NAME: Vault City liaison, RESOLVED TO: Zaelyn, RESOLVED TO: Ashunte]', role: 'Foil', gender: 'female' },
+];
+const restoredTrack = store.applyDraftToSessionZero({ dossier: corruptedRestore });
+assert.strictEqual(restoredTrack.dossier.npcs.length, 1, 'applyDraftToSessionZero must heal and deduplicate restored NPCs');
+assert.strictEqual(restoredTrack.dossier.npcs[0].name, '[NAME: Vault City liaison, RESOLVED TO: Zaelyn]');
+assert.strictEqual(restoredTrack.dossier.npcs[0].gender, 'female');
+
+assert.strictEqual(
+    shouldRunContemplativeJudgePass({
+        prevDossier: { meta: { premise: 'Test' }, protagonist: { name: 'A' }, npcs: [{ name: 'N' }], monsters: [{ name: 'M' }] },
+        updatedDossier: {},
+        builderReport: {
+            hasMutations: true,
+            isNoop: false,
+            changes: ['Updated NPC "Mouad"', 'Added FAE Encounter "Dust Wolf Pack"', 'The Kick crisis updated'],
+        },
+    }),
+    true,
+    'shouldRunContemplativeJudgePass must count "Added FAE Encounter ..." in the monsters category'
+);
 
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

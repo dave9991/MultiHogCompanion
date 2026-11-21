@@ -148,9 +148,23 @@ console.log(`✓ All ${requiredCatalogTags.length} required [CATALOG: ...] ancho
 
 // 8. Verify documentation references resolve (guards against catalog drift after refactors/retirements)
 console.log('Verifying catalog/doc file references and cross-doc anchors resolve...');
+const collectMarkdownFiles = (dir, baseRel = '') => {
+    if (!fs.existsSync(dir)) return [];
+    const results = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const rel = baseRel ? `${baseRel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+            results.push(...collectMarkdownFiles(path.join(dir, entry.name), rel));
+        } else if (entry.isFile() && entry.name.endsWith('.md')) {
+            results.push(rel);
+        }
+    }
+    return results;
+};
+
 const docFiles = [
     'FEATURES.md', 'WORKAROUNDS.md', 'LISTENERS.md', 'MONKEYPATCHES.md',
-    ...fs.readdirSync(path.join(extensionRoot, 'docs')).filter(f => f.endsWith('.md')).map(f => path.join('docs', f)),
+    ...collectMarkdownFiles(path.join(extensionRoot, 'docs'), 'docs'),
 ];
 
 // GitHub-style heading slug

@@ -12,6 +12,7 @@ Before modifying code, designing features, or debugging async timing:
 * **SillyTavern Host Contracts**: Consult [docs/host-sillytavern.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/host-sillytavern.md) for pointers to `SillyTavern-Docs` and `st-source`.
 * **Upstream MultiHog Framework**: Consult [docs/upstream-multihog.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/upstream-multihog.md) for pointers to upstream design docs, memo loops, and cartridges.
 * **State Tracker HUD & Rendering Reference**: Consult [docs/multihog-rendering-reference.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/multihog-rendering-reference.md) for `((MARKER))` tokens, pill hover-toast rules (`(...)` vs `[...]`), color/gradient syntax, and implicit field highlighting.
+* **Session Zero Concierge Architecture & Stage Contracts**: Consult [docs/concierge/README.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/concierge/README.md) for the 4-stage pipeline, prompt/parser/NameRAG contracts, button gating, N-turn invariants, and active audit tracker.
 
 ---
 

@@ -184,7 +184,14 @@ export function renderDebugInspectorDom(tx, { activeDossier = null } = {}) {
     }
 
     modalRaw.text(rawText || tx.rawOutput || '(empty)');
-    modalAttempts.text(tx.stage === 'canon' ? 'Attempt 1/1 (Ingest Pass)' : `Attempt ${attempts.length}/2`);
+    const pass1Attempts = attempts.filter(a => typeof a?.attempt === 'number').length;
+    const extraPasses = attempts.filter(a => typeof a?.attempt !== 'number' && a?.attempt).map(a => String(a.attempt));
+    const attemptLabel = tx.stage === 'canon'
+        ? 'Attempt 1/1 (Ingest Pass)'
+        : (extraPasses.length > 0
+            ? `Pass 1 (${pass1Attempts || 1}/2) + ${extraPasses.join(' + ')}`
+            : `Attempt ${attempts.length}/2`);
+    modalAttempts.text(attemptLabel);
     modalPrompt.text(tx.promptInput ? String(tx.promptInput) : JSON.stringify(tx.builderRequest?.messages || [], null, 2));
     modalDossier.text(JSON.stringify(tx.activeDossierSnapshot || tx.currentDossierSnapshot || activeDossier || {}, null, 2));
 }

@@ -804,12 +804,22 @@ export function applyDossierUpdates(text, dossier) {
 
     // 1. Locate directive content: [UPDATE_DOSSIER] or [CONCIERGE_STATE]
     let raw = null;
+    const closedUpdateBlocks = [...cleanedText.matchAll(/(?:^|\n)[ \t]*\[UPDATE_DOSSIER\][ \t]*(?:\r?\n|$)([\s\S]*?)\[\/UPDATE_DOSSIER\]/gi)]
+        .map(m => m[1])
+        .filter(Boolean);
+    const inlineClosedBlocks = closedUpdateBlocks.length
+        ? closedUpdateBlocks
+        : [...cleanedText.matchAll(/\[UPDATE_DOSSIER\]([\s\S]*?)\[\/UPDATE_DOSSIER\]/gi)]
+            .map(m => m[1])
+            .filter(Boolean);
     const updateMatch = cleanedText.match(/(?:^|\n)[ \t]*\[UPDATE_DOSSIER\][ \t]*(?:\r?\n|$)([\s\S]*?)(?:\[\/UPDATE_DOSSIER\]|$)/i)
         || cleanedText.match(/\[UPDATE_DOSSIER\]([\s\S]*?)\[\/UPDATE_DOSSIER\]/i);
     const stateMatch = cleanedText.match(/(?:^|\n)[ \t]*\[CONCIERGE_STATE\][ \t]*(?:\r?\n|$)([\s\S]*?)(?:\[\/CONCIERGE_STATE\]|$)/i)
         || cleanedText.match(/\[CONCIERGE_STATE\]([\s\S]*?)\[\/CONCIERGE_STATE\]/i);
 
-    if (updateMatch) {
+    if (inlineClosedBlocks.length > 0) {
+        raw = inlineClosedBlocks.join('\n\n');
+    } else if (updateMatch) {
         raw = updateMatch[1];
     } else if (stateMatch) {
         raw = stateMatch[1];
@@ -2131,10 +2141,11 @@ export function applyDossierUpdates(text, dossier) {
     if (configBlocks.length > 0) {
         const cBlock = configBlocks[0].content;
         const kv = parseKeyValueLines(cBlock);
+        const isPipeTemplate = (v) => typeof v === 'string' && v.includes('|');
 
         // Playstyle
-        const psRaw = (kv.playstyle || kv.cyoa_mode || kv.cyoa || '').toLowerCase();
-        if (psRaw) {
+        const psRaw = (kv.playstyle || kv.cyoa_mode || kv.cyoa || '').toLowerCase().trim();
+        if (psRaw && !isPipeTemplate(psRaw)) {
             let nextPs = updated.config.playstyle;
             if (/^(freeform|prose|none|off|disabled|false|0)$/.test(psRaw)) nextPs = 'freeform';
             else if (/^(cyoa_3|3|minimal|minimalist)$/.test(psRaw)) nextPs = 'cyoa_3';
@@ -2149,16 +2160,19 @@ export function applyDossierUpdates(text, dossier) {
 
         // CYOA Emojis
         if (kv.cyoa_emojis !== undefined || kv.emojis !== undefined) {
-            const emRaw = String(kv.cyoa_emojis !== undefined ? kv.cyoa_emojis : kv.emojis).toLowerCase();
-            const nextEm = !/^(false|off|0|no)$/.test(emRaw);
-            if (nextEm !== updated.config.cyoaEmojis) {
-                updated.config.cyoaEmojis = nextEm;
-                changes.push(`CYOA Emojis set to ${nextEm ? 'On' : 'Off'}`);
+            const emRaw = String(kv.cyoa_emojis !== undefined ? kv.cyoa_emojis : kv.emojis).toLowerCase().trim();
+            if (!isPipeTemplate(emRaw)) {
+                const nextEm = !/^(false|off|0|no)$/.test(emRaw);
+                if (nextEm !== updated.config.cyoaEmojis) {
+                    updated.config.cyoaEmojis = nextEm;
+                    changes.push(`CYOA Emojis set to ${nextEm ? 'On' : 'Off'}`);
+                }
             }
         }
 
         // Harm Max / Lethality
-        const harmRaw = parseInt(kv.harm_max || kv.harm || kv.lethality, 10);
+        const harmStr = String(kv.harm_max || kv.harm || kv.lethality || '').trim();
+        const harmRaw = !isPipeTemplate(harmStr) ? parseInt(harmStr, 10) : NaN;
         if (!isNaN(harmRaw) && harmRaw >= 2 && harmRaw <= 8) {
             if (harmRaw !== updated.config.harmMax) {
                 updated.config.harmMax = harmRaw;
@@ -2172,8 +2186,8 @@ export function applyDossierUpdates(text, dossier) {
         }
 
         // Party Mode
-        const partyRaw = (kv.party_mode || kv.party || '').toLowerCase();
-        if (partyRaw) {
+        const partyRaw = (kv.party_mode || kv.party || '').toLowerCase().trim();
+        if (partyRaw && !isPipeTemplate(partyRaw)) {
             let nextParty = updated.config.partyMode;
             if (/^(solo|lone|loner|alone)$/.test(partyRaw)) nextParty = 'solo';
             else if (/^(duo|pair|partner|buddy)$/.test(partyRaw)) nextParty = 'duo';
@@ -2195,7 +2209,8 @@ export function applyDossierUpdates(text, dossier) {
         }
 
         // Pacing XP
-        const xpRaw = parseInt(kv.pacing_xp || kv.xp, 10);
+        const xpStr = String(kv.pacing_xp || kv.xp || '').trim();
+        const xpRaw = !isPipeTemplate(xpStr) ? parseInt(xpStr, 10) : NaN;
         if (!isNaN(xpRaw) && (xpRaw === 3 || xpRaw === 5)) {
             if (xpRaw !== updated.config.pacingXp) {
                 updated.config.pacingXp = xpRaw;
@@ -2204,8 +2219,8 @@ export function applyDossierUpdates(text, dossier) {
         }
 
         // World Simulation Depth
-        const simRaw = (kv.simulation_depth || kv.sim_depth || kv.simulation || '').toLowerCase();
-        if (simRaw) {
+        const simRaw = (kv.simulation_depth || kv.sim_depth || kv.simulation || '').toLowerCase().trim();
+        if (simRaw && !isPipeTemplate(simRaw)) {
             let nextSim = updated.config.simulationDepth || 'active_fronts';
             if (/^(static|none|off|solo|disabled|narrative_solo)$/.test(simRaw)) nextSim = 'static';
             else if (/^(living|living_world|full|deep|all)$/.test(simRaw)) nextSim = 'living_world';
@@ -2221,10 +2236,12 @@ export function applyDossierUpdates(text, dossier) {
         // Relationships Dial
         if (kv.relationships !== undefined || kv.relations !== undefined || kv.npc_relationships !== undefined) {
             const relRaw = String(kv.relationships ?? kv.relations ?? kv.npc_relationships).toLowerCase().trim();
-            const nextRel = !/^(false|off|0|no|disabled)$/i.test(relRaw);
-            if (nextRel !== updated.config.relationships) {
-                updated.config.relationships = nextRel;
-                changes.push(`Relationships dial set to ${nextRel ? 'On' : 'Off'}`);
+            if (!isPipeTemplate(relRaw)) {
+                const nextRel = !/^(false|off|0|no|disabled)$/i.test(relRaw);
+                if (nextRel !== updated.config.relationships) {
+                    updated.config.relationships = nextRel;
+                    changes.push(`Relationships dial set to ${nextRel ? 'On' : 'Off'}`);
+                }
             }
         }
 
@@ -2273,26 +2290,34 @@ export function applyDossierUpdates(text, dossier) {
 
         // FAE Knobs in CONFIG
         updated.config.knobs = updated.config.knobs || {};
+        const BOOLEAN_CONFIG_RE = /^(?:true|false|on|off|yes|no|1|0)$/i;
         const heroicRaw = kv.heroic_tier !== undefined ? kv.heroic_tier : (kv.heroic !== undefined ? kv.heroic : kv.heroic_domain_active);
         if (heroicRaw !== undefined) {
-            const val = /^(?:true|on|yes|1)$/i.test(String(heroicRaw).trim());
-            if (updated.config.heroicTier !== val) {
-                updated.config.heroicTier = val;
-                updated.config.knobs.heroic_tier = val;
-                changes.push(`Heroic Tier dial set to ${val ? 'ON' : 'OFF'}`);
+            const hStr = String(heroicRaw).trim();
+            if (!isPipeTemplate(hStr) && BOOLEAN_CONFIG_RE.test(hStr)) {
+                const val = /^(?:true|on|yes|1)$/i.test(hStr);
+                if (updated.config.heroicTier !== val) {
+                    updated.config.heroicTier = val;
+                    updated.config.knobs.heroic_tier = val;
+                    changes.push(`Heroic Tier dial set to ${val ? 'ON' : 'OFF'}`);
+                }
             }
         }
         const fleeRaw = kv.flee_grace_toggle !== undefined ? kv.flee_grace_toggle : kv.flee_grace;
         if (fleeRaw !== undefined) {
-            const val = /true|on/i.test(String(fleeRaw).trim());
-            if (updated.config.knobs.flee_grace_toggle !== val) {
-                updated.config.knobs.flee_grace_toggle = val;
-                changes.push(`Flee Grace dial set to ${val ? 'ON' : 'OFF'}`);
+            const fStr = String(fleeRaw).trim();
+            if (!isPipeTemplate(fStr) && BOOLEAN_CONFIG_RE.test(fStr)) {
+                const val = /^(?:true|on|yes|1)$/i.test(fStr);
+                if (updated.config.knobs.flee_grace_toggle !== val) {
+                    updated.config.knobs.flee_grace_toggle = val;
+                    changes.push(`Flee Grace dial set to ${val ? 'ON' : 'OFF'}`);
+                }
             }
         }
         const shiftRaw = kv.base_attrition_shift !== undefined ? kv.base_attrition_shift : kv.attrition_shift;
         if (shiftRaw !== undefined) {
-            const val = parseInt(shiftRaw, 10);
+            const sStr = String(shiftRaw).trim();
+            const val = !isPipeTemplate(sStr) ? parseInt(sStr, 10) : NaN;
             if (!isNaN(val) && updated.config.knobs.base_attrition_shift !== val) {
                 updated.config.knobs.base_attrition_shift = val;
                 changes.push(`Base Attrition Shift dial set to ${val >= 0 ? '+' : ''}${val}`);
@@ -2301,7 +2326,7 @@ export function applyDossierUpdates(text, dossier) {
         const overflowRaw = kv.overflow_default !== undefined ? kv.overflow_default : kv.overflow;
         if (overflowRaw !== undefined) {
             const val = String(overflowRaw).trim().toLowerCase();
-            if (['lethal', 'scar_and_ko', 'scene_fail'].includes(val) && updated.config.knobs.overflow_default !== val) {
+            if (!isPipeTemplate(val) && ['lethal', 'scar_and_ko', 'scene_fail'].includes(val) && updated.config.knobs.overflow_default !== val) {
                 updated.config.knobs.overflow_default = val;
                 changes.push(`Overflow default dial set to ${val}`);
             }
@@ -2309,7 +2334,7 @@ export function applyDossierUpdates(text, dossier) {
         const tempoRaw = kv.action_tempo !== undefined ? kv.action_tempo : (kv.tempo !== undefined ? kv.tempo : kv.pacing_tempo);
         if (tempoRaw !== undefined) {
             const val = String(tempoRaw).trim().toLowerCase();
-            if (['action_serial', 'gritty_default', 'slow_burn', 'slice_of_life'].includes(val)) {
+            if (!isPipeTemplate(val) && ['action_serial', 'gritty_default', 'slow_burn', 'slice_of_life'].includes(val)) {
                 if (updated.config.actionTempo !== val) {
                     updated.config.actionTempo = val;
                     updated.config.knobs.action_tempo = val;
@@ -2374,18 +2399,22 @@ export function applyDossierUpdates(text, dossier) {
         };
     }
 
+    const NOOP_DIRECTIVE_SENTINEL = /^(?:none|n\/?a|null|false|no|unchanged|skip|nothing|nil|-+)$/i;
+
     const recalM = raw.match(/(?:\[RECALIBRATE_RULESET\s*:\s*([^\]]+)\]|^[ \t]*recalibrate_ruleset\s*:\s*([^\n\r]+))/im);
     if (recalM) {
-        recalibrateRuleset = (recalM[1] || recalM[2] || '').trim();
-        if (recalibrateRuleset) {
+        const candidateRecal = (recalM[1] || recalM[2] || '').trim();
+        if (candidateRecal && !NOOP_DIRECTIVE_SENTINEL.test(candidateRecal)) {
+            recalibrateRuleset = candidateRecal;
             changes.push(`Requested Ruleset Architect recalibration: ${recalibrateRuleset}`);
         }
     }
 
     const designGsM = raw.match(/(?:\[DESIGN_GAME_SYSTEM\s*:\s*([^\]]+)\]|^[ \t]*design_game_system\s*:\s*([^\n\r]+))/im);
     if (designGsM) {
-        designGameSystem = (designGsM[1] || designGsM[2] || '').trim();
-        if (designGameSystem) {
+        const candidateDesign = (designGsM[1] || designGsM[2] || '').trim();
+        if (candidateDesign && !NOOP_DIRECTIVE_SENTINEL.test(candidateDesign)) {
+            designGameSystem = candidateDesign;
             changes.push(`Requested Game System Wizard design: ${designGameSystem}`);
         }
     }

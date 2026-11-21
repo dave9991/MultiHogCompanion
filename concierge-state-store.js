@@ -9,7 +9,7 @@
  * [CATALOG: FEAT-02] See FEATURES.md — Concierge Session Zero & Living World Dossier
  */
 
-import { createEmptyDossier, isDossierEmptyOrUntouched } from './concierge-parser.js';
+import { createEmptyDossier, isDossierEmptyOrUntouched, healAndNormalizeDossier } from './concierge-parser.js';
 
 /**
  * Builds a clean Session Zero track state object.
@@ -111,7 +111,7 @@ export class ConciergeStateStore {
         if (!draft || typeof draft !== 'object') return this.sessionZeroTrack;
         const track = this.sessionZeroTrack;
         if (draft.dossier) {
-            track.dossier = draft.dossier;
+            track.dossier = healAndNormalizeDossier(draft.dossier);
         }
         if (Array.isArray(draft.stagedCanonEntries)) {
             track.stagedCanonEntries = [...draft.stagedCanonEntries];

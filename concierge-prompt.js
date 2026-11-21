@@ -1226,7 +1226,8 @@ ${formattedBlueprint}
 ${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
 }
 
-export const RESOLVED_NAME_FORMAT_GUIDANCE = `* **Resolved Name Format (\`[NAME: <concept>, RESOLVED TO: <Name>]\`):** Whenever an entity or Canon entry shows \`[NAME: <concept>, RESOLVED TO: <Name>]\` (or \`<Name> [concept: <concept>]\`), **\`<Name>\` is their official, NameRAG-assigned canonical name** and \`<concept>\` is only their original role/archetype. Always address and refer to them by \`<Name>\` in prose, moves, and updates, NEVER copy \`[concept: ...]\` into \`name:\`, and NEVER revert a resolved name back to a \`[[NAME: ...]]\` placeholder.`;
+export const RESOLVED_NAME_FORMAT_GUIDANCE = `* **Resolved Name Format (\`[NAME: <concept>, RESOLVED TO: <Name>]\`):** Whenever an entity or Canon entry shows \`[NAME: <concept>, RESOLVED TO: <Name>]\` (or \`<Name> [concept: <concept>]\`), **\`<Name>\` is their official, NameRAG-assigned canonical name** and \`<concept>\` is only their original role/archetype. Always address and refer to them by \`<Name>\` in prose, moves, and updates, NEVER copy \`[concept: ...]\` into \`name:\`, and NEVER revert a resolved name back to a \`[[NAME: ...]]\` placeholder.
+* **Preserving Imported / Established Canon Names:** Any character already named in Active Series Bible / Canon or imported lore (e.g. \`[NPC] Marcus\`, \`Lynette\`) MUST keep their exact Canon name verbatim — NEVER rename them, NEVER append or wrap a \`[[NAME: ...]]\` placeholder around an existing Canon name (e.g. never \`Marcus ([[NAME: ...]])\`), and reserve \`[[NAME: ...]]\` strictly for newly invented unnamed characters.`;
 
 export const TALKER_DESIGN_ONLY_BOUNDARY = `0. **Out-of-Character Design Desk ONLY (NEVER Roleplay):**
    - You are facilitating Session Zero campaign setup, NOT running a live game session.
@@ -1728,7 +1729,7 @@ You emit an [UPDATE_DOSSIER] block containing ONLY:
 * NEVER output conversational prose, greetings, explanations, or GM roleplay outside the block.
 * NEVER write a "Thinking Process" or numbered analysis outside the block.
 * 🚫 **NEVER output Episode 1 stat blocks here:** NEVER emit [MONSTER], [MAP], [KICK], or [PROTAGONIST] cards in Step 2. Those belong in Step 3 (\`🗺️ Adventure\`) and Step 4 (\`👤 Character\`).
-* 🏷️ **Name Diversity & Targeted Placeholders (Character Names Only):** NameRAG generates **individual person/character names** (protagonist, NPCs, companions, named leaders/founders). Use \`[[NAME: evocative role or concept]]\` (e.g., \`[[NAME: grizzled wasteland doctor]]\`, \`[[NAME: nomadic raider matriarch]]\`) ONLY for individual people (such as \`NPC\` names or a named leader inside a Faction's description). NameRAG **cannot** name organizations, places, laws, or events — **Do NOT use \`[[NAME: ...]]\` as the title/name of a Faction, Location, Rule, Event, or Lore entry** (give those clear descriptive names directly).
+* 🏷️ **Name Diversity & Targeted Placeholders (Character Names Only):** NameRAG generates **individual person/character names** (protagonist, NPCs, companions, named leaders/founders). Use \`[[NAME: evocative role or concept]]\` (e.g., \`[[NAME: grizzled wasteland doctor]]\`, \`[[NAME: nomadic raider matriarch]]\`) ONLY for **newly invented** individual people who do not already have a name in imported lore or Canon (keep already-named/imported characters verbatim — never wrap or append \`[[NAME: ...]]\` to an existing name). NameRAG **cannot** name organizations, places, laws, or events — **Do NOT use \`[[NAME: ...]]\` as the title/name of a Faction, Location, Rule, Event, or Lore entry** (give those clear descriptive names directly).
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Canon & World Rule updates>
 * If no updates were requested:
@@ -2000,8 +2001,8 @@ Your ONLY job is to assemble or update the Episode 1 starting stage set:
 * 🚫 **STRICTLY FORBIDDEN IN STEP 3: NEVER emit [PROTAGONIST] here.** The protagonist character sheet and progression codex are built in **Step 4 (\`👤 Character\`)**.
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Adventure changes>
-* Ground every adversary, location, and NPC in the established active Canon entries.
-* 🏷️ **Name Diversity & Targeted Placeholders (Character Names Only):** NameRAG generates **individual person/character names** (NPCs, named adversaries, faction leaders) and **cannot** name organizations or places. Emit \`name: [[NAME: evocative role or concept]]\` ONLY for individual people/characters (e.g. \`[NPC] name: [[NAME: eccentric scrap merchant]]\`, or a leader mentioned inside \`notes:\`); **never** use \`[[NAME: ...]]\` as the title of a \`[FACTION]\` or \`[MAP]\` site. Do NOT invent generic cliché names.
+* Ground every adversary, location, and NPC in the established active Canon entries, and **preserve established Canon NPC names verbatim** (if an NPC is already named in Active Canon, copy their exact Canon name into \`name:\` without appending or wrapping \`[[NAME: ...]]\`).
+* 🏷️ **Name Diversity & Targeted Placeholders (New Unnamed Characters Only):** NameRAG generates **individual person/character names** (NPCs, named adversaries, faction leaders) and **cannot** name organizations or places. Emit \`name: [[NAME: evocative role or concept]]\` ONLY for **newly invented unnamed** individual people/characters (e.g. \`[NPC] name: [[NAME: eccentric scrap merchant]]\`, or an unnamed leader mentioned inside \`notes:\`); **never** attach \`[[NAME: ...]]\` to an already-named Canon NPC (no \`CanonName ([[NAME: ...]])\`) and **never** use \`[[NAME: ...]]\` as the title of a \`[FACTION]\` or \`[MAP]\` site. Do NOT invent generic cliché names.
 
 ${rulesetDirectives}
 

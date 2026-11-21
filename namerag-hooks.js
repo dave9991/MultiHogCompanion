@@ -484,6 +484,124 @@ export function buildQueryFromPlaceholderContext({ tag = '', genre = 'fantasy', 
     return pieces.filter(Boolean).join(' ').trim();
 }
 
+const GENERIC_CANON_SLOT_TAGS = new Set(['protagonist', 'companion', 'general', 'npc', 'pc', 'monster', 'adversary', 'ally']);
+const NON_PERSON_CANON_KINDS = new Set(['FACTION', 'LOCATION', 'RULE', 'EVENT', 'LORE', 'MONSTER']);
+
+function escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Builds a lookup of established Canon and Dossier NPC names so NameRAG never
+ * renames, appends to, or collides with already-named characters.
+ *
+ * @param {Array<object>} [canonEntries=[]]
+ * @param {object} [activeDossier={}]
+ * @returns {{ canonNameMap: Map<string, string>, personCanonKeys: Set<string>, sortedCanonNames: string[] }}
+ */
+function buildCanonNameLookup(canonEntries = [], activeDossier = {}) {
+    const canonNameMap = new Map();
+    const personCanonKeys = new Set();
+
+    const registerName = (rawName, { isPerson = true } = {}) => {
+        if (!rawName || typeof rawName !== 'string') return;
+        const cleanName = parseResolvedNameToken(rawName).cleanName?.trim();
+        if (!cleanName || cleanName.length < 2) return;
+        if (cleanName.includes('[[NAME') || /^unnamed/i.test(cleanName)) return;
+        const lower = cleanName.toLowerCase();
+        if (GENERIC_CANON_SLOT_TAGS.has(lower)) return;
+        if (!canonNameMap.has(lower)) {
+            canonNameMap.set(lower, cleanName);
+        }
+        if (isPerson) {
+            personCanonKeys.add(lower);
+        }
+    };
+
+    const allCanon = [
+        ...(Array.isArray(canonEntries) ? canonEntries : []),
+        ...(Array.isArray(activeDossier?.canonEntries) ? activeDossier.canonEntries : []),
+    ];
+    for (const entry of allCanon) {
+        if (!entry || entry.disabled) continue;
+        const kind = String(entry.kind || '').trim().toUpperCase();
+        registerName(entry.name, { isPerson: !NON_PERSON_CANON_KINDS.has(kind) });
+    }
+
+    for (const npc of (activeDossier?.npcs || [])) {
+        registerName(npc?.name, { isPerson: true });
+    }
+
+    const sortedCanonNames = Array.from(canonNameMap.values()).sort((a, b) => b.length - a.length);
+    return { canonNameMap, personCanonKeys, sortedCanonNames };
+}
+
+/**
+ * Checks whether a placeholder token is either directly named after an established Canon entry
+ * (e.g. `[[NAME: Lynette]]`) or stitched alongside one in a hybrid form
+ * (e.g. `Lynette ([[NAME: stern guard]])` or `[[NAME: npc]] (Marcus)`).
+ *
+ * @param {string} text
+ * @param {{ token: string, tag: string }} ph
+ * @param {{ canonNameMap: Map<string, string>, personCanonKeys: Set<string>, sortedCanonNames: string[] }} lookup
+ * @returns {string|null} Canonical name to preserve verbatim, or null if no match
+ */
+function matchPlaceholderToCanonName(text, ph, { canonNameMap, personCanonKeys, sortedCanonNames }) {
+    if (!canonNameMap || canonNameMap.size === 0 || !ph?.token) return null;
+
+    // 1. Direct tag match: [[NAME: Lynette]] or [[NAME: Lynette - First Citizen]]
+    const rawTag = (ph.tag || '').trim();
+    if (rawTag) {
+        const tagCandidates = [rawTag];
+        const headTag = rawTag.split(/\s+-\s+|[:,]/)[0].trim();
+        if (headTag && headTag !== rawTag) tagCandidates.push(headTag);
+        for (const cand of tagCandidates) {
+            const matched = canonNameMap.get(cand.toLowerCase());
+            if (matched) return matched;
+        }
+    }
+
+    // 2. Same-line hybrid patterns: <CanonName> ([[NAME: ...]]) or [[NAME: ...]] (<CanonName>)
+    const escapedToken = escapeRegExp(ph.token);
+    const prefixParenRe = new RegExp(`^(.+?)\\s*\\(\\s*${escapedToken}\\s*\\)`);
+    const suffixParenRe = new RegExp(`${escapedToken}\\s*\\(\\s*([^)\\r\\n]+?)\\s*\\)`);
+
+    for (const line of String(text || '').split(/\r?\n/)) {
+        if (!line.includes(ph.token)) continue;
+
+        const prefixMatch = line.match(prefixParenRe);
+        if (prefixMatch) {
+            const rawPrefix = prefixMatch[1];
+            const strippedPrefix = rawPrefix
+                .replace(/^.*?(?:\[\s*(?:NPC|CANON_ENTRY|PROTAGONIST|COMPANION|MONSTER|FACTION|MAP|LOCATION)\s*:\s*|["']?(?:name|site|npc|character|leader)["']?\s*:\s*["']?)/i, '')
+                .replace(/^[-*]\s*/, '')
+                .replace(/^["']+|["']+$/g, '')
+                .trim();
+            if (strippedPrefix) {
+                const direct = canonNameMap.get(strippedPrefix.toLowerCase());
+                if (direct) return direct;
+            }
+            const trimmedRawPrefix = rawPrefix.trim();
+            for (const cname of sortedCanonNames) {
+                const tailRe = new RegExp(`(?:^|[\\s:,;"'\\[\\-*>/])${escapeRegExp(cname)}$`, 'i');
+                if (tailRe.test(trimmedRawPrefix)) {
+                    return cname;
+                }
+            }
+        }
+
+        const suffixMatch = line.match(suffixParenRe);
+        if (suffixMatch) {
+            const cleanSuffix = suffixMatch[1].replace(/^["']+|["']+$/g, '').trim().toLowerCase();
+            if (cleanSuffix && personCanonKeys.has(cleanSuffix)) {
+                return canonNameMap.get(cleanSuffix) || null;
+            }
+        }
+    }
+
+    return null;
+}
+
 /**
  * Resolves all [[NAME:...]] placeholders across raw Builder output by performing
  * targeted NameRAG searches per entity, gracefully falling back to offline pools if unavailable.
@@ -492,9 +610,10 @@ export function buildQueryFromPlaceholderContext({ tag = '', genre = 'fantasy', 
  * @param {object} activeDossier Current campaign dossier for genre and premise context
  * @param {object} [options]
  * @param {boolean} [options.returnDetails=false] If true, returns { text: string, resolutions: Array<object> }
+ * @param {Array<object>} [options.canonEntries=[]] Active Canon / Series Bible entries whose names must be preserved verbatim
  * @returns {Promise<string|{ text: string, resolutions: Array<object> }>} The raw output with all [[NAME:...]] tokens resolved to unique names
  */
-export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDossier = {}, { returnDetails = false } = {}) {
+export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDossier = {}, { returnDetails = false, canonEntries = [] } = {}) {
     const emptyResult = returnDetails ? { text: rawBuilderOutput, resolutions: [] } : rawBuilderOutput;
     if (!rawBuilderOutput || typeof rawBuilderOutput !== 'string') return emptyResult;
 
@@ -562,13 +681,14 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
         }
     }
 
-    // Track names already used in this dossier to guarantee zero intra-campaign duplicates
+    // Track established Canon & Dossier names so NameRAG never collides with or renames them
+    const canonLookup = buildCanonNameLookup(canonEntries, activeDossier);
     const usedNames = new Set();
     if (hasEstablishedProtagonist) usedNames.add(parseResolvedNameToken(existingProtoName).cleanName.toLowerCase());
     if (establishedCompanionName) usedNames.add(parseResolvedNameToken(establishedCompanionName).cleanName.toLowerCase());
-    (activeDossier?.npcs || []).forEach(n => {
-        if (n.name) usedNames.add(parseResolvedNameToken(n.name).cleanName.toLowerCase());
-    });
+    for (const lowerCanon of canonLookup.canonNameMap.keys()) {
+        usedNames.add(lowerCanon);
+    }
     (activeDossier?.monsters || []).forEach(m => {
         if (m.name) usedNames.add(parseResolvedNameToken(m.name).cleanName.toLowerCase());
     });
@@ -598,6 +718,9 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
             /^\[\[NAME:\s*companion\s*\]\]$/i.test(ph.token) ||
             (blockType === 'COMPANION' && /^\[\[NAME\]\]$/i.test(ph.token));
 
+        const matchedCanonName = matchPlaceholderToCanonName(resolvedOutput, ph, canonLookup);
+        const cleanTag = (ph.tag || '').trim();
+
         if (isProtagonistToken && hasEstablishedProtagonist) {
             chosenName = existingProtoName;
             source = 'Existing Dossier (Preserved)';
@@ -606,6 +729,32 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
             chosenName = establishedCompanionName;
             source = 'Existing Dossier (Preserved)';
             candidatePool = [chosenName];
+        } else if (matchedCanonName) {
+            chosenName = matchedCanonName;
+            source = 'Existing Canon (Preserved)';
+            candidatePool = [chosenName];
+            usedNames.add(chosenName.toLowerCase());
+
+            const escCanon = escapeRegExp(chosenName);
+            const escToken = escapeRegExp(ph.token);
+            resolvedOutput = resolvedOutput
+                .replace(new RegExp(`${escCanon}\\s*\\(\\s*${escToken}\\s*\\)`, 'gi'), chosenName)
+                .replace(new RegExp(`${escToken}\\s*\\(\\s*${escCanon}\\s*\\)`, 'gi'), chosenName)
+                .split(ph.token)
+                .join(chosenName);
+
+            resolutions.push({
+                placeholder: ph.token,
+                tag: cleanTag || 'general',
+                blockType,
+                query,
+                gender,
+                source,
+                candidates: candidatePool,
+                selectedName: chosenName,
+                replacement: chosenName,
+            });
+            continue;
         } else if (isNonPersonEntity) {
             // Non-person guard: Factions, Locations, Maps, Rules, Events, and Lore must NEVER receive personal NameRAG names.
             const rawTag = (ph.tag || '').trim();
@@ -663,12 +812,10 @@ export async function resolveDossierNamePlaceholders(rawBuilderOutput, activeDos
         // Format replacement: If placeholder had an evocative concept tag (not a generic slot or preserved name),
         // preserve evolution for Session Zero visibility: [NAME: tag, RESOLVED TO: chosenName]
         let replacement = chosenName;
-        const cleanTag = (ph.tag || '').trim();
-        const GENERIC_SLOT_TAGS = new Set(['protagonist', 'companion', 'general', 'npc', 'pc', 'monster', 'adversary', 'ally']);
         if (
             !isNonPersonEntity &&
             cleanTag &&
-            !GENERIC_SLOT_TAGS.has(cleanTag.toLowerCase()) &&
+            !GENERIC_CANON_SLOT_TAGS.has(cleanTag.toLowerCase()) &&
             source !== 'Existing Dossier (Preserved)'
         ) {
             replacement = `[NAME: ${cleanTag}, RESOLVED TO: ${chosenName}]`;

@@ -662,4 +662,95 @@ assert.ok(nonPersonBlockResolved.includes('[NAME: ruthless aqueduct overseer, RE
 assert.ok(nonPersonBlockResolved.includes('site: Sunken Freeway Interchange'), '[MAP] site must not receive personal NameRAG name');
 console.log('✓ Non-person entity guard verified for JSON and [FACTION]/[MAP] blocks (including leader-in-body exception)');
 
+// 13k. Canon Name Preservation: Step 2/3 prompts & resolveDossierNamePlaceholders hybrid guard
+assert.ok(
+    RESOLVED_NAME_FORMAT_GUIDANCE.includes('MUST keep their exact Canon name verbatim'),
+    'RESOLVED_NAME_FORMAT_GUIDANCE must require preserving imported/Canon character names verbatim'
+);
+assert.ok(
+    stage2Prompt.includes('ONLY for **newly invented** individual people') && stage2Prompt.includes('keep already-named/imported characters verbatim'),
+    'Step 2 Canon Builder must scope [[NAME: ...]] to newly invented unnamed people only'
+);
+assert.ok(
+    stage3Prompt.includes('preserve established Canon NPC names verbatim') && stage3Prompt.includes('no `CanonName ([[NAME: ...]])`'),
+    'Step 3 Adventure Builder must forbid stitching [[NAME: ...]] onto established Canon NPCs'
+);
+
+const importedCanonEntries = [
+    { kind: 'NPC', name: 'Lynette', importance: 5, content: 'First Citizen of Vault City.' },
+    { kind: 'NPC', name: 'Marcus', importance: 5, content: 'Super mutant sheriff of Broken Hills.' },
+    { kind: 'NPC', name: 'Overseer Jacoren', importance: 4, content: 'Overseer of Vault 13.' },
+    { kind: 'LOCATION', name: 'Vault 13', importance: 5, content: 'Subterranean shelter.' },
+];
+
+const hybridStep3Output = `[UPDATE_DOSSIER]
+[NPC]
+name: Lynette ([[NAME: stern vault city first citizen]])
+role: First Citizen
+[/NPC]
+[NPC]
+name: Marcus ([[NAME: npc]])
+role: Sheriff
+[/NPC]
+[NPC: Overseer Jacoren ([[NAME: anxious vault overseer]])]
+role: Overseer
+[/NPC]
+[NPC]
+name: [[NAME: Lynette]]
+role: First Citizen
+[/NPC]
+[NPC]
+name: [[NAME: eccentric scrap merchant]]
+role: Merchant
+[/NPC]
+[/UPDATE_DOSSIER]`;
+
+const canonPreservedRes = await resolveDossierNamePlaceholders(
+    hybridStep3Output,
+    { meta: { systemKey: 'post_apocalyptic' } },
+    { returnDetails: true, canonEntries: importedCanonEntries }
+);
+
+assert.ok(canonPreservedRes.text.includes('name: Lynette\nrole: First Citizen'), 'Hybrid Lynette ([[NAME: ...]]) must collapse to plain Lynette');
+assert.ok(!canonPreservedRes.text.includes('Lynette ('), 'Lynette hybrid parentheses must be stripped cleanly');
+assert.ok(canonPreservedRes.text.includes('name: Marcus\nrole: Sheriff'), 'Hybrid Marcus ([[NAME: npc]]) must collapse to plain Marcus');
+assert.ok(!canonPreservedRes.text.includes('Marcus ('), 'Marcus hybrid parentheses must be stripped cleanly');
+assert.ok(canonPreservedRes.text.includes('[NPC: Overseer Jacoren]'), '[NPC: Overseer Jacoren ([[NAME: ...]])] must collapse to [NPC: Overseer Jacoren]');
+assert.ok(!canonPreservedRes.text.includes('Overseer Jacoren ('), 'Overseer Jacoren hybrid parentheses must be stripped cleanly');
+assert.ok(!canonPreservedRes.text.includes('[[NAME: Lynette]]'), 'Direct [[NAME: Lynette]] placeholder must resolve to plain Lynette');
+
+const lynetteRecord = canonPreservedRes.resolutions.find(r => r.placeholder === '[[NAME: stern vault city first citizen]]');
+assert.strictEqual(lynetteRecord?.selectedName, 'Lynette');
+assert.strictEqual(lynetteRecord?.source, 'Existing Canon (Preserved)');
+
+const marcusRecord = canonPreservedRes.resolutions.find(r => r.placeholder === '[[NAME: npc]]');
+assert.strictEqual(marcusRecord?.selectedName, 'Marcus');
+assert.strictEqual(marcusRecord?.source, 'Existing Canon (Preserved)');
+
+assert.ok(
+    canonPreservedRes.text.includes('[NAME: eccentric scrap merchant, RESOLVED TO:'),
+    'Brand-new unnamed NPC must still resolve via NameRAG normally alongside preserved Canon NPCs'
+);
+
+const reversedAndLocationTest = `[UPDATE_DOSSIER]
+[NPC: [[NAME: tired gatekeeper]] (Marcus)]
+role: Sheriff
+[/NPC]
+[NPC]
+name: [[NAME: wasteland medic]] (Vault 13)
+role: Medic
+[/NPC]
+[/UPDATE_DOSSIER]`;
+const reversedRes = await resolveDossierNamePlaceholders(
+    reversedAndLocationTest,
+    { meta: { systemKey: 'post_apocalyptic' } },
+    { returnDetails: true, canonEntries: importedCanonEntries }
+);
+assert.ok(reversedRes.text.includes('[NPC: Marcus]'), 'Reversed hybrid [[NAME: ...]] (Marcus) must collapse to [NPC: Marcus]');
+assert.ok(
+    reversedRes.text.includes('[NAME: wasteland medic, RESOLVED TO:'),
+    'New NPC with Canon location parenthetical (Vault 13) must resolve via NameRAG instead of being renamed to Vault 13'
+);
+console.log('✓ Canon Name Preservation prompts and hybrid NameRAG safety guard verified cleanly');
+
 console.log('--- ALL NAMERAG INTEGRATION TESTS PASSED CLEANLY! ---');

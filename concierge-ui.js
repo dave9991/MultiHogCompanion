@@ -708,7 +708,7 @@ async function runStageHarmonizationPass(stage, { upstreamDiff = '', agnosticBon
     let harmonizationResolutions = [];
     if (extension_settings?.multihog_companion?.enableNameRag !== false) {
         try {
-            const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true });
+            const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true, canonEntries: stagedCanon });
             builderRaw = resolved.text;
             harmonizationResolutions = resolved.resolutions || [];
         } catch (resErr) {
@@ -833,7 +833,7 @@ async function runStageAutoPass(stage, promptText, { agnosticBones = null, upstr
         let autoPassResolutions = [];
         if (extension_settings?.multihog_companion?.enableNameRag !== false) {
             try {
-                const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true });
+                const resolved = await resolveDossierNamePlaceholders(builderRaw, activeDossier, { returnDetails: true, canonEntries: stagedCanon });
                 processedBuilderRaw = resolved.text;
                 autoPassResolutions = resolved.resolutions || [];
             } catch (resErr) {
@@ -1767,7 +1767,7 @@ async function handleUserSend() {
             // Resolve unique Name Diversity placeholders ([[NAME:...]]) via NameRAG before parsing
             if (extension_settings?.multihog_companion?.enableNameRag !== false) {
                 try {
-                    const resolved = await resolveDossierNamePlaceholders(builderRawResponse, activeDossier, { returnDetails: true });
+                    const resolved = await resolveDossierNamePlaceholders(builderRawResponse, activeDossier, { returnDetails: true, canonEntries: getStagedCanonEntries() });
                     builderRawResponse = resolved.text;
                     turnNameRagResolutions = resolved.resolutions || [];
                     if (turnNameRagResolutions.length > 0) {
@@ -1885,7 +1885,7 @@ async function handleUserSend() {
                     let recalRaw = await llm(recalMsgs);
                     if (extension_settings?.multihog_companion?.enableNameRag !== false) {
                         try {
-                            const resolved = await resolveDossierNamePlaceholders(recalRaw, activeDossier, { returnDetails: true });
+                            const resolved = await resolveDossierNamePlaceholders(recalRaw, activeDossier, { returnDetails: true, canonEntries: getStagedCanonEntries() });
                             recalRaw = resolved.text;
                             if (resolved.resolutions?.length) latestNameRagResolutions.push(...resolved.resolutions);
                         } catch (resErr) {
@@ -1990,7 +1990,7 @@ async function handleUserSend() {
                         let refinerNameRagResolutions = [];
                         if (extension_settings?.multihog_companion?.enableNameRag !== false) {
                             try {
-                                const resolvedRefiner = await resolveDossierNamePlaceholders(refinerRawResponse, activeDossier, { returnDetails: true });
+                                const resolvedRefiner = await resolveDossierNamePlaceholders(refinerRawResponse, activeDossier, { returnDetails: true, canonEntries: getStagedCanonEntries() });
                                 refinerRawResponse = resolvedRefiner.text;
                                 refinerNameRagResolutions = resolvedRefiner.resolutions || [];
                                 if (refinerNameRagResolutions.length > 0) {

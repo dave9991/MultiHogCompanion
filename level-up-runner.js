@@ -10,8 +10,8 @@
 
 import { XP_LEVEL_THRESHOLDS, MAX_CHARACTER_LEVEL, getTierPerks, getCanonicalDndProgression, sanitizeFeatureList, formatTraitAsPill, classifyFeatureKind, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { parseAbilitiesBlockFromMemo } from './level-up-scaffold.js';
-import { PBTA_GENRES, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
-import { FAE_GENRES, sanitizeFaePositiveTags, createInitialFaeState } from './fae-ruleset.js';
+import { PBTA_GENRES, resolveEffectivePbtaGenre, formatMoveAsPill, splitTopLevelPillItems } from './pbta-ruleset.js';
+import { FAE_GENRES, resolveEffectiveFaeGenre, normalizeCustomFaePools, sanitizeFaePositiveTags, createInitialFaeState } from './fae-ruleset.js';
 import { parseFaeStateFromMemo, formatFaeCharacterMemoBlock, normalizeFaePill } from './fae-state-sync.js';
 import { getPartitionDossier, setPartitionDossier } from './pbta-ruleset-persistence.js';
 
@@ -270,7 +270,7 @@ export const PBTA_ADVANCE_CATALOG = [
 ];
 
 /**
- * Resolves the active PbtA genre key ('fantasy', 'scifi', 'horror', etc.) from a dossier.
+ * Resolves the active PbtA genre key ('fantasy', 'scifi', 'horror', 'custom', etc.) from a dossier.
  *
  * @param {object} dossier
  * @returns {string}
@@ -282,6 +282,9 @@ export function resolvePbtaGenreKey(dossier) {
     for (const c of candidates) {
         if (PBTA_GENRES[c]) return c;
     }
+    if (candidates.includes('custom') || Boolean(dossier?.meta?.customGenreSpec)) {
+        return 'custom';
+    }
     const label = (dossier?.meta?.systemLabel || '').toLowerCase();
     if (label) {
         const byLabel = Object.values(PBTA_GENRES).find(g =>
@@ -291,7 +294,7 @@ export function resolvePbtaGenreKey(dossier) {
         );
         if (byLabel) return byLabel.id;
     }
-    const rawStats = dossier?.protagonist?.stats || dossier?.stats || {};
+    const rawStats = dossier?.protagonist?.stats || dossier?.character?.stats || dossier?.stats || {};
     const statKeysLower = new Set(Object.keys(rawStats).map(k => k.toLowerCase()));
     if (statKeysLower.size > 0) {
         let bestGenre = null;
@@ -310,14 +313,17 @@ export function resolvePbtaGenreKey(dossier) {
 
 /**
  * Deduplicates PbtA stats case-insensitively into canonical TitleCase keys
- * (eliminating duplicate 'AGILITY' + 'Agility' pairs from memo parsing).
+ * (eliminating duplicate 'AGILITY' + 'Agility' pairs from memo parsing) while
+ * honoring custom Ruleset Architect genres via `resolveEffectivePbtaGenre`.
  *
  * @param {object} statsObj Raw stats map.
  * @param {string} [genreKey='fantasy'] Active PbtA genre key.
+ * @param {object} [overrides={}] Optional dossier or customGenreSpec overrides.
  * @returns {Record<string, number>}
  */
-export function getCanonicalPbtaStats(statsObj, genreKey = 'fantasy') {
-    const genreStats = PBTA_GENRES[genreKey]?.stats || PBTA_GENRES.fantasy.stats;
+export function getCanonicalPbtaStats(statsObj, genreKey = 'fantasy', overrides = {}) {
+    const effectiveGenre = resolveEffectivePbtaGenre(genreKey, overrides);
+    const genreStats = effectiveGenre?.stats || PBTA_GENRES.fantasy.stats;
     const canonicalNameByLower = new Map(genreStats.map(s => [s.toLowerCase(), s]));
     const out = {};
     if (statsObj && typeof statsObj === 'object') {
@@ -380,9 +386,12 @@ function expandGenreMoveTemplate(rawTemplate, charStatNames = []) {
  * @returns {Array<object>}
  */
 export function buildPbtaAdvanceOptions(dossier, proposal = null) {
-    const char = dossier?.protagonist || {};
+    const char = (dossier?.protagonist && Object.keys(dossier.protagonist).length > 0)
+        ? dossier.protagonist
+        : (dossier?.character || {});
     const genreKey = proposal?.genreKey || resolvePbtaGenreKey(dossier);
-    const stats = getCanonicalPbtaStats(proposal?.stats || char.stats, genreKey);
+    const overrides = dossier || proposal || {};
+    const stats = getCanonicalPbtaStats(proposal?.stats || char.stats, genreKey, overrides);
     const statNames = Object.keys(stats);
     const harm = proposal?.harm || char.harm || { current: 0, max: 4, armor: 1 };
     const currentMoves = proposal?.newFeatures || char.moves || char.startingMoves || [];
@@ -397,7 +406,7 @@ export function buildPbtaAdvanceOptions(dossier, proposal = null) {
         if (id) usedCounts[id] = (usedCounts[id] || 0) + 1;
     }
 
-    const activeGenre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const activeGenre = resolveEffectivePbtaGenre(genreKey, overrides);
     const topStat = statNames[0] || 'Might';
     const secondStat = statNames[1] || topStat;
 
@@ -535,6 +544,9 @@ export function resolveFaeGenreKey(dossier, memoText = '') {
     for (const c of candidates) {
         if (FAE_GENRES[c]) return c;
     }
+    if (candidates.includes('custom') || Boolean(dossier?.meta?.customGenreSpec)) {
+        return 'custom';
+    }
 
     const label = (dossier?.meta?.systemLabel || '').toLowerCase();
     if (label) {
@@ -552,10 +564,17 @@ export function resolveFaeGenreKey(dossier, memoText = '') {
         if (label.includes('west') || label.includes('weird west') || label.includes('cowboy')) return 'weird_west';
     }
 
-    // Inspect pools in dossier?.protagonist?.pools or memoText
-    const poolsMap = dossier?.protagonist?.pools || {};
-    const poolKeys = Object.keys(poolsMap).map(k => k.toLowerCase());
-    const poolLabels = Object.values(poolsMap).map(p => (p.label || '').toLowerCase());
+    // Inspect pools across protagonist, legacy Turn-0 character, top-level dossier, config, and memoText
+    const poolsMap = dossier?.protagonist?.pools
+        || dossier?.character?.pools
+        || dossier?.pools
+        || dossier?.config?.pools
+        || {};
+    const poolKeys = Array.isArray(poolsMap)
+        ? poolsMap.map(p => String(p?.key || p?.label || '').toLowerCase()).filter(Boolean)
+        : Object.keys(poolsMap).map(k => k.toLowerCase());
+    const poolValues = Array.isArray(poolsMap) ? poolsMap : Object.values(poolsMap);
+    const poolLabels = poolValues.map(p => (p?.label || '').toLowerCase());
     const allPoolText = [...poolKeys, ...poolLabels, String(memoText).toLowerCase()].join(' ');
 
     if (/sanity/i.test(allPoolText)) {
@@ -581,8 +600,10 @@ export function resolveFaeGenreKey(dossier, memoText = '') {
  */
 export function buildFaeMilestoneOptions(dossier, proposal) {
     const genreKey = proposal?.genreKey || resolveFaeGenreKey(dossier);
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
-    const pools = proposal?.pools || genre.pools || {};
+    const overrides = dossier || proposal || {};
+    const genre = resolveEffectiveFaeGenre(genreKey, overrides);
+    const configPools = normalizeCustomFaePools(dossier?.config?.pools, genre.pools);
+    const pools = proposal?.pools || configPools || genre.pools || {};
     const currentPositive = proposal?.positiveTags || proposal?.newFeatures || [];
     const ownedTagKeys = new Set(currentPositive.map(t => extractFeatureKey(t)));
 
@@ -594,7 +615,7 @@ export function buildFaeMilestoneOptions(dossier, proposal) {
 
     const reducedPools = [];
     for (const [k, p] of Object.entries(pools)) {
-        const baselineMax = genre.pools?.[k]?.max ?? 8;
+        const baselineMax = genre.pools?.[k]?.max ?? configPools?.[k]?.max ?? dossier?.config?.pools?.[k]?.max ?? 8;
         if (p.max < baselineMax) {
             reducedPools.push({
                 key: k,
@@ -903,29 +924,47 @@ export function evaluateLevelUpEligibility(memoText, ruleset = null, options = {
  */
 export function formulateLevelUpProposal(dossier, blueprint, targetLevel, options = {}) {
     const isRespec = !!options.isRespec;
-    const char = dossier?.protagonist || (dossier?.features || dossier?.name ? dossier : {});
+    const prot = (dossier?.protagonist && Object.keys(dossier.protagonist).length > 0) ? dossier.protagonist : null;
+    const legacyChar = (dossier?.character && Object.keys(dossier.character).length > 0) ? dossier.character : null;
+    const char = prot || legacyChar || (dossier?.features || dossier?.name ? dossier : {});
     const sysKeyLower = (dossier?.meta?.systemKey || '').toLowerCase();
+    const hasPoolsObj = (p) => Boolean(p && (Array.isArray(p) ? p.length > 0 : Object.keys(p).length > 0));
+    const explicitlyPbta = Boolean(options.isPbta || dossier?.meta?.ruleset === 'pbta');
 
     const isFae = options.isFae
         || dossier?.meta?.ruleset === 'fae'
-        || Boolean(dossier?.meta?.systemKey && FAE_GENRES[String(dossier.meta.systemKey).toLowerCase()])
-        || Boolean(dossier?.protagonist?.pools && Object.keys(dossier.protagonist.pools).length > 0)
-        || /FAE Knobs:|Positive Tags:/i.test(options.currentMemo || '');
+        || (!explicitlyPbta && Boolean(dossier?.meta?.systemKey && FAE_GENRES[String(dossier.meta.systemKey).toLowerCase()]))
+        || hasPoolsObj(dossier?.protagonist?.pools)
+        || hasPoolsObj(dossier?.character?.pools)
+        || hasPoolsObj(dossier?.pools)
+        || (!explicitlyPbta && hasPoolsObj(dossier?.config?.pools))
+        || (!explicitlyPbta && /FAE Knobs:|Positive Tags:/i.test(options.currentMemo || ''));
 
     if (isFae) {
         const genreKey = resolveFaeGenreKey(dossier, options.currentMemo || '');
+        const effectiveGenre = resolveEffectiveFaeGenre(genreKey, dossier || {});
         const liveFaeState = options.currentMemo ? parseFaeStateFromMemo(options.currentMemo, genreKey) : null;
-        const characterName = liveFaeState?.character?.name || char.name || 'Survivor';
-        const className = liveFaeState?.character?.archetype || char.archetype || char.playbook || char.class || 'Survivor';
-        const pacingScenes = Number(dossier?.config?.pacingScenes) || Number(liveFaeState?.character?.scenes_target) || 4;
+        const characterName = liveFaeState?.character?.name || char.name || legacyChar?.name || 'Survivor';
+        const className = liveFaeState?.character?.archetype || char.archetype || legacyChar?.archetype || char.playbook || char.class || 'Survivor';
+        const pacingScenes = Number(dossier?.config?.scenesTarget || dossier?.config?.scenes_target || dossier?.config?.pacingScenes)
+            || Number(liveFaeState?.character?.scenes_target)
+            || Number(char.scenesTarget || char.scenes_target || legacyChar?.scenes_target)
+            || 4;
 
         let pools = {};
-        if (liveFaeState?.pools && Object.keys(liveFaeState.pools).length > 0) {
+        const memoHasSecondaryPools = Boolean(options.currentMemo && /\(\(BAR/i.test(options.currentMemo));
+        if (hasPoolsObj(liveFaeState?.pools) && (memoHasSecondaryPools || (!hasPoolsObj(char.pools) && !hasPoolsObj(legacyChar?.pools) && !hasPoolsObj(dossier?.pools) && !hasPoolsObj(dossier?.config?.pools)))) {
             pools = JSON.parse(JSON.stringify(liveFaeState.pools));
-        } else if (char.pools && Object.keys(char.pools).length > 0) {
+        } else if (hasPoolsObj(char.pools)) {
             pools = JSON.parse(JSON.stringify(char.pools));
+        } else if (hasPoolsObj(legacyChar?.pools)) {
+            pools = JSON.parse(JSON.stringify(legacyChar.pools));
+        } else if (hasPoolsObj(dossier?.pools)) {
+            pools = JSON.parse(JSON.stringify(dossier.pools));
+        } else if (hasPoolsObj(dossier?.config?.pools)) {
+            pools = normalizeCustomFaePools(dossier.config.pools, effectiveGenre.pools) || createInitialFaeState(genreKey, dossier).pools;
         } else {
-            pools = createInitialFaeState(genreKey).pools;
+            pools = createInitialFaeState(genreKey, dossier).pools;
         }
 
         const knobs = liveFaeState?.knobs
@@ -934,21 +973,27 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
                 ? { ...dossier.config.knobs }
                 : (char.knobs
                     ? { ...char.knobs }
-                    : { ...(FAE_GENRES[genreKey]?.knobs || { flee_grace_toggle: true, base_attrition_shift: 0, overflow_default: 'scar_and_ko' }) }));
+                    : { ...(effectiveGenre.knobs || { flee_grace_toggle: true, base_attrition_shift: 0, overflow_default: 'scar_and_ko' }) }));
 
-        let rawPosTags = liveFaeState?.character?.positive_tags
+        const memoHasPosTags = Boolean(options.currentMemo && /Positive Tags:/i.test(options.currentMemo));
+        let rawPosTags = (memoHasPosTags ? liveFaeState?.character?.positive_tags : null)
             || char.positive_tags
             || char.positiveTags
             || char.tags
-            || FAE_GENRES[genreKey]?.defaultPositiveTags
+            || legacyChar?.positive_tags
+            || legacyChar?.positiveTags
+            || effectiveGenre.defaultPositiveTags
             || [];
         if (!Array.isArray(rawPosTags)) rawPosTags = [rawPosTags];
         const positiveTags = rawPosTags.map(t => normalizeFaePill(t, 'Positive Tag')).filter(Boolean);
 
-        let rawNegTags = liveFaeState?.character?.negative_tags
+        const memoHasNegTags = Boolean(options.currentMemo && /(?:Scars & Debuffs|Conditions):/i.test(options.currentMemo));
+        let rawNegTags = (memoHasNegTags ? liveFaeState?.character?.negative_tags : null)
             || char.negative_tags
             || char.negativeTags
             || char.scars
+            || legacyChar?.negative_tags
+            || legacyChar?.negativeTags
             || [];
         if (!Array.isArray(rawNegTags)) rawNegTags = [rawNegTags];
         const negativeTags = rawNegTags.map(t => {
@@ -965,6 +1010,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
             isPbta: false,
             isRespec,
             genreKey,
+            customGenreSpec: dossier?.meta?.customGenreSpec || null,
             pacingScenes,
             characterName,
             className,
@@ -983,7 +1029,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
                 newMax: primaryPool?.max || 8,
                 mode: 'fae',
             },
-            status: liveFaeState?.character?.status || char.status || 'Healthy',
+            status: liveFaeState?.character?.status || char.status || legacyChar?.status || 'Healthy',
             partyChanges: [],
             faeMilestone: options.faeMilestone || null,
         };
@@ -992,26 +1038,33 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
     }
 
     const isPbta = !isFae && (options.isPbta
+        || dossier?.meta?.ruleset === 'pbta'
         || sysKeyLower === 'pbta'
         || Boolean(sysKeyLower && PBTA_GENRES[sysKeyLower])
         || !!char.isPbta
         || !!char.playbook
+        || !!legacyChar?.playbook
         || !!char.harm
+        || !!legacyChar?.harm
         || (dossier?.meta?.systemLabel && /PbtA|Dungeon World|Fellowship|Apocalypse|Monster of the Week|Sprawl|Masks|Blades in the Dark|Wanderhome/i.test(dossier.meta.systemLabel)));
 
     if (isPbta) {
         const genreKey = resolvePbtaGenreKey(dossier);
-        const playbookName = char.playbook || char.class || 'Protagonist';
-        const rawHarm = char.harm || { current: 0, max: dossier?.config?.harmMax || 4, armor: char.armor ?? 1 };
+        const playbookName = char.playbook || legacyChar?.playbook || char.class || legacyChar?.class || 'Protagonist';
+        const rawHarm = char.harm || legacyChar?.harm || { current: 0, max: dossier?.config?.harmMax || 4, armor: char.armor ?? legacyChar?.armor ?? 1 };
         const harm = {
             current: Number(rawHarm.current) || 0,
             max: Number(rawHarm.max) || Number(dossier?.config?.harmMax) || 4,
-            armor: rawHarm.armor !== undefined ? Number(rawHarm.armor) : (Number(char.armor) || 1),
+            armor: rawHarm.armor !== undefined ? Number(rawHarm.armor) : (Number(char.armor ?? legacyChar?.armor) || 1),
         };
-        const conditions = Array.isArray(char.conditions) ? [...char.conditions] : [];
-        const stats = getCanonicalPbtaStats(char.stats, genreKey);
+        const conditions = Array.isArray(char.conditions)
+            ? [...char.conditions]
+            : (Array.isArray(legacyChar?.conditions) ? [...legacyChar.conditions] : []);
+        const stats = getCanonicalPbtaStats(char.stats || legacyChar?.stats, genreKey, dossier || {});
         const pacingXp = Number(dossier?.config?.pacingXp) > 0 ? Number(dossier.config.pacingXp) : 5;
-        const advancesTaken = Array.isArray(char.advancesTaken) ? [...char.advancesTaken] : [];
+        const advancesTaken = Array.isArray(char.advancesTaken)
+            ? [...char.advancesTaken]
+            : (Array.isArray(legacyChar?.advancesTaken) ? [...legacyChar.advancesTaken] : []);
 
         let moves = [];
         if (Array.isArray(char.moves) && char.moves.length > 0) {
@@ -1020,6 +1073,10 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
             moves = [...char.startingMoves];
         } else if (Array.isArray(char.features) && char.features.length > 0) {
             moves = [...char.features];
+        } else if (Array.isArray(legacyChar?.moves) && legacyChar.moves.length > 0) {
+            moves = [...legacyChar.moves];
+        } else if (Array.isArray(legacyChar?.startingMoves) && legacyChar.startingMoves.length > 0) {
+            moves = [...legacyChar.startingMoves];
         }
 
         // Clean out any accidental D&D artifact strings
@@ -1029,8 +1086,9 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
             isPbta: true,
             isRespec,
             genreKey,
+            customGenreSpec: dossier?.meta?.customGenreSpec || null,
             pacingXp,
-            characterName: char.name || 'Hero',
+            characterName: char.name || legacyChar?.name || 'Hero',
             className: playbookName,
             playbookName,
             targetLevel: null,
@@ -1040,7 +1098,7 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
             conditions,
             stats,
             statNames: Object.keys(stats),
-            status: char.status || 'Healthy',
+            status: char.status || legacyChar?.status || 'Healthy',
             hpChange: {
                 oldMax: harm.max,
                 gain: 0,
@@ -1173,6 +1231,224 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
 }
 
 /**
+ * Applies a D&D 5e ASI choice (stat1/amount1, stat2/amount2) to an in-memory stats dictionary,
+ * matching existing keys case-insensitively.
+ *
+ * @param {Record<string, number>} statsObj
+ * @param {object|null} asiChoice
+ * @returns {Record<string, number>}
+ */
+export function applyAsiToStatsMap(statsObj, asiChoice) {
+    if (!statsObj || typeof statsObj !== 'object' || asiChoice?.type !== 'asi') {
+        return statsObj;
+    }
+    for (const [stat, delta] of [[asiChoice.stat1, asiChoice.amount1], [asiChoice.stat2, asiChoice.amount2]]) {
+        const inc = Number(delta);
+        if (!stat || !Number.isFinite(inc) || inc === 0) continue;
+        const matchKey = Object.keys(statsObj).find(k => k.toLowerCase() === String(stat).trim().toLowerCase())
+            || String(stat).trim().toUpperCase();
+        const curVal = Number.isFinite(Number(statsObj[matchKey])) ? Number(statsObj[matchKey]) : 10;
+        statsObj[matchKey] = curVal + inc;
+    }
+    return statsObj;
+}
+
+/**
+ * Increments a single ability score inside a [CHARACTER] block and recalculates
+ * its parenthetical modifier (if present), e.g. `STR 16 (+3)` -> `STR 18 (+4)`.
+ *
+ * @param {string} blockText
+ * @param {string} statKey
+ * @param {number} delta
+ * @returns {string}
+ */
+function applyAsiStatBump(blockText, statKey, delta) {
+    if (!statKey || !delta) return blockText;
+    const re = new RegExp(`\\b(${statKey}\\s*[:=]?\\s*)(\\d+)(\\s*\\([+-]?\\d+\\))?`, 'i');
+    return blockText.replace(re, (m, prefix, val, modSuffix) => {
+        const nextScore = parseInt(val, 10) + Number(delta);
+        if (!modSuffix) return `${prefix}${nextScore}`;
+        const nextMod = Math.floor((nextScore - 10) / 2);
+        const modStr = nextMod >= 0 ? `+${nextMod}` : `${nextMod}`;
+        return `${prefix}${nextScore} (${modStr})`;
+    });
+}
+
+/**
+ * Resolves the canonical WRK-10 sanitized chat partition entry in `rpgSettings.chatStates`.
+ *
+ * @param {object|null} rpgSettings
+ * @param {string} chatId
+ * @returns {object|null}
+ */
+function resolveChatPartition(rpgSettings, chatId) {
+    if (!rpgSettings?.chatStates || !chatId) return null;
+    const cleanId = String(chatId).replace(/\.jsonl$/i, '');
+    return (cleanId && rpgSettings.chatStates[cleanId]) || rpgSettings.chatStates[chatId] || null;
+}
+
+/**
+ * Synchronizes a single dossier object in place after an FAE, PbtA, or D&D 5e commit.
+ * Shared by `applyLevelUpCommit()` (for partition caches) and `level-up-ui.js`
+ * (for direct Confirm & Apply synchronization when the partition had no cached entry).
+ *
+ * @param {object} dossier
+ * @param {object} proposal
+ * @param {object} [options={}]
+ * @param {boolean} [options.isRespec=false]
+ * @param {number|null} [options.currentHpGain=null]
+ * @param {string[]|null} [options.cleanFeatures=null]
+ * @returns {object}
+ */
+export function applyDossierCommitUpdate(dossier, proposal, options = {}) {
+    if (!dossier || typeof dossier !== 'object' || !proposal) return dossier;
+    const isRespec = Boolean(options.isRespec);
+
+    if (proposal.isFae) {
+        const scenesTarget = Number(proposal.pacingScenes) || 0;
+        if (dossier.protagonist) {
+            dossier.protagonist.pools = JSON.parse(JSON.stringify(proposal.pools));
+            dossier.protagonist.positiveTags = [...(proposal.positiveTags || [])];
+            dossier.protagonist.negativeTags = [...(proposal.negativeTags || [])];
+        }
+        if (dossier.character) {
+            dossier.character.positive_tags = [...(proposal.positiveTags || [])];
+            dossier.character.negative_tags = [...(proposal.negativeTags || [])];
+            if (scenesTarget > 0) dossier.character.scenes_target = scenesTarget;
+        }
+        if (dossier.pools) {
+            dossier.pools = JSON.parse(JSON.stringify(proposal.pools));
+        }
+        dossier.config = dossier.config || {};
+        dossier.config.knobs = { ...(proposal.knobs || {}) };
+        if (scenesTarget > 0) dossier.config.scenesTarget = scenesTarget;
+        return dossier;
+    }
+
+    if (proposal.isPbta) {
+        const moves = [...(proposal.newFeatures || [])];
+        if (dossier.protagonist) {
+            dossier.protagonist.moves = moves;
+            dossier.protagonist.startingMoves = [...moves];
+            if (proposal.harm) {
+                dossier.protagonist.harm = { ...proposal.harm };
+                if (proposal.harm.armor !== undefined) {
+                    dossier.protagonist.armor = proposal.harm.armor;
+                }
+            }
+            if (proposal.stats) {
+                dossier.protagonist.stats = {
+                    ...getCanonicalPbtaStats(proposal.stats, proposal.genreKey, {
+                        customGenreSpec: proposal.customGenreSpec || dossier?.meta?.customGenreSpec || null,
+                    }),
+                };
+            }
+            if (Array.isArray(proposal.advancesTaken)) {
+                dossier.protagonist.advancesTaken = [...proposal.advancesTaken];
+            }
+        }
+        if (dossier.character) {
+            dossier.character.startingMoves = [...moves];
+            if (proposal.harm?.armor !== undefined) {
+                dossier.character.armor = proposal.harm.armor;
+            }
+        }
+        return dossier;
+    }
+
+    if (!dossier.protagonist) return dossier;
+    if (!isRespec && proposal.targetLevel) {
+        dossier.protagonist.level = proposal.targetLevel;
+    }
+    const newMaxHp = proposal.hpChange?.newMax;
+    if (newMaxHp) {
+        dossier.protagonist.hp = dossier.protagonist.hp || {};
+        const priorMax = Number.isFinite(dossier.protagonist.hp.max)
+            ? dossier.protagonist.hp.max
+            : (proposal.hpChange?.oldMax ?? newMaxHp);
+        const priorCurrent = Number.isFinite(dossier.protagonist.hp.current)
+            ? dossier.protagonist.hp.current
+            : priorMax;
+        const gain = Number.isFinite(options.currentHpGain)
+            ? Math.max(0, options.currentHpGain)
+            : Math.max(0, newMaxHp - priorMax);
+        dossier.protagonist.hp.max = newMaxHp;
+        dossier.protagonist.hp.current = Math.min(newMaxHp, priorCurrent + gain);
+    }
+    if (proposal.asiChoice?.type === 'asi') {
+        dossier.protagonist.stats = dossier.protagonist.stats || {};
+        applyAsiToStatsMap(dossier.protagonist.stats, proposal.asiChoice);
+    }
+    const featList = Array.isArray(options.cleanFeatures)
+        ? options.cleanFeatures
+        : (Array.isArray(proposal.newFeatures) ? sanitizeFeatureList(proposal.newFeatures) : null);
+    if (featList) {
+        dossier.protagonist.features = isRespec
+            ? [...featList]
+            : mergeUpgradedFeatures(dossier.protagonist.features || [], featList);
+    }
+    if (Array.isArray(proposal.activeAbilities)) {
+        dossier.protagonist.abilities = proposal.activeAbilities.map(a => formatTraitAsPill(a)).filter(Boolean);
+    }
+    return dossier;
+}
+
+/**
+ * Applies `updater(dossier)` across all unique dossier references on a chat partition
+ * and re-syncs canonical partition slots via `setPartitionDossier()`.
+ *
+ * @param {object} part
+ * @param {'dnd5e'|'pbta'|'fae'} rulesetHint
+ * @param {(d: object) => void} updater
+ * @returns {Set<object>}
+ */
+function syncPartitionDossiers(part, rulesetHint, updater) {
+    const seen = new Set();
+    if (!part) return seen;
+    for (const key of ['faeCampaignDossier', 'pbtaCampaignDossier', 'companionDossier', 'campaignDossier']) {
+        const d = part[key];
+        if (d && typeof d === 'object' && !seen.has(d)) {
+            seen.add(d);
+            updater(d);
+        }
+    }
+    const canonical = getPartitionDossier(part);
+    if (canonical) {
+        setPartitionDossier(part, canonical, rulesetHint);
+    }
+    return seen;
+}
+
+/**
+ * Propagates a newly committed memo string to MultiHog runtime globals, the DOM textarea,
+ * and SillyTavern's debounced settings persistence.
+ *
+ * @param {object} params
+ * @param {string} params.updatedMemo
+ * @param {object|null} params.rpgSettings
+ */
+function commitMemoToUiAndSettings({ updatedMemo, rpgSettings }) {
+    if (!rpgSettings) return;
+    rpgSettings.currentMemo = updatedMemo;
+    if (typeof globalThis._rpgUpdateUIMemo === 'function') {
+        globalThis._rpgUpdateUIMemo(updatedMemo);
+    }
+    if (typeof document !== 'undefined') {
+        const memoEl = document.getElementById('rpg-tracker-memo');
+        if (memoEl) {
+            memoEl.value = updatedMemo;
+            memoEl.dispatchEvent(new Event('input', { bubbles: true }));
+            memoEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+    if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext?.()?.saveSettingsDebounced === 'function') {
+        SillyTavern.getContext().saveSettingsDebounced();
+    } else if (typeof globalThis.saveSettingsDebounced === 'function') {
+        globalThis.saveSettingsDebounced();
+    }
+}
+
+/**
  * Surgically commits the approved Level-Up / Respec proposal into the active State Memo.
  *
  * @param {object} params
@@ -1184,7 +1460,8 @@ export function formulateLevelUpProposal(dossier, blueprint, targetLevel, option
  * @returns {{
  *   success: boolean,
  *   updatedMemo: string,
- *   summary: string
+ *   summary: string,
+ *   _syncedDossiers?: Set<object>
  * }}
  */
 export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = false, rpgSettings = null }) {
@@ -1203,12 +1480,15 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         state.pools = JSON.parse(JSON.stringify(proposal.pools));
         state.knobs = { ...(proposal.knobs || state.knobs) };
         state.character = state.character || {};
+        if (proposal.characterName) state.character.name = proposal.characterName;
+        if (proposal.className) state.character.archetype = proposal.className;
         state.character.positive_tags = [...(proposal.positiveTags || proposal.newFeatures || [])];
         state.character.negative_tags = [...(proposal.negativeTags || [])];
+        state.character.scenes_target = Number(proposal.pacingScenes) || state.character.scenes_target || 4;
 
         if (!isRespec) {
             const cur = state.character.scenes_completed ?? 0;
-            const max = state.character.scenes_target ?? (proposal.pacingScenes || 4);
+            const max = state.character.scenes_target;
             state.character.scenes_completed = Math.max(0, cur - max);
         }
 
@@ -1220,44 +1500,14 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
             updatedMemo = `${newCharBlock}\n\n${updatedMemo}`;
         }
 
+        let _syncedDossiers = new Set();
         if (rpgSettings) {
-            rpgSettings.currentMemo = updatedMemo;
-            if (typeof globalThis._rpgUpdateUIMemo === 'function') {
-                globalThis._rpgUpdateUIMemo(updatedMemo);
-            }
-            if (rpgSettings.chatStates && chatId && rpgSettings.chatStates[chatId]) {
-                const part = rpgSettings.chatStates[chatId];
+            const part = resolveChatPartition(rpgSettings, chatId);
+            if (part) {
                 part.currentMemo = updatedMemo;
-                const seen = new Set();
-                for (const key of ['faeCampaignDossier', 'pbtaCampaignDossier', 'companionDossier', 'campaignDossier']) {
-                    const d = part[key];
-                    if (d?.protagonist && !seen.has(d)) {
-                        seen.add(d);
-                        d.protagonist.pools = JSON.parse(JSON.stringify(proposal.pools));
-                        d.protagonist.positiveTags = [...(proposal.positiveTags || [])];
-                        d.protagonist.negativeTags = [...(proposal.negativeTags || [])];
-                        d.config = d.config || {};
-                        d.config.knobs = { ...(proposal.knobs || {}) };
-                    }
-                }
-                const canonical = getPartitionDossier(part);
-                if (canonical) {
-                    setPartitionDossier(part, canonical, 'fae');
-                }
+                _syncedDossiers = syncPartitionDossiers(part, 'fae', (d) => applyDossierCommitUpdate(d, proposal, { isRespec }));
             }
-            if (typeof document !== 'undefined') {
-                const memoEl = document.getElementById('rpg-tracker-memo');
-                if (memoEl) {
-                    memoEl.value = updatedMemo;
-                    memoEl.dispatchEvent(new Event('input', { bubbles: true }));
-                    memoEl.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-            if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext?.()?.saveSettingsDebounced === 'function') {
-                SillyTavern.getContext().saveSettingsDebounced();
-            } else if (typeof globalThis.saveSettingsDebounced === 'function') {
-                globalThis.saveSettingsDebounced();
-            }
+            commitMemoToUiAndSettings({ updatedMemo, rpgSettings });
         }
 
         return {
@@ -1266,6 +1516,7 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
             summary: isRespec
                 ? 'FAE character pools, tags, and knobs tuned and saved.'
                 : `FAE Milestone Complete! ${proposal.characterName}'s milestone applied.`,
+            _syncedDossiers,
         };
     }
 
@@ -1276,13 +1527,14 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         }
 
         let updatedMemo = currentMemo;
+        const pbtaGenreOverrides = { customGenreSpec: proposal.customGenreSpec || null };
         const charMatch = updatedMemo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
         if (charMatch) {
             let charBlock = charMatch[1];
 
             // 1. Update Stats in-place if modified
             if (proposal.stats && typeof proposal.stats === 'object' && Object.keys(proposal.stats).length > 0) {
-                const canonStats = getCanonicalPbtaStats(proposal.stats, proposal.genreKey);
+                const canonStats = getCanonicalPbtaStats(proposal.stats, proposal.genreKey, pbtaGenreOverrides);
                 if (/^\s*(?:Stats|Attr|Attributes)\s*:/im.test(charBlock)) {
                     charBlock = charBlock.replace(/^(\s*(?:Stats|Attr|Attributes)\s*:\s*)([^\n\r]*)/im, (full, prefix, lineBody) => {
                         let updatedLine = lineBody;
@@ -1344,11 +1596,18 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
                         `${curHp}/${maxHarm} HP`
                     );
                 }
-                if (/Armor\s*:\s*\d+/i.test(charBlock) && proposal.harm.armor !== undefined) {
-                    charBlock = charBlock.replace(
-                        /Armor\s*:\s*\d+/i,
-                        `Armor: ${proposal.harm.armor}`
-                    );
+                if (proposal.harm.armor !== undefined) {
+                    if (/Armor\s*:\s*\d+/i.test(charBlock)) {
+                        charBlock = charBlock.replace(
+                            /Armor\s*:\s*\d+/i,
+                            `Armor: ${proposal.harm.armor}`
+                        );
+                    } else if (/Harm\s*:\s*\d+\/\d+/i.test(charBlock)) {
+                        charBlock = charBlock.replace(
+                            /(Harm\s*:\s*\d+\/\d+)/i,
+                            `$1 | Armor: ${proposal.harm.armor}`
+                        );
+                    }
                 }
             }
 
@@ -1378,40 +1637,14 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         }
 
         // Sync settings / partition
+        let _syncedDossiers = new Set();
         if (rpgSettings) {
-            rpgSettings.currentMemo = updatedMemo;
-            if (rpgSettings.chatStates && chatId && rpgSettings.chatStates[chatId]) {
-                const part = rpgSettings.chatStates[chatId];
+            const part = resolveChatPartition(rpgSettings, chatId);
+            if (part) {
                 part.currentMemo = updatedMemo;
-                const seen = new Set();
-                for (const key of ['pbtaCampaignDossier', 'faeCampaignDossier', 'companionDossier', 'campaignDossier']) {
-                    const d = part[key];
-                    if (d?.protagonist && !seen.has(d)) {
-                        seen.add(d);
-                        d.protagonist.moves = [...(proposal.newFeatures || [])];
-                        if (proposal.harm) d.protagonist.harm = { ...proposal.harm };
-                        if (proposal.stats) d.protagonist.stats = { ...getCanonicalPbtaStats(proposal.stats, proposal.genreKey) };
-                        if (Array.isArray(proposal.advancesTaken)) d.protagonist.advancesTaken = [...proposal.advancesTaken];
-                    }
-                }
-                const canonical = getPartitionDossier(part);
-                if (canonical) {
-                    setPartitionDossier(part, canonical, 'pbta');
-                }
+                _syncedDossiers = syncPartitionDossiers(part, 'pbta', (d) => applyDossierCommitUpdate(d, proposal, { isRespec }));
             }
-            if (typeof document !== 'undefined') {
-                const memoEl = document.getElementById('rpg-tracker-memo');
-                if (memoEl) {
-                    memoEl.value = updatedMemo;
-                    memoEl.dispatchEvent(new Event('input', { bubbles: true }));
-                    memoEl.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-            if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext?.()?.saveSettingsDebounced === 'function') {
-                SillyTavern.getContext().saveSettingsDebounced();
-            } else if (typeof globalThis.saveSettingsDebounced === 'function') {
-                globalThis.saveSettingsDebounced();
-            }
+            commitMemoToUiAndSettings({ updatedMemo, rpgSettings });
         }
 
         return {
@@ -1420,6 +1653,7 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
             summary: isRespec
                 ? `Playbook sheet successfully tuned and saved.`
                 : `Playbook Advance Complete! ${proposal.characterName}'s advances applied.`,
+            _syncedDossiers,
         };
     }
 
@@ -1460,17 +1694,11 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
             charBlock = `${charBlock.trimEnd()}\n${hdLine}\n`;
         }
 
-        // Apply ASI if chosen
+        // Apply ASI if chosen (updating both raw score and parenthetical modifier if present)
         if (proposal.asiChoice?.type === 'asi') {
             const { stat1, amount1, stat2, amount2 } = proposal.asiChoice;
-            if (stat1 && amount1) {
-                const re1 = new RegExp(`\\b(${stat1}\\s*[:=]?\\s*)(\\d+)`, 'i');
-                charBlock = charBlock.replace(re1, (m, prefix, val) => `${prefix}${parseInt(val, 10) + amount1}`);
-            }
-            if (stat2 && amount2) {
-                const re2 = new RegExp(`\\b(${stat2}\\s*[:=]?\\s*)(\\d+)`, 'i');
-                charBlock = charBlock.replace(re2, (m, prefix, val) => `${prefix}${parseInt(val, 10) + amount2}`);
-            }
+            charBlock = applyAsiStatBump(charBlock, stat1, amount1);
+            charBlock = applyAsiStatBump(charBlock, stat2, amount2);
         }
 
         // Update Features / Traits / Abilities line
@@ -1577,32 +1805,18 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         }
     }
 
-    // Commit to MultiHog live settings if provided
+    // Commit to MultiHog live settings & partition dossiers if provided
+    let _syncedDossiers = new Set();
     if (rpgSettings) {
-        rpgSettings.currentMemo = updatedMemo;
-        if (typeof globalThis._rpgUpdateUIMemo === 'function') {
-            globalThis._rpgUpdateUIMemo(updatedMemo);
+        const part = resolveChatPartition(rpgSettings, chatId);
+        if (part) {
+            part.currentMemo = updatedMemo;
+            _syncedDossiers = syncPartitionDossiers(part, 'dnd5e', (d) => applyDossierCommitUpdate(d, proposal, {
+                isRespec,
+                cleanFeatures,
+            }));
         }
-        if (rpgSettings.chatStates && chatId && rpgSettings.chatStates[chatId]) {
-            rpgSettings.chatStates[chatId].currentMemo = updatedMemo;
-        }
-
-        // Keep DOM textarea in sync if present
-        if (typeof document !== 'undefined') {
-            const memoEl = document.getElementById('rpg-tracker-memo');
-            if (memoEl) {
-                memoEl.value = updatedMemo;
-                memoEl.dispatchEvent(new Event('input', { bubbles: true }));
-                memoEl.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-
-        // Persist settings
-        if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext?.()?.saveSettingsDebounced === 'function') {
-            SillyTavern.getContext().saveSettingsDebounced();
-        } else if (typeof globalThis.saveSettingsDebounced === 'function') {
-            globalThis.saveSettingsDebounced();
-        }
+        commitMemoToUiAndSettings({ updatedMemo, rpgSettings });
     }
 
     const summary = isRespec
@@ -1613,6 +1827,7 @@ export function applyLevelUpCommit({ chatId, currentMemo, proposal, isRespec = f
         success: true,
         updatedMemo,
         summary,
+        _syncedDossiers,
     };
 }
 

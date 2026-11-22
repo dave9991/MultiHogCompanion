@@ -2138,7 +2138,10 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     const eligibility = evaluateLevelUpEligibility(
         currentMemo,
         rulesetKey,
-        { pacingXp: dossier.config?.pacingXp },
+        {
+            pacingXp: dossier.config?.pacingXp,
+            pacingScenes: dossier.config?.scenesTarget || dossier.config?.scenes_target || dossier.config?.pacingScenes,
+        },
     );
 
     let blueprintPromise = null;
@@ -2147,8 +2150,11 @@ export async function launchLevelUpOrRespecDesk({ isRespec = false } = {}) {
     if (isFae) {
         dossier.progressionBlueprint = null;
         if (dossier.meta) {
-            dossier.meta.systemKey = 'fae';
             dossier.meta.ruleset = 'fae';
+            const existingSysKey = (dossier.meta.systemKey || '').toLowerCase();
+            if (!existingSysKey || existingSysKey === 'dnd5e' || existingSysKey === 'pbta' || existingSysKey === 'fae') {
+                dossier.meta.systemKey = detectActiveFaeGenre({ chatId, rpgSettings, currentMemo }) || 'cosmic_horror';
+            }
             if (!dossier.meta.systemLabel || dossier.meta.systemLabel.includes('5e')) {
                 dossier.meta.systemLabel = 'FAE Freeform Attrition Engine';
             }

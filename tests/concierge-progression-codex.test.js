@@ -229,4 +229,79 @@ test('Progression Codex: Mathematical boundary hardening handles un-normalized C
     assert.ok(updatedDossier.protagonist.hp.max >= 1, 'HP is strictly >= 1');
 });
 
+test('Progression Codex: LVL-007 honors customGenreSpec, Turn-0 dossier.character, blueprintMatchesClass & custom pacing', () => {
+    // 1. PbtA customGenreSpec + custom pacingXp + dossier.character
+    const customPbta = createEmptyDossier('pbta');
+    customPbta.meta.genre = 'custom';
+    customPbta.meta.systemKey = 'custom';
+    customPbta.meta.customGenreSpec = {
+        label: 'Gothic Bloodcraft',
+        stats: ['Blood', 'Echo', 'Iron', 'Veil', 'Wyrd'],
+        moves: ['Siphon Aether (+Wyrd) — channel spectral energy'],
+    };
+    customPbta.config.pacingXp = 6;
+    customPbta.protagonist = {};
+    customPbta.character = {
+        name: 'Isolde',
+        playbook: 'The Hollowed',
+        armor: 2,
+        harm: { current: 1, max: 6 },
+        stats: { BLOOD: 2, echo: 1, IRON: 0, veil: -1, WYRD: 2 },
+    };
+
+    const pbtaEl = createMockElement();
+    renderProgressionArchitect(pbtaEl, { dossier: customPbta, ruleset: 'pbta' });
+    const pbtaHtml = pbtaEl.html();
+    assert.ok(pbtaHtml.includes('The Hollowed'));
+    assert.ok(pbtaHtml.includes('Harm Track: <strong style="color: #f87171;">1/6</strong>'));
+    assert.ok(pbtaHtml.includes('Armor: <strong style="color: #60a5fa;">2</strong>'));
+    assert.ok(pbtaHtml.includes('Every 6 XP'), 'LVL-007: displays custom pacingXp');
+    assert.ok(pbtaHtml.includes('XP 6/6'));
+    assert.ok(pbtaHtml.includes('Blood: <strong>+2</strong>') && pbtaHtml.includes('Wyrd: <strong>+2</strong>'), 'LVL-007: renders customGenreSpec stats');
+    assert.ok(pbtaHtml.includes('Siphon Aether'), 'LVL-007: renders customGenreSpec fallback moves');
+
+    // 2. FAE customGenreSpec + Turn-0 dossier.character + custom scenesTarget
+    const customFae = createEmptyDossier('fae');
+    customFae.meta.genre = 'custom';
+    customFae.meta.systemKey = 'custom';
+    customFae.meta.customGenreSpec = {
+        label: 'Clockwork Alchemist',
+        pools: [
+            { key: 'vitality', label: 'Vitality', current: 8, max: 8 },
+            { key: 'aether', label: 'Aether', current: 5, max: 6 },
+        ],
+        defaultPositiveTags: ['Brass Automaton [mechanical minions]'],
+    };
+    customFae.config.scenesTarget = 5;
+    customFae.protagonist = {};
+    customFae.character = {
+        name: 'Cornelius',
+        archetype: 'Artificer',
+        scenes_target: 5,
+        heroic_domain: 'Alchemist [transmutation & wards]',
+        positive_tags: ['Brass Automaton [mechanical minions]'],
+        negative_tags: ['Burned Finger'],
+    };
+
+    const faeEl = createMockElement();
+    renderProgressionArchitect(faeEl, { dossier: customFae, ruleset: 'fae' });
+    const faeHtml = faeEl.html();
+    assert.ok(faeHtml.includes('Artificer'));
+    assert.ok(faeHtml.includes('5 Scenes / Milestone'), 'LVL-007: displays custom scenesTarget');
+    assert.ok(faeHtml.includes('Vitality') && faeHtml.includes('8/8'), 'LVL-007: renders customGenreSpec pools');
+    assert.ok(faeHtml.includes('Alchemist [transmutation &amp; wards]'), 'LVL-007: renders dossier.character.heroic_domain');
+    assert.ok(faeHtml.includes('(-) Burned Finger'), 'LVL-007: renders negative tags/scars');
+
+    // 3. D&D 5e blueprintMatchesClass preserves customized compatible blueprint
+    const customDnd = createEmptyDossier('dnd5e');
+    const customBp = getCanonicalDndProgression('Rogue');
+    customBp.levels['1'].features = ['Custom Umbral Strike (Bonus shadow damage)'];
+    customDnd.protagonist = { name: 'Vex', class: 'Shadow Rogue', level: 1, hp: { current: 10, max: 10 }, stats: { CON: 12 } };
+    customDnd.progressionBlueprint = customBp;
+
+    const dndEl = createMockElement();
+    renderProgressionArchitect(dndEl, { dossier: customDnd, ruleset: 'dnd5e' });
+    assert.ok(dndEl.html().includes('Custom Umbral Strike'), 'LVL-007: blueprintMatchesClass preserves compatible variant blueprint');
+});
+
 

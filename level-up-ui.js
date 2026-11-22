@@ -11,7 +11,7 @@
  * [CATALOG: FEAT-10] See FEATURES.md — Autonomous Level-Up Concierge & Class Progression Codex
  */
 
-import { formulateLevelUpProposal, applyLevelUpCommit, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection, applyFaeMilestoneSelection, resolveFaeGenreKey, extractConciergeDirectives, splitTopLevelDirectives, buildFaeMilestonePrompt } from './level-up-runner.js';
+import { formulateLevelUpProposal, applyLevelUpCommit, applyDossierCommitUpdate, extractFeatureKey, deduplicateFeatures, mergeUpgradedFeatures, collapseCodexProgression, ensureNamedFeature, matchesFeatureRemovalTarget, applyPbtaAdvanceSelection, applyFaeMilestoneSelection, resolveFaeGenreKey, extractConciergeDirectives, splitTopLevelDirectives, buildFaeMilestonePrompt } from './level-up-runner.js';
 import { getTierPerks, getCanonicalDndProgression, formatBlueprintSummary, parseBlueprintFromResponse, normalizeBlueprint, normalizeLevelEntry, formatTraitAsPill, partitionFeaturesAndAbilities } from './level-up-blueprint.js';
 import { sendConciergeRequest } from './concierge-connection.js';
 import { syncDossierToWorldInfoBook, persistCompanionDossier, parseCharacterBlockFromMemo } from './level-up-scaffold.js';
@@ -30,6 +30,7 @@ import {
     buildFaeMilestoneAndTuningHtml,
     buildLevelUpModalHtml,
     buildBlueprintTableHtml,
+    normalizeFaeOverflowRule,
 } from './level-up-stage-renderers.js';
 
 export {
@@ -1025,9 +1026,10 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
                             const sel = modal.querySelector('#mhc_fae_shift_select');
                             if (sel) sel.value = String(proposal.knobs.base_attrition_shift);
                         } else if (knobName.includes('overflow')) {
-                            proposal.knobs.overflow_default = knobVal;
+                            const normOv = normalizeFaeOverflowRule(knobVal);
+                            proposal.knobs.overflow_default = normOv;
                             const sel = modal.querySelector('#mhc_fae_overflow_select');
-                            if (sel) sel.value = knobVal;
+                            if (sel) sel.value = normOv;
                         }
                     }
                 } else if (dir.tag === 'ADD_FEATURE') {
@@ -1621,43 +1623,9 @@ ARCHITECTURAL RULES (DECIDING WHERE AN ABILITY GOES & AUDITING):
         });
 
         if (commitResult.success) {
-            if (dossier?.protagonist) {
-                if (isFae) {
-                    dossier.protagonist.pools = JSON.parse(JSON.stringify(proposal.pools));
-                    dossier.protagonist.positiveTags = [...(proposal.positiveTags || [])];
-                    dossier.protagonist.negativeTags = [...(proposal.negativeTags || [])];
-                    dossier.config = dossier.config || {};
-                    dossier.config.knobs = { ...(proposal.knobs || {}) };
-                } else if (isPbta) {
-                    dossier.protagonist.moves = [...(proposal.newFeatures || [])];
-                    if (proposal.harm) dossier.protagonist.harm = { ...proposal.harm };
-                    if (proposal.stats) dossier.protagonist.stats = { ...proposal.stats };
-                    if (Array.isArray(proposal.advancesTaken)) dossier.protagonist.advancesTaken = [...proposal.advancesTaken];
-                } else {
-                    if (!isRespec) {
-                        dossier.protagonist.level = proposal.targetLevel;
-                    }
-                    if (proposal.hpChange?.newMax) {
-                        dossier.protagonist.hp = dossier.protagonist.hp || {};
-                        // Mirror the memo commit: current HP rises by the gain (0 is a valid current HP)
-                        const priorCurrent = Number.isFinite(dossier.protagonist.hp.current)
-                            ? dossier.protagonist.hp.current
-                            : (proposal.hpChange.oldMax || 0);
-                        dossier.protagonist.hp.max = proposal.hpChange.newMax;
-                        dossier.protagonist.hp.current = Math.min(
-                            proposal.hpChange.newMax,
-                            priorCurrent + Math.max(0, currentHpGain)
-                        );
-                    }
-                    if (proposal.newFeatures && Array.isArray(proposal.newFeatures)) {
-                        dossier.protagonist.features = isRespec
-                            ? [...proposal.newFeatures]
-                            : [ ...new Set([...(dossier.protagonist.features || []), ...proposal.newFeatures]) ];
-                    }
-                    if (proposal.activeAbilities && Array.isArray(proposal.activeAbilities)) {
-                        dossier.protagonist.abilities = [...proposal.activeAbilities];
-                    }
-                }
+            const alreadySyncedByCommit = Boolean(commitResult._syncedDossiers?.has(dossier));
+            if (dossier && !alreadySyncedByCommit) {
+                applyDossierCommitUpdate(dossier, proposal, { isRespec, currentHpGain });
             }
 
             persistCompanionDossier(chatId, dossier);

@@ -8,8 +8,11 @@
  */
 
 import { getCandidateChatIds } from './persona-matching.js';
-import { getPartitionDossier } from './pbta-ruleset-persistence.js';
+import { getPartitionDossier, setPartitionDossier } from './pbta-ruleset-persistence.js';
 import { PBTA_GENRES, splitTopLevelPillItems, splitPbtaMovesLine } from './pbta-ruleset.js';
+import { FAE_GENRES } from './fae-ruleset.js';
+import { parseFaeStateFromMemo } from './fae-state-sync.js';
+import { detectActiveFaeGenre } from './pbta-companion-bridge.js';
 import { getCanonicalDndProgression } from './level-up-blueprint.js';
 import { systemRegistry } from './concierge-system-registry.js';
 import './concierge-system-pbta.js';
@@ -98,10 +101,32 @@ export function parseCharacterBlockFromMemo(memoText) {
         result.class = classMatch[1].trim();
     }
 
-    // Detect PbtA narrative mechanics
-    const isPbta = systemRegistry.detectRulesetFromMemo(memoText) === 'pbta';
+    // Detect active ruleset from memo markers
+    const detectedRuleset = systemRegistry.detectRulesetFromMemo(memoText);
+    const isFae = detectedRuleset === 'fae';
+    const isPbta = !isFae && detectedRuleset === 'pbta';
 
-    if (isPbta) {
+    if (isFae) {
+        const inferredGenreKey = detectActiveFaeGenre({ currentMemo: memoText }) || 'cosmic_horror';
+        const faeState = parseFaeStateFromMemo(memoText, inferredGenreKey);
+        result.isFae = true;
+        result.isPbta = false;
+        result.hitDie = null;
+        result.level = null;
+        if (faeState.character?.name && faeState.character.name !== 'Character') {
+            result.name = faeState.character.name;
+        }
+        result.archetype = faeState.character?.archetype || (result.class !== 'Adventurer' ? result.class : 'Survivor');
+        result.class = result.archetype;
+        result.pools = faeState.pools || {};
+        result.positiveTags = Array.isArray(faeState.character?.positive_tags) ? [...faeState.character.positive_tags] : [];
+        result.negativeTags = Array.isArray(faeState.character?.negative_tags) ? [...faeState.character.negative_tags] : [];
+        result.knobs = faeState.knobs ? { ...faeState.knobs } : undefined;
+        result.scenesCompleted = faeState.character?.scenes_completed ?? 0;
+        result.scenesTarget = faeState.character?.scenes_target ?? 4;
+        result.status = faeState.character?.status || 'Healthy';
+        result.genreKey = faeState.genreKey || 'cosmic_horror';
+    } else if (isPbta) {
         result.isPbta = true;
         result.playbook = result.class;
         result.hitDie = null;
@@ -242,7 +267,18 @@ export function isDossierPbta(dossier) {
 }
 
 /**
- * Creates a clean, standardized campaign dossier stub for unconfigured or stock D&D chats.
+ * Detects whether a dossier represents an FAE narrative campaign.
+ *
+ * @param {object} dossier Campaign dossier.
+ * @returns {boolean}
+ */
+export function isDossierFae(dossier) {
+    if (!dossier || typeof dossier !== 'object') return false;
+    return systemRegistry.detectRuleset(dossier, { fallback: 'dnd5e' }) === 'fae';
+}
+
+/**
+ * Creates a clean, standardized campaign dossier stub for unconfigured or stock chats across D&D 5e, PbtA, and FAE.
  *
  * @param {string} chatId Unique identifier for the chat.
  * @param {string} stateMemo Live state memo to parse character data from.
@@ -252,15 +288,21 @@ export function isDossierPbta(dossier) {
 export function scaffoldDossierStubForChat(chatId, stateMemo, chatTitle = '') {
     const charData = parseCharacterBlockFromMemo(stateMemo);
 
-    // Determine basic system key
-    const isPbta = systemRegistry.detectRulesetFromMemo(stateMemo) === 'pbta' || !!charData.isPbta;
-    const systemKey = isPbta ? 'pbta' : 'dnd5e';
-    const systemLabel = isPbta ? 'PbtA Narrative Engine' : 'D&D 5e Standard';
+    // Determine active ruleset & system key
+    const detectedRuleset = systemRegistry.detectRulesetFromMemo(stateMemo);
+    const isFae = detectedRuleset === 'fae' || !!charData.isFae;
+    const isPbta = !isFae && (detectedRuleset === 'pbta' || !!charData.isPbta);
+    const ruleset = isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e');
+    const systemKey = isFae ? (charData.genreKey || 'cosmic_horror') : (isPbta ? 'pbta' : 'dnd5e');
+    const systemLabel = isFae
+        ? 'FAE Freeform Attrition Engine'
+        : (isPbta ? 'PbtA Narrative Engine' : 'D&D 5e Standard');
 
     return {
         meta: {
             chatId: chatId || 'default',
             title: chatTitle || `${charData.name}'s Adventure`,
+            ruleset,
             systemKey,
             systemLabel,
             isStub: true,
@@ -270,29 +312,36 @@ export function scaffoldDossierStubForChat(chatId, stateMemo, chatTitle = '') {
         protagonist: {
             name: charData.name,
             class: charData.class,
+            archetype: isFae ? (charData.archetype || charData.class) : undefined,
             playbook: isPbta ? (charData.playbook || charData.class) : undefined,
+            isFae,
             isPbta,
-            level: isPbta ? null : charData.level,
-            hitDie: isPbta ? null : charData.hitDie,
-            hp: isPbta ? null : {
+            level: (isPbta || isFae) ? null : charData.level,
+            hitDie: (isPbta || isFae) ? null : charData.hitDie,
+            hp: (isPbta || isFae) ? null : {
                 current: charData.currentHp,
                 max: charData.maxHp,
             },
             harm: isPbta ? (charData.harm || { current: 0, max: 4, armor: charData.armor || 1 }) : null,
+            pools: isFae ? (charData.pools || {}) : undefined,
+            positiveTags: isFae ? (charData.positiveTags || []) : undefined,
+            negativeTags: isFae ? (charData.negativeTags || []) : undefined,
             moves: isPbta ? (charData.moves || []) : undefined,
             startingMoves: isPbta ? (charData.moves || []) : undefined,
             conditions: isPbta ? (charData.conditions || []) : undefined,
             gear: isPbta ? (charData.gear || []) : undefined,
-            features: isPbta ? undefined : (charData.features || []),
-            abilities: isPbta ? undefined : (charData.abilities || []),
-            status: isPbta ? (charData.status || 'Healthy') : undefined,
+            features: (isPbta || isFae) ? undefined : (charData.features || []),
+            abilities: (isPbta || isFae) ? undefined : (charData.abilities || []),
+            status: (isPbta || isFae) ? (charData.status || 'Healthy') : undefined,
             stats: charData.stats,
             rawCharacterBlock: charData.rawText,
         },
         progressionBlueprint: null,
         config: {
             simulationDepth: 'active_fronts',
-            partySyncEnabled: true,
+            partySyncEnabled: !isFae,
+            ...(isFae && charData.knobs ? { knobs: charData.knobs } : {}),
+            ...(isFae && charData.scenesTarget ? { scenesTarget: charData.scenesTarget } : {}),
         },
     };
 }
@@ -306,8 +355,10 @@ export function scaffoldDossierStubForChat(chatId, stateMemo, chatTitle = '') {
  * @returns {object} Active or newly scaffolded dossier.
  */
 export function ensureChatDossier(chatId, companionSettings = null, options = {}) {
+    const stCtx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
     const liveMemo = options.memo
         || companionSettings?.currentMemo
+        || stCtx?.extensionSettings?.rpg_tracker?.currentMemo
         || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker?.currentMemo : null)
         || globalThis.extension_settings?.rpg_tracker?.currentMemo
         || (typeof document !== 'undefined' ? document.getElementById('rpg-tracker-memo')?.value : null)
@@ -333,9 +384,8 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
     // 2. SillyTavern chatMetadata check (direct per-chat metadata)
     if (!dossier) {
         try {
-            const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-            const metaDossier = ctx?.chatMetadata?.mhc_dossier
-                || ctx?.chat_metadata?.mhc_dossier
+            const metaDossier = stCtx?.chatMetadata?.mhc_dossier
+                || stCtx?.chat_metadata?.mhc_dossier
                 || (typeof globalThis !== 'undefined' && globalThis.chat_metadata?.mhc_dossier);
             if (metaDossier && typeof metaDossier === 'object') {
                 dossier = metaDossier;
@@ -345,12 +395,14 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
         }
     }
 
-    // 3. Global extension_settings checks
+    // 3. Global extension_settings & SillyTavern extensionSettings checks
     if (!dossier) {
         try {
-            const compGlobal = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
+            const compGlobal = stCtx?.extensionSettings?.multihog_companion
+                || (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
                 || globalThis.extension_settings?.multihog_companion;
-            const rpgGlobal = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
+            const rpgGlobal = stCtx?.extensionSettings?.rpg_tracker
+                || (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
                 || globalThis.extension_settings?.rpg_tracker;
 
             for (const cid of candidateIds) {
@@ -370,8 +422,32 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
 
     // Refresh protagonist details if existing dossier is a stub or has generic protagonist while liveMemo has real data
     if (dossier) {
-        const pbtaMode = isDossierPbta(dossier) || /Harm\s*:\s*\d+\/\d+/i.test(liveMemo || '');
-        if (pbtaMode) {
+        const memoDetectedRuleset = liveMemo ? systemRegistry.detectRulesetFromMemo(liveMemo) : null;
+        const faeMode = isDossierFae(dossier) || memoDetectedRuleset === 'fae';
+        const pbtaMode = !faeMode && (isDossierPbta(dossier) || /Harm\s*:\s*\d+\/\d+/i.test(liveMemo || ''));
+        if (faeMode) {
+            dossier.meta = dossier.meta || {};
+            dossier.meta.ruleset = 'fae';
+            const existingKey = (dossier.meta.systemKey || '').toLowerCase();
+            if (existingKey && (FAE_GENRES[existingKey] || existingKey === 'custom')) {
+                dossier.meta.systemKey = existingKey;
+            } else {
+                dossier.meta.systemKey = 'cosmic_horror';
+            }
+            if (!dossier.meta.systemLabel || dossier.meta.systemLabel.includes('5e')) {
+                dossier.meta.systemLabel = 'FAE Freeform Attrition Engine';
+            }
+            if (dossier.progressionBlueprint?.levels) {
+                dossier.progressionBlueprint = null;
+            }
+            if (dossier.protagonist) {
+                dossier.protagonist.isFae = true;
+                dossier.protagonist.isPbta = false;
+                dossier.protagonist.hitDie = null;
+                dossier.protagonist.level = null;
+                dossier.protagonist.archetype = dossier.protagonist.archetype || dossier.protagonist.class;
+            }
+        } else if (pbtaMode) {
             dossier.meta = dossier.meta || {};
             const existingKey = (dossier.meta.systemKey || '').toLowerCase();
             if (existingKey && PBTA_GENRES[existingKey]) {
@@ -396,31 +472,37 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
             }
         }
 
-        if (dossier.meta?.isStub || dossier.protagonist?.name === 'Protagonist' || !dossier.protagonist?.class || dossier.protagonist?.class === 'Adventurer' || pbtaMode) {
+        if (dossier.meta?.isStub || dossier.protagonist?.name === 'Protagonist' || !dossier.protagonist?.class || dossier.protagonist?.class === 'Adventurer' || pbtaMode || faeMode) {
             if (liveMemo) {
                 const parsed = parseCharacterBlockFromMemo(liveMemo);
                 if (parsed.name && parsed.name !== 'Protagonist') {
-                    const isPbtaProtagonist = parsed.isPbta || pbtaMode;
+                    const isFaeProtagonist = parsed.isFae || faeMode;
+                    const isPbtaProtagonist = !isFaeProtagonist && (parsed.isPbta || pbtaMode);
                     dossier.protagonist = {
                         ...dossier.protagonist,
                         name: parsed.name,
                         class: parsed.class !== 'Adventurer' ? parsed.class : (dossier.protagonist?.class || parsed.class),
+                        archetype: isFaeProtagonist ? (parsed.archetype || dossier.protagonist?.archetype || parsed.class) : undefined,
                         playbook: isPbtaProtagonist ? (parsed.playbook || dossier.protagonist?.playbook || parsed.class) : undefined,
+                        isFae: isFaeProtagonist,
                         isPbta: isPbtaProtagonist,
-                        level: isPbtaProtagonist ? null : (parsed.level || dossier.protagonist?.level || 1),
-                        hitDie: isPbtaProtagonist ? null : (parsed.hitDie || dossier.protagonist?.hitDie || deriveHitDieForClass(parsed.class || dossier.protagonist?.class)),
-                        hp: isPbtaProtagonist ? null : {
+                        level: (isPbtaProtagonist || isFaeProtagonist) ? null : (parsed.level || dossier.protagonist?.level || 1),
+                        hitDie: (isPbtaProtagonist || isFaeProtagonist) ? null : (parsed.hitDie || dossier.protagonist?.hitDie || deriveHitDieForClass(parsed.class || dossier.protagonist?.class)),
+                        hp: (isPbtaProtagonist || isFaeProtagonist) ? null : {
                             current: parsed.currentHp || dossier.protagonist?.hp?.current || 10,
                             max: parsed.maxHp || dossier.protagonist?.hp?.max || 10,
                         },
                         harm: isPbtaProtagonist ? (parsed.harm || dossier.protagonist?.harm || { current: 0, max: 4, armor: 1 }) : null,
+                        pools: isFaeProtagonist ? (Object.keys(parsed.pools || {}).length > 0 ? parsed.pools : (dossier.protagonist?.pools || {})) : undefined,
+                        positiveTags: isFaeProtagonist ? (parsed.positiveTags?.length > 0 ? parsed.positiveTags : (dossier.protagonist?.positiveTags || [])) : undefined,
+                        negativeTags: isFaeProtagonist ? (parsed.negativeTags?.length > 0 ? parsed.negativeTags : (dossier.protagonist?.negativeTags || [])) : undefined,
                         moves: isPbtaProtagonist ? (parsed.moves && parsed.moves.length > 0 ? parsed.moves : (dossier.protagonist?.moves || dossier.protagonist?.startingMoves || [])) : undefined,
                         startingMoves: isPbtaProtagonist ? (dossier.protagonist?.startingMoves || parsed.moves || []) : undefined,
                         conditions: isPbtaProtagonist ? (parsed.conditions || dossier.protagonist?.conditions || []) : undefined,
                         gear: isPbtaProtagonist ? (parsed.gear || dossier.protagonist?.gear || []) : undefined,
-                        features: isPbtaProtagonist ? undefined : (parsed.features?.length > 0 ? parsed.features : (dossier.protagonist?.features || [])),
-                        abilities: isPbtaProtagonist ? undefined : (parsed.abilities?.length > 0 ? parsed.abilities : (dossier.protagonist?.abilities || [])),
-                        status: isPbtaProtagonist ? (parsed.status || dossier.protagonist?.status || 'Healthy') : undefined,
+                        features: (isPbtaProtagonist || isFaeProtagonist) ? undefined : (parsed.features?.length > 0 ? parsed.features : (dossier.protagonist?.features || [])),
+                        abilities: (isPbtaProtagonist || isFaeProtagonist) ? undefined : (parsed.abilities?.length > 0 ? parsed.abilities : (dossier.protagonist?.abilities || [])),
+                        status: (isPbtaProtagonist || isFaeProtagonist) ? (parsed.status || dossier.protagonist?.status || 'Healthy') : undefined,
                         stats: Object.keys(parsed.stats).length > 0 ? parsed.stats : (dossier.protagonist?.stats || {}),
                         rawCharacterBlock: parsed.rawText || dossier.protagonist?.rawCharacterBlock,
                     };
@@ -428,7 +510,7 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
             }
         }
 
-        if (liveMemo && !pbtaMode) {
+        if (liveMemo && !pbtaMode && !faeMode) {
             const liveParsed = parseCharacterBlockFromMemo(liveMemo);
             if (Array.isArray(liveParsed.features) && liveParsed.features.length > 0) {
                 if (!dossier.protagonist) dossier.protagonist = {};
@@ -444,8 +526,8 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
             }
         }
 
-        // Auto-link canonical SRD progression if class matches and blueprint is missing
-        if (!pbtaMode && !dossier.progressionBlueprint && dossier.protagonist?.class) {
+        // Auto-link canonical SRD progression if class matches and blueprint is missing (D&D 5e only)
+        if (!pbtaMode && !faeMode && !dossier.progressionBlueprint && dossier.protagonist?.class) {
             const canonical = getCanonicalDndProgression(dossier.protagonist.class);
             if (canonical) {
                 dossier.progressionBlueprint = {
@@ -457,11 +539,11 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
             }
         }
 
-        // Keep partition cache in sync
-        const cleanPartId = String(chatId || '').replace(/\.jsonl$/i, '').trim();
+        // Keep partition cache in sync without creating .jsonl duplicate keys (WRK-10)
+        const rulesetHint = faeMode ? 'fae' : (pbtaMode ? 'pbta' : 'dnd5e');
         if (companionSettings?.chatStates && cleanPartId) {
             companionSettings.chatStates[cleanPartId] = companionSettings.chatStates[cleanPartId] || {};
-            companionSettings.chatStates[cleanPartId].companionDossier = dossier;
+            setPartitionDossier(companionSettings.chatStates[cleanPartId], dossier, rulesetHint);
         }
 
         return dossier;
@@ -470,8 +552,9 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
     // 4. Auto-Scaffold fresh stub from current state memo
     const chatTitle = options.chatTitle || '';
     const stub = scaffoldDossierStubForChat(chatId, liveMemo, chatTitle);
+    const stubRuleset = stub.meta?.ruleset || (stub.meta?.systemKey === 'pbta' ? 'pbta' : 'dnd5e');
 
-    if (stub.protagonist?.class && stub.meta?.systemKey !== 'pbta') {
+    if (stub.protagonist?.class && stubRuleset === 'dnd5e') {
         const canonical = getCanonicalDndProgression(stub.protagonist.class);
         if (canonical) {
             stub.progressionBlueprint = {
@@ -483,19 +566,18 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
         }
     }
 
-    // Save in chat partition
+    // Save in chat partition without creating .jsonl duplicate keys (WRK-10)
     if (companionSettings?.chatStates && cleanPartId) {
         companionSettings.chatStates[cleanPartId] = companionSettings.chatStates[cleanPartId] || {};
-        companionSettings.chatStates[cleanPartId].companionDossier = stub;
+        setPartitionDossier(companionSettings.chatStates[cleanPartId], stub, stubRuleset);
     }
 
     // Save in SillyTavern chatMetadata if available
     try {
-        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-        if (ctx?.chatMetadata) {
-            ctx.chatMetadata.mhc_dossier = stub;
-            if (typeof ctx.saveMetadataDebounced === 'function') {
-                ctx.saveMetadataDebounced();
+        if (stCtx?.chatMetadata) {
+            stCtx.chatMetadata.mhc_dossier = stub;
+            if (typeof stCtx.saveMetadataDebounced === 'function') {
+                stCtx.saveMetadataDebounced();
             }
         }
     } catch (_) {}
@@ -509,8 +591,8 @@ export function ensureChatDossier(chatId, companionSettings = null, options = {}
 /**
  * Persists the Campaign Dossier and Progression Blueprint across all storage tiers:
  * 1. SillyTavern chatMetadata (direct per-chat metadata, saved to disk)
- * 2. MultiHog Companion chatStates partitions (all candidate chat IDs)
- * 3. MultiHog RPG Tracker chatStates partitions (all candidate chat IDs)
+ * 2. MultiHog Companion chatStates partition (canonical cleanId per WRK-10)
+ * 3. MultiHog RPG Tracker chatStates partition (canonical cleanId per WRK-10)
  * 4. SillyTavern extension settings (saveSettingsDebounced)
  * 5. Campaign_<ChatTitle> World Info Lorebook (async)
  *
@@ -529,52 +611,63 @@ export function persistCompanionDossier(chatId, dossier) {
         dossier.meta.updatedAt = new Date().toISOString();
     }
 
-    const candidateIds = getCandidateChatIds(chatId);
+    const rulesetHint = isDossierFae(dossier) ? 'fae' : (isDossierPbta(dossier) ? 'pbta' : 'dnd5e');
+    const stCtx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
 
     // 1. SillyTavern chatMetadata
     try {
-        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-        if (ctx?.chatMetadata) {
-            ctx.chatMetadata.mhc_dossier = dossier;
+        if (stCtx?.chatMetadata) {
+            stCtx.chatMetadata.mhc_dossier = dossier;
         }
         if (typeof globalThis !== 'undefined' && globalThis.chat_metadata) {
             globalThis.chat_metadata.mhc_dossier = dossier;
         }
-        if (typeof ctx?.saveMetadataDebounced === 'function') {
-            ctx.saveMetadataDebounced();
-        } else if (typeof ctx?.saveMetadata === 'function') {
-            ctx.saveMetadata();
+        if (typeof stCtx?.saveMetadataDebounced === 'function') {
+            stCtx.saveMetadataDebounced();
+        } else if (typeof stCtx?.saveMetadata === 'function') {
+            stCtx.saveMetadata();
         }
     } catch (_) {}
 
-    // 2. MultiHog Companion extension_settings partition
+    // Strip .jsonl extension so duplicate extension-laden keys never pollute chatStates (WRK-10)
     const cleanId = String(chatId || '').replace(/\.jsonl$/i, '').trim();
+    const syncStorePartition = (store) => {
+        if (!store || !cleanId) return;
+        store.chatStates = store.chatStates || {};
+        store.chatStates[cleanId] = store.chatStates[cleanId] || {};
+        setPartitionDossier(store.chatStates[cleanId], dossier, rulesetHint);
+    };
+
+    // 2. MultiHog Companion extension_settings partition
     try {
-        const compSettings = (typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null)
-            || globalThis.extension_settings?.multihog_companion;
-        if (compSettings && cleanId) {
-            compSettings.chatStates = compSettings.chatStates || {};
-            compSettings.chatStates[cleanId] = compSettings.chatStates[cleanId] || {};
-            compSettings.chatStates[cleanId].companionDossier = dossier;
+        const compTargets = new Set([
+            stCtx?.extensionSettings?.multihog_companion,
+            typeof extension_settings !== 'undefined' ? extension_settings?.multihog_companion : null,
+            globalThis.extension_settings?.multihog_companion,
+        ].filter(Boolean));
+        for (const compSettings of compTargets) {
+            syncStorePartition(compSettings);
         }
     } catch (_) {}
 
     // 3. Upstream MultiHog RPG Tracker partition
     try {
-        const rpg = (typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null)
-            || globalThis.extension_settings?.rpg_tracker;
-        if (rpg && cleanId) {
-            rpg.chatStates = rpg.chatStates || {};
-            rpg.chatStates[cleanId] = rpg.chatStates[cleanId] || {};
-            rpg.chatStates[cleanId].companionDossier = dossier;
+        const rpgTargets = new Set([
+            stCtx?.extensionSettings?.rpg_tracker,
+            typeof extension_settings !== 'undefined' ? extension_settings?.rpg_tracker : null,
+            globalThis.extension_settings?.rpg_tracker,
+        ].filter(Boolean));
+        for (const rpg of rpgTargets) {
+            syncStorePartition(rpg);
         }
     } catch (_) {}
 
     // 4. Save settings debounced
     try {
-        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
-        if (typeof ctx?.saveSettingsDebounced === 'function') {
-            ctx.saveSettingsDebounced();
+        if (typeof stCtx?.saveSettingsDebounced === 'function') {
+            stCtx.saveSettingsDebounced();
+        } else if (typeof globalThis.saveSettingsDebounced === 'function') {
+            globalThis.saveSettingsDebounced();
         }
     } catch (_) {}
 
@@ -582,6 +675,99 @@ export function persistCompanionDossier(chatId, dossier) {
     syncDossierToWorldInfoBook(chatId, dossier).catch(() => {});
 
     return dossier;
+}
+
+/**
+ * Formats a Campaign Dossier (D&D 5e, PbtA, or FAE) into Markdown for SillyTavern World Info storage.
+ *
+ * @param {string} chatId
+ * @param {object} dossier
+ * @returns {string}
+ */
+export function buildDossierWorldInfoMarkdown(chatId, dossier) {
+    if (!dossier) return '';
+    const cleanId = String(chatId || 'Adventure').replace(/\.jsonl$/i, '').trim();
+    const cleanTitle = (dossier.meta?.title || cleanId).replace(/[^\w\s'-]/g, '').trim();
+    const isFae = isDossierFae(dossier);
+    const isPbta = !isFae && isDossierPbta(dossier);
+    const isStubCodex = Boolean(dossier.meta?.autoScaffolded || dossier.meta?.isStub);
+    const p = dossier.protagonist || {};
+    const charMeta = dossier.character || {};
+
+    let md = isStubCodex
+        ? `# 📜 CHARACTER PROGRESSION CODEX: ${dossier.meta?.title || cleanTitle}\n\n`
+        : `# 📜 CAMPAIGN DOSSIER: ${dossier.meta?.title || cleanTitle}\n\n`;
+
+    const fallbackLabel = isFae
+        ? 'FAE Freeform Attrition Engine'
+        : (isPbta ? 'PbtA Narrative Engine' : 'D&D 5e Standard');
+    const fallbackKey = isFae ? 'fae' : (isPbta ? 'pbta' : 'dnd5e');
+    md += `* **System Engine:** ${dossier.meta?.systemLabel || fallbackLabel} (\`${dossier.meta?.systemKey || fallbackKey}\`)\n`;
+    md += `* **Status:** Active Campaign\n\n---\n\n`;
+
+    md += `## 👤 Protagonist: ${p.name || 'Hero'}\n`;
+    if (isFae) {
+        md += `* **Archetype:** ${p.archetype || p.class || 'Survivor'}\n`;
+        const pools = p.pools || charMeta.pools || {};
+        if (Object.keys(pools).length > 0) {
+            const poolsStr = Object.entries(pools)
+                .map(([k, pool]) => `${pool?.label || k} (${pool?.current ?? pool?.max ?? 8}/${pool?.max ?? 8})`)
+                .join(' · ');
+            md += `* **Resource Pools:** ${poolsStr}\n`;
+        }
+        const posTags = p.positiveTags || p.positive_tags || charMeta.positiveTags || [];
+        if (Array.isArray(posTags) && posTags.length > 0) {
+            md += `* **Positive Tags:** ${posTags.join(', ')}\n`;
+        }
+        const negTags = p.negativeTags || p.negative_tags || charMeta.negativeTags || [];
+        if (Array.isArray(negTags) && negTags.length > 0) {
+            md += `* **Scars & Debuffs:** ${negTags.join(', ')}\n`;
+        }
+        if (dossier.config?.knobs) {
+            const k = dossier.config.knobs;
+            md += `* **FAE Knobs:** Flee Grace ${k.flee_grace_toggle ? 'ON' : 'OFF'} · Shift ${Number(k.base_attrition_shift || 0) >= 0 ? `+${Number(k.base_attrition_shift || 0)}` : k.base_attrition_shift} · Overflow ${k.overflow_default || 'scar_and_ko'}\n`;
+        }
+    } else if (isPbta) {
+        md += `* **Playbook:** ${p.playbook || p.class || 'Wanderer'}\n`;
+        const harm = p.harm || { current: 0, max: dossier.config?.harmMax || 5, armor: 0 };
+        md += `* **Harm Track:** ${harm.current ?? 0}/${harm.max ?? 5} · **Armor:** ${harm.armor ?? p.armor ?? 0}\n`;
+        if (p.stats && Object.keys(p.stats).length > 0) {
+            md += `* **Stats:** ${Object.entries(p.stats).map(([k, v]) => `${k} ${Number(v) >= 0 ? `+${v}` : v}`).join(' · ')}\n`;
+        }
+        const moves = p.startingMoves || p.moves || [];
+        if (Array.isArray(moves) && moves.length > 0) {
+            md += `* **Moves:** ${moves.join(', ')}\n`;
+        }
+    } else {
+        md += `* **Class / Archetype:** ${p.class || 'Adventurer'}\n`;
+        md += `* **Level:** ${p.level || 1}\n`;
+        md += `* **Hit Points:** ${(p.hp?.current ?? 10)}/${(p.hp?.max ?? 10)} HP\n`;
+        md += `* **Hit Die:** ${p.hitDie || 'd8'}\n`;
+        if (p.stats && Object.keys(p.stats).length > 0) {
+            md += `* **Attributes:** ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(' · ')}\n`;
+        }
+    }
+
+    if (p.rawCharacterBlock) {
+        md += `\n### 📋 Character Sheet Details:\n\`\`\`text\n${p.rawCharacterBlock}\n\`\`\`\n`;
+    }
+
+    const bp = !isFae && !isPbta ? dossier.progressionBlueprint : null;
+    if (bp && bp.levels) {
+        md += `\n---\n\n## 📜 1–20 Progression Blueprint (${bp.className || p.class || 'Adventurer'})\n`;
+        md += `* **Hit Die:** ${bp.hitDie || p.hitDie || 'd8'}\n`;
+        if (bp.primaryStats) md += `* **Primary Stats:** ${bp.primaryStats.join(', ')}\n`;
+        if (bp.subclassTitle) md += `* **Subclass Specialization:** ${bp.subclassTitle}\n\n`;
+        md += `### Advancement Codex:\n`;
+        for (const [lvl, data] of Object.entries(bp.levels)) {
+            const feats = (data.features || []).join(', ');
+            const asiNote = data.asi ? ' [Milestone ASI/Feat]' : '';
+            const subNote = data.subclass ? ' [Subclass Archetype]' : '';
+            md += `* **Level ${lvl}:** ${feats}${asiNote}${subNote}\n`;
+        }
+    }
+
+    return md;
 }
 
 /**
@@ -598,41 +784,9 @@ export async function syncDossierToWorldInfoBook(chatId, dossier) {
     const cleanTitle = (dossier.meta?.title || cleanId).replace(/[^\w\s'-]/g, '').trim();
     const bookName = cleanTitle.startsWith('Campaign_') ? cleanTitle : `Campaign_${cleanTitle || cleanId || 'Adventure'}`;
 
-    // Format dossier to Markdown
     const isStubCodex = Boolean(dossier.meta?.autoScaffolded || dossier.meta?.isStub);
-    let md = isStubCodex
-        ? `# 📜 CHARACTER PROGRESSION CODEX: ${dossier.meta?.title || cleanTitle}\n\n`
-        : `# 📜 CAMPAIGN DOSSIER: ${dossier.meta?.title || cleanTitle}\n\n`;
-    md += `* **System Engine:** ${dossier.meta?.systemLabel || 'D&D 5e Standard'} (\`${dossier.meta?.systemKey || 'dnd5e'}\`)\n`;
-    md += `* **Status:** Active Campaign\n\n---\n\n`;
-
+    const md = buildDossierWorldInfoMarkdown(chatId, dossier);
     const p = dossier.protagonist || {};
-    md += `## 👤 Protagonist: ${p.name || 'Hero'}\n`;
-    md += `* **Class / Archetype:** ${p.class || 'Adventurer'}\n`;
-    md += `* **Level:** ${p.level || 1}\n`;
-    md += `* **Hit Points:** ${(p.hp?.current ?? 10)}/${(p.hp?.max ?? 10)} HP\n`;
-    md += `* **Hit Die:** ${p.hitDie || 'd8'}\n`;
-    if (p.stats && Object.keys(p.stats).length > 0) {
-        md += `* **Attributes:** ${Object.entries(p.stats).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(' · ')}\n`;
-    }
-    if (p.rawCharacterBlock) {
-        md += `\n### 📋 Character Sheet Details:\n\`\`\`text\n${p.rawCharacterBlock}\n\`\`\`\n`;
-    }
-
-    const bp = dossier.progressionBlueprint;
-    if (bp && bp.levels) {
-        md += `\n---\n\n## 📜 1–20 Progression Blueprint (${bp.className || p.class || 'Adventurer'})\n`;
-        md += `* **Hit Die:** ${bp.hitDie || p.hitDie || 'd8'}\n`;
-        if (bp.primaryStats) md += `* **Primary Stats:** ${bp.primaryStats.join(', ')}\n`;
-        if (bp.subclassTitle) md += `* **Subclass Specialization:** ${bp.subclassTitle}\n\n`;
-        md += `### Advancement Codex:\n`;
-        for (const [lvl, data] of Object.entries(bp.levels)) {
-            const feats = (data.features || []).join(', ');
-            const asiNote = data.asi ? ' [Milestone ASI/Feat]' : '';
-            const subNote = data.subclass ? ' [Subclass Archetype]' : '';
-            md += `* **Level ${lvl}:** ${feats}${asiNote}${subNote}\n`;
-        }
-    }
 
     const entry = {
         uid: Date.now(),

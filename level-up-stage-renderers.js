@@ -166,6 +166,23 @@ export function buildDndAsiAndPartyHtml({ isPbta, isFae, isRespec: _isRespec, pr
 }
 
 /**
+ * Normalizes FAE overflow rules (including legacy or AI-suggested aliases like
+ * 'gear_loss' / 'narrative_fail') onto the three canonical FAE overflow modes:
+ * 'scar_and_ko', 'scene_fail', or 'lethal'.
+ *
+ * @param {string} raw
+ * @returns {'scar_and_ko'|'scene_fail'|'lethal'}
+ */
+export function normalizeFaeOverflowRule(raw) {
+    const lower = String(raw || '').trim().toLowerCase();
+    if (lower === 'lethal' || lower === 'death') return 'lethal';
+    if (lower === 'scene_fail' || lower === 'scene_failure' || lower === 'gear_loss' || lower === 'narrative_fail') {
+        return 'scene_fail';
+    }
+    return 'scar_and_ko';
+}
+
+/**
  * Builds FAE Milestone Reward Picker and Pools/Knobs/Tags Tuning card HTML.
  *
  * @param {object} params
@@ -286,7 +303,7 @@ export function buildFaeMilestoneAndTuningHtml({ isFae, isRespec, proposal }) {
         }).join('');
 
         const shiftVal = proposal?.knobs?.base_attrition_shift ?? 0;
-        const overflowVal = proposal?.knobs?.overflow_default || 'scar_and_ko';
+        const overflowVal = normalizeFaeOverflowRule(proposal?.knobs?.overflow_default || 'scar_and_ko');
 
         faeTuningSection = `
         <!-- FAE Resource Pools Card -->
@@ -303,23 +320,22 @@ export function buildFaeMilestoneAndTuningHtml({ isFae, isRespec, proposal }) {
             <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.9em;">
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                     <input type="checkbox" id="mhc_fae_flee_grace_chk" ${proposal?.knobs?.flee_grace_toggle ? 'checked' : ''} />
-                    <span><strong>Flee Grace:</strong> Grant +1 to Flee actions during retreat</span>
+                    <span><strong>Flee Grace:</strong> Escape at 0 Pool with a Scar or gear loss instead of Overflow</span>
                 </label>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <label style="color: #94a3b8;">Base Attrition Shift:</label>
                     <select id="mhc_fae_shift_select" class="text_pole" style="width: auto;">
-                        <option value="-1" ${shiftVal === -1 ? 'selected' : ''}>-1 (Hardened / Heavy Attrition)</option>
-                        <option value="0" ${shiftVal === 0 ? 'selected' : ''}>0 (Standard)</option>
-                        <option value="1" ${shiftVal === 1 ? 'selected' : ''}>+1 (Heroic / Forgiving)</option>
+                        <option value="-1" ${shiftVal === -1 ? 'selected' : ''}>-1 (Pulp / Forgiving Attrition)</option>
+                        <option value="0" ${shiftVal === 0 ? 'selected' : ''}>0 (Gritty / Standard)</option>
+                        <option value="1" ${shiftVal === 1 ? 'selected' : ''}>+1 (Brutal / Heavy Attrition)</option>
                     </select>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <label style="color: #94a3b8;">Overflow Default:</label>
                     <select id="mhc_fae_overflow_select" class="text_pole" style="width: auto;">
-                        <option value="scar_and_ko" ${overflowVal === 'scar_and_ko' ? 'selected' : ''}>Scar &amp; KO (Incapacitation + Negative Tag)</option>
+                        <option value="scar_and_ko" ${overflowVal === 'scar_and_ko' ? 'selected' : ''}>Scar &amp; KO (Incapacitation + Negative Tag &amp; -1 Max Pool)</option>
+                        <option value="scene_fail" ${overflowVal === 'scene_fail' ? 'selected' : ''}>Scene Failure (Non-Lethal Forced Retreat / Objective Lost)</option>
                         <option value="lethal" ${overflowVal === 'lethal' ? 'selected' : ''}>Lethal (Fatal Injury / Terminal Doom)</option>
-                        <option value="gear_loss" ${overflowVal === 'gear_loss' ? 'selected' : ''}>Gear Loss (Signature Item Destroyed)</option>
-                        <option value="narrative_fail" ${overflowVal === 'narrative_fail' ? 'selected' : ''}>Narrative Consequence (Severe Permanent Shift)</option>
                     </select>
                 </div>
             </div>

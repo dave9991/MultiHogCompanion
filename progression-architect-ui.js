@@ -14,15 +14,21 @@
 import {
     CORE_DND_PROGRESSIONS,
     getCanonicalDndProgression,
+    blueprintMatchesClass,
     formatTraitAsPill,
     classifyFeatureKind,
     partitionFeaturesAndAbilities,
     normalizeBlueprint,
 } from './level-up-blueprint.js';
 import { deriveHitDieForClass } from './level-up-scaffold.js';
-import { deduplicateFeatures } from './level-up-runner.js';
-import { PBTA_GENRES, formatMoveAsPill } from './pbta-ruleset.js';
-import { FAE_GENRES } from './fae-ruleset.js';
+import {
+    deduplicateFeatures,
+    resolvePbtaGenreKey,
+    getCanonicalPbtaStats,
+    resolveFaeGenreKey,
+} from './level-up-runner.js';
+import { PBTA_GENRES, resolveEffectivePbtaGenre, formatMoveAsPill } from './pbta-ruleset.js';
+import { FAE_GENRES, resolveEffectiveFaeGenre, normalizeCustomFaePools } from './fae-ruleset.js';
 import { systemRegistry } from './concierge-system-registry.js';
 import { calculateDndModifier } from './concierge-system-dnd5e.js';
 import { escapeHtml } from './mhc-utils.js';
@@ -67,16 +73,33 @@ export function renderProgressionArchitect(container, { dossier, ruleset = null,
 }
 
 /**
+ * Resolves active character block fields across modern `dossier.protagonist`
+ * and Turn-0 `dossier.character` structures.
+ *
+ * @param {object} dossier
+ * @returns {{ primary: object, legacyChar: object|null }}
+ */
+function resolveCharacterState(dossier) {
+    const prot = (dossier?.protagonist && Object.keys(dossier.protagonist).length > 0) ? dossier.protagonist : null;
+    const legacyChar = (dossier?.character && Object.keys(dossier.character).length > 0) ? dossier.character : null;
+    return {
+        primary: prot || legacyChar || {},
+        legacyChar,
+    };
+}
+
+/**
  * Renders D&D 5e (D&D Lite) 1–20 Progression Codex view.
  */
 function renderDndProgression($container, dossier, onUpdate) {
-    const p = dossier.protagonist || {};
+    const { primary } = resolveCharacterState(dossier);
+    const p = Object.keys(primary).length > 0 ? primary : (dossier.protagonist = dossier.protagonist || {});
     const className = p.class || 'Fighter';
     const hitDie = deriveHitDieForClass(className, p.hitDie || 'd8');
 
-    // Resolve or auto-seed blueprint
+    // Resolve or auto-seed blueprint (preserving compatible custom blueprints via blueprintMatchesClass)
     let bp = dossier.progressionBlueprint;
-    if (!bp || !bp.levels || bp.className?.toLowerCase() !== className.toLowerCase()) {
+    if (!bp || !bp.levels || !blueprintMatchesClass(bp, className)) {
         const canonical = getCanonicalDndProgression(className);
         if (canonical) {
             bp = {
@@ -254,17 +277,34 @@ function renderDndProgression($container, dossier, onUpdate) {
 /**
  * Renders PbtA Playbook Moves & Advance Matrix view.
  */
-function renderPbtaProgression($container, dossier, onUpdate) {
-    const p = dossier.protagonist || {};
-    const playbook = p.playbook || 'Wanderer';
-    const genreKey = dossier.meta?.systemKey || 'fantasy';
-    const genreObj = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+function renderPbtaProgression($container, dossier, _onUpdate) {
+    const { primary: p, legacyChar } = resolveCharacterState(dossier);
+    const playbook = p.playbook || legacyChar?.playbook || p.class || 'Wanderer';
+    const genreKey = resolvePbtaGenreKey(dossier);
+    const genreObj = resolveEffectivePbtaGenre(genreKey, dossier);
 
-    const harmMax = dossier.config?.harmMax || p.harm?.max || 5;
-    const armor = p.harm?.armor || 0;
-    const moves = Array.isArray(p.startingMoves) && p.startingMoves.length > 0
-        ? p.startingMoves
-        : (Array.isArray(p.moves) ? p.moves : []);
+    const harmCur = Number(p.harm?.current ?? legacyChar?.harm?.current ?? 0);
+    const harmMax = Number(p.harm?.max || legacyChar?.harm?.max || dossier?.config?.harmMax) || 5;
+    const armor = Number(p.harm?.armor ?? p.armor ?? legacyChar?.harm?.armor ?? legacyChar?.armor ?? 0);
+    const pacingXp = Number(dossier?.config?.pacingXp) > 0 ? Number(dossier.config.pacingXp) : 5;
+
+    const rawMoves = (Array.isArray(p.moves) && p.moves.length > 0)
+        ? p.moves
+        : ((Array.isArray(p.startingMoves) && p.startingMoves.length > 0)
+            ? p.startingMoves
+            : ((Array.isArray(legacyChar?.moves) && legacyChar.moves.length > 0)
+                ? legacyChar.moves
+                : ((Array.isArray(legacyChar?.startingMoves) && legacyChar.startingMoves.length > 0)
+                    ? legacyChar.startingMoves
+                    : (genreObj.moves || []).map(m => formatMoveAsPill(m)))));
+    const moves = deduplicateFeatures(rawMoves);
+
+    const stats = getCanonicalPbtaStats(p.stats || legacyChar?.stats, genreKey, dossier);
+    const statsHtml = Object.entries(stats).map(([k, v]) => {
+        const num = Number(v) || 0;
+        const disp = num >= 0 ? `+${num}` : String(num);
+        return `<span class="mhc-pill" style="border-color: rgba(148, 163, 184, 0.25); color: #e2e8f0; background: rgba(15, 23, 42, 0.4); font-size: 0.78em;">${escapeHtml(k)}: <strong>${disp}</strong></span>`;
+    }).join('');
 
     const movesHtml = moves.map(m => `
         <div class="mhc-pill" style="border-color: rgba(59, 130, 246, 0.3); color: #93c5fd; background: rgba(59, 130, 246, 0.15); padding: 4px 8px; margin: 3px 0; display: block;" title="${escapeHtml(m)}">
@@ -298,10 +338,11 @@ function renderPbtaProgression($container, dossier, onUpdate) {
         </div>
 
         <div style="display: flex; gap: 12px; margin-top: 6px; font-size: 0.85em; align-items: center; color: #9ca3af;">
-            <div>Harm Track: <strong style="color: #f87171;">0/${harmMax}</strong></div>
+            <div>Harm Track: <strong style="color: #f87171;">${harmCur}/${harmMax}</strong></div>
             <div>Armor: <strong style="color: #60a5fa;">${armor}</strong></div>
-            <div>Advance Trigger: <strong style="color: #fbbf24;">Every 5 XP</strong></div>
+            <div>Advance Trigger: <strong style="color: #fbbf24;">Every ${pacingXp} XP</strong></div>
         </div>
+        ${statsHtml ? `<div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;">${statsHtml}</div>` : ''}
     </div>
 
     <div class="mhc-card" style="margin-bottom: 10px;">
@@ -310,7 +351,7 @@ function renderPbtaProgression($container, dossier, onUpdate) {
     </div>
 
     <div class="mhc-card">
-        <div class="mhc-card-header"><span class="mhc-card-title" style="font-size: 0.9em;">🌟 Canonical Playbook Advances (XP 5/5)</span></div>
+        <div class="mhc-card-header"><span class="mhc-card-title" style="font-size: 0.9em;">🌟 Canonical Playbook Advances (XP ${pacingXp}/${pacingXp})</span></div>
         <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 3px;">
             ${advancesHtml}
         </div>
@@ -321,12 +362,52 @@ function renderPbtaProgression($container, dossier, onUpdate) {
 /**
  * Renders FAE Resource Pools, Positive Tags & Milestone Desk view.
  */
-function renderFaeProgression($container, dossier, onUpdate) {
-    const p = dossier.protagonist || {};
-    const archetype = p.archetype || p.playbook || 'Survivor';
-    const pools = p.pools || {};
-    const posTags = Array.isArray(p.positiveTags) ? p.positiveTags : [];
-    const heroic = p.heroicDomain || '';
+function renderFaeProgression($container, dossier, _onUpdate) {
+    const { primary: p, legacyChar } = resolveCharacterState(dossier);
+    const archetype = p.archetype || legacyChar?.archetype || p.playbook || 'Survivor';
+    const genreKey = resolveFaeGenreKey(dossier);
+    const genreObj = resolveEffectiveFaeGenre(genreKey, dossier);
+
+    const hasEntries = (obj) => Boolean(obj && (Array.isArray(obj) ? obj.length > 0 : Object.keys(obj).length > 0));
+    const hasCustomSpecPools = hasEntries(dossier?.meta?.customGenreSpec?.pools);
+    const pools = hasEntries(p.pools)
+        ? p.pools
+        : (hasEntries(legacyChar?.pools)
+            ? legacyChar.pools
+            : (hasCustomSpecPools
+                ? genreObj.pools
+                : (hasEntries(dossier?.pools)
+                    ? dossier.pools
+                    : (normalizeCustomFaePools(dossier?.config?.pools, genreObj.pools) || genreObj.pools || {}))));
+
+    const rawPosTags = (Array.isArray(p.positiveTags) && p.positiveTags.length > 0)
+        ? p.positiveTags
+        : ((Array.isArray(p.positive_tags) && p.positive_tags.length > 0)
+            ? p.positive_tags
+            : ((Array.isArray(legacyChar?.positive_tags) && legacyChar.positive_tags.length > 0)
+                ? legacyChar.positive_tags
+                : ((Array.isArray(legacyChar?.positiveTags) && legacyChar.positiveTags.length > 0)
+                    ? legacyChar.positiveTags
+                    : (genreObj.defaultPositiveTags || []))));
+
+    const rawNegTags = (Array.isArray(p.negativeTags) && p.negativeTags.length > 0)
+        ? p.negativeTags
+        : ((Array.isArray(p.negative_tags) && p.negative_tags.length > 0)
+            ? p.negative_tags
+            : ((Array.isArray(legacyChar?.negative_tags) && legacyChar.negative_tags.length > 0)
+                ? legacyChar.negative_tags
+                : (Array.isArray(legacyChar?.negativeTags) ? legacyChar.negativeTags : [])));
+
+    const heroic = p.heroicDomain
+        || p.heroic_domain
+        || legacyChar?.heroic_domain
+        || legacyChar?.heroicDomain
+        || dossier?.config?.heroicDomain
+        || '';
+
+    const scenesTarget = Number(dossier?.config?.scenesTarget || dossier?.config?.scenes_target || dossier?.config?.pacingScenes)
+        || Number(p.scenesTarget || p.scenes_target || legacyChar?.scenes_target || legacyChar?.scenesTarget)
+        || 4;
 
     const poolsHtml = Object.entries(pools).map(([k, pool]) => `
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.82em;">
@@ -337,7 +418,8 @@ function renderFaeProgression($container, dossier, onUpdate) {
 
     const tagsHtml = [
         heroic ? `<span class="mhc-pill" style="border-color: rgba(245, 158, 11, 0.3); color: #fbbf24; background: rgba(245, 158, 11, 0.15); margin: 2px;">⚡ ${escapeHtml(heroic)} (Heroic Domain)</span>` : '',
-        ...posTags.map(t => `<span class="mhc-pill" style="border-color: rgba(16, 185, 129, 0.3); color: #34d399; background: rgba(16, 185, 129, 0.15); margin: 2px;">+ ${escapeHtml(t)}</span>`),
+        ...rawPosTags.map(t => `<span class="mhc-pill" style="border-color: rgba(16, 185, 129, 0.3); color: #34d399; background: rgba(16, 185, 129, 0.15); margin: 2px;">+ ${escapeHtml(t)}</span>`),
+        ...rawNegTags.map(s => `<span class="mhc-pill" style="border-color: rgba(239, 68, 68, 0.35); color: #f87171; background: rgba(239, 68, 68, 0.15); margin: 2px;">(-) ${escapeHtml(String(s).replace(/^\(-\)\s*/, ''))}</span>`),
     ].filter(Boolean).join('') || '<span class="mhc-empty-hint">No positive tags configured.</span>';
 
     $container.html(`
@@ -351,7 +433,7 @@ function renderFaeProgression($container, dossier, onUpdate) {
         </div>
 
         <div style="display: flex; gap: 12px; margin-top: 6px; font-size: 0.85em; align-items: center; color: #9ca3af;">
-            <div>Milestone Pacing: <strong style="color: #fbbf24;">4 Scenes / Milestone</strong></div>
+            <div>Milestone Pacing: <strong style="color: #fbbf24;">${scenesTarget} Scenes / Milestone</strong></div>
             <div>Dice: <strong style="color: #93c5fd;">4dF (Range -4 to +4)</strong></div>
         </div>
     </div>

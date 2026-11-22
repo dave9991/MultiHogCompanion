@@ -1906,3 +1906,480 @@ test('Level-Up Stage Renderers: Extracted Markup Builders Across D&D, PbtA, FAE 
     assert.match(modalHtml, /Kaelen &lt;Script&gt;/);
     assert.match(modalHtml, /Fighter &amp; &quot;Vanguard&quot;/);
 });
+
+test('Level-Up Scaffold: LVL-002 FAE memo parsing, stub isolation with Ranger archetype, and per-ruleset World Info markdown', async () => {
+    const {
+        parseCharacterBlockFromMemo,
+        scaffoldDossierStubForChat,
+        ensureChatDossier,
+        isDossierFae,
+        buildDossierWorldInfoMarkdown,
+    } = await import('../level-up-scaffold.js');
+
+    const faeMemo = `[CHARACTER]
+Mira Vance (Ranger): 6/8 HP | Pool: Health (6/8) | Scenes: 4/4 | XP: 0/4
+((BAR:purple)) Sanity: 5/6 (Zero Debuff: Shaken)
+((BAR:amber)) Torch & Supplies: 4/6 (Zero Debuff: Pitch Black)
+FAE Knobs: Flee Grace: ON | Attrition Shift: 0 | Overflow: scar_and_ko
+((PILLS)) Positive Tags: Scout [for dungeon passages], Lantern-Bearer
+((PILLS)) Scars & Debuffs: Sprained Ankle
+Status: Alert
+[/CHARACTER]`;
+
+    const parsed = parseCharacterBlockFromMemo(faeMemo);
+    assert.strictEqual(parsed.isFae, true, 'FAE memo must set isFae=true');
+    assert.strictEqual(parsed.isPbta, false, 'FAE memo must not set isPbta=true');
+    assert.strictEqual(parsed.level, null, 'FAE parsed protagonist must not carry D&D level');
+    assert.strictEqual(parsed.hitDie, null, 'FAE parsed protagonist must not carry D&D hitDie');
+    assert.strictEqual(parsed.archetype, 'Ranger');
+    assert.ok(parsed.pools?.health?.current === 6 && parsed.pools?.health?.max === 8, 'FAE primary pool parsed cleanly');
+    assert.ok(parsed.pools?.sanity?.max === 6, 'FAE secondary Sanity pool parsed cleanly');
+    assert.ok(parsed.positiveTags.some(t => t.includes('Scout')), 'FAE positive tags extracted');
+    assert.ok(parsed.negativeTags.some(t => t.includes('Sprained Ankle')), 'FAE scars extracted');
+
+    const stub = scaffoldDossierStubForChat('fae_osr_chat', faeMemo, 'Sunken Crypt');
+    assert.strictEqual(stub.meta.ruleset, 'fae');
+    assert.strictEqual(stub.meta.systemKey, 'osr_dungeon');
+    assert.strictEqual(isDossierFae(stub), true);
+    assert.strictEqual(stub.progressionBlueprint, null, 'FAE stub must not link D&D progressionBlueprint');
+
+    const mockSettings = { chatStates: {} };
+    const ensured = ensureChatDossier('fae_osr_chat', mockSettings, { memo: faeMemo, chatTitle: 'Sunken Crypt' });
+    assert.strictEqual(ensured.meta.ruleset, 'fae');
+    assert.strictEqual(ensured.progressionBlueprint, null, 'ensureChatDossier must never attach Ranger D&D 5e blueprint to FAE chat');
+    assert.strictEqual(mockSettings.chatStates.fae_osr_chat.faeCampaignDossier, ensured, 'setPartitionDossier must sync faeCampaignDossier');
+
+    const faeMd = buildDossierWorldInfoMarkdown('fae_osr_chat', ensured);
+    assert.ok(faeMd.includes('* **Archetype:** Ranger'), 'FAE World Info must list Archetype');
+    assert.ok(faeMd.includes('* **Resource Pools:**'), 'FAE World Info must list Resource Pools');
+    assert.ok(!faeMd.includes('* **Hit Die:**'), 'FAE World Info must omit D&D Hit Die');
+    assert.ok(!faeMd.includes('* **Level:**'), 'FAE World Info must omit D&D Level');
+
+    const pbtaMd = buildDossierWorldInfoMarkdown('pbta_chat', {
+        meta: { ruleset: 'pbta', systemKey: 'fantasy', systemLabel: 'Dungeon World', title: 'Ash Vale' },
+        protagonist: {
+            name: 'Vanya',
+            playbook: 'The Chosen',
+            harm: { current: 1, max: 5, armor: 1 },
+            stats: { Might: 2, Wits: 1 },
+            startingMoves: ['Smite Evil (+Might)'],
+        },
+    });
+    assert.ok(pbtaMd.includes('* **Playbook:** The Chosen'), 'PbtA World Info must list Playbook');
+    assert.ok(pbtaMd.includes('* **Harm Track:** 1/5'), 'PbtA World Info must list Harm Track');
+    assert.ok(!pbtaMd.includes('* **Hit Die:**'), 'PbtA World Info must omit D&D Hit Die');
+});
+
+test('Level-Up Scaffold & Launcher: LVL-001 FAE genre preservation and LVL-008/WRK-10 partition persistence', async () => {
+    const { persistCompanionDossier } = await import('../level-up-scaffold.js');
+    const { closeLevelUpModal } = await import('../level-up-ui.js');
+    const { launchLevelUpOrRespecDesk } = await import('../index.js');
+
+    const chatIdRaw = 'crypt_osr_run.jsonl';
+    const cleanId = 'crypt_osr_run';
+    const faeDossier = {
+        meta: {
+            title: 'Crypt OSR Run',
+            ruleset: 'fae',
+            systemKey: 'osr_dungeon',
+            systemLabel: 'FAE: Gritty OSR Dungeon Crawl',
+        },
+        protagonist: {
+            name: 'Mira Vance',
+            archetype: 'Ranger',
+            pools: {
+                health: { label: 'Health', current: 8, max: 8 },
+                torch_supplies: { label: 'Torch & Supplies', current: 5, max: 6 },
+            },
+            positiveTags: ['Scout [for dungeon passages]'],
+            negativeTags: [],
+        },
+        config: {
+            scenesTarget: 5,
+            knobs: { flee_grace_toggle: true, base_attrition_shift: 0, overflow_default: 'scar_and_ko' },
+        },
+    };
+
+    const mockCompStore = { chatStates: {} };
+    const mockRpgStore = {
+        currentMemo: `[CHARACTER]
+Mira Vance (Ranger): 8/8 HP | Pool: Health (8/8) | Scenes: 5/5 | XP: 0/5
+((BAR:amber)) Torch & Supplies: 5/6 (Zero Debuff: Pitch Black)
+FAE Knobs: Flee Grace: ON | Attrition Shift: 0 | Overflow: scar_and_ko
+((PILLS)) Positive Tags: Scout [for dungeon passages]
+Status: Healthy
+[/CHARACTER]`,
+        chatStates: {},
+    };
+    const mockCtx = {
+        getCurrentChatId: () => chatIdRaw,
+        chatId: chatIdRaw,
+        chatMetadata: {},
+        extensionSettings: {
+            multihog_companion: mockCompStore,
+            rpg_tracker: mockRpgStore,
+        },
+        saveMetadataDebounced: () => {},
+        saveSettingsDebounced: () => {},
+    };
+
+    // Minimal document mock for launchLevelUpOrRespecDesk -> openLevelUpModal
+    const prevDoc = globalThis.document;
+    const prevSt = globalThis.SillyTavern;
+    const elementsMap = new Map();
+    const mkNode = () => ({
+        style: {},
+        value: '',
+        innerHTML: '',
+        disabled: false,
+        placeholder: '',
+        addEventListener: () => {},
+        remove: () => {},
+        querySelector: (sel) => {
+            if (!elementsMap.has(sel)) elementsMap.set(sel, mkNode());
+            return elementsMap.get(sel);
+        },
+        querySelectorAll: () => [],
+    });
+    globalThis.document = {
+        createElement: () => mkNode(),
+        body: { appendChild: () => {} },
+        getElementById: () => null,
+    };
+    globalThis.SillyTavern = { getContext: () => mockCtx };
+
+    try {
+        // LVL-008 + WRK-10 check
+        persistCompanionDossier(chatIdRaw, faeDossier);
+        assert.strictEqual(mockCompStore.chatStates[chatIdRaw], undefined, 'WRK-10: must NOT create .jsonl key in multihog_companion.chatStates');
+        assert.strictEqual(mockRpgStore.chatStates[chatIdRaw], undefined, 'WRK-10: must NOT create .jsonl key in rpg_tracker.chatStates');
+        assert.strictEqual(mockCompStore.chatStates[cleanId].faeCampaignDossier, faeDossier, 'LVL-008: must sync ctx.extensionSettings.multihog_companion faeCampaignDossier');
+        assert.strictEqual(mockRpgStore.chatStates[cleanId].companionDossier, faeDossier, 'LVL-008: must sync ctx.extensionSettings.rpg_tracker companionDossier');
+
+        // LVL-001 check
+        await launchLevelUpOrRespecDesk({ isRespec: false });
+        assert.strictEqual(faeDossier.meta.ruleset, 'fae', 'FAE ruleset must remain fae');
+        assert.strictEqual(faeDossier.meta.systemKey, 'osr_dungeon', 'LVL-001: launchLevelUpOrRespecDesk must preserve active FAE genre key instead of overwriting with "fae"');
+        assert.strictEqual(faeDossier.progressionBlueprint, null, 'FAE progressionBlueprint must remain null');
+        closeLevelUpModal();
+    } finally {
+        globalThis.document = prevDoc;
+        if (prevSt === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = prevSt;
+    }
+});
+
+test('Level-Up Runner: LVL-003 PbtA customGenreSpec stats/moves & genre-collision isolation', async () => {
+    const {
+        resolvePbtaGenreKey,
+        getCanonicalPbtaStats,
+        buildPbtaAdvanceOptions,
+        formulateLevelUpProposal,
+    } = await import('../level-up-runner.js');
+
+    const customPbtaDossier = {
+        meta: {
+            ruleset: 'pbta',
+            genre: 'custom',
+            systemKey: 'custom',
+            systemLabel: 'Gothic Bloodcraft',
+            customGenreSpec: {
+                label: 'Gothic Bloodcraft',
+                stats: ['Blood', 'Echo', 'Iron', 'Veil', 'Wyrd'],
+                moves: [
+                    'Siphon Aether (+Wyrd) — channel spectral energy from a haunt',
+                    'Blood Oath (+Blood) — seal a binding pact in vein and ash',
+                ],
+            },
+        },
+        config: { pacingXp: 6 },
+        protagonist: {},
+        character: {
+            name: 'Isolde',
+            playbook: 'The Hollowed',
+            stats: { BLOOD: 2, echo: 1, IRON: 0, veil: -1, WYRD: 2 },
+            harm: { current: 1, max: 5, armor: 1 },
+            startingMoves: ['Blood Oath (+Blood) (When you seal a binding pact...)'],
+        },
+    };
+
+    assert.strictEqual(resolvePbtaGenreKey(customPbtaDossier), 'custom', 'LVL-003: must resolve explicit custom genre without falling back to fantasy');
+
+    const stats = getCanonicalPbtaStats(customPbtaDossier.character.stats, 'custom', customPbtaDossier);
+    assert.deepStrictEqual(Object.keys(stats), ['Blood', 'Echo', 'Iron', 'Veil', 'Wyrd'], 'LVL-003: canonical stats must use customGenreSpec.stats order/casing');
+    assert.strictEqual(stats.Wyrd, 2);
+
+    const options = buildPbtaAdvanceOptions(customPbtaDossier);
+    const playbookOpt = options.find(o => o.id === 'playbook_move');
+    assert.ok(
+        playbookOpt.suggestedMoves.some(m => m.includes('Siphon Aether [+Wyrd]') && m.includes('roll +Wyrd')),
+        'LVL-003: playbook_move suggestions must expand customGenreSpec.moves',
+    );
+    assert.ok(
+        !playbookOpt.suggestedMoves.some(m => m.includes('Blood Oath')),
+        'Already-owned starting move on dossier.character must be excluded from suggestions',
+    );
+
+    const proposal = formulateLevelUpProposal(customPbtaDossier, null, null, { isRespec: false });
+    assert.strictEqual(proposal.isPbta, true);
+    assert.strictEqual(proposal.genreKey, 'custom');
+    assert.strictEqual(proposal.characterName, 'Isolde');
+    assert.deepStrictEqual(Object.keys(proposal.stats), ['Blood', 'Echo', 'Iron', 'Veil', 'Wyrd']);
+
+    // Ensure PbtA genres sharing IDs with FAE_GENRES (e.g. cosmic_horror) are never hijacked to FAE
+    const pbtaCosmic = formulateLevelUpProposal({
+        meta: { ruleset: 'pbta', systemKey: 'cosmic_horror' },
+        protagonist: { name: 'Arthur', playbook: 'The Occultist', stats: { Sanity: 2, Grit: 1 }, harm: { current: 0, max: 4, armor: 0 } },
+    }, null, null, { isRespec: false });
+    assert.strictEqual(pbtaCosmic.isPbta, true);
+    assert.strictEqual(pbtaCosmic.isFae, undefined);
+});
+
+test('Level-Up Runner: LVL-004 FAE customGenreSpec pools/tags, Turn-0 dossier.character fallback & scenesTarget pacing', async () => {
+    const {
+        resolveFaeGenreKey,
+        buildFaeMilestoneOptions,
+        formulateLevelUpProposal,
+        applyLevelUpCommit,
+    } = await import('../level-up-runner.js');
+
+    const customFaeDossier = {
+        meta: {
+            ruleset: 'fae',
+            genre: 'custom',
+            systemKey: 'custom',
+            systemLabel: 'Clockwork Alchemist',
+            customGenreSpec: {
+                label: 'Clockwork Alchemist',
+                pools: [
+                    { key: 'vitality', label: 'Vitality', barColor: 'green', current: 8, max: 8 },
+                    { key: 'aether', label: 'Aether', barColor: 'purple', current: 6, max: 6 },
+                ],
+                defaultPositiveTags: [
+                    'Brass Automaton [mechanical minions]',
+                    'Volatile Flasks [explosive alchemy]',
+                ],
+            },
+        },
+        config: {
+            scenesTarget: 6,
+            knobs: { flee_grace_toggle: true, base_attrition_shift: 0, overflow_default: 'scar_and_ko' },
+        },
+        protagonist: {},
+        character: {
+            name: 'Cornelius',
+            archetype: 'Clockwork Artificer',
+            scenes_target: 6,
+            pools: {
+                vitality: { key: 'vitality', label: 'Vitality', barColor: 'green', current: 6, max: 6 },
+                aether: { key: 'aether', label: 'Aether', barColor: 'purple', current: 5, max: 6 },
+            },
+            positive_tags: ['Brass Automaton [mechanical minions]'],
+            negative_tags: ['Burned Finger'],
+        },
+    };
+
+    assert.strictEqual(resolveFaeGenreKey(customFaeDossier), 'custom', 'LVL-004: must return custom when customGenreSpec exists');
+
+    const proposal = formulateLevelUpProposal(customFaeDossier, null, null, { isRespec: false });
+    assert.strictEqual(proposal.isFae, true);
+    assert.strictEqual(proposal.genreKey, 'custom');
+    assert.strictEqual(proposal.characterName, 'Cornelius');
+    assert.strictEqual(proposal.className, 'Clockwork Artificer');
+    assert.strictEqual(proposal.pacingScenes, 6, 'Must read config.scenesTarget / character.scenes_target');
+    assert.ok(proposal.pools.vitality && proposal.pools.aether, 'Must use custom pools');
+    assert.ok(proposal.positiveTags.some(t => t.includes('Brass Automaton')), 'Must read Turn-0 character.positive_tags');
+
+    const opts = buildFaeMilestoneOptions(customFaeDossier, proposal);
+    const healOpt = opts.find(o => o.id === 'heal_scar');
+    const capOpt = opts.find(o => o.id === 'new_capability');
+    assert.strictEqual(healOpt.reducedPools.length, 1);
+    assert.strictEqual(healOpt.reducedPools[0].key, 'vitality');
+    assert.strictEqual(healOpt.reducedPools[0].baselineMax, 8, 'Must compare against customGenreSpec.pools baseline max');
+    assert.ok(capOpt.suggestedTags.some(t => t.includes('Volatile Flasks')), 'Must suggest customGenreSpec.defaultPositiveTags');
+
+    const liveMemo = `[CHARACTER]
+Cornelius (Clockwork Artificer): 6/6 HP | Pool: Vitality (6/6) | Scenes: 6/6 | XP: 6/6
+((BAR:purple)) Aether: 5/6
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko
+((PILLS)) Positive Tags: Brass Automaton (mechanical minions)
+((PILLS)) Scars & Debuffs: (-) Burned Finger
+Status: (-) Strained & Injured
+[/CHARACTER]`;
+
+    const rpgSettings = {
+        currentMemo: liveMemo,
+        chatStates: {
+            custom_fae_run: {
+                faeCampaignDossier: customFaeDossier,
+            },
+        },
+    };
+    const commitRes = applyLevelUpCommit({
+        chatId: 'custom_fae_run.jsonl',
+        currentMemo: liveMemo,
+        proposal: { ...proposal, faeMilestone: { type: 'heal_scar', restorePool: 'vitality' } },
+        isRespec: false,
+        rpgSettings,
+    });
+    assert.strictEqual(commitRes.success, true);
+    assert.ok(commitRes.updatedMemo.includes('Scenes: 0/6 | XP: 0/6'), 'LVL-004: commit must preserve configured scenesTarget 6 on reset');
+    assert.strictEqual(customFaeDossier.character.scenes_target, 6);
+    assert.strictEqual(rpgSettings.chatStates.custom_fae_run.companionDossier, customFaeDossier, 'WRK-10 cleanId partition synced');
+});
+
+test('Level-Up Commit: LVL-005 PbtA startingMoves/Armor, D&D ASI parenthetical modifiers & double-apply prevention', async () => {
+    const {
+        applyLevelUpCommit,
+        applyDossierCommitUpdate,
+    } = await import('../level-up-runner.js');
+
+    // 1. PbtA: missing Armor: in header + startingMoves & armor sync via WRK-10 cleanId
+    const pbtaMemo = `[CHARACTER]
+Kora (The Tempest): 4/4 HP | Harm: 0/4 | XP: 5/5
+Stats: Might +1, Agility +2, Wits +0, Heart +1, Arcana -1
+((PILLS)) Moves: Storm Strike (+Might)
+[/CHARACTER]`;
+    const pbtaDossier = {
+        meta: { ruleset: 'pbta', systemKey: 'fantasy' },
+        protagonist: {
+            name: 'Kora',
+            playbook: 'The Tempest',
+            harm: { current: 0, max: 4, armor: 0 },
+            moves: ['Storm Strike (+Might)'],
+            startingMoves: ['Storm Strike (+Might)'],
+        },
+    };
+    const pbtaSettings = {
+        currentMemo: pbtaMemo,
+        chatStates: {
+            kora_pbta: {
+                pbtaCampaignDossier: pbtaDossier,
+            },
+        },
+    };
+    const pbtaCommit = applyLevelUpCommit({
+        chatId: 'kora_pbta.jsonl',
+        currentMemo: pbtaMemo,
+        rpgSettings: pbtaSettings,
+        proposal: {
+            isPbta: true,
+            characterName: 'Kora',
+            genreKey: 'fantasy',
+            stats: { Might: 1, Agility: 2, Wits: 0, Heart: 1, Arcana: -1 },
+            harm: { current: 0, max: 4, armor: 1 },
+            newFeatures: ['Storm Strike (+Might)', 'Eye of the Gale (+Wits) (Sense ambushes on 10+)'],
+            advancesTaken: ['armor_training'],
+        },
+    });
+    assert.strictEqual(pbtaCommit.success, true);
+    assert.ok(pbtaCommit.updatedMemo.includes('Harm: 0/4 | Armor: 1'), 'LVL-005: injects Armor: when absent from PbtA header');
+    assert.strictEqual(pbtaDossier.protagonist.armor, 1, 'LVL-005: syncs protagonist.armor');
+    assert.strictEqual(pbtaDossier.protagonist.startingMoves.length, 2, 'LVL-005: keeps startingMoves in sync with moves');
+    assert.strictEqual(pbtaDossier.protagonist.moves.length, 2);
+
+    // 2. D&D 5e: Parenthetical ASI modifier recalculation + partition dossier sync + no double-apply
+    const dndMemo = `[CHARACTER]
+Vaelen (Rogue): 18/22 HP
+Attr: STR 16 (+3), DEX 14 (+2), CON 15 (+2), INT 10 (+0), WIS 12 (+1), CHA 8 (-1)
+Level: 3
+Traits: Sneak Attack (1d6)
+HD: d8 (3/3)
+Status: Healthy
+[/CHARACTER]
+[XP]
+Total: 2,700 / 2,700 XP (Level 3)
+[/XP]`;
+    const dndDossier = {
+        meta: { ruleset: 'dnd5e', systemKey: 'dnd5e' },
+        protagonist: {
+            name: 'Vaelen',
+            class: 'Rogue',
+            level: 3,
+            hp: { current: 18, max: 22 },
+            stats: { STR: 16, DEX: 14, CON: 15, INT: 10, WIS: 12, CHA: 8 },
+            features: ['Sneak Attack (1d6)'],
+            abilities: [],
+        },
+    };
+    const dndSettings = {
+        currentMemo: dndMemo,
+        chatStates: {
+            vaelen_run: {
+                companionDossier: dndDossier,
+            },
+        },
+    };
+    const dndProposal = {
+        characterName: 'Vaelen',
+        className: 'Rogue',
+        targetLevel: 4,
+        hitDie: 'd8',
+        hpChange: { oldMax: 22, gain: 7, newMax: 29 },
+        asiChoice: { type: 'asi', stat1: 'STR', amount1: 1, stat2: 'CON', amount2: 1 },
+        newFeatures: ['Sneak Attack (2d6)', 'Uncanny Dodge'],
+        activeAbilities: ['Evasion (Reaction half damage; 1/1 per short rest)'],
+    };
+    const dndCommit = applyLevelUpCommit({
+        chatId: 'vaelen_run.jsonl',
+        currentMemo: dndMemo,
+        proposal: dndProposal,
+        rpgSettings: dndSettings,
+    });
+    assert.strictEqual(dndCommit.success, true);
+    assert.ok(dndCommit.updatedMemo.includes('STR 17 (+3)'), 'LVL-005: STR 16 (+3) + 1 -> STR 17 (+3)');
+    assert.ok(dndCommit.updatedMemo.includes('CON 16 (+3)'), 'LVL-005: CON 15 (+2) + 1 -> CON 16 (+3) recalculated');
+    assert.strictEqual(dndDossier.protagonist.level, 4);
+    assert.strictEqual(dndDossier.protagonist.hp.current, 25, 'HP current 18 + 7 = 25');
+    assert.strictEqual(dndDossier.protagonist.hp.max, 29);
+    assert.strictEqual(dndDossier.protagonist.stats.STR, 17, 'LVL-005: dossier.protagonist.stats.STR updated');
+    assert.strictEqual(dndDossier.protagonist.stats.CON, 16, 'LVL-005: dossier.protagonist.stats.CON updated');
+    assert.deepStrictEqual(dndDossier.protagonist.features, ['Sneak Attack (2d6)', 'Uncanny Dodge'], 'Scaling feature replaced in place on dossier');
+    assert.strictEqual(dndSettings.chatStates.vaelen_run.campaignDossier, dndDossier, 'setPartitionDossier links campaignDossier for dnd5e');
+    assert.strictEqual(dndCommit._syncedDossiers.has(dndDossier), true, 'Tracks synced dossiers so UI confirm avoids double-apply');
+
+    // Confirm UI skip guard simulation: calling applyDossierCommitUpdate ONLY when !_syncedDossiers.has(dossier)
+    if (!dndCommit._syncedDossiers.has(dndDossier)) {
+        applyDossierCommitUpdate(dndDossier, dndProposal, { isRespec: false, currentHpGain: 7 });
+    }
+    assert.strictEqual(dndDossier.protagonist.stats.STR, 17, 'Stats must NOT be double-incremented by Confirm handler');
+    assert.strictEqual(dndDossier.protagonist.hp.current, 25, 'Partial HP must NOT be double-healed by Confirm handler');
+});
+
+test('Level-Up Stage Renderers: LVL-006 FAE Shift label polarity & canonical overflow options', async () => {
+    const {
+        buildFaeMilestoneAndTuningHtml,
+        normalizeFaeOverflowRule,
+    } = await import('../level-up-stage-renderers.js');
+
+    assert.strictEqual(normalizeFaeOverflowRule('gear_loss'), 'scene_fail');
+    assert.strictEqual(normalizeFaeOverflowRule('narrative_fail'), 'scene_fail');
+    assert.strictEqual(normalizeFaeOverflowRule('scene_fail'), 'scene_fail');
+    assert.strictEqual(normalizeFaeOverflowRule('lethal'), 'lethal');
+    assert.strictEqual(normalizeFaeOverflowRule('scar_and_ko'), 'scar_and_ko');
+
+    const { faeTuningSection } = buildFaeMilestoneAndTuningHtml({
+        isFae: true,
+        isRespec: true,
+        proposal: {
+            pools: {
+                health: { label: 'Health', current: 8, max: 8, barColor: 'green', zero_debuff: 'Crippled' },
+            },
+            knobs: {
+                flee_grace_toggle: true,
+                base_attrition_shift: -1,
+                overflow_default: 'gear_loss',
+            },
+        },
+    });
+
+    assert.ok(faeTuningSection.includes('-1 (Pulp / Forgiving Attrition)'), 'LVL-006: -1 must be labeled Pulp / Forgiving');
+    assert.ok(faeTuningSection.includes('0 (Gritty / Standard)'), 'LVL-006: 0 must be labeled Gritty / Standard');
+    assert.ok(faeTuningSection.includes('+1 (Brutal / Heavy Attrition)'), 'LVL-006: +1 must be labeled Brutal / Heavy');
+    assert.ok(faeTuningSection.includes('Escape at 0 Pool with a Scar or gear loss instead of Overflow'), 'LVL-006: accurate Flee Grace description');
+    assert.ok(!faeTuningSection.includes('value="gear_loss"'), 'LVL-006: unrecognized gear_loss option must not appear');
+    assert.ok(!faeTuningSection.includes('value="narrative_fail"'), 'LVL-006: unrecognized narrative_fail option must not appear');
+    assert.match(faeTuningSection, /<option value="scene_fail" selected>/, 'LVL-006: legacy gear_loss maps cleanly to canonical scene_fail selected');
+    assert.ok(faeTuningSection.includes('value="scar_and_ko"'));
+    assert.ok(faeTuningSection.includes('value="lethal"'));
+});

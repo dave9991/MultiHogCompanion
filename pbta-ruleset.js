@@ -8,7 +8,30 @@
 import {
     isValidCharacterName,
     stripMarkdownNameArtifacts,
+    splitNameAndEmbeddedArchetype,
+    flattenArchetypeParens,
 } from './character-creator-sanitizer.js';
+
+const ADVERSARIAL_COMPANION_ROLE_RE = /\b(?:former|ex(?=\b|-|\s)|rival|enemy|enemies|hostile|betrayed|betrayer|nemesis|antagonist|traitor|turned\s+enemy)\b/i;
+const ALLIED_COMPANION_ROLE_RE = /\b(?:companion|party|mentor|patron|ally|allies|sidekick|follower|partner)\b/i;
+
+/**
+ * Classifies an NPC role string as an active allied companion/mentor role while
+ * rejecting negated or adversarial descriptions (e.g. "Former ally turned enemy", "Ex-companion rival").
+ *
+ * @param {string} role
+ * @param {{ extraAlliedRe?: RegExp }} [options={}]
+ * @returns {boolean}
+ */
+export function isAlliedCompanionRole(role, options = {}) {
+    if (!role || typeof role !== 'string') return false;
+    const trimmed = role.trim();
+    if (!trimmed) return false;
+    if (ADVERSARIAL_COMPANION_ROLE_RE.test(trimmed)) return false;
+    if (ALLIED_COMPANION_ROLE_RE.test(trimmed)) return true;
+    if (options.extraAlliedRe && options.extraAlliedRe.test(trimmed)) return true;
+    return false;
+}
 
 export const PBTA_CARTRIDGE_ID = 'pbta_narrative_engine_v1';
 export const CARTRIDGE_FORMAT = 'multihog-game-cartridge';
@@ -1895,8 +1918,10 @@ export function formatInitialPbtaMemo(dossier) {
     const hasExplicitGenreContext = Boolean(dossier.meta?.systemKey || dossier.meta?.customGenreSpec);
     const p = dossier.protagonist || {};
     const kick = dossier.theKick || {};
-    const charName = (p.name || 'Protagonist').trim();
-    const playbook = (p.playbook || 'Wanderer').trim();
+    const { cleanName: splitProtoName, embeddedArchetype: embeddedProtoArch } = splitNameAndEmbeddedArchetype((p.name || '').trim());
+    const charName = splitProtoName || 'Protagonist';
+    const rawPlaybook = (p.playbook || p.archetype || embeddedProtoArch || 'Wanderer').trim();
+    const playbook = flattenArchetypeParens(rawPlaybook) || 'Wanderer';
     const harmMax = dossier.config?.harmMax || p.harm?.max || 5;
     const pacingXp = dossier.config?.pacingXp || 5;
     const isSolo = dossier.config?.partyMode === 'solo';
@@ -1982,10 +2007,7 @@ export function formatInitialPbtaMemo(dossier) {
 
     // 3b. If companion NPCs exist in the dossier and party mode is not solo, initialize [PARTY] block
     const npcs = dossier.npcs || [];
-    const companions = isSolo ? [] : npcs.filter(n => {
-        const r = (n.role || '').toLowerCase();
-        return r.includes('companion') || r.includes('party') || r.includes('sidekick') || r.includes('follower') || r.includes('partner');
-    });
+    const companions = isSolo ? [] : npcs.filter(n => n && n.name && isAlliedCompanionRole(n.role));
     if (companions.length > 0) {
         const partyLines = ['[PARTY]'];
         for (let i = 0; i < companions.length; i++) {

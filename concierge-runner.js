@@ -13,7 +13,7 @@
  */
 
 import { serializeDossierToMarkdown, isDefaultUntitledCampaignTitle } from './concierge-parser.js';
-import { formatInitialPbtaMemo } from './pbta-ruleset.js';
+import { formatInitialPbtaMemo, isAlliedCompanionRole } from './pbta-ruleset.js';
 import { formatInitialFaeMemo } from './fae-state-sync.js';
 import { buildFaeCartridge } from './fae-ruleset.js';
 import { getStagedCanonEntries, writeStagedCanon } from './concierge-canon.js';
@@ -1270,7 +1270,7 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                         }
 
                         // Activate starting companions / mentors on Turn 1 so they appear in [NPC_RELATIONS]
-                        const isAllied = /companion|party|mentor|patron|ally/i.test(n.role || '');
+                        const isAllied = isAlliedCompanionRole(n.role);
                         if (isAllied && !rpgSettings.activeRouterKeys.includes(fullId)) {
                             rpgSettings.activeRouterKeys.push(fullId);
                         }

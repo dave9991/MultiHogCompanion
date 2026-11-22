@@ -23,7 +23,12 @@ import {
     sanitizeFaePositiveTags,
     toMultihogBarMarker,
 } from './fae-ruleset.js';
-import { stripMarkdownNameArtifacts } from './character-creator-sanitizer.js';
+import {
+    stripMarkdownNameArtifacts,
+    splitNameAndEmbeddedArchetype,
+    flattenArchetypeParens,
+} from './character-creator-sanitizer.js';
+import { isAlliedCompanionRole } from './pbta-ruleset.js';
 
 /**
  * Normalizes pool display labels to canonical object keys (e.g. "Torch & Supplies" -> "torch_and_supplies").
@@ -96,9 +101,37 @@ export function normalizeFaePill(item, defaultDesc = '') {
         return `${name} (${desc})`;
     }
 
-    // Check if it already has trailing parentheses
-    if (/\([^)]+\)$/.test(trimmed)) {
-        return trimmed;
+    // Balanced check for trailing parenthetical qualifier so nested parens inside toasts become [...]
+    if (trimmed.endsWith(')')) {
+        let depth = 0;
+        let openIdx = -1;
+        for (let i = trimmed.length - 1; i >= 0; i--) {
+            if (trimmed[i] === ')') depth++;
+            else if (trimmed[i] === '(') {
+                depth--;
+                if (depth === 0) {
+                    openIdx = i;
+                    break;
+                }
+            }
+        }
+        if (openIdx > 0) {
+            let head = trimmed.slice(0, openIdx).trim();
+            const rawDesc = trimmed.slice(openIdx + 1, -1).trim();
+            // Flatten any extra paren groups inside head while preserving a leading (+)/(-) marker
+            const signMatch = head.match(/^(\([+-]\)\s*)(.+)$/);
+            if (signMatch) {
+                const flatBody = flattenArchetypeParens(signMatch[2]);
+                head = flatBody ? `${signMatch[1]}${flatBody}` : head;
+            } else {
+                head = flattenArchetypeParens(head) || head;
+            }
+            if (!rawDesc) {
+                return head;
+            }
+            const safeDesc = rawDesc.replace(/\(/g, '[').replace(/\)/g, ']');
+            return `${head} (${safeDesc})`;
+        }
     }
 
     // Check "Name: Desc"
@@ -145,8 +178,12 @@ export function formatFaeHeroicDomain(domain) {
 export function formatFaeCharacterMemoBlock(faeState) {
     if (!faeState || typeof faeState !== 'object') return '';
     const char = faeState.character || {};
-    const name = char.name || 'Protagonist';
-    const archetype = char.archetype || faeState.genre || 'Investigator';
+    const rawCharName = String(char.name || 'Protagonist').replace(/[*_`~]/g, '').trim() || 'Protagonist';
+    const { cleanName, embeddedArchetype } = splitNameAndEmbeddedArchetype(rawCharName);
+    const name = cleanName || 'Protagonist';
+    const rawArchetype = char.archetype || embeddedArchetype || faeState.genre || 'Investigator';
+    const archetype = flattenArchetypeParens(rawArchetype) || rawArchetype;
+    const headerIdentity = archetype ? `${name} (${archetype})` : name;
     const knobs = faeState.knobs || { flee_grace_toggle: true, base_attrition_shift: 0, overflow_default: 'scar_and_ko' };
     const pools = faeState.pools || {};
     const poolKeys = Object.keys(pools);
@@ -166,7 +203,7 @@ export function formatFaeCharacterMemoBlock(faeState) {
 
     // Line 1: Name (Archetype): cur/max HP | Pool: Label (cur/max) | Scenes: X/Y | XP: X/Y
     lines.push(
-        `${name} (${archetype}): ${primaryPool.current}/${primaryPool.max} HP | Pool: ${primaryPool.label} (${primaryPool.current}/${primaryPool.max}) | Scenes: ${scenesCur}/${scenesMax} | XP: ${scenesCur}/${scenesMax}`
+        `${headerIdentity}: ${primaryPool.current}/${primaryPool.max} HP | Pool: ${primaryPool.label} (${primaryPool.current}/${primaryPool.max}) | Scenes: ${scenesCur}/${scenesMax} | XP: ${scenesCur}/${scenesMax}`
     );
 
     // Secondary Pools (Pools 2 and 3)
@@ -218,7 +255,7 @@ export function formatFaeCharacterMemoBlock(faeState) {
 
     lines.push(`((PILLS)) Scars & Debuffs: ${debuffPills.length > 0 ? debuffPills.join(', ') : 'None'}`);
 
-    // Status
+    // Status: deterministic from pool breaking points or persisted char.status (never inferred from Session Zero flaws)
     let statusStr = 'Healthy';
     if (primaryPool.current === 0) {
         statusStr = `(-) ${primaryPool.zero_debuff} (Breaking Point)`;
@@ -226,8 +263,8 @@ export function formatFaeCharacterMemoBlock(faeState) {
         const zeroPool = Object.values(pools).find(p => p.current === 0);
         if (zeroPool) {
             statusStr = `(-) ${zeroPool.zero_debuff}`;
-        } else if (rawNegTags.length > 0) {
-            statusStr = '(-) Strained & Injured';
+        } else if (typeof char.status === 'string' && char.status.trim()) {
+            statusStr = char.status.trim();
         }
     }
     lines.push(`Status: ${statusStr}`);
@@ -259,9 +296,6 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
     let line1 = charLines.find(l => /HP/i.test(l)) || '';
     if (line1) {
         line1 = line1.replace(/[*_`~]/g, '');
-        while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(line1)) {
-            line1 = line1.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
-        }
     }
     const clauses = line1.split('|').map(s => s.trim());
 
@@ -274,12 +308,16 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
     let scenesMax = baseState.character.scenes_target;
 
     if (clauses.length > 0) {
-        const headMatch = clauses[0].match(/^\s*[-*+•–—]?\s*(.+?)(?:\s*\(([^)]+)\))?:\s*([+-]?\d+)\/(\d+)\s*HP/i);
-        if (headMatch) {
-            name = stripMarkdownNameArtifacts(headMatch[1]) || headMatch[1].trim();
-            archetype = headMatch[2] ? headMatch[2].trim() : archetype;
-            primaryCur = parseInt(headMatch[3], 10);
-            primaryMax = parseInt(headMatch[4], 10);
+        const hpHeadMatch = clauses[0].match(/^\s*[-*+•–—]?\s*(.+?):\s*([+-]?\d+)\/(\d+)\s*HP\b/i);
+        if (hpHeadMatch) {
+            const rawHeaderIdentity = hpHeadMatch[1].trim();
+            const { cleanName, embeddedArchetype } = splitNameAndEmbeddedArchetype(rawHeaderIdentity);
+            name = stripMarkdownNameArtifacts(cleanName) || cleanName || name;
+            if (embeddedArchetype) {
+                archetype = embeddedArchetype;
+            }
+            primaryCur = parseInt(hpHeadMatch[2], 10);
+            primaryMax = parseInt(hpHeadMatch[3], 10);
         }
         let foundScenes = false;
         for (let i = 1; i < clauses.length; i++) {
@@ -428,16 +466,23 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         }
     }
 
-    // 4. Positive Tags
+    // 4. Positive Tags (respect explicit Positive Tags: None or empty lines without fallback overwrite)
     let positiveTags = [];
-    const posMatch = charText.match(/(?:\(\(PILLS\)\)\s*)?Positive Tags:\s*(.+)$/m);
-    if (posMatch && !/^none$/i.test(posMatch[1].trim())) {
-        positiveTags = splitTopLevelPillItems(posMatch[1])
-            .map(t => normalizeFaePill(t))
-            .filter(t => t && !/^none$/i.test(t));
+    const posMatch = charText.match(/^[ \t]*(?:\(\(PILLS\)\)\s*)?Positive Tags:[ \t]*([^\n\r]*)$/mi);
+    if (posMatch) {
+        const rawPosVal = posMatch[1].trim();
+        if (rawPosVal && !/^none$/i.test(rawPosVal)) {
+            positiveTags = splitTopLevelPillItems(rawPosVal)
+                .map(t => normalizeFaePill(t))
+                .filter(t => t && !/^none$/i.test(t));
+        }
     } else {
         positiveTags = [...fallbackGenre.defaultPositiveTags];
     }
+
+    // 4b. Status line (preserved across round-trips rather than discarded)
+    const statusLineMatch = charText.match(/^[ \t]*Status:[ \t]*([^\n\r]*)$/mi);
+    const parsedStatus = statusLineMatch ? statusLineMatch[1].trim() : '';
 
     // 5. Scars & Debuffs
     const negativeTags = [];
@@ -500,6 +545,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         character: {
             name,
             archetype,
+            status: parsedStatus,
             heroic_domain: knobs.heroic_tier ? (heroicDomain || (fallbackGenre.knobs?.heroic_tier ? fallbackGenre.defaultHeroicDomain : null)) : null,
             positive_tags: sanitizeFaePositiveTags(positiveTags, 5),
             negative_tags: negativeTags,
@@ -794,7 +840,7 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
     if (typeof faeStateOrGenreKey === 'string') {
         state = createInitialFaeState(faeStateOrGenreKey, options);
     } else if (isObj) {
-        if (faeStateOrGenreKey.pools && faeStateOrGenreKey.character) {
+        if (faeStateOrGenreKey.pools && faeStateOrGenreKey.character && !faeStateOrGenreKey.protagonist) {
             state = faeStateOrGenreKey;
         } else {
             const genreKey = faeStateOrGenreKey.genreKey
@@ -828,22 +874,42 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
                     ? p.pools
                     : options.pools;
             const normalizedPools = normalizeCustomFaePools(rawPools, effectiveGenre.pools) || rawPools;
-            const charOverrides = {
-                name: p.name || 'Protagonist',
-                archetype: p.archetype || p.playbook,
-                positive_tags: p.positiveTags || p.positive_tags || p.tags,
-                negative_tags: p.negativeTags || p.negative_tags || p.scars,
-                heroic_domain: resolvedDomain,
-                temp_advantage: p.temp_advantage,
-                scenes_completed: p.scenes_completed,
-                scenes_target: p.scenes_target,
+            const rawCharObj = faeStateOrGenreKey.character || {};
+            const { cleanName: pCleanName, embeddedArchetype: pEmbeddedArch } = splitNameAndEmbeddedArchetype((p.name || '').trim());
+            const { cleanName: cCleanName, embeddedArchetype: cEmbeddedArch } = splitNameAndEmbeddedArchetype((rawCharObj.name || '').trim());
+            const defaultGenreArch = effectiveGenre?.archetypes?.[0]?.trim() || '';
+            const isDefaultCharArch = Boolean(rawCharObj.archetype && defaultGenreArch && rawCharObj.archetype.trim() === defaultGenreArch);
+            const resolvedArchetype = flattenArchetypeParens(
+                p.archetype
+                || p.playbook
+                || pEmbeddedArch
+                || (!isDefaultCharArch ? rawCharObj.archetype : '')
+                || cEmbeddedArch
+                || rawCharObj.archetype
+                || ''
+            );
+            const resolvedPositiveTags = p.positiveTags || p.positive_tags || p.tags || rawCharObj.positive_tags;
+            const resolvedNegativeTags = p.negativeTags || p.negative_tags || p.scars || rawCharObj.negative_tags;
+            const resolvedTempAdv = p.temp_advantage ?? rawCharObj.temp_advantage;
+            const resolvedScenesCur = p.scenes_completed ?? rawCharObj.scenes_completed;
+            const resolvedScenesMax = p.scenes_target ?? rawCharObj.scenes_target;
+            const sanitizedCharObj = {
+                ...rawCharObj,
+                name: pCleanName || cCleanName || 'Protagonist',
+                ...(resolvedArchetype ? { archetype: resolvedArchetype } : {}),
+                ...(resolvedPositiveTags !== undefined ? { positive_tags: resolvedPositiveTags } : {}),
+                ...(resolvedNegativeTags !== undefined ? { negative_tags: resolvedNegativeTags } : {}),
+                ...(resolvedDomain ? { heroic_domain: resolvedDomain } : {}),
+                ...(resolvedTempAdv !== undefined ? { temp_advantage: resolvedTempAdv } : {}),
+                ...(resolvedScenesCur !== undefined ? { scenes_completed: resolvedScenesCur } : {}),
+                ...(resolvedScenesMax !== undefined ? { scenes_target: resolvedScenesMax } : {}),
             };
             const overrides = {
                 ...faeStateOrGenreKey,
                 dossier: faeStateOrGenreKey,
                 heroic_tier: isHeroic,
                 heroic_domain: resolvedDomain,
-                character: { ...charOverrides, ...(faeStateOrGenreKey.character || {}) },
+                character: sanitizedCharObj,
                 pools: normalizedPools,
                 knobs: {
                     ...(faeStateOrGenreKey.knobs || faeStateOrGenreKey.config?.knobs || options.knobs || {}),
@@ -851,6 +917,10 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
                 },
             };
             state = createInitialFaeState(genreKey, overrides);
+            const initialStatus = String(p.status || rawCharObj.status || '').trim();
+            if (initialStatus && state?.character) {
+                state.character.status = initialStatus;
+            }
         }
     } else {
         state = createInitialFaeState('cosmic_horror', options);
@@ -870,7 +940,7 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
     let companions = [];
     if (isObj && faeStateOrGenreKey.config?.partyMode !== 'solo' && Array.isArray(faeStateOrGenreKey.npcs)) {
         companions = faeStateOrGenreKey.npcs.filter(n =>
-            n && n.name && /companion|party|sidekick|follower|partner|ally|friend|crew|squad/i.test(n.role || 'companion')
+            n && n.name && isAlliedCompanionRole(n.role || 'companion', { extraAlliedRe: /\b(?:friend|crew|squad)\b/i })
         );
         if (companions.length > 0) {
             state.character = state.character || {};
@@ -1116,11 +1186,16 @@ export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) 
     };
 
     const p = dossier?.protagonist || {};
-    const effectiveName = (charName || p.name || nextState.character.name || 'Protagonist').trim();
-    nextState.character.name = effectiveName;
+    const rawEffectiveName = (charName || p.name || nextState.character.name || 'Protagonist').trim();
+    const { cleanName: effCleanName, embeddedArchetype: effEmbeddedArch } = splitNameAndEmbeddedArchetype(rawEffectiveName);
+    nextState.character.name = effCleanName || 'Protagonist';
 
     if (p.playbook || p.archetype) {
-        nextState.character.archetype = (p.playbook || p.archetype).trim();
+        nextState.character.archetype = flattenArchetypeParens((p.playbook || p.archetype).trim());
+    } else if (effEmbeddedArch) {
+        nextState.character.archetype = effEmbeddedArch;
+    } else if (nextState.character.archetype) {
+        nextState.character.archetype = flattenArchetypeParens(nextState.character.archetype);
     }
 
     const isHeroic = Boolean(
@@ -1216,7 +1291,7 @@ export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) 
     // Fold companions into [CHARACTER] positive tags per Zero-Bookkeeping Model if partyMode !== 'solo'
     if (dossier?.config?.partyMode !== 'solo' && Array.isArray(dossier?.npcs)) {
         const companions = dossier.npcs.filter(n =>
-            n && n.name && /companion|party|sidekick|follower|partner|ally|friend|crew|squad/i.test(n.role || 'companion')
+            n && n.name && isAlliedCompanionRole(n.role || 'companion', { extraAlliedRe: /\b(?:friend|crew|squad)\b/i })
         );
         if (companions.length > 0) {
             nextState.character.positive_tags = nextState.character.positive_tags || [];

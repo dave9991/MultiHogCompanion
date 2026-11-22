@@ -2255,6 +2255,7 @@ Your ONLY job is to assemble or update the Protagonist character sheet and optio
 * 🚫 **FORBIDDEN IN STEP 4:** Focus strictly on \`[PROTAGONIST]\` (and optional \`[DESIGN_GAME_SYSTEM: ...]\` / \`[REMOVE_CUSTOM_MODULE]\`). Do NOT re-emit or alter \`[MAP]\`, \`[MONSTER]\`, \`[NPC]\`, \`[FACTION]\`, or \`[KICK]\` blocks here.
 * Ground the protagonist's bonds, gear, and motivations in the established Canon and Episode 1 Adventure. If \`Active Stats\` or \`Available Archetypes / Playbooks\` are listed in the Continuity Brief, use those exact stat names and choose or adapt from those archetypes.
 * 🏷️ **Name Diversity & Targeted Placeholders:** If the player did not specify an exact character name, emit \`name: [[NAME: evocative role or concept]]\` (e.g. \`name: [[NAME: cybernetic street samurai]]\`). NEVER invent cliché placeholder names.
+* 🪪 **Clean Identity Fields:** Keep \`name:\` as ONLY the character's plain name (never append class, archetype, or title in parentheses onto \`name:\`). Keep \`archetype:\` / \`playbook:\` / \`class:\` as a single flat label with zero nested parentheses (e.g. \`Frontier Magistrate — Old World Paladin\`, never \`Frontier Magistrate (Old World Paladin)\`).
 * Every [UPDATE_DOSSIER] block MUST begin with a 1-line semantic summary:
   summary: <One concise sentence summarizing Protagonist updates>
 

@@ -22,6 +22,154 @@
 import { toMultihogBarMarker } from './fae-ruleset.js';
 
 /**
+ * Flattens nested or adjacent parenthetical qualifiers in an archetype/class/playbook label
+ * into a single non-nested label separated by em-dashes.
+ * Example: "(Frontier Magistrate (Old World Paladin))" -> "Frontier Magistrate — Old World Paladin"
+ * Example: "Frontier Magistrate (Old World Paladin) (The Sellsword)" -> "Frontier Magistrate — Old World Paladin — The Sellsword"
+ * @param {string} raw
+ * @returns {string}
+ */
+export function flattenArchetypeParens(raw) {
+    if (!raw || typeof raw !== 'string') return '';
+    let s = raw.trim();
+    if (!s) return '';
+
+    // Repeatedly strip a single pair of balanced outer parentheses wrapping the whole string
+    while (s.startsWith('(') && s.endsWith(')')) {
+        let depth = 0;
+        let wrapsAll = true;
+        for (let i = 0; i < s.length; i++) {
+            if (s[i] === '(') depth++;
+            else if (s[i] === ')') depth--;
+            if ((depth === 0 && i < s.length - 1) || depth < 0) {
+                wrapsAll = false;
+                break;
+            }
+        }
+        if (wrapsAll && depth === 0) {
+            s = s.slice(1, -1).trim();
+        } else {
+            break;
+        }
+    }
+
+    // Flatten balanced parenthetical groups sequentially using depth tracking
+    let out = '';
+    let i = 0;
+    while (i < s.length) {
+        if (s[i] === '(') {
+            let depth = 1;
+            let j = i + 1;
+            while (j < s.length && depth > 0) {
+                if (s[j] === '(') depth++;
+                else if (s[j] === ')') depth--;
+                j++;
+            }
+            if (depth === 0) {
+                const inner = flattenArchetypeParens(s.slice(i + 1, j - 1));
+                if (inner) {
+                    const trimmedOut = out.trimEnd();
+                    if (trimmedOut && !trimmedOut.endsWith('—') && !trimmedOut.endsWith('-')) {
+                        out = `${trimmedOut} — ${inner}`;
+                    } else {
+                        out = trimmedOut ? `${trimmedOut} ${inner}` : inner;
+                    }
+                }
+                i = j;
+                continue;
+            }
+        }
+        out += s[i];
+        i++;
+    }
+
+    return out
+        .replace(/[()]/g, '')
+        .replace(/\s*—\s*(?:—\s*)+/g, ' — ')
+        .replace(/\s+/g, ' ')
+        .replace(/^—\s*|\s*—$/g, '')
+        .trim();
+}
+
+/**
+ * Uses a depth-balanced parenthesis scanner to split trailing embedded archetype/title
+ * parentheticals from a character name without breaking on nested parentheses.
+ * Unresolved/evolved NameRAG tokens ([[NAME:...]], [NAME: ..., RESOLVED TO: ...]) are left intact.
+ *
+ * @param {string} rawName
+ * @returns {{ cleanName: string, embeddedArchetype: string }}
+ */
+export function splitNameAndEmbeddedArchetype(rawName) {
+    if (!rawName || typeof rawName !== 'string') {
+        return { cleanName: '', embeddedArchetype: '' };
+    }
+    const trimmed = rawName.trim();
+    if (!trimmed) {
+        return { cleanName: '', embeddedArchetype: '' };
+    }
+
+    // Never split NameRAG placeholder or resolved-name syntax
+    if (/\[\[\s*NAME:|,\s*RESOLVED\s+TO:/i.test(trimmed)) {
+        return { cleanName: trimmed, embeddedArchetype: '' };
+    }
+
+    let end = trimmed.length;
+    const groups = [];
+
+    while (end > 0) {
+        while (end > 0 && /\s/.test(trimmed[end - 1])) end--;
+        if (end === 0 || trimmed[end - 1] !== ')') break;
+
+        let depth = 0;
+        let start = -1;
+        for (let i = end - 1; i >= 0; i--) {
+            if (trimmed[i] === ')') depth++;
+            else if (trimmed[i] === '(') {
+                depth--;
+                if (depth === 0) {
+                    start = i;
+                    break;
+                }
+            }
+        }
+
+        if (start === -1) break; // Unbalanced parentheses; stop scanning
+
+        const prefix = trimmed.slice(0, start).trim();
+        if (!prefix) {
+            // Entire remaining string is wrapped in parens; avoid blanking cleanName
+            if (groups.length === 0) {
+                return {
+                    cleanName: flattenArchetypeParens(trimmed) || trimmed,
+                    embeddedArchetype: '',
+                };
+            }
+            break;
+        }
+
+        const rawGroup = trimmed.slice(start + 1, end - 1).trim();
+        groups.unshift(rawGroup);
+        end = start;
+    }
+
+    let cleanName = trimmed.slice(0, end).trim();
+    if (!cleanName || groups.length === 0) {
+        return { cleanName: cleanName || trimmed, embeddedArchetype: '' };
+    }
+
+    // If the name prefix itself ended up wrapped in outer parens (e.g. "(Jon) (The Sellsword)"), unwrap it
+    if (cleanName.startsWith('(') && cleanName.endsWith(')')) {
+        const unwrapped = flattenArchetypeParens(cleanName);
+        if (unwrapped) cleanName = unwrapped;
+    }
+
+    // Prefer the first/authoritative trailing group so redundant fallback parens are dropped
+    const primaryGroup = groups.find(g => flattenArchetypeParens(g).length > 0) || '';
+    const embeddedArchetype = flattenArchetypeParens(primaryGroup);
+    return { cleanName, embeddedArchetype };
+}
+
+/**
  * Strips HTML tags, markdown emphasis (*, _, `, ~), leading bullets/symbols,
  * and trailing parenthetical archetypes (e.g. "Lou (The Sellsword)") from a raw name.
  * @param {string} rawName
@@ -29,23 +177,16 @@ import { toMultihogBarMarker } from './fae-ruleset.js';
  */
 export function stripMarkdownNameArtifacts(rawName) {
     if (!rawName || typeof rawName !== 'string') return '';
-    let cleaned = rawName
+    const cleaned = rawName
         .replace(/<[^>]+>/g, '')
         .replace(/^[-*•–—#>\s]+/, '')
         .replace(/[*_`~]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 
-    // Strip trailing parenthetical archetype if present (e.g. "Lou (The Sellsword)" -> "Lou")
-    while (/\s*\([^)]*\)$/.test(cleaned)) {
-        const stripped = cleaned.replace(/\s*\([^)]*\)$/, '').trim();
-        if (stripped) {
-            cleaned = stripped;
-        } else {
-            break;
-        }
-    }
-    return cleaned;
+    if (!cleaned) return '';
+    const { cleanName } = splitNameAndEmbeddedArchetype(cleaned);
+    return cleanName || cleaned;
 }
 
 /**
@@ -143,8 +284,8 @@ export function sanitizeCharacterStockPrompt(stockPrompts, targetName = '') {
 }
 
 /**
- * Cleans the first non-empty line inside [CHARACTER]...[/CHARACTER] of markdown artifacts
- * and duplicate parenthetical archetypes, and replaces placeholders with fallbackName if provided.
+ * Cleans the first non-empty line inside [CHARACTER]...[/CHARACTER] of markdown artifacts,
+ * nested/duplicate parenthetical archetypes, and replaces placeholders with fallbackName strictly on Line 1.
  * @param {string} memo
  * @param {string} [fallbackName='']
  * @returns {string}
@@ -152,18 +293,10 @@ export function sanitizeCharacterStockPrompt(stockPrompts, targetName = '') {
 export function sanitizeCharacterHeaderInMemo(memo, fallbackName = '') {
     if (!memo || typeof memo !== 'string') return memo;
 
-    let updatedMemo = memo;
-
-    // If fallbackName is provided and valid, run placeholder replacement logic
     const cleanFallback = stripMarkdownNameArtifacts(fallbackName);
-    if (isValidCharacterName(cleanFallback)) {
-        updatedMemo = updatedMemo.replace(
-            /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player|Character Name|Protagonist Name|Protagonist)(\s*[\(:])/gi,
-            `$1${cleanFallback}$2`
-        );
-    }
+    const hasValidFallback = isValidCharacterName(cleanFallback);
 
-    updatedMemo = updatedMemo.replace(/(\[CHARACTER\])([\s\S]*?)(\[\/CHARACTER\])/i, (fullMatch, openTag, body, closeTag) => {
+    const updatedMemo = memo.replace(/(\[CHARACTER\])([\s\S]*?)(\[\/CHARACTER\])/i, (fullMatch, openTag, body, closeTag) => {
         const lines = body.split('\n');
         let headerIdx = -1;
         for (let i = 0; i < lines.length; i++) {
@@ -174,28 +307,31 @@ export function sanitizeCharacterHeaderInMemo(memo, fallbackName = '') {
         }
         if (headerIdx === -1) return fullMatch;
 
-        let line = lines[headerIdx];
+        const rawLine = lines[headerIdx];
+        const colonIdx = rawLine.indexOf(':');
+        let headerPrefix = colonIdx !== -1 ? rawLine.slice(0, colonIdx) : rawLine;
+        const headerRest = colonIdx !== -1 ? rawLine.slice(colonIdx) : '';
 
-        // 1. Strip markdown bold/italic/code (*, _, `, ~) from header prefix before first : (or whole line if no :)
-        const colonIdx = line.indexOf(':');
-        if (colonIdx !== -1) {
-            const prefix = line.slice(0, colonIdx);
-            const rest = line.slice(colonIdx);
-            const cleanPrefix = prefix.replace(/[*_`~]/g, '');
-            line = cleanPrefix + rest;
-        } else {
-            line = line.replace(/[*_`~]/g, '');
+        // 1. Strip markdown emphasis (*, _, `, ~) only from the Line-1 identity prefix before ':'
+        headerPrefix = headerPrefix.replace(/[*_`~]/g, '');
+
+        // 2. Scope placeholder replacement strictly to the Line-1 leading identity slot
+        if (hasValidFallback) {
+            headerPrefix = headerPrefix.replace(
+                /^(\s*(?:[-*•–—#>\s]*)?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player|Character Name|Protagonist Name|Protagonist)(\s*(?:\(|$))/i,
+                `$1${cleanFallback}$2`
+            );
         }
 
-        // 2. Fix duplicate parenthetical archetypes caused by **Lou substitution
-        // e.g. Lou (The Sellsword)** (The Sellsword): 10/10 HP or Lou (The Sellsword) (The Sellsword): 10/10 HP -> Lou (The Sellsword): 10/10 HP
-        while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(line)) {
-            line = line.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
+        // 3. Flatten nested or duplicate parenthetical archetypes cleanly (e.g. "(A (B)) (C)" or "(X) (X)")
+        const { cleanName, embeddedArchetype } = splitNameAndEmbeddedArchetype(headerPrefix);
+        if (cleanName && !/\[\[\s*NAME:|,\s*RESOLVED\s+TO:/i.test(headerPrefix)) {
+            headerPrefix = embeddedArchetype ? `${cleanName} (${embeddedArchetype})` : cleanName;
         }
 
-        lines[headerIdx] = line;
+        lines[headerIdx] = headerPrefix + headerRest;
 
-        // 3. Normalize secondary pool lines containing ((BAR...)) markers:
+        // 4. Normalize secondary pool lines containing ((BAR...)) markers:
         // - Normalize malformed ((BAR:...)) or ((BAR - ...)) markers into valid MultiHog ((BAR<COLOR>)) tokens
         // - Strip trailing (Zero Debuff: ...) parentheticals that crush HUD progress bar width
         for (let i = 0; i < lines.length; i++) {
@@ -217,8 +353,9 @@ export function sanitizeCharacterHeaderInMemo(memo, fallbackName = '') {
 }
 
 /**
- * Rectifies the character name in a state memo string if it currently contains
- * {{user}}, {user}, or generic User, and ensures the character header is clean.
+ * Rectifies the character name in a state memo string if Line 1 currently contains
+ * {{user}}, {user}, or generic User/Player/Protagonist, and ensures the character header is clean.
+ * Strictly delegates to Line-1-scoped header sanitization so downstream tag/pill lines are never altered.
  * @param {string} memo
  * @param {string} realName
  * @returns {string}
@@ -227,12 +364,7 @@ export function rectifyMemoCharacterName(memo, realName) {
     if (!memo || typeof memo !== 'string') return memo;
     const cleanName = stripMarkdownNameArtifacts(realName);
     if (!isValidCharacterName(cleanName)) return sanitizeCharacterHeaderInMemo(memo);
-
-    const replaced = memo.replace(
-        /(\[CHARACTER\][\s\S]*?)(?:\{\{user\}\}|\{user\}|\{\{char\}\}|\{char\}|User|Player|Character Name|Protagonist Name|Protagonist)(\s*[\(:])/gi,
-        `$1${cleanName}$2`
-    );
-    return sanitizeCharacterHeaderInMemo(replaced, cleanName);
+    return sanitizeCharacterHeaderInMemo(memo, cleanName);
 }
 
 /**
@@ -283,8 +415,11 @@ export function determineEffectiveCharacterName(context = {}) {
                 .replace(/^[-*•–—#>\s]+/, '')
                 .replace(/[*_`~]/g, '')
                 .trim();
-            while (/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/i.test(firstLine)) {
-                firstLine = firstLine.replace(/(\s*\(\s*([^)]+?)\s*\))\s*\(\s*\2\s*\)/gi, '$1');
+            const colonIdx = firstLine.indexOf(':');
+            const beforeColon = colonIdx !== -1 ? firstLine.slice(0, colonIdx).trim() : firstLine;
+            const splitClean = splitNameAndEmbeddedArchetype(beforeColon).cleanName;
+            if (isValidCharacterName(splitClean) && splitClean.length <= 50) {
+                return splitClean;
             }
             const m = firstLine.match(/^([^(:\[\n]{2,50}?)(?:\s*\(|\s*:)/);
             if (m) {

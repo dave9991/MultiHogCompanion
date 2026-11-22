@@ -24,6 +24,22 @@ import {
     applyDossierUpdates,
     normalizeMalformedDossierClosers,
 } from '../concierge-parser.js';
+import {
+    splitNameAndEmbeddedArchetype,
+    flattenArchetypeParens,
+    sanitizeCharacterHeaderInMemo,
+    rectifyMemoCharacterName,
+} from '../character-creator-sanitizer.js';
+import {
+    formatInitialFaeMemo,
+    formatFaeCharacterMemoBlock,
+    parseFaeStateFromMemo,
+    normalizeFaePill,
+} from '../fae-state-sync.js';
+import {
+    formatInitialPbtaMemo,
+    isAlliedCompanionRole,
+} from '../pbta-ruleset.js';
 
 // ── Upstream parser, extracted from source ──────────────────────────────────
 const RENDERER_PATH = new URL('../../SillyTavern-MultihogDnDFramework/renderer.js', import.meta.url);
@@ -165,4 +181,150 @@ test('3. normalizeMalformedDossierClosers is narrow: rewrites only whole-line kn
         '[/PROTAGONIST]',
     ].join('\n');
     assert.equal(normalizeMalformedDossierClosers(untouched), untouched);
+});
+
+// ── MEMO-001 .. MEMO-005 Regression Guards ──────────────────────────────────
+test('4. MEMO-001 & MEMO-002: Jon nested-paren archetype + starting flaws emit clean Turn-0 FAE memo with Status: Healthy', () => {
+    const base = createEmptyDossier('fae', 'post_apocalyptic');
+    const stage4Update = `[UPDATE_DOSSIER]
+summary: Protagonist Jon built for wasteland magistracy.
+ruleset: fae
+system: post_apocalyptic
+[PROTAGONIST]
+name: Jon (Frontier Magistrate (Old World Paladin))
+gender: male
+positive_tags:
+- Oathbound Sentinel [when enforcing NCR law or protecting civilians]
+- Heavy Armor Training [when resisting bludgeon or ballistic attacks]
+- Bureaucratic Inquisition [when cross-examining suspects or verifying warrants]
+negative_tags:
+- Unyielding Code [when tempted to break the law for a greater good]
+- Dust-Blind [when tracking through a sandstorm or low visibility]
+pools: Body: 10/10 | Stress: 8/8 | Rations & Gear: 6/6
+[/PROTAGONIST]
+[/UPDATE_DOSSIER]`;
+
+    const applied = applyDossierUpdates(stage4Update, base);
+    const healed = healAndNormalizeDossier(applied.updatedDossier);
+
+    assert.equal(healed.protagonist.name, 'Jon');
+    assert.equal(healed.protagonist.archetype, 'Frontier Magistrate — Old World Paladin');
+    assert.equal(healed.character.archetype, 'Frontier Magistrate — Old World Paladin');
+
+    const memo = formatInitialFaeMemo(healed, {});
+    assert.ok(memo.includes('Jon (Frontier Magistrate — Old World Paladin): 10/10 HP | Pool: Body (10/10)'), `Unexpected header in:\n${memo}`);
+    assert.ok(!memo.includes('The Road Warrior') && !memo.includes('The Sellsword'), 'Must not fall back to genre default archetype');
+    assert.ok(!memo.includes('((Frontier'), 'Must not emit nested/double parens');
+    assert.ok(memo.includes('Status: Healthy'), 'Starting negative tags/flaws must NOT fabricate Strained & Injured status');
+    assert.ok(!memo.includes('Strained & Injured'));
+
+    // Even if an un-healed dossier bypasses healAndNormalizeDossier with stale genre default, formatInitialFaeMemo cleans it
+    const staleCharDossier = createEmptyDossier('fae', 'post_apocalyptic');
+    staleCharDossier.protagonist.name = 'Jon (Frontier Magistrate (Old World Paladin))';
+    staleCharDossier.protagonist.negativeTags = ['Unyielding Code (when tempted)'];
+    const directMemo = formatInitialFaeMemo(staleCharDossier, {});
+    assert.ok(directMemo.includes('Jon (Frontier Magistrate — Old World Paladin):'), 'Direct formatInitialFaeMemo must prefer embedded archetype over stale default');
+    assert.ok(!directMemo.includes('The Road Warrior') && !directMemo.includes('The Sellsword'), 'Must not fall back to genre default archetype');
+    assert.ok(directMemo.includes('Status: Healthy'));
+});
+
+test('5. MEMO-003: parseFaeStateFromMemo -> formatFaeCharacterMemoBlock preserves Status, nested archetypes, and explicit Positive Tags: None', () => {
+    const liveMemo = `[CHARACTER]
+Jon (Frontier Magistrate (Old World Paladin)) (The Sellsword): 9/10 HP | Pool: Body (9/10) | Scenes: 1/4 | XP: 1/4
+((BARPURPLE)) Stress: 8/8
+FAE Knobs: Flee Grace: ON | Shift: +0 | Overflow: scar_and_ko | Tempo: gritty_default | Idle: 1t | Breather: READY
+((PILLS)) Positive Tags: None
+((PILLS)) Scars & Debuffs: (-) Unyielding Code (moral dilemma)
+Status: (-) Poisoned
+[/CHARACTER]`;
+
+    const parsed = parseFaeStateFromMemo(liveMemo, 'post_apocalyptic');
+    assert.equal(parsed.character.name, 'Jon');
+    assert.equal(parsed.character.archetype, 'Frontier Magistrate — Old World Paladin');
+    assert.equal(parsed.character.status, '(-) Poisoned');
+    assert.deepEqual(parsed.character.positive_tags, [], 'Explicit Positive Tags: None must not backfill genre defaults');
+    assert.equal(parsed.pools.body.current, 9);
+
+    const serialized = formatFaeCharacterMemoBlock(parsed);
+    assert.ok(serialized.includes('Jon (Frontier Magistrate — Old World Paladin): 9/10 HP'));
+    assert.ok(serialized.includes('((PILLS)) Positive Tags: None'));
+    assert.ok(serialized.includes('Status: (-) Poisoned'));
+    assert.ok(!serialized.includes('Strained & Injured'));
+});
+
+test('6. MEMO-004: normalizeFaePill converts inner parentheses in descriptions to brackets', () => {
+    assert.equal(
+        normalizeFaePill('Oathbound Sentinel (when defending (the weak))'),
+        'Oathbound Sentinel (when defending [the weak])'
+    );
+    assert.equal(
+        normalizeFaePill('(-) Burn (deep (thermal))'),
+        '(-) Burn (deep [thermal])'
+    );
+});
+
+test('7. MEMO-001: PbtA and D&D 5e initial memos split embedded archetypes and flatten nested parens', () => {
+    const pbtaDossier = createEmptyDossier('pbta', 'fantasy');
+    pbtaDossier.protagonist.name = 'Mara (Shadow Blade (Exile))';
+    pbtaDossier.protagonist.playbook = '';
+    const pbtaMemo = formatInitialPbtaMemo(pbtaDossier);
+    assert.ok(pbtaMemo.includes('Mara (Shadow Blade — Exile): '), `Unexpected PbtA header:\n${pbtaMemo}`);
+    assert.ok(!pbtaMemo.includes('(Wanderer)'), 'Must promote embedded playbook over Wanderer fallback');
+
+    const dndDossier = createEmptyDossier('dnd5e');
+    dndDossier.protagonist.name = 'Jon (Frontier Magistrate (Old World Paladin))';
+    dndDossier.protagonist.class = '';
+    const dndMemo = systemRegistry.get('dnd5e').formatInitialMemo(dndDossier, {});
+    assert.ok(dndMemo.includes('Jon (Frontier Magistrate — Old World Paladin): '), `Unexpected D&D header:\n${dndMemo}`);
+    assert.ok(!dndMemo.includes('(Fighter)'), 'Must promote embedded class over Fighter fallback');
+});
+
+test('8. MEMO-004: sanitizeCharacterHeaderInMemo & rectifyMemoCharacterName scope placeholder replacement strictly to Line 1', () => {
+    const memoWithTagsMentioningUserAndPlayer = `[CHARACTER]
+{{user}} (Frontier Magistrate (Old World Paladin)) (The Sellsword): 10/10 HP | Pool: Health (10/10)
+((PILLS)) Positive Tags: Sworn to the User (defending civilians), Player of Cards (bluffing)
+((PILLS)) Scars & Debuffs: (-) Debt to User (owes a favor)
+Status: Healthy
+[/CHARACTER]`;
+
+    const rectified = rectifyMemoCharacterName(memoWithTagsMentioningUserAndPlayer, 'Jon');
+    assert.ok(rectified.includes('Jon (Frontier Magistrate — Old World Paladin): 10/10 HP'));
+    assert.ok(rectified.includes('Sworn to the User (defending civilians)'), 'Must NOT corrupt Positive Tags containing "User ("');
+    assert.ok(rectified.includes('Player of Cards (bluffing)'), 'Must NOT corrupt Positive Tags containing "Player"');
+    assert.ok(rectified.includes('(-) Debt to User (owes a favor)'), 'Must NOT corrupt Scars containing "User ("');
+
+    // Also verify when Line 1 has a normal name while Line 3 has "Player (" or "User ("
+    const cleanHeadMemo = `[CHARACTER]
+Jon (Sentinel): 10/10 HP
+((PILLS)) Positive Tags: User (system test), Player (trickster)
+[/CHARACTER]`;
+    const reSanitized = sanitizeCharacterHeaderInMemo(cleanHeadMemo, 'Marcus');
+    assert.ok(reSanitized.includes('Jon (Sentinel): 10/10 HP'));
+    assert.ok(reSanitized.includes('User (system test), Player (trickster)'), 'Line 1 scoping must leave pill lines untouched');
+});
+
+test('9. MEMO-004: isAlliedCompanionRole accepts genuine allies and rejects negated/adversarial roles', () => {
+    assert.equal(isAlliedCompanionRole('Loyal Companion'), true);
+    assert.equal(isAlliedCompanionRole('Party Medic'), true);
+    assert.equal(isAlliedCompanionRole('Trusted Ally'), true);
+    assert.equal(isAlliedCompanionRole('Expert Mentor'), true);
+
+    assert.equal(isAlliedCompanionRole('Former ally turned enemy'), false);
+    assert.equal(isAlliedCompanionRole('Betrayed the party'), false);
+    assert.equal(isAlliedCompanionRole('Ex-companion rival'), false);
+    assert.equal(isAlliedCompanionRole('Ex ally'), false);
+    assert.equal(isAlliedCompanionRole('Hostile Patron'), false);
+    assert.equal(isAlliedCompanionRole(''), false);
+});
+
+test('10. MEMO-001: splitNameAndEmbeddedArchetype leaves NameRAG tokens intact', () => {
+    assert.deepEqual(
+        splitNameAndEmbeddedArchetype('[[NAME: veteran magistrate (old world)]]'),
+        { cleanName: '[[NAME: veteran magistrate (old world)]]', embeddedArchetype: '' }
+    );
+    assert.deepEqual(
+        splitNameAndEmbeddedArchetype('[NAME: paladin, RESOLVED TO: Jon (Vanguard)]'),
+        { cleanName: '[NAME: paladin, RESOLVED TO: Jon (Vanguard)]', embeddedArchetype: '' }
+    );
+    assert.equal(flattenArchetypeParens('(Frontier Magistrate (Old World Paladin))'), 'Frontier Magistrate — Old World Paladin');
 });

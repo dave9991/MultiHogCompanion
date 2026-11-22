@@ -27,6 +27,7 @@ import {
 } from './concierge-block-lexer.js';
 import { escapeHtml } from './mhc-utils.js';
 import { parseResolvedNameToken } from './namerag-hooks.js';
+import { splitNameAndEmbeddedArchetype, flattenArchetypeParens } from './character-creator-sanitizer.js';
 
 function canonicalizeResolvedName(raw) {
     if (!raw || typeof raw !== 'string') return raw;
@@ -1140,12 +1141,23 @@ export function applyDossierUpdates(text, dossier) {
         const pBlock = protoBlocks[0].content;
         const kv = parseKeyValueLines(pBlock);
 
-        if (kv.name) kv.name = canonicalizeResolvedName(kv.name);
+        if (kv.name) {
+            kv.name = canonicalizeResolvedName(kv.name);
+            const { cleanName, embeddedArchetype } = splitNameAndEmbeddedArchetype(kv.name);
+            if (cleanName) kv.name = cleanName;
+            if (embeddedArchetype && !kv.archetype && !kv.playbook && !kv.class && !kv.character_class) {
+                const existingArch = String(updated.protagonist.archetype || updated.protagonist.playbook || '').trim();
+                if (!existingArch || /^(?:wanderer|investigator|protagonist)$/i.test(existingArch)) {
+                    kv.archetype = embeddedArchetype;
+                }
+            }
+        }
         if (kv.name && updated.protagonist.name !== kv.name) {
             changes.push(`Protagonist name: "${kv.name}" (was "${updated.protagonist.name || 'Unnamed'}")`);
             updated.protagonist.name = kv.name;
         }
-        const archVal = kv.archetype || kv.playbook || kv.class || kv.character_class;
+        const rawArchVal = kv.archetype || kv.playbook || kv.class || kv.character_class;
+        const archVal = rawArchVal ? flattenArchetypeParens(rawArchVal) : '';
         if (archVal && (updated.protagonist.playbook !== archVal || updated.protagonist.archetype !== archVal || updated.protagonist.class !== archVal)) {
             changes.push(`Protagonist archetype/class: "${archVal}" (was "${updated.protagonist.archetype || updated.protagonist.playbook || updated.protagonist.class || 'None'}")`);
             updated.protagonist.playbook = archVal;
@@ -1153,7 +1165,7 @@ export function applyDossierUpdates(text, dossier) {
             updated.protagonist.class = archVal;
         }
         if (kv.class) {
-            updated.protagonist.class = kv.class.trim();
+            updated.protagonist.class = flattenArchetypeParens(kv.class.trim()) || kv.class.trim();
         }
         if (kv.ac) {
             const parsedAc = parseInt(kv.ac, 10);
@@ -2596,8 +2608,22 @@ export function healAndNormalizeDossier(dossier, rawMarkdown = '') {
 
     // 3. Protagonist
     dossier.protagonist = dossier.protagonist || {};
-    dossier.protagonist.name = (dossier.protagonist.name || '').trim();
-    dossier.protagonist.playbook = (dossier.protagonist.playbook || '').trim();
+    const { cleanName: splitProtoName, embeddedArchetype: splitProtoArch } = splitNameAndEmbeddedArchetype((dossier.protagonist.name || '').trim());
+    dossier.protagonist.name = splitProtoName;
+    if (splitProtoArch) {
+        const curArch = String(dossier.protagonist.archetype || '').trim();
+        const curPlaybook = String(dossier.protagonist.playbook || '').trim();
+        const isGenericRole = (val) => !val || /^(?:wanderer|investigator|protagonist)$/i.test(val);
+        if (isGenericRole(curArch)) dossier.protagonist.archetype = splitProtoArch;
+        if (isGenericRole(curPlaybook)) dossier.protagonist.playbook = splitProtoArch;
+    }
+    if (dossier.protagonist.archetype) {
+        dossier.protagonist.archetype = flattenArchetypeParens(dossier.protagonist.archetype);
+    }
+    dossier.protagonist.playbook = flattenArchetypeParens((dossier.protagonist.playbook || '').trim());
+    if (dossier.protagonist.class) {
+        dossier.protagonist.class = flattenArchetypeParens(dossier.protagonist.class);
+    }
     dossier.protagonist.species = sanitizeSpeciesValue(dossier.protagonist.species || '') || (dossier.protagonist.species || '').trim();
     dossier.protagonist.bio = dossier.protagonist.bio || dossier.protagonist.background || '';
     dossier.protagonist.background = dossier.protagonist.background || dossier.protagonist.bio || '';

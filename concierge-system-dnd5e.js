@@ -33,6 +33,7 @@ import {
 import { buildPlayerCardBio } from './concierge-pc-format.js';
 import { buildMonsterEntryContent } from './concierge-npc-format.js';
 import { systemRegistry } from './concierge-system-registry.js';
+import { splitNameAndEmbeddedArchetype, flattenArchetypeParens } from './character-creator-sanitizer.js';
 
 export const DND5E_GENRES = {
     fantasy: {
@@ -605,8 +606,10 @@ export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
     formatInitialMemo(dossier, options = {}) {
         if (!dossier || typeof dossier !== 'object') return '';
         const p = dossier.protagonist || {};
-        const charName = (p.name || 'Protagonist').trim();
-        const className = (p.class || 'Fighter').trim();
+        const { cleanName: splitProtoName, embeddedArchetype: embeddedProtoClass } = splitNameAndEmbeddedArchetype((p.name || '').trim());
+        const charName = splitProtoName || 'Protagonist';
+        const rawClassName = (p.class || p.archetype || p.playbook || embeddedProtoClass || 'Fighter').trim();
+        const className = flattenArchetypeParens(rawClassName) || 'Fighter';
         const rawHitDie = p.hitDie || deriveHitDieForClass(className) || 'd8';
         const hitDie = String(rawHitDie).replace(/^\d+/, '') || 'd8';
         const curHp = p.hp?.current ?? 10;

@@ -356,6 +356,7 @@ export class ConciergeSystemAdapter {
                     <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
                         👹 ${escapeHtml(cleanName)} ${badgeHtml}
                     </div>
+                    <button type="button" class="menu_button mhc-deck-remove-item-btn" data-remove-kind="monster" data-remove-target="${escapeHtml(cleanName)}" style="padding: 1px 6px; font-size: 0.72em; color: #f87171; border-color: rgba(239,68,68,0.3); margin-left: auto; margin-right: 4px;" title="Remove Adversary">✕</button>
                     <span class="mhc-deck-item-toggle">▼</span>
                 </div>
                 <div class="mhc-deck-item-detail">

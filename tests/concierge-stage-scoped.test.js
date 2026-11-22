@@ -683,4 +683,75 @@ assert.strictEqual(mapShrine?.threat, 'HIGH', 'CONC-017: legacy danger: Tense ma
 assert.strictEqual(mapOutpost?.threat, 'MODERATE', 'CONC-017: legacy danger: Medium maps to MODERATE');
 assert.strictEqual(mapPit?.threat, 'DEADLY', 'Canonical threat: DEADLY preserved');
 
+console.log('22. Testing Phase 5 Critic/Refiner Stage-Scoping & Living World / D&D 5e Prompt Parity (CONC-025, CONC-026, CONC-027)...');
+const {
+    buildConciergeCriticContext,
+    buildConciergeRefinerContext,
+    buildConciergeBuilderContext,
+} = await import('../concierge-prompt.js');
+
+const p5Dossier = createEmptyDossier('fae');
+p5Dossier.meta.title = 'Frontier Audit';
+p5Dossier.theKick = { startingLocation: 'Vault 8 Gate', crisis: 'Audit cordon breach' };
+const p5Critique = {
+    score: 78,
+    grade: 'B',
+    weaknesses: ['Thin encounter link'],
+    directives: ['Tie encounter directly to Vault City tariff law'],
+};
+
+// CONC-025: Step 3 Refiner uses Stage 3 Builder prompt AND includes Series Bible Canon entries
+const s3RefinerCtx = buildConciergeRefinerContext(p5Dossier, [], p5Critique, '', {
+    stage: 'adventure',
+    canonEntries: sampleCanonEntries,
+});
+assert.ok(s3RefinerCtx.includes('Adventure Stage Architect'), 'CONC-025: Step 3 Refiner must use Stage 3 Adventure Builder prompt');
+assert.ok(s3RefinerCtx.includes('Lyon Partisans'), 'CONC-025: Step 3 Refiner must include active Series Bible Canon entries');
+assert.ok(s3RefinerCtx.includes('STRICT STAGE 3 BOUNDARY'), 'CONC-025: Step 3 Refiner must enforce Stage 3 boundary');
+
+// CONC-025 & CONC-026: Step 4 Critic & Refiner enforce Stage 4 Character boundary and include Series Bible Canon
+const s4CriticCtx = buildConciergeCriticContext(p5Dossier, 'Make me a scarred courier', 'Created courier', null, {
+    stage: 'character',
+    canonEntries: sampleCanonEntries,
+});
+assert.ok(s4CriticCtx.includes('STEP 4: CHARACTER STAGE SCOPE BOUNDARY'), 'CONC-026: Step 4 Critic must include Character Stage scope boundary');
+assert.ok(s4CriticCtx.includes('DO NOT audit, critique, penalize, or issue directives to alter `[KICK]`, `[MAP]`, `[MONSTER]`, `[NPC]`, or `[FACTION]`'), 'CONC-026: Step 4 Critic must forbid altering Step 3 entities');
+assert.ok(s4CriticCtx.includes('Lyon Partisans'), 'CONC-026: Step 4 Critic must include active Series Bible Canon');
+
+const s4RefinerCtx = buildConciergeRefinerContext(p5Dossier, [], p5Critique, '', {
+    stage: 'character',
+    canonEntries: sampleCanonEntries,
+});
+assert.ok(s4RefinerCtx.includes('Protagonist Architect'), 'CONC-025: Step 4 Refiner must use Stage 4 Character Builder prompt');
+assert.ok(s4RefinerCtx.includes('Lyon Partisans'), 'CONC-025: Step 4 Refiner must include active Series Bible Canon');
+assert.ok(s4RefinerCtx.includes('STRICT STAGE 4 BOUNDARY'), 'CONC-026: Step 4 Refiner must enforce Stage 4 boundary');
+assert.ok(s4RefinerCtx.includes('NEVER re-emit or alter `[MAP]`, `[MONSTER]`, `[NPC]`, `[FACTION]`, or `[KICK]`'), 'CONC-026: Step 4 Refiner must forbid altering Step 3 blocks');
+
+// CONC-027: buildConciergeBuilderContext includes RESOLVED_NAME_FORMAT_GUIDANCE; D&D 5e prompt & parser aliases
+const lwBuilderCtx = buildConciergeBuilderContext(p5Dossier, [], '', sampleCanonEntries);
+assert.ok(lwBuilderCtx.includes('Resolved Name Format'), 'CONC-027: buildConciergeBuilderContext must include RESOLVED_NAME_FORMAT_GUIDANCE');
+assert.ok(lwBuilderCtx.includes('Lyon Partisans'), 'CONC-027: buildConciergeBuilderContext must include active Canon entries when provided');
+
+const dndBuilderPrompt = systemRegistry.get('dnd5e').getBuilderPrompt();
+assert.ok(dndBuilderPrompt.includes('threat: LOW'), 'CONC-027: D&D 5e getBuilderPrompt must emit canonical threat:');
+assert.ok(dndBuilderPrompt.includes('crisis:'), 'CONC-027: D&D 5e getBuilderPrompt must emit canonical crisis: in [KICK]');
+assert.ok(!dndBuilderPrompt.includes('danger: Low'), 'CONC-027: D&D 5e getBuilderPrompt must not emit legacy danger: Low');
+
+const dndAliasParsed = applyDossierUpdates(`
+[UPDATE_DOSSIER]
+[MAP: The Crossroads Tavern]
+site: The Crossroads Tavern
+danger: Low
+sensory: Bustling roadside inn.
+[/MAP]
+[KICK]
+starting_location: The Crossroads Tavern
+pressure: Bandits ambushing royal tax wagons.
+[/KICK]
+[/UPDATE_DOSSIER]
+`, createEmptyDossier('dnd5e'));
+assert.strictEqual(dndAliasParsed.updatedDossier.maps[0]?.threat, 'LOW');
+assert.strictEqual(dndAliasParsed.updatedDossier.maps[0]?.briefDescription, 'Bustling roadside inn.');
+assert.strictEqual(dndAliasParsed.updatedDossier.theKick.crisis, 'Bandits ambushing royal tax wagons.');
+
 console.log('--- ALL CONCIERGE STAGE-SCOPED PROMPT & DIRECTIVE TESTS PASSED! ---');

@@ -540,6 +540,7 @@ export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
                     <div class="mhc-deck-item-title" style="color: var(--mhc-danger, #ef4444);">
                         👹 ${escapeHtml(mClean)} ${mTagBadge}${statBadge}
                     </div>
+                    <button type="button" class="menu_button mhc-deck-remove-item-btn" data-remove-kind="monster" data-remove-target="${escapeHtml(mClean)}" style="padding: 1px 6px; font-size: 0.72em; color: #f87171; border-color: rgba(239,68,68,0.3); margin-left: auto; margin-right: 4px;" title="Remove Adversary">✕</button>
                     <span class="mhc-deck-item-toggle">▼</span>
                 </div>
                 <div class="mhc-deck-item-detail">
@@ -1027,8 +1028,9 @@ ${genreSummaries}
     - Active Powers with Rest Counters: place under \`abilities:\` as list items with rest frequency: \`Second Wind (Heal 1d10+1; 1/1 per short rest)\`, \`Action Surge (Take an additional action; 1/1 per short rest)\`.
   - Equipment: \`equipment: Chain mail, longsword, shield, adventurer pack, 15 gp\`
 * Monsters / Adversaries: Must include name, hp, ac, cr, and attacks with damage notation (e.g. \`hp: 15/15\`, \`ac: 13\`, \`cr: 1/2\`, \`attacks: Bite (1d6+2 dmg)\`).
-* Maps: Name of site, danger level, sensory details.
-* Kick / Opening Hook: Starting location, sensory arrival, and immediate call to action / crisis.
+* Maps: Name of site, kind (\`SETTLEMENT\` / \`DUNGEON\` / \`INTERIOR\` / \`WILDERNESS\`), threat level (\`LOW\` / \`MODERATE\` / \`HIGH\` / \`DEADLY\`), and \`brief_description\`.
+* Kick / Opening Hook: Starting location, immediate \`crisis\`, and \`opening_prompt\`.
+* Entity Removal / Clearing: \`[REMOVE_MONSTER: Name]\`, \`[CLEAR_MONSTERS]\`, \`[REMOVE_NPC: Name]\`, \`[CLEAR_NPCS]\`, \`[REMOVE_MAP: Site]\`, \`[REMOVE_FACTION: Name]\`.
 
 ### 📋 Directives & Syntax Template:
 \`\`\`text
@@ -1057,13 +1059,15 @@ equipment: Chain mail, longsword, shield, 15 gp
 
 [MAP: The Crossroads Tavern]
 site: The Crossroads Tavern
-danger: Low
-sensory: A bustling roadside inn filled with traders and tired travelers.
+kind: SETTLEMENT
+threat: LOW
+brief_description: A bustling roadside inn filled with traders and tired travelers.
 [/MAP]
 
 [KICK]
 starting_location: The Crossroads Tavern
-pressure: Bandits ambushing royal tax wagons along the King's Road.
+crisis: Bandits ambushing royal tax wagons along the King's Road.
+opening_prompt: Arrows thud into the tavern shutters as a wounded outrider stumbles through the door—what do you do?
 [/KICK]
 [/UPDATE_DOSSIER]
 \`\`\``;

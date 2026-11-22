@@ -1048,12 +1048,14 @@ export function buildAxiomCardHtml(ax) {
         ? `<div style="font-size: 0.8em; margin-top: 4px; opacity: 0.85;">🏛️ <b>Infrastructure:</b> ${escapeHtml(ax.architecturalNotes)}</div>`
         : '';
 
+    const removeTarget = ax.title || ax.id || 'World Law';
     return `
         <div class="mhc-deck-item collapsible">
             <div class="mhc-deck-item-header">
                 <div class="mhc-deck-item-title" style="color: #10b981;">
                     🌐 ${escapeHtml(ax.title || 'World Law')} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${catColor};">${escapeHtml(ax.category || 'physics').toUpperCase()}</span>
                 </div>
+                <button type="button" class="menu_button mhc-deck-remove-item-btn" data-remove-kind="axiom" data-remove-target="${escapeHtml(removeTarget)}" style="padding: 1px 6px; font-size: 0.72em; color: #f87171; border-color: rgba(239,68,68,0.3); margin-left: auto; margin-right: 4px;" title="Remove World Axiom">✕</button>
                 <span class="mhc-deck-item-toggle">▼</span>
             </div>
             <div class="mhc-deck-item-detail">

@@ -374,6 +374,7 @@ export function renderBlueprintDeckDom({
                         <div class="mhc-deck-item-title" style="color: var(--mhc-accent, #3b82f6);">
                             👤 ${escapeHtml(cleanName)} <span class="mhc-pill" style="font-size: 0.72em;">${role}</span>${tagBadge}${woundBadge}${demeanor}
                         </div>
+                        <button type="button" class="menu_button mhc-deck-remove-item-btn" data-remove-kind="npc" data-remove-target="${escapeHtml(cleanName)}" style="padding: 1px 6px; font-size: 0.72em; color: #f87171; border-color: rgba(239,68,68,0.3); margin-left: auto; margin-right: 4px;" title="Remove NPC">✕</button>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
                     <div class="mhc-deck-item-detail">
@@ -423,6 +424,7 @@ export function renderBlueprintDeckDom({
                         <div class="mhc-deck-item-title">
                             🗺️ ${mapNameInfo.html} <span class="mhc-pill" style="font-size: 0.72em;">${map.kind || 'Site'} · ${map.threat || 'Threat'}</span> ${stageBadge}
                         </div>
+                        <button type="button" class="menu_button mhc-deck-remove-item-btn" data-remove-kind="map" data-remove-target="${escapeHtml(mapNameInfo.cleanName)}" style="padding: 1px 6px; font-size: 0.72em; color: #f87171; border-color: rgba(239,68,68,0.3); margin-left: auto; margin-right: 4px;" title="Remove Location">✕</button>
                         <span class="mhc-deck-item-toggle">▼</span>
                     </div>
                     <div class="mhc-deck-item-detail">
@@ -445,7 +447,7 @@ export function renderBlueprintDeckDom({
         fList.empty();
         if (factions.length) {
             factions.forEach(f => {
-                const { html: factionNameHtml } = formatBlueprintNameWithBadge(f.name, {
+                const { cleanName: factionCleanName, html: factionNameHtml } = formatBlueprintNameWithBadge(f.name, {
                     fallback: 'Unnamed Faction',
                     badgeBg: 'rgba(245, 158, 11, 0.15)',
                     badgeBorder: 'rgba(245, 158, 11, 0.45)',
@@ -462,6 +464,7 @@ export function renderBlueprintDeckDom({
                             <div class="mhc-deck-item-title" style="color: var(--mhc-warning, #f59e0b);">
                                 🚩 ${factionNameHtml} <span class="mhc-pill" style="font-size: 0.72em; border-color: ${badgeColor};">${standing}</span>
                             </div>
+                            <button type="button" class="menu_button mhc-deck-remove-item-btn" data-remove-kind="faction" data-remove-target="${escapeHtml(factionCleanName)}" style="padding: 1px 6px; font-size: 0.72em; color: #f87171; border-color: rgba(239,68,68,0.3); margin-left: auto; margin-right: 4px;" title="Remove Faction">✕</button>
                             <span class="mhc-deck-item-toggle">▼</span>
                         </div>
                         <div class="mhc-deck-item-detail">

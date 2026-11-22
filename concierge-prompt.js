@@ -580,13 +580,13 @@ system_label: Optional custom genre name (when system is custom)
 tone: Evocative tone & atmospheric style
 premise: Brief 1-2 sentence core premise
 
-[CONFIG] (Optional calibration knobs)
-flee_grace_toggle: true | false
-heroic_tier: true | false
+[CONFIG] (Optional calibration knobs — pick ONE concrete value per field, never copy option lists with |)
+flee_grace_toggle: true
+heroic_tier: false
 base_attrition_shift: 0
-action_tempo: action_serial | gritty_default | slow_burn | slice_of_life
-overflow_default: scar_and_ko | lethal | scene_fail
-playstyle: cyoa_5 | cyoa_3 | freeform
+action_tempo: gritty_default
+overflow_default: scar_and_ko
+playstyle: cyoa_5
 [/CONFIG]
 
 [PROTAGONIST]
@@ -657,7 +657,7 @@ opening_prompt: In media res opening scene dropping the protagonist into the cru
    * On Turn 1 initial scaffold: proactively generate [CONTEMPLATION], [CONFIG], [PROTAGONIST], 1 [FACTION], 1 [MONSTER], 1 [MAP], and [KICK]. Always define an evocative 2-4 word campaign title (\`title: Evocative Title\`).
    * Ensure the Protagonist, Faction, and Monster are **entangled** (shared history, debts, conflicting agendas) rather than isolated tropes.
 2. **Follow-Up Edits (Partial Patches):** On follow-up turns / delta edits: emit ONLY changed entities/fields. Unchanged entities and fields are preserved automatically. NEVER re-emit \`[[NAME:protagonist]]\` or entity name placeholders if the entity already exists in [CURRENT_LIVE_BLUEPRINT]; preserve established character/entity names.
-3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
+3. **Entity Removal:** Use \`[REMOVE_NPC: Name]\`, \`[CLEAR_NPCS]\`, \`[REMOVE_MONSTER: Name]\`, \`[CLEAR_MONSTERS]\`, \`[REMOVE_MAP: Site]\`, \`[REMOVE_FACTION: Name]\`, \`[REMOVE_WORLD_RULE: Title]\`, or \`[REMOVE_CUSTOM_MODULE]\` (or \`remove_npc: Name\`, \`remove_monster: Name\`, \`remove_map: Site\`, \`remove_faction: Name\`, \`remove_world_rule: Title\`, or \`remove_custom_module: true\`). To request a bespoke HUD tracker via the Game System Wizard, emit \`[DESIGN_GAME_SYSTEM: <1-sentence mechanic description>]\`.
 4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.
 `;
 }
@@ -744,16 +744,16 @@ system: fantasy | scifi | anime | horror | western | pirate | mecha | cosmic_hor
 tone: Evocative tone & atmospheric style
 premise: Brief 1-2 sentence core premise
 
-[CONFIG] (Optional calibration dials)
-playstyle: cyoa_5 | cyoa_3 | freeform
-harm_max: 5 (3 for gritty, 4 for tense, 6 for heroic)
+[CONFIG] (Optional calibration dials — pick ONE concrete value per field, never copy option lists with |)
+playstyle: cyoa_5
+harm_max: 5
 max_harm_fate: Mortal peril / dying (or "MMO respawn at shrine", "Emotional burnout / faint", "Arrested / captured")
-pacing_xp: 3 | 5
-party_mode: squad | solo | duo
-cyoa_emojis: true | false
+pacing_xp: 5
+party_mode: squad
+cyoa_emojis: true
 art_style: Visual aesthetic for portrait & scene generation
-simulation_depth: active_fronts | living_world | static
-relationships: on | off
+simulation_depth: active_fronts
+relationships: on
 [/CONFIG]
 
 [PROTAGONIST]
@@ -782,13 +782,13 @@ status: Healthy
 [FACTION]
 name: Faction Name
 agenda: Core objective
-standing: Friendly | Neutral | Hostile
+standing: Neutral
 notes: Details
 [/FACTION]
 
 [NPC]
 name: [[NAME:mentor]]
-role: Mentor | Patron | Merchant | Faction Contact | Companion (Party)
+role: Mentor
 archetype: Archetype / title (e.g. Veteran Scout, Hedge Mage, Bounty Hunter)
 species: Human (Female) (actual species and gender)
 appearance: Distinct visual look
@@ -817,8 +817,8 @@ notes: Behavior notes
 
 [MAP]
 site: Location Name
-kind: SETTLEMENT | DUNGEON | INTERIOR | WILDERNESS
-threat: SAFE | MODERATE | DANGEROUS | DEADLY
+kind: SETTLEMENT
+threat: MODERATE
 entrance: Specific arrival spot
 prompt: Visual environment description
 brief_description: Summary
@@ -832,7 +832,7 @@ opening_prompt: Vivid narrative setup
 
 [WORLD_RULES]
 title: Biomechanical Substitution (or Universal Innate Flight)
-category: technology | physiology | metaphysics | ecology | social | general
+category: technology
 axiom: Core physical/technological truth of this world
 substitutions:
 - Replaced Item -> In-world Replacement (e.g. "Cars/Vehicles -> Six-legged crawler beasts")
@@ -870,7 +870,7 @@ sample:
    * Ensure the Protagonist, Faction, NPC, and Monster are **entangled** (shared history, debts, conflicting agendas) rather than isolated tropes.
    * If the premise introduces a radical physical, technological, biological, or ecological law (e.g. biology replaces mechanics, universal wings/flight), proactively include [WORLD_RULES] and propagate those laws into the Protagonist's equipment, NPC roles, and [MAP] architecture. Only include a [CUSTOM_MODULE] if this rule requires a bespoke physical resource gauge (e.g. symbiote hunger, wing stamina); NEVER emit generic trackers (e.g. "Status Tracking", "Encounter Tracking").
 2. **Follow-Up Edits (Partial Patches):** When modifying an existing blueprint, emit ONLY the tags being added, edited, or removed. Unchanged entities and fields are preserved automatically.
-3. **Entity Removal:** Use remove_npc: Name, remove_monster: Name, remove_map: Site, remove_faction: Name, remove_world_rule: Title, or remove_custom_module: true.
+3. **Entity Removal:** Use \`[REMOVE_NPC: Name]\`, \`[CLEAR_NPCS]\`, \`[REMOVE_MONSTER: Name]\`, \`[CLEAR_MONSTERS]\`, \`[REMOVE_MAP: Site]\`, \`[REMOVE_FACTION: Name]\`, \`[REMOVE_WORLD_RULE: Title]\`, or \`[REMOVE_CUSTOM_MODULE]\` (or \`remove_npc: Name\`, \`remove_monster: Name\`, \`remove_map: Site\`, \`remove_faction: Name\`, \`remove_world_rule: Title\`, or \`remove_custom_module: true\`). To request a bespoke HUD tracker via the Game System Wizard, emit \`[DESIGN_GAME_SYSTEM: <1-sentence mechanic description>]\`.
 4. Always inspect [CURRENT_LIVE_BLUEPRINT] in context as your single source of truth.
 
 ### 🗃️ Big-Lore (Canon) Rules — apply ONLY when [CANON_INVENTORY] or [CANON_FOCUS] appears in the player's message:
@@ -1001,10 +1001,11 @@ directives:
  * @param {string|null} [options.stage=null] Current workflow stage ('adventure', 'character', etc.)
  * @returns {string}
  */
-export function buildConciergeCriticContext(activeDossier, userPromptText = '', builderSummary = '', contemplation = null, { stage = null } = {}) {
+export function buildConciergeCriticContext(activeDossier, userPromptText = '', builderSummary = '', contemplation = null, { stage = null, canonEntries = [] } = {}) {
     const ruleset = systemRegistry.detectRuleset(activeDossier);
     const basePrompt = buildConciergeCriticPrompt(ruleset);
     const formattedBlueprint = formatDossierForContext(activeDossier);
+    const activeCanon = Array.isArray(canonEntries) ? canonEntries.filter(e => !e.disabled) : [];
 
     const contLines = [];
     if (contemplation && typeof contemplation === 'object') {
@@ -1019,11 +1020,16 @@ export function buildConciergeCriticContext(activeDossier, userPromptText = '', 
 
     const stageBoundaryNote = stage === 'adventure'
         ? `\n\n======================================================================\n🚧 [STEP 3: ADVENTURE STAGE SCOPE BOUNDARY]\n======================================================================\nWe are currently in **Step 3 (\`🗺️ Adventure\`)**. The protagonist character sheet (stats, pools, positive/negative tags, archetype) has NOT been built yet and belongs strictly to **Step 4 (\`👤 Character\`)**.\n* DO NOT audit, critique, penalize, or issue directives for \`[PROTAGONIST]\` (even if \`[CURRENT_LIVE_BLUEPRINT]\` shows Protagonist: Unset or placeholder pools).\n* Audit ONLY Step 3 Episode 1 scope: \`[KICK]\`, \`[MAP]\`, \`[MONSTER]\`, \`[NPC]\`, \`[FACTION]\`, and \`[CONFIG]\`.`
+        : stage === 'character'
+            ? `\n\n======================================================================\n🚧 [STEP 4: CHARACTER STAGE SCOPE BOUNDARY]\n======================================================================\nWe are currently in **Step 4 (\`👤 Character\`)**. The Episode 1 stage set (\`[KICK]\`, \`[MAP]\`, \`[MONSTER]\`, \`[NPC]\`, \`[FACTION]\`) was already established in Step 3.\n* DO NOT audit, critique, penalize, or issue directives to alter \`[KICK]\`, \`[MAP]\`, \`[MONSTER]\`, \`[NPC]\`, or \`[FACTION]\`.\n* Audit ONLY Step 4 Protagonist scope: \`[PROTAGONIST]\` (and optional Custom HUD Tracker \`[CUSTOM_MODULE]\` / \`[DESIGN_GAME_SYSTEM]\`), checking that the protagonist is grounded in the established Canon and Episode 1 crisis.`
+            : '';
+
+    const canonSection = activeCanon.length > 0
+        ? `\n======================================================================\n📚 [ACTIVE_SERIES_BIBLE_CANON] (ESTABLISHED NAMES & LORE)\n======================================================================\n${formatCanonEntriesForContext(activeCanon)}\n`
         : '';
 
     return `${basePrompt}${stageBoundaryNote}
-${contemplationSection}
-======================================================================
+${contemplationSection}${canonSection}======================================================================
 💬 [PLAYER_REQUEST_CONTEXT]
 ======================================================================
 Player Input: ${userPromptText || '(Session Zero campaign scaffolding)'}
@@ -1046,22 +1052,50 @@ ${formattedBlueprint}`;
  * @param {string} [activeNameRagSeeds]
  * @param {object} [options]
  * @param {string|null} [options.stage=null] Current workflow stage ('adventure', 'character', etc.)
+ * @param {Array<object>} [options.canonEntries=[]] Active Series Bible Canon entries
  * @returns {string}
  */
-export function buildConciergeRefinerContext(activeDossier, changelog, critique, activeNameRagSeeds = '', { stage = null } = {}) {
+export function buildConciergeRefinerContext(activeDossier, changelog, critique, activeNameRagSeeds = '', { stage = null, canonEntries = [] } = {}) {
     const isFae = activeDossier?.meta?.ruleset === 'fae';
-    const baseContext = buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds);
+    let baseContext = '';
+    if (stage === 'adventure') {
+        const stagePrompt = buildStage3AdventureBuilderPrompt(activeDossier, canonEntries);
+        const formattedBlueprint = formatDossierForContext(activeDossier);
+        const formattedChangelog = formatChangelogForContext(changelog);
+        baseContext = `${stagePrompt}\n\n======================================================================\n📋 [CURRENT_LIVE_BLUEPRINT] (CURRENT STATE)\n${RESOLVED_NAME_FORMAT_GUIDANCE}\n======================================================================\n${formattedBlueprint}\n\n${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
+    } else if (stage === 'character') {
+        const stagePrompt = buildStage4CharacterBuilderPrompt(activeDossier, canonEntries);
+        const formattedBlueprint = formatDossierForContext(activeDossier);
+        const formattedChangelog = formatChangelogForContext(changelog);
+        baseContext = `${stagePrompt}\n\n======================================================================\n📋 [CURRENT_LIVE_BLUEPRINT] (CURRENT STATE)\n${RESOLVED_NAME_FORMAT_GUIDANCE}\n======================================================================\n${formattedBlueprint}\n\n${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
+    } else {
+        baseContext = buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds, canonEntries);
+    }
+
     const weaknessesList = (critique?.weaknesses || []).map(w => `- ${w}`).join('\n') || '- Deepen cross-entity connections and fictional specificity.';
-    const defaultDirective = isFae
-        ? '- Enrich the Protagonist, Pools, Tags, NPC, Faction, Encounter, and Kick so they are tightly entangled.'
-        : '- Enrich the Protagonist, NPC, Faction, Monster, and Kick so they are tightly entangled.';
+    let defaultDirective = '';
+    if (stage === 'adventure') {
+        defaultDirective = isFae
+            ? '- Enrich the Episode 1 NPCs, Factions, Encounters, Maps, and Kick so they are tightly entangled.'
+            : '- Enrich the Episode 1 NPCs, Factions, Monsters, Maps, and Kick so they are tightly entangled.';
+    } else if (stage === 'character') {
+        defaultDirective = isFae
+            ? '- Enrich the Protagonist, Resource Pools, and Positive/Negative Tags so they tie directly into the active Canon and Episode 1 crisis.'
+            : '- Enrich the Protagonist stats, moves/abilities, and gear so they tie directly into the active Canon and Episode 1 crisis.';
+    } else {
+        defaultDirective = isFae
+            ? '- Enrich the Protagonist, Pools, Tags, NPC, Faction, Encounter, and Kick so they are tightly entangled.'
+            : '- Enrich the Protagonist, NPC, Faction, Monster, and Kick so they are tightly entangled.';
+    }
     const directivesList = (critique?.directives || []).map(d => `- ${d}`).join('\n') || defaultDirective;
     const cleanupDirective = isFae
         ? '3. If the Judge flagged a naming collision, duplicate entity, or unnecessary block (such as an unwanted [WORLD_RULES]), use `[REMOVE_NPC: Name]`, `[REMOVE_MONSTER: Name]`, `[REMOVE_FACTION: Name]`, `[REMOVE_MAP: Site]`, or `[REMOVE_WORLD_RULE: Title]` to remove the collided/unwanted entry before emitting the corrected entity.'
         : '3. If the Judge flagged a naming collision, duplicate entity, or unnecessary block (such as an unwanted [WORLD_RULES] or [CUSTOM_MODULE]), use `[REMOVE_NPC: Name]`, `[REMOVE_MONSTER: Name]`, `[REMOVE_FACTION: Name]`, `[REMOVE_MAP: Site]`, `[REMOVE_WORLD_RULE: Title]`, or `[REMOVE_CUSTOM_MODULE]` to remove the collided/unwanted entry before emitting the corrected entity.';
     const stageDirective = stage === 'adventure'
         ? `\n6. **STRICT STAGE 3 BOUNDARY:** We are in Step 3 (\`🗺️ Adventure\`). NEVER emit \`[PROTAGONIST]\` here — protagonist sheets, pools, and tags are built in Step 4 (\`👤 Character\`).`
-        : '';
+        : stage === 'character'
+            ? `\n6. **STRICT STAGE 4 BOUNDARY:** We are in Step 4 (\`👤 Character\`). Focus strictly on \`[PROTAGONIST]\` (and optional \`[DESIGN_GAME_SYSTEM: <concept>]\` / \`[REMOVE_CUSTOM_MODULE]\`). NEVER re-emit or alter \`[MAP]\`, \`[MONSTER]\`, \`[NPC]\`, \`[FACTION]\`, or \`[KICK]\` blocks here.`
+            : '';
 
     return `${baseContext}
 
@@ -1222,17 +1256,22 @@ ${genreSummaries}
  * @param {string} [activeNameRagSeeds]
  * @returns {string}
  */
-export function buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds = '') {
+export function buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds = '', canonEntries = []) {
     const basePrompt = buildConciergeBuilderPrompt({ ruleset: activeDossier?.meta?.ruleset, dossier: activeDossier });
     const formattedBlueprint = formatDossierForContext(activeDossier);
     const formattedChangelog = formatChangelogForContext(changelog);
+    const activeCanon = Array.isArray(canonEntries) ? canonEntries.filter(e => !e.disabled) : [];
+    const canonSection = activeCanon.length > 0
+        ? `\n\n======================================================================\n📚 [ACTIVE_SERIES_BIBLE_CANON] (ESTABLISHED NAMES & LORE)\n======================================================================\n${formatCanonEntriesForContext(activeCanon)}`
+        : '';
 
     return `${basePrompt}
 
 ======================================================================
 📋 [CURRENT_LIVE_BLUEPRINT] (CURRENT STATE)
+${RESOLVED_NAME_FORMAT_GUIDANCE}
 ======================================================================
-${formattedBlueprint}
+${formattedBlueprint}${canonSection}
 
 ${formattedChangelog}${activeNameRagSeeds ? `\n\n${activeNameRagSeeds}` : ''}`;
 }

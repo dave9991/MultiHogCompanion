@@ -670,6 +670,8 @@ function setConciergeBusyState(busy) {
         '.mhc-ruleset-card',
         '.mhc-ruleset-btn',
         '.mhc-dial-pill',
+        '.mhc-deck-remove-item-btn',
+        '.mhc-source-remove-btn',
         '#mhc_sync_active_campaign_btn',
         '#mhc_fork_campaign_btn',
         '#mhc_reset_session_btn',
@@ -1874,7 +1876,7 @@ async function handleUserSend() {
                 builderPromptContent = buildStage4CharacterBuilderPrompt(activeDossier, stagedCanon);
             }
         } else {
-            builderPromptContent = buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds);
+            builderPromptContent = buildConciergeBuilderContext(activeDossier, changelog, activeNameRagSeeds, getStagedCanonEntries());
         }
 
         const builderMessages = [
@@ -2095,6 +2097,7 @@ async function handleUserSend() {
                         setStage('<i>⚖️ The Concierge is grading blueprint depth &amp; entanglement...</i>');
                     }
                     const activeStageScope = currentNavMode === 'new-adventure' ? currentAdventureStep : null;
+                    const stagedCanonForJudge = getStagedCanonEntries();
                     const criticMessages = [
                         {
                             role: 'system',
@@ -2104,7 +2107,7 @@ async function handleUserSend() {
                                 displayUserText,
                                 builderSummaryText,
                                 builderReport.contemplation || activeDossier.contemplation,
-                                { stage: activeStageScope },
+                                { stage: activeStageScope, canonEntries: stagedCanonForJudge },
                             ),
                         },
                         {
@@ -2125,7 +2128,7 @@ async function handleUserSend() {
                             {
                                 role: 'system',
                                 name: 'System',
-                                content: buildConciergeRefinerContext(activeDossier, changelog, critiqueResult, activeNameRagSeeds, { stage: activeStageScope }),
+                                content: buildConciergeRefinerContext(activeDossier, changelog, critiqueResult, activeNameRagSeeds, { stage: activeStageScope, canonEntries: stagedCanonForJudge }),
                             },
                             ...recentHistory().map(formatHistoryMessage),
                             {
@@ -2164,10 +2167,19 @@ async function handleUserSend() {
 
                         if (refinerReport.hasMutations) {
                             activeDossier = refinerReport.updatedDossier;
+                            if (currentNavMode === 'new-adventure' && currentAdventureStep === 'adventure') {
+                                refreshAdventureStageNote(activeDossier);
+                            }
                             (refinerReport.changes || []).forEach(c => {
                                 changelog.push(`[${timeStr} · Pass 2] ${c}`);
                                 appliedChangesThisTurn.push(c);
                             });
+                            if (refinerReport.designGameSystem && !builderReport?.designGameSystem) {
+                                if (typingEl) {
+                                    setStage('<i>🧙 MultiHog Game System Wizard is designing the custom HUD tracker...</i>');
+                                }
+                                await runDelegatedGameSystemDesign(refinerReport.designGameSystem, llm);
+                            }
                             updateBlueprintDeck();
                             saveDraft();
                             const refinerSummaryPart = refinerReport.builderSummary || refinerReport.changes.join('; ');
@@ -3165,6 +3177,7 @@ export function bindModalEvents() {
     // Attached source remove buttons
     $('#mhc_concierge_modal').on('click', '.mhc-source-remove-btn', function (e) {
         e.stopPropagation();
+        if (isGenerating) return;
         const name = $(this).attr('data-name');
         if (!name) return;
         unstageCanonSource(name);
@@ -3179,6 +3192,56 @@ export function bindModalEvents() {
         updateBlueprintDeck();
         saveDraft();
         toastr?.info(`Removed source "${name}".`);
+    });
+
+    // Blueprint Deck quick-remove item buttons (CONC-028: NPC, Monster, Map, Faction, Axiom)
+    $('#mhc_concierge_modal').on('click', '.mhc-deck-remove-item-btn', function (e) {
+        e.stopPropagation();
+        if (isGenerating) return;
+        const kind = ($(this).attr('data-remove-kind') || '').trim().toLowerCase();
+        const target = ($(this).attr('data-remove-target') || '').trim();
+        if (!kind || !target || !activeDossier) return;
+        const targetLower = target.toLowerCase();
+        const matchesName = (rawName) => {
+            if (!rawName) return false;
+            const clean = (parseResolvedNameToken(rawName).cleanName || rawName).trim().toLowerCase();
+            return clean === targetLower || String(rawName).trim().toLowerCase() === targetLower;
+        };
+
+        let removedLabel = '';
+        if (kind === 'npc' && Array.isArray(activeDossier.npcs)) {
+            const before = activeDossier.npcs.length;
+            activeDossier.npcs = activeDossier.npcs.filter(n => !matchesName(n.name));
+            if (activeDossier.npcs.length < before) removedLabel = `NPC "${target}"`;
+        } else if (kind === 'monster' && Array.isArray(activeDossier.monsters)) {
+            const before = activeDossier.monsters.length;
+            activeDossier.monsters = activeDossier.monsters.filter(m => !matchesName(m.name));
+            if (activeDossier.monsters.length < before) removedLabel = `Adversary "${target}"`;
+        } else if (kind === 'map' && Array.isArray(activeDossier.maps)) {
+            const before = activeDossier.maps.length;
+            activeDossier.maps = activeDossier.maps.filter(m => !matchesName(m.site || m.name));
+            if (activeDossier.maps.length < before) removedLabel = `Location "${target}"`;
+        } else if (kind === 'faction' && Array.isArray(activeDossier.factions)) {
+            const before = activeDossier.factions.length;
+            activeDossier.factions = activeDossier.factions.filter(f => !matchesName(f.name));
+            if (activeDossier.factions.length < before) removedLabel = `Faction "${target}"`;
+        } else if (kind === 'axiom' && Array.isArray(activeDossier.worldRules?.axioms)) {
+            const before = activeDossier.worldRules.axioms.length;
+            activeDossier.worldRules.axioms = activeDossier.worldRules.axioms.filter(ax => {
+                const t = (ax.title || '').trim().toLowerCase();
+                const id = (ax.id || '').trim().toLowerCase();
+                return t !== targetLower && id !== targetLower;
+            });
+            if (activeDossier.worldRules.axioms.length < before) removedLabel = `World Rule "${target}"`;
+        }
+
+        if (removedLabel) {
+            changelog.push(`Removed ${removedLabel}`);
+            evaluateStepUnlocks();
+            updateBlueprintDeck();
+            saveDraft();
+            toastr?.info(`Removed ${removedLabel} from Blueprint.`);
+        }
     });
 
     // Ruleset Switch segmented buttons & interactive cards

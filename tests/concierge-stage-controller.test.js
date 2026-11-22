@@ -780,4 +780,49 @@ const runnerSrc = fs.readFileSync(path.join(ROOT_DIR, 'concierge-runner.js'), 'u
 assert.ok(runnerSrc.includes("'Bestiary'"), 'CONC-022: standardSuffixes in launchPbtaCampaign must include Bestiary');
 assert.ok(!/if\s*\(\s*npcs\.length\s*\|\|\s*monsters\.length\s*\|\|\s*factions\.length\s*\)\s*\{[\s\S]*?injectDossierEntitiesIntoCampaignLorebooks/.test(runnerSrc), 'CONC-022: Lorebook distribution must not be gated behind npcs/monsters/factions non-empty check');
 
+console.log('14. Testing Phase 5 CONC-028 (Blueprint Deck One-Click Quick-Remove Buttons)...');
+resetConciergeState({ showGreeting: false });
+const quickRemoveDossier = getActiveConciergeDossier();
+quickRemoveDossier.npcs = [{ name: '[NAME: frontier magistrate, RESOLVED TO: Mouad]', role: 'Ally' }];
+quickRemoveDossier.monsters = [{ name: 'Salt-Scavenger Hound', harm: 3 }];
+quickRemoveDossier.maps = [{ site: 'Saline Sinkhole', kind: 'WILDERNESS', threat: 'HIGH' }];
+quickRemoveDossier.factions = [{ name: 'Vault City', standing: 'Neutral', agenda: 'Audit tariffs' }];
+quickRemoveDossier.worldRules = {
+    axioms: [{ id: 'rule_code_7g', title: 'Code 7-G', category: 'social', axiom: 'All encounters require Form V-22.' }],
+    customModule: null,
+};
+updateBlueprintDeck();
+
+// Verify rendered deck HTML includes .mhc-deck-remove-item-btn
+const npcListHtml = getOrCreateMockElement('#mhc_deck_npcs_list').childrenList.join('');
+const monListHtml = getOrCreateMockElement('#mhc_deck_monsters_list').childrenList.join('');
+const mapListHtml = getOrCreateMockElement('#mhc_deck_maps_list').childrenList.join('');
+const facListHtml = getOrCreateMockElement('#mhc_deck_factions_list').childrenList.join('');
+const wrListHtml = getOrCreateMockElement('#mhc_deck_world_rules_list').childrenList.join('');
+assert.ok(npcListHtml.includes('mhc-deck-remove-item-btn') && npcListHtml.includes('data-remove-kind="npc"'), 'CONC-028: NPC card must render quick-remove button');
+assert.ok(monListHtml.includes('mhc-deck-remove-item-btn') && monListHtml.includes('data-remove-kind="monster"'), 'CONC-028: Monster card must render quick-remove button');
+assert.ok(mapListHtml.includes('mhc-deck-remove-item-btn') && mapListHtml.includes('data-remove-kind="map"'), 'CONC-028: Map card must render quick-remove button');
+assert.ok(facListHtml.includes('mhc-deck-remove-item-btn') && facListHtml.includes('data-remove-kind="faction"'), 'CONC-028: Faction card must render quick-remove button');
+assert.ok(wrListHtml.includes('mhc-deck-remove-item-btn') && wrListHtml.includes('data-remove-kind="axiom"'), 'CONC-028: World Rule card must render quick-remove button');
+
+// Trigger clicks on each quick-remove button type via #mhc_concierge_modal delegation
+for (const [kind, target] of [
+    ['npc', 'Mouad'],
+    ['monster', 'Salt-Scavenger Hound'],
+    ['map', 'Saline Sinkhole'],
+    ['faction', 'Vault City'],
+    ['axiom', 'Code 7-G'],
+]) {
+    const btn = getOrCreateMockElement(`.mhc-deck-remove-item-btn-${kind}`);
+    btn.classes.add('mhc-deck-remove-item-btn');
+    btn.attr('data-remove-kind', kind);
+    btn.attr('data-remove-target', target);
+    modalEl.trigger('click', { stopPropagation: () => {} }, btn);
+}
+assert.strictEqual(getActiveConciergeDossier().npcs.length, 0, 'CONC-028: Clicking NPC quick-remove button must delete NPC (matching NameRAG clean name)');
+assert.strictEqual(getActiveConciergeDossier().monsters.length, 0, 'CONC-028: Clicking Monster quick-remove button must delete Monster');
+assert.strictEqual(getActiveConciergeDossier().maps.length, 0, 'CONC-028: Clicking Map quick-remove button must delete Map');
+assert.strictEqual(getActiveConciergeDossier().factions.length, 0, 'CONC-028: Clicking Faction quick-remove button must delete Faction');
+assert.strictEqual(getActiveConciergeDossier().worldRules.axioms.length, 0, 'CONC-028: Clicking Axiom quick-remove button must delete World Rule');
+
 console.log('--- ALL CONCIERGE 4-STEP UI CONTROLLER TESTS PASSED CLEANLY! ---');

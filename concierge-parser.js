@@ -1817,8 +1817,8 @@ export function applyDossierUpdates(text, dossier) {
             kind: ['DUNGEON', 'SETTLEMENT', 'INTERIOR', 'WILDERNESS'].includes(kindUpper) ? kindUpper : 'INTERIOR',
             threat: ['NONE', 'SAFE', 'LOW', 'MODERATE', 'HIGH', 'DANGEROUS', 'DEADLY'].includes(threatUpper) ? threatUpper : 'MODERATE',
             entrance: kv.entrance || 'Main Entrance',
-            prompt: kv.prompt || '',
-            briefDescription: kv.brief_description || kv.prompt || '',
+            prompt: kv.prompt || kv.sensory || '',
+            briefDescription: kv.brief_description || kv.prompt || kv.sensory || '',
             status: 'queued',
         };
 
@@ -1828,8 +1828,8 @@ export function applyDossierUpdates(text, dossier) {
             if (kv.kind) patch.kind = mapObj.kind;
             if (kv.threat || kv.danger) patch.threat = mapObj.threat;
             if (kv.entrance) patch.entrance = mapObj.entrance;
-            if (kv.prompt) { patch.prompt = mapObj.prompt; }
-            if (kv.brief_description || kv.prompt) patch.briefDescription = mapObj.briefDescription;
+            if (kv.prompt || kv.sensory) { patch.prompt = mapObj.prompt; }
+            if (kv.brief_description || kv.prompt || kv.sensory) patch.briefDescription = mapObj.briefDescription;
             updated.maps[existingIdx] = Object.assign({}, updated.maps[existingIdx], patch);
             changes.push(`Updated Location "${mapObj.site}" (${mapObj.kind})`);
         } else {
@@ -1909,8 +1909,9 @@ export function applyDossierUpdates(text, dossier) {
             updated.theKick.startingLocation = kv.starting_location;
             changes.push(`The Kick starting location: "${kv.starting_location}"`);
         }
-        if (kv.crisis && updated.theKick.crisis !== kv.crisis) {
-            updated.theKick.crisis = kv.crisis;
+        const kickCrisis = kv.crisis || kv.pressure;
+        if (kickCrisis && updated.theKick.crisis !== kickCrisis) {
+            updated.theKick.crisis = kickCrisis;
             changes.push(`The Kick crisis updated`);
         }
         if (kv.opening_prompt && updated.theKick.openingPrompt !== kv.opening_prompt) {

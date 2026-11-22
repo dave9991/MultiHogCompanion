@@ -1636,6 +1636,9 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
             xp: false,        // PbtA tracks XP: 0/5 directly inside [CHARACTER]
             time: true,
         },
+        npcRelationshipBars: config.relationships !== false,
+        gameSystems: [],
+        customFields: [],
     };
 
     const cleanTitleSlug = overrides.campaignTitle

@@ -2338,6 +2338,9 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
             xp: false,
             time: true,
         },
+        npcRelationshipBars: config.relationships !== false,
+        gameSystems: [],
+        customFields: [],
     };
 
     const cartridgeId = overrides.id || FAE_CARTRIDGE_ID;

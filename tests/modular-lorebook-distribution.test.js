@@ -13,6 +13,9 @@
  */
 
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
     extractCleanKeywords,
     buildFactionEntry,
@@ -27,7 +30,14 @@ import {
 import { buildPlayerCardBio } from '../concierge-pc-format.js';
 import { buildMonsterEntryContent } from '../concierge-npc-format.js';
 import { stripResolvedNameTokensInText, sanitizeDossierResolvedNameTokens } from '../namerag-hooks.js';
-import { registerAndActivateWorldInfoBook, prepareSanitizedDossierForFramework } from '../concierge-runner.js';
+import {
+    registerAndActivateWorldInfoBook,
+    prepareSanitizedDossierForFramework,
+    STANDARD_CAMPAIGN_BOOK_SUFFIXES,
+    resolveCanonicalCampaignPrefix,
+    stampCanonicalCampaignPrefix,
+    mergePreservingMappedLocationCore,
+} from '../concierge-runner.js';
 import { healAndNormalizeDossier } from '../concierge-parser.js';
 
 console.log('--- Running Modular Lorebook Distribution Test Suite ---');
@@ -273,5 +283,90 @@ assert.deepStrictEqual(callLog, [
     'cmd:/world state=on silent=true "Frosthaven_Bestiary"',
 ]);
 console.log('✓ HAND-003 Bestiary normalization and ST World Info registry/activation verified');
+
+// ── Test 9: HAND-004 Canonical Campaign Prefix Ordering & Early Stamping ────
+console.log('Testing HAND-004 canonical campaign prefix resolution and stamping...');
+const fakeRpgSettings = {
+    chatStates: {
+        'Game Master - 2026-11-21@12h00m': {
+            renamedCampaignPrefix: 'Frosthaven_Chronicles',
+        },
+    },
+};
+// Must prefer explicit renamedCampaignPrefix over raw timestamped chatId or .jsonl suffix
+assert.strictEqual(
+    resolveCanonicalCampaignPrefix('Game Master - 2026-11-21@12h00m.jsonl', {
+        adventureTitle: 'Frosthaven Chronicles',
+        rpgSettings: fakeRpgSettings,
+        stateMgr: {
+            getEffectiveRouterCampaignPrefix: () => 'Game_Master_2026_11_21_12h00m',
+            sanitizeCampaignPrefixString: (s) => s.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+        },
+    }),
+    'Frosthaven_Chronicles',
+    'resolveCanonicalCampaignPrefix must honor Step 0b renamedCampaignPrefix pin even when chatId ends in .jsonl',
+);
+// Fallback strips .jsonl and sanitizes cleanly
+assert.strictEqual(
+    resolveCanonicalCampaignPrefix('Echoes in the Dark.jsonl', { adventureTitle: 'Echoes in the Dark' }),
+    'Echoes_in_the_Dark',
+);
+
+const stampedSettings = { chatStates: {} };
+const stamped = stampCanonicalCampaignPrefix('chat_1', 'Frosthaven_Chronicles', stampedSettings);
+assert.strictEqual(stamped, 'Frosthaven_Chronicles');
+assert.strictEqual(stampedSettings.chatStates.chat_1.renamedCampaignPrefix, 'Frosthaven_Chronicles');
+for (const suf of STANDARD_CAMPAIGN_BOOK_SUFFIXES) {
+    assert.ok(
+        stampedSettings.chatStates.chat_1.campaignBooks.includes(`Frosthaven_Chronicles_${suf}`),
+        `campaignBooks must contain Frosthaven_Chronicles_${suf}`,
+    );
+}
+console.log('✓ HAND-004 canonical prefix resolution and early stamping verified');
+
+// ── Test 10: HAND-005 Map Architect Prompt/Brief Separation & CORE Merge ────
+console.log('Testing HAND-005 Map Architect interop and Location [CORE] preservation...');
+const existingMappedLoc = [
+    '[CORE]',
+    'Old brief description',
+    'Host Site: Frosthold',
+    'Host Brief: Command keep overlooking the harbor.',
+    '[/CORE]',
+    '[MAP]',
+    '{"version":3,"site":"Harbor Watch"}',
+    '[/MAP]',
+    '[Day 2] Guards doubled at the gate.',
+].join('\n');
+
+const refreshedLocCore = buildLocationEntry({
+    site: 'Harbor Watch',
+    kind: 'INTERIOR',
+    threat: 'HIGH',
+    entrance: 'Sea Gate',
+    briefDescription: 'Fortified watchtower overlooking the icy harbor.',
+}).core;
+
+const mergedLoc = mergePreservingMappedLocationCore(existingMappedLoc, refreshedLocCore);
+assert.ok(mergedLoc.includes('Fortified watchtower overlooking the icy harbor.'), 'Updated brief must replace old brief');
+assert.ok(mergedLoc.includes('Kind: INTERIOR'), 'Structured Kind must be included');
+assert.ok(mergedLoc.includes('Host Site: Frosthold'), 'Host Site metadata inside [CORE] must be preserved');
+assert.ok(mergedLoc.includes('Host Brief: Command keep overlooking the harbor.'), 'Host Brief metadata inside [CORE] must be preserved');
+assert.ok(mergedLoc.includes('[MAP]\n{"version":3,"site":"Harbor Watch"}\n[/MAP]'), '[MAP] attachment must remain untouched');
+assert.ok(mergedLoc.includes('[Day 2] Guards doubled at the gate.'), 'Post-[/CORE] chronicle text must remain untouched');
+
+const runnerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runnerCode = fs.readFileSync(path.join(runnerDir, 'concierge-runner.js'), 'utf8');
+const runMapBlock = runnerCode.match(/await mapArch\.runMapArchitect\(\{([\s\S]*?)\}\);/);
+assert.ok(runMapBlock, 'concierge-runner.js must call mapArch.runMapArchitect');
+assert.ok(runMapBlock[1].includes('threatContext'), 'Map Architect prompt must include threatContext');
+assert.ok(
+    !/brief_description:[^\n]*threatContext/.test(runMapBlock[1]),
+    'Map Architect brief_description must NOT include private threatContext generation directives',
+);
+assert.ok(
+    runMapBlock[1].includes('locationCore: buildLocationEntry(primaryMap).core'),
+    'Map Architect must receive structured locationCore from buildLocationEntry(primaryMap).core',
+);
+console.log('✓ HAND-005 Map Architect brief/prompt separation and Location [CORE] preservation verified');
 
 console.log('--- ALL MODULAR LOREBOOK DISTRIBUTION TESTS PASSED CLEANLY! ---');

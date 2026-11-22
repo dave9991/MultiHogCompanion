@@ -7,6 +7,13 @@ import {
     buildPbtACartridge,
     formatInitialPbtaMemo,
 } from '../pbta-ruleset.js';
+import { buildFaeCartridge } from '../fae-ruleset.js';
+import {
+    buildCompanionActiveCartridgeRecord,
+    registerCustomGameSystemInSettings,
+    syncSavedCartridgePayloadFromLiveSettings,
+} from '../concierge-runner.js';
+import { syncChatSetupCatalogs, snapshotChatSetup } from '../../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -130,5 +137,97 @@ assert.ok(runnerCode.includes('rpgSettings.customFields'), 'concierge-runner.js 
 assert.ok(runnerCode.includes('rpgSettings.chatStates[chatId].customFields'), 'concierge-runner.js must mirror customFields to chatStates');
 
 console.log('✓ concierge-runner.js contains all required Step 5 launch pipeline integrations');
+
+// ── 5. HAND-006 / HAND-007 / HAND-008 Cartridge & v3 Catalog Handoff ────────
+console.log('Testing HAND-006 CompanionActiveCartridge metadata preservation...');
+const customSpec = { label: 'Mycelial Punk', stats: ['Spore', 'Sinew', 'Craft', 'Bond', 'Echo'] };
+const activeRecord = buildCompanionActiveCartridgeRecord(
+    { id: 'pbta', label: 'PbtA Engine' },
+    'custom',
+    {
+        meta: { title: 'Fungal Spire', systemLabel: 'PbtA: Mycelial Punk', customGenreSpec: customSpec },
+        config: { harmMax: 6, relationships: false, playstyle: 'cyoa_5' },
+        protagonist: { name: 'Lichen', stats: { Spore: 2, Sinew: 1, Craft: 0, Bond: 1, Echo: -1 } },
+    },
+    {
+        title: 'Fungal Spire',
+        cartridgeOverrides: { knobs: { action_tempo: 'heroic' } },
+    },
+);
+assert.strictEqual(activeRecord.cartridgeId, 'pbta');
+assert.deepStrictEqual(activeRecord.customGenreSpec, customSpec, 'HAND-006: customGenreSpec must be preserved');
+assert.deepStrictEqual(activeRecord.stats, ['Spore', 'Sinew', 'Craft', 'Bond', 'Echo'], 'HAND-006: stats must be preserved');
+assert.deepStrictEqual(activeRecord.knobs, { action_tempo: 'heroic' }, 'HAND-006: knobs must be preserved');
+assert.strictEqual(activeRecord.config.harmMax, 6, 'HAND-006: config must be preserved');
+console.log('✓ HAND-006 CompanionActiveCartridge preservation verified');
+
+console.log('Testing HAND-007 v3 Custom Game System & Catalog registration...');
+const liveSettings = {
+    chatSetupCatalogVersion: 3,
+    blockOrder: ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'TIME'],
+    gameSystems: [],
+    customSyspromptLibrary: [],
+    customFields: [],
+    gameSystemDatabase: [],
+    syspromptSnippetDatabase: [],
+    trackerModuleDatabase: [],
+    syspromptModules: { CYOA_mode: true },
+    cyoaConfig: { useCustomPrompt: true, playstyle: 'cyoa_5' },
+    npcRelationshipBars: false,
+    chatStates: {},
+};
+const registeredOk = registerCustomGameSystemInSettings(
+    liveSettings,
+    {
+        tag: 'SYMBIONT_SYNC',
+        label: 'Symbiont Bio-Sync',
+        gmTag: 'symbiont_sync',
+        icon: '🧬',
+        drivers: ['time', 'gm_annotation'],
+        instruction: 'Track protagonist harmony with their bio-graft.',
+        sampleContent: '[SYMBIONT_SYNC]\nBio-Sync: 85%\n[/SYMBIONT_SYNC]',
+    },
+    { chatId: 'fungal_spire', syncChatSetupCatalogs },
+);
+assert.strictEqual(registeredOk, true);
+assert.strictEqual(liveSettings.gameSystems.length, 1);
+assert.strictEqual(liveSettings.gameSystems[0].driverTime, true, 'HAND-007: driverTime boolean flag must be set');
+assert.strictEqual(liveSettings.gameSystems[0].driverGmAnnotation, true, 'HAND-007: driverGmAnnotation boolean flag must be set');
+assert.strictEqual(liveSettings.gameSystems[0].driverStatedFact, false, 'HAND-007: driverStatedFact boolean flag must be false');
+assert.strictEqual(liveSettings.gameSystems[0].scope, 'chat', 'HAND-007: gameSystem scope must be chat');
+assert.strictEqual(liveSettings.gameSystems[0]._chatSetupMember, true, 'HAND-007: gameSystem must be chat setup member');
+assert.ok(
+    liveSettings.customSyspromptLibrary[0].content.startsWith('<symbiont_sync>\n')
+        && liveSettings.customSyspromptLibrary[0].content.endsWith('\n</symbiont_sync>'),
+    'HAND-007: GM section snippet must be wrapped in <tag>...</tag>',
+);
+assert.strictEqual(liveSettings.customSyspromptLibrary[0].tag, 'symbiont_sync');
+assert.strictEqual(liveSettings.gameSystemDatabase.length, 1, 'HAND-007: v3 gameSystemDatabase must be synced');
+assert.strictEqual(liveSettings.syspromptSnippetDatabase.length, 1, 'HAND-007: v3 syspromptSnippetDatabase must be synced');
+assert.strictEqual(liveSettings.trackerModuleDatabase.length, 1, 'HAND-007: v3 trackerModuleDatabase must be synced');
+const snapshot = snapshotChatSetup(liveSettings);
+assert.strictEqual(snapshot.gameSystemStates[liveSettings.gameSystems[0].id], true, 'HAND-007: upstream snapshotChatSetup must capture enabled Game System state');
+assert.strictEqual(snapshot.customFieldStates.SYMBIONT_SYNC, true, 'HAND-007: upstream snapshotChatSetup must capture enabled Custom Field state');
+console.log('✓ HAND-007 v3 Custom Game System & catalog registration verified');
+
+console.log('Testing HAND-008 gameCartridges payload completeness & post-Step-5 refresh...');
+const pbtaBaseCart = buildPbtACartridge('fantasy', { config: { relationships: false } });
+assert.strictEqual(pbtaBaseCart.payload.npcRelationshipBars, false, 'HAND-008: PbtA cartridge payload must include npcRelationshipBars');
+assert.deepStrictEqual(pbtaBaseCart.payload.gameSystems, [], 'HAND-008: PbtA cartridge payload must initialize gameSystems');
+assert.deepStrictEqual(pbtaBaseCart.payload.customFields, [], 'HAND-008: PbtA cartridge payload must initialize customFields');
+
+const faeBaseCart = buildFaeCartridge('cosmic_horror', { config: { relationships: true } });
+assert.strictEqual(faeBaseCart.payload.npcRelationshipBars, true, 'HAND-008: FAE cartridge payload must include npcRelationshipBars');
+assert.deepStrictEqual(faeBaseCart.payload.gameSystems, [], 'HAND-008: FAE cartridge payload must initialize gameSystems');
+assert.deepStrictEqual(faeBaseCart.payload.customFields, [], 'HAND-008: FAE cartridge payload must initialize customFields');
+
+pbtaBaseCart.id = 'pbta_fungal_spire';
+liveSettings.gameCartridges = [pbtaBaseCart];
+const refreshed = syncSavedCartridgePayloadFromLiveSettings(liveSettings, 'pbta_fungal_spire');
+assert.strictEqual(refreshed, true, 'HAND-008: saved campaign cartridge must refresh from post-Step-5 live settings');
+assert.strictEqual(liveSettings.gameCartridges[0].payload.gameSystems.length, 1, 'HAND-008: saved cartridge must carry Step 5 Game System');
+assert.strictEqual(liveSettings.gameCartridges[0].payload.customFields.length, 1, 'HAND-008: saved cartridge must carry Step 5 Custom Field');
+assert.ok(liveSettings.gameCartridges[0].payload.blockOrder.includes('SYMBIONT_SYNC'), 'HAND-008: saved cartridge blockOrder must include SYMBIONT_SYNC');
+console.log('✓ HAND-008 gameCartridges payload completeness and post-Step-5 refresh verified');
 
 console.log('--- ALL CONCIERGE WORLD RULES LAUNCH PIPELINE TESTS PASSED CLEANLY! ---');

@@ -28,6 +28,7 @@ import {
 } from './concierge-npc-format.js';
 import {
     buildDossierWorldInfoEntry,
+    buildLocationEntry,
     prepareCampaignLorebookDistributions,
     buildMapThreatBrief,
     buildWorldSkeletonEntries,
@@ -36,13 +37,379 @@ import {
     loadMainPcSectionNames,
     buildPlayerCardBio,
 } from './concierge-pc-format.js';
-import { normalizeGameSystemDrivers } from './game-system-bridge.js';
+import { normalizeGameSystemDrivers, toWizardDriverFlags } from './game-system-bridge.js';
 import { setPartitionDossier } from './pbta-ruleset-persistence.js';
 import {
     parseResolvedNameToken,
     resolveDossierNamePlaceholders,
     sanitizeDossierResolvedNameTokens,
 } from './namerag-hooks.js';
+
+export const STANDARD_CAMPAIGN_BOOK_SUFFIXES = Object.freeze([
+    'NPCs', 'Bestiary', 'Locations', 'Quests', 'Factions', 'Rules', 'Skeleton', 'Canon', 'World',
+]);
+
+/**
+ * Sanitizes a raw campaign/chat identifier into a safe lorebook prefix,
+ * matching upstream `sanitizeCampaignPrefixString` rules.
+ *
+ * @param {string} raw
+ * @param {any} [stateMgr=null]
+ * @returns {string}
+ */
+export function sanitizePrefixFallback(raw, stateMgr = null) {
+    if (!raw) return '';
+    if (typeof stateMgr?.sanitizeCampaignPrefixString === 'function') {
+        return stateMgr.sanitizeCampaignPrefixString(String(raw));
+    }
+    return String(raw).replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * Resolves the canonical campaign prefix for a chat, honoring any Step 0b
+ * `renamedCampaignPrefix` pin before falling back to upstream router prefix or sanitized chatId/title.
+ *
+ * @param {string} chatId
+ * @param {{ adventureTitle?: string, rpgSettings?: any, stateMgr?: any }} [options={}]
+ * @returns {string}
+ */
+export function resolveCanonicalCampaignPrefix(chatId, {
+    adventureTitle = '',
+    rpgSettings = null,
+    stateMgr = null,
+} = {}) {
+    const rawId = String(chatId || '').trim();
+    const cleanChatId = rawId.replace(/\.jsonl$/i, '').trim();
+    const existingPin = rpgSettings?.chatStates?.[rawId]?.renamedCampaignPrefix
+        || rpgSettings?.chatStates?.[cleanChatId]?.renamedCampaignPrefix
+        || (cleanChatId ? rpgSettings?.chatStates?.[`${cleanChatId}.jsonl`]?.renamedCampaignPrefix : '')
+        || '';
+    if (existingPin) {
+        return sanitizePrefixFallback(existingPin, stateMgr);
+    }
+    if (typeof stateMgr?.getEffectiveRouterCampaignPrefix === 'function') {
+        const eff = stateMgr.getEffectiveRouterCampaignPrefix(cleanChatId || rawId);
+        if (eff) return sanitizePrefixFallback(eff, stateMgr);
+    }
+    return sanitizePrefixFallback(cleanChatId || adventureTitle, stateMgr);
+}
+
+/**
+ * Stamps the canonical campaign prefix and standard campaign lorebook names onto the chat's
+ * MultiHog `chatStates` partition so Steps 3, 4, 4b, 5, and upstream router passes share one prefix.
+ *
+ * @param {string} chatId
+ * @param {string} prefix
+ * @param {any} rpgSettings
+ * @returns {string}
+ */
+export function stampCanonicalCampaignPrefix(chatId, prefix, rpgSettings) {
+    const cleanPrefix = sanitizePrefixFallback(prefix);
+    if (!chatId || !cleanPrefix || !rpgSettings) return cleanPrefix || '';
+    rpgSettings.chatStates = rpgSettings.chatStates || {};
+    rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
+    rpgSettings.chatStates[chatId].renamedCampaignPrefix = cleanPrefix;
+
+    const campaignBooksSet = new Set(rpgSettings.chatStates[chatId].campaignBooks || []);
+    for (const suf of STANDARD_CAMPAIGN_BOOK_SUFFIXES) {
+        campaignBooksSet.add(`${cleanPrefix}_${suf}`);
+    }
+    rpgSettings.chatStates[chatId].campaignBooks = [...campaignBooksSet];
+    return cleanPrefix;
+}
+
+/**
+ * Replaces the `[CORE]...[/CORE]` block inside an existing Location/Entity entry while
+ * preserving any upstream Map Architect `Host Site:` / `Host Brief:` lines, `[MAP]...[/MAP]` block,
+ * and chronicle text appended below `[/CORE]`.
+ *
+ * @param {string} existingContent
+ * @param {string} incomingCore
+ * @returns {string}
+ */
+export function mergePreservingMappedLocationCore(existingContent, incomingCore) {
+    const source = String(existingContent || '');
+    const nextCoreRaw = String(incomingCore || '').trim();
+    if (!nextCoreRaw) return source;
+
+    const existingCoreMatch = source.match(/\[CORE\]([\s\S]*?)\[\/CORE\]/i);
+    if (!existingCoreMatch) return source;
+
+    const hostLines = String(existingCoreMatch[1] || '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => /^Host Site:/i.test(line) || /^Host Brief:/i.test(line));
+
+    let mergedCore = nextCoreRaw;
+    if (hostLines.length > 0) {
+        const innerMatch = nextCoreRaw.match(/^\[CORE\]([\s\S]*?)\[\/CORE\]$/i);
+        const innerText = (innerMatch ? innerMatch[1] : nextCoreRaw).trim();
+        const existingLower = innerText.toLowerCase();
+        const missingHostLines = hostLines.filter(hl => !existingLower.includes(hl.toLowerCase()));
+        const combinedInner = [innerText, ...missingHostLines].filter(Boolean).join('\n');
+        mergedCore = `[CORE]\n${combinedInner}\n[/CORE]`;
+    }
+
+    return source.replace(/\[CORE\][\s\S]*?\[\/CORE\]/i, () => mergedCore);
+}
+
+/**
+ * Wraps Game System GM instructions in exactly one `<tag>...</tag>` wrapper,
+ * matching upstream `normalizeGmContent` (`src/state/sysprompt-content.js`).
+ *
+ * @param {string} tag
+ * @param {string} content
+ * @returns {string}
+ */
+export function wrapGameSystemGmContent(tag, content) {
+    const cleanTag = String(tag || '').trim();
+    let body = String(content || '').trim();
+    if (!cleanTag || !body) return body;
+    const escapedTag = cleanTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tagToken = `<\\s*\\/?\\s*${escapedTag}(?:\\s+[^>]*)?\\s*>`;
+    body = body.replace(new RegExp(`^[\\t ]*${tagToken}[\\t ]*(?:\\r?\\n|$)`, 'gim'), '');
+    body = body.replace(new RegExp(tagToken, 'gi'), '');
+    body = body.trim();
+    return `<${cleanTag}>\n${body}\n</${cleanTag}>`;
+}
+
+/**
+ * Builds the complete `CompanionActiveCartridge` metadata record for a chat,
+ * preserving custom genre specs, stats/pools, knobs, and config across Step 5
+ * and Living-World Sync.
+ *
+ * @param {object} adapter
+ * @param {string} systemKey
+ * @param {object} dossier
+ * @param {{ title?: string, cartridgeOverrides?: object }} [options={}]
+ * @returns {object}
+ */
+export function buildCompanionActiveCartridgeRecord(
+    adapter,
+    systemKey,
+    dossier,
+    { title = null, cartridgeOverrides = null } = {},
+) {
+    const customGenreSpec = dossier?.meta?.customGenreSpec || cartridgeOverrides?.customGenreSpec || null;
+    const statsList = Object.keys(dossier?.protagonist?.stats || {});
+    const stats = statsList.length >= 3
+        ? statsList
+        : (Array.isArray(cartridgeOverrides?.stats) && cartridgeOverrides.stats.length >= 3 ? [...cartridgeOverrides.stats] : null);
+    const pools = (dossier?.protagonist?.pools && Object.keys(dossier.protagonist.pools).length > 0)
+        ? dossier.protagonist.pools
+        : (cartridgeOverrides?.pools && Object.keys(cartridgeOverrides.pools).length > 0 ? cartridgeOverrides.pools : null);
+    const knobs = cartridgeOverrides?.knobs || dossier?.config?.knobs || null;
+    const config = dossier?.config || cartridgeOverrides?.config || null;
+
+    return {
+        cartridgeId: adapter?.id || 'pbta',
+        genre: systemKey || 'fantasy',
+        systemLabel: dossier?.meta?.systemLabel || adapter?.label || '',
+        title: title || dossier?.meta?.title || null,
+        ...(customGenreSpec ? { customGenreSpec: JSON.parse(JSON.stringify(customGenreSpec)) } : {}),
+        ...(stats ? { stats: [...stats] } : {}),
+        ...(pools ? { pools: JSON.parse(JSON.stringify(pools)) } : {}),
+        ...(knobs ? { knobs: JSON.parse(JSON.stringify(knobs)) } : {}),
+        ...(config ? { config: JSON.parse(JSON.stringify(config)) } : {}),
+        dossier: JSON.parse(JSON.stringify(dossier || {})),
+    };
+}
+
+/**
+ * Registers or updates a Concierge Custom HUD Tracker / Game System in MultiHog settings
+ * using upstream's v3 catalog schema (`gameSystems`, `customSyspromptLibrary`, `customFields`,
+ * boolean driver flags, `<tag>...</tag>` wrapper, `scope: 'chat'`, and global v3 catalogs).
+ *
+ * @param {object} rpgSettings
+ * @param {object} customMod
+ * @param {{ chatId?: string|null, syncChatSetupCatalogs?: Function|null }} [options={}]
+ * @returns {boolean}
+ */
+export function registerCustomGameSystemInSettings(
+    rpgSettings,
+    customMod,
+    { chatId = null, syncChatSetupCatalogs = null } = {},
+) {
+    if (!rpgSettings || !customMod || !(customMod.tag || customMod.fieldKey || customMod.label)) {
+        return false;
+    }
+
+    const customTag = String(customMod.tag || customMod.fieldKey || customMod.label)
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .toUpperCase();
+    const gmTag = String(customMod.gmTag || customTag)
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .toLowerCase();
+    const driversList = normalizeGameSystemDrivers(customMod.drivers || customMod);
+    const driverFlags = toWizardDriverFlags(customMod.drivers || customMod);
+    const label = customMod.label || customMod.tag || customMod.fieldKey || customTag;
+    const instruction = String(customMod.instruction || customMod.gmInstruction || '').trim();
+    const sampleTemplate = String(customMod.sampleContent || customMod.sample || customMod.trackerContent || '').trim();
+
+    rpgSettings.gameSystems = rpgSettings.gameSystems || [];
+    const existingGsIdx = rpgSettings.gameSystems.findIndex(
+        gs => gs?.customFieldTag?.toUpperCase() === customTag || (customMod.id && gs?.id === customMod.id),
+    );
+    const existingGs = existingGsIdx >= 0 ? rpgSettings.gameSystems[existingGsIdx] : null;
+    const systemId = customMod.id || existingGs?.id || `gs_${customTag.toLowerCase()}`;
+    const syspromptId = instruction
+        ? (customMod.syspromptLibraryId || existingGs?.syspromptLibraryId || `sys_${systemId}`)
+        : null;
+
+    // 1. Register in rpgSettings.gameSystems (upstream v3 schema with boolean drivers & chat scope)
+    const gsDef = {
+        id: systemId,
+        name: label,
+        icon: customMod.icon || '📟',
+        description: instruction,
+        author: 'Concierge',
+        version: '1.0.0',
+        enabled: true,
+        scope: 'chat',
+        _chatSetupMember: true,
+        needsTracker: Boolean(sampleTemplate),
+        driverTime: driverFlags.driverTime,
+        driverGmAnnotation: driverFlags.driverGmAnnotation,
+        driverStatedFact: driverFlags.driverStatedFact,
+        drivers: driversList,
+        effectOwner: customMod.effectOwner || 'world',
+        customFieldTag: customTag,
+        syspromptLibraryId: syspromptId,
+        isBuiltin: false,
+        createdAt: existingGs?.createdAt || customMod.createdAt || Date.now(),
+    };
+    if (existingGsIdx >= 0) {
+        rpgSettings.gameSystems[existingGsIdx] = gsDef;
+    } else {
+        rpgSettings.gameSystems.push(gsDef);
+    }
+
+    // 2. Register in rpgSettings.customSyspromptLibrary with <tag>...</tag> wrapper
+    if (instruction && syspromptId) {
+        rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary || [];
+        const existingSysIdx = rpgSettings.customSyspromptLibrary.findIndex(sp => sp?.id === syspromptId);
+        const sysDef = {
+            id: syspromptId,
+            tag: gmTag,
+            name: `${label} (Game System)`,
+            description: `Game System: ${label}`,
+            content: wrapGameSystemGmContent(gmTag, instruction),
+            icon: 'fa-hat-wizard',
+            category: 'Game Systems',
+            tags: ['game-system', customTag.toLowerCase()],
+            enabled: true,
+            origin: 'wizard',
+            scope: 'chat',
+            _chatSetupMember: true,
+        };
+        if (existingSysIdx >= 0) {
+            rpgSettings.customSyspromptLibrary[existingSysIdx] = sysDef;
+        } else {
+            rpgSettings.customSyspromptLibrary.push(sysDef);
+        }
+    }
+
+    // 3. Register in rpgSettings.customFields
+    rpgSettings.customFields = rpgSettings.customFields || [];
+    const existingFieldIdx = rpgSettings.customFields.findIndex(f => f?.tag?.toUpperCase() === customTag);
+    const fieldDef = {
+        tag: customTag,
+        label,
+        icon: customMod.icon || '📟',
+        prompt: instruction,
+        template: sampleTemplate,
+        enabled: true,
+        origin: 'wizard',
+        scope: 'chat',
+        _chatSetupMember: true,
+    };
+    if (existingFieldIdx >= 0) {
+        rpgSettings.customFields[existingFieldIdx] = fieldDef;
+    } else {
+        rpgSettings.customFields.push(fieldDef);
+    }
+
+    if (Array.isArray(rpgSettings.blockOrder) && !rpgSettings.blockOrder.includes(customTag)) {
+        rpgSettings.blockOrder.push(customTag);
+    }
+
+    // 4. Sync into upstream global v3 catalogs (gameSystemDatabase, syspromptSnippetDatabase, trackerModuleDatabase)
+    if (typeof syncChatSetupCatalogs === 'function') {
+        if (rpgSettings.chatSetupCatalogVersion === undefined) {
+            rpgSettings.chatSetupCatalogVersion = 3;
+        }
+        syncChatSetupCatalogs(rpgSettings);
+    } else {
+        const upsertCatalogDef = (dbKey, defObj, keyFn) => {
+            rpgSettings[dbKey] = rpgSettings[dbKey] || [];
+            const cleanDef = { ...defObj };
+            delete cleanDef.enabled;
+            delete cleanDef._chatSetupMember;
+            const targetKey = keyFn(cleanDef);
+            const idx = rpgSettings[dbKey].findIndex(item => keyFn(item) === targetKey);
+            if (idx >= 0) rpgSettings[dbKey][idx] = { ...rpgSettings[dbKey][idx], ...cleanDef };
+            else rpgSettings[dbKey].push(cleanDef);
+        };
+        upsertCatalogDef('gameSystemDatabase', gsDef, x => String(x?.id || '').trim());
+        upsertCatalogDef('trackerModuleDatabase', fieldDef, x => String(x?.tag || '').trim().toUpperCase());
+        if (instruction && syspromptId) {
+            const sysItem = rpgSettings.customSyspromptLibrary.find(sp => sp?.id === syspromptId);
+            if (sysItem) upsertCatalogDef('syspromptSnippetDatabase', sysItem, x => String(x?.id || '').trim());
+        }
+    }
+
+    // 5. Retain chatStates[chatId].customFields mirror for launch/sync consumers
+    if (chatId) {
+        rpgSettings.chatStates = rpgSettings.chatStates || {};
+        rpgSettings.chatStates[chatId] = rpgSettings.chatStates[chatId] || {};
+        rpgSettings.chatStates[chatId].customFields = [...rpgSettings.customFields];
+    }
+
+    return true;
+}
+
+/**
+ * Refreshes the campaign's saved entry inside `rpgSettings.gameCartridges` after
+ * Step 5 finalizes CYOA toggles, `npcRelationshipBars`, `blockOrder`, and custom Game Systems.
+ *
+ * @param {object} rpgSettings
+ * @param {string|null} cartridgeId
+ * @returns {boolean}
+ */
+export function syncSavedCartridgePayloadFromLiveSettings(rpgSettings, cartridgeId) {
+    if (!rpgSettings || !cartridgeId || !Array.isArray(rpgSettings.gameCartridges)) return false;
+    const cartridge = rpgSettings.gameCartridges.find(c => c && c.id === cartridgeId);
+    if (!cartridge) return false;
+    cartridge.payload = cartridge.payload || {};
+
+    const clone = (val) => JSON.parse(JSON.stringify(val));
+    if (Array.isArray(rpgSettings.customSyspromptLibrary)) {
+        cartridge.payload.customSyspromptLibrary = clone(rpgSettings.customSyspromptLibrary);
+    }
+    if (rpgSettings.syspromptModules && typeof rpgSettings.syspromptModules === 'object') {
+        cartridge.payload.syspromptModules = clone(rpgSettings.syspromptModules);
+    }
+    if (Array.isArray(rpgSettings.syspromptSectionOrder)) {
+        cartridge.payload.syspromptSectionOrder = clone(rpgSettings.syspromptSectionOrder);
+    }
+    if (Array.isArray(rpgSettings.blockOrder)) {
+        cartridge.payload.blockOrder = clone(rpgSettings.blockOrder);
+    }
+    if (rpgSettings.cyoaConfig && typeof rpgSettings.cyoaConfig === 'object') {
+        cartridge.payload.cyoaConfig = clone(rpgSettings.cyoaConfig);
+    }
+    if (Array.isArray(rpgSettings.gameSystems)) {
+        cartridge.payload.gameSystems = clone(rpgSettings.gameSystems);
+    }
+    if (Array.isArray(rpgSettings.customFields)) {
+        cartridge.payload.customFields = clone(rpgSettings.customFields);
+    }
+    if (typeof rpgSettings.npcRelationshipBars === 'boolean') {
+        cartridge.payload.npcRelationshipBars = rpgSettings.npcRelationshipBars;
+    }
+    cartridge.updatedAt = Date.now();
+    return true;
+}
 
 /**
  * Registers a newly written or updated World Info book with both Upstream MultiHog's router cache/list
@@ -271,15 +638,21 @@ async function upsertWorldInfoBook(bookName, items = []) {
                     uid: existingEntry.uid,
                     fullId: `${bookName}::${existingEntry.uid}`,
                 };
-                // Re-launch / edited dossier: refresh only the protected [CORE] identity block and
-                // leave any chronicle text the Router has since appended untouched.
+                // Re-launch / edited dossier: refresh only the protected [CORE] identity block,
+                // preserving Map Architect host lines, [MAP] section, and live-play chronicle text.
                 const current = String(existingEntry.content || '');
                 if (/\[CORE\][\s\S]*?\[\/CORE\]/i.test(current)) {
-                    const next = current.replace(/\[CORE\][\s\S]*?\[\/CORE\]/i, () => item.core);
+                    const next = mergePreservingMappedLocationCore(current, item.core);
                     if (next !== current) {
                         existingEntry.content = next;
                         modified = true;
                     }
+                }
+                const isMappedRoot = /\[MAP\][\s\S]*?\[\/MAP\]/i.test(String(existingEntry.content || ''))
+                    || Boolean(existingEntry.extensions?.dungeonMap);
+                if (isMappedRoot && existingEntry.disable !== true) {
+                    existingEntry.disable = true;
+                    modified = true;
                 }
                 continue;
             }
@@ -339,13 +712,12 @@ async function upsertWorldInfoBook(bookName, items = []) {
  * - {prefix}_Rules     (World Axioms & Custom Trackers)
  * @returns {Promise<Record<string, { bookName: string, uid: number|string, fullId: string }>>}
  */
-async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames = null) {
+async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames = null, explicitPrefix = '') {
     if (!dossier || typeof dossier !== 'object') return {};
     try {
         const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
-        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
-            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
-            : (chatId || '');
+        const mainSettings = (typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null) || null;
+        const prefix = explicitPrefix || resolveCanonicalCampaignPrefix(chatId, { rpgSettings: mainSettings, stateMgr });
 
         const npcBookName = prefix ? `${prefix}_NPCs` : 'NPCs';
         const bestiaryBookName = prefix ? `${prefix}_Bestiary` : 'Bestiary';
@@ -378,15 +750,14 @@ async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, secti
  *
  * @param {string} chatId
  */
-async function injectCanonBook(chatId) {
+async function injectCanonBook(chatId, explicitPrefix = '') {
     try {
         if (!getStagedCanonEntries().length) return null;
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        const mainSettings = (typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null) || null;
         const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
-        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
-            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
-            : (chatId || '');
+        const prefix = explicitPrefix || resolveCanonicalCampaignPrefix(chatId, { rpgSettings: mainSettings, stateMgr });
         const res = await writeStagedCanon(prefix, {
             afterSave: async (bookName, bookData) => {
                 await registerAndActivateWorldInfoBook(bookName, bookData, { ctx, router, activateOnChat: true });
@@ -411,17 +782,16 @@ async function injectCanonBook(chatId) {
  * @param {string} chatId
  * @param {object} dossier
  */
-async function injectWorldSkeleton(chatId, dossier) {
+async function injectWorldSkeleton(chatId, dossier, explicitPrefix = '') {
     if (!dossier || typeof dossier !== 'object') return;
     const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
     if (!ctx) return;
 
     try {
         const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        const mainSettings = (typeof stateMgr.getSettings === 'function' ? stateMgr.getSettings() : null) || null;
         const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
-        const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
-            ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
-            : (chatId || '');
+        const prefix = explicitPrefix || resolveCanonicalCampaignPrefix(chatId, { rpgSettings: mainSettings, stateMgr });
         const skeletonBookName = prefix ? `${prefix}_Skeleton` : 'World_Skeleton';
 
         const skeletonEntries = buildWorldSkeletonEntries(dossier);
@@ -556,17 +926,25 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 delete rpgEarly.chatStates[wipeOldTitle.replace(/\s+/g, '_')];
             }
 
-            // Also clean out previous Campaign_${wipeOldTitle} world info book
+            // Also clean out previous Campaign_${wipeOldTitle} world info book (raw and sanitized forms)
             try {
                 const getHeaders = ctx?.getRequestHeaders || (() => ({ 'Content-Type': 'application/json' }));
-                await fetch('/api/worldinfo/delete', {
-                    method: 'POST',
-                    headers: getHeaders(),
-                    body: JSON.stringify({ name: `Campaign_${wipeOldTitle}` }),
-                });
-                const wiMod = await import('../../../world-info.js');
-                if (wiMod?.worldInfoCache && typeof wiMod.worldInfoCache.delete === 'function') {
-                    wiMod.worldInfoCache.delete(`Campaign_${wipeOldTitle}`);
+                const oldClean = String(wipeOldTitle).replace(/\.jsonl$/i, '').trim();
+                const oldSanitized = sanitizePrefixFallback(oldClean);
+                const legacyBookNames = [...new Set([
+                    oldClean ? `Campaign_${oldClean}` : '',
+                    oldSanitized ? `Campaign_${oldSanitized}` : '',
+                ].filter(Boolean))];
+                const wiMod = await import('../../../world-info.js').catch(() => null);
+                for (const oldBook of legacyBookNames) {
+                    await fetch('/api/worldinfo/delete', {
+                        method: 'POST',
+                        headers: getHeaders(),
+                        body: JSON.stringify({ name: oldBook }),
+                    });
+                    if (wiMod?.worldInfoCache && typeof wiMod.worldInfoCache.delete === 'function') {
+                        wiMod.worldInfoCache.delete(oldBook);
+                    }
                 }
             } catch (_) {}
         }
@@ -582,6 +960,22 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
             fallbackLabel,
             wipeOldTitle,
         });
+
+        // Resolve & stamp canonical campaign prefix BEFORE Step 3 (Map Architect) and Step 4 lorebooks
+        const effectiveCtxEarly = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
+        const rpgEarly = effectiveCtxEarly?.extensionSettings?.rpg_tracker;
+        let stateMgrEarly = null;
+        try {
+            stateMgrEarly = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        } catch (_) {}
+        const campaignPrefix = resolveCanonicalCampaignPrefix(chatId, {
+            adventureTitle,
+            rpgSettings: rpgEarly,
+            stateMgr: stateMgrEarly,
+        });
+        if (chatId && campaignPrefix && rpgEarly) {
+            stampCanonicalCampaignPrefix(chatId, campaignPrefix, rpgEarly);
+        }
         // ── 1. Apply Ruleset Cartridge with Dynamic Overrides ───────────────────
         onProgress(`🎲 Installing ${adapter.label} (${adapter.diceEngine})...`, 15);
         const statsList = Object.keys(dossier.protagonist?.stats || {});
@@ -612,7 +1006,6 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                 ...(dossier.config?.knobs || {}),
                 action_tempo: dossier.config?.actionTempo || dossier.config?.knobs?.action_tempo || 'gritty_default',
             },
-            systemLabel: dossier.meta?.systemLabel || '',
             customGenreSpec: dossier.meta?.customGenreSpec || null,
             dossier,
         };
@@ -622,8 +1015,6 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
         }
 
         // Apply native MultiHog CYOA toggle based on playstyle dial
-        const effectiveCtxEarly = ctx || (typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null);
-        const rpgEarly = effectiveCtxEarly?.extensionSettings?.rpg_tracker;
         const isFreeform = (dossier.config?.playstyle === 'freeform');
         if (rpgEarly) {
             rpgEarly.syspromptModules = rpgEarly.syspromptModules || {};
@@ -731,10 +1122,11 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                             let mapLorebookNames = [];
                             if (monsters.length > 0) {
                                 try {
-                                    const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
-                                    const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
-                                        ? stateMgr.getEffectiveRouterCampaignPrefix(chatId || '')
-                                        : (chatId || '');
+                                    const prefix = campaignPrefix || resolveCanonicalCampaignPrefix(chatId, {
+                                        adventureTitle,
+                                        rpgSettings: rpgEarly,
+                                        stateMgr: stateMgrEarly,
+                                    });
                                     const bestiaryBookName = prefix ? `${prefix}_Bestiary` : 'Bestiary';
                                     const preDist = prepareCampaignLorebookDistributions(dossier, sectionNamesForLaunch);
                                     if (preDist.bestiary?.length) {
@@ -759,7 +1151,8 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                                 scale: 'SMALL',
                                 threat: primaryMap.threat || 'MODERATE',
                                 prompt: `${primaryMap.prompt || primaryMap.briefDescription}${archContext}${threatContext}`,
-                                brief_description: `${primaryMap.briefDescription || primaryMap.prompt}${archContext}${threatContext}`,
+                                brief_description: `${primaryMap.briefDescription || primaryMap.prompt || ''}${archContext}`.trim(),
+                                locationCore: buildLocationEntry(primaryMap).core,
                                 ...(mapLorebookNames.length ? { lorebookNames: mapLorebookNames } : {}),
                             });
                         } catch (mapErr) {
@@ -803,18 +1196,18 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
 
         // Always distribute across MultiHog's native campaign lorebooks (_NPCs, _Bestiary, _Factions, _Locations, _Quests, _Rules)
         try {
-            npcMapping = await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
+            npcMapping = await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames, campaignPrefix);
         } catch (loreErr) {
             console.warn('[PbtA Concierge] Campaign lorebook injection skipped:', loreErr);
         }
 
         // Archivist mode: full imported lore → {prefix}_Canon (vector-matchable)
-        await injectCanonBook(chatId);
+        await injectCanonBook(chatId, campaignPrefix);
 
         // ── 4b. Seed Day 0 World Skeleton ({prefix}_Skeleton) for World Progression ──
         onProgress('🌍 Seeding Day 0 World Skeleton for macro progression...', 78);
         try {
-            await injectWorldSkeleton(chatId, dossier);
+            await injectWorldSkeleton(chatId, dossier, campaignPrefix);
         } catch (skelErr) {
             console.warn('[PbtA Concierge] World Skeleton injection skipped:', skelErr);
         }
@@ -918,96 +1311,30 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
                         rpgSettings.chatStates[chatId].campaignArtStyle = dossier.config.artStyle;
                     }
 
-                    // Derive campaign prefix and register partition lorebooks for upstream MultiHog purge tracking
-                    const cleanPrefix = (chatId || '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-                    rpgSettings.chatStates[chatId].renamedCampaignPrefix = cleanPrefix;
+                    // Preserve canonical campaign prefix and register partition lorebooks for upstream MultiHog purge tracking
+                    stampCanonicalCampaignPrefix(
+                        chatId,
+                        campaignPrefix || resolveCanonicalCampaignPrefix(chatId, {
+                            adventureTitle,
+                            rpgSettings,
+                            stateMgr: stateMgrEarly,
+                        }),
+                        rpgSettings,
+                    );
 
-                    const standardSuffixes = ['NPCs', 'Bestiary', 'Locations', 'Quests', 'Factions', 'Rules', 'Skeleton', 'Canon', 'World'];
-                    const campaignBooksSet = new Set(rpgSettings.chatStates[chatId].campaignBooks || []);
-                    standardSuffixes.forEach(suf => campaignBooksSet.add(`${cleanPrefix}_${suf}`));
-                    rpgSettings.chatStates[chatId].campaignBooks = [...campaignBooksSet];
-
-                    // Register Custom HUD Tracker / Game System in MultiHog Settings if defined
-                    const customMod = dossier.worldRules?.customModule;
-                    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
-                        const customTag = (customMod.tag || customMod.fieldKey || customMod.label)
-                            .replace(/[^a-zA-Z0-9_]/g, '_')
-                            .toUpperCase();
-                        const driversList = normalizeGameSystemDrivers(customMod.drivers);
-                        const systemId = customMod.id || `gs_${Date.now()}_${customTag.toLowerCase()}`;
-                        const syspromptId = customMod.syspromptLibraryId || `sys_${systemId}`;
-                        const label = customMod.label || customMod.tag || customMod.fieldKey || customTag;
-                        const instruction = customMod.instruction || customMod.gmInstruction || '';
-                        const sampleTemplate = customMod.sampleContent || customMod.sample || customMod.trackerContent || '';
-
-                        // 1. Register in rpgSettings.gameSystems
-                        rpgSettings.gameSystems = rpgSettings.gameSystems || [];
-                        const existingGsIdx = rpgSettings.gameSystems.findIndex(gs => gs.customFieldTag?.toUpperCase() === customTag || gs.id === systemId);
-                        const gsDef = {
-                            id: systemId,
-                            name: label,
-                            description: instruction,
-                            author: 'Concierge',
-                            version: '1.0.0',
-                            enabled: true,
-                            needsTracker: Boolean(sampleTemplate),
-                            customFieldTag: customTag,
-                            syspromptLibraryId: syspromptId,
-                            effectOwner: customMod.effectOwner || 'world',
-                            drivers: driversList,
-                            isBuiltin: false,
-                        };
-                        if (existingGsIdx >= 0) {
-                            rpgSettings.gameSystems[existingGsIdx] = gsDef;
-                        } else {
-                            rpgSettings.gameSystems.push(gsDef);
+                    // Register Custom HUD Tracker / Game System in MultiHog v3 catalogs if defined
+                    let syncChatSetupCatalogsFn = null;
+                    try {
+                        const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
+                        if (typeof setupMod.syncChatSetupCatalogs === 'function') {
+                            syncChatSetupCatalogsFn = setupMod.syncChatSetupCatalogs;
                         }
-
-                        // 2. Register in rpgSettings.customSyspromptLibrary
-                        if (instruction) {
-                            rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary || [];
-                            const existingSysIdx = rpgSettings.customSyspromptLibrary.findIndex(sp => sp.id === syspromptId);
-                            const sysDef = {
-                                id: syspromptId,
-                                name: `${label} (Game System)`,
-                                content: instruction,
-                                category: 'Game Systems',
-                                tags: ['game-system', customTag.toLowerCase()],
-                                enabled: true,
-                                origin: 'wizard',
-                            };
-                            if (existingSysIdx >= 0) {
-                                rpgSettings.customSyspromptLibrary[existingSysIdx] = sysDef;
-                            } else {
-                                rpgSettings.customSyspromptLibrary.push(sysDef);
-                            }
-                        }
-
-                        // 3. Register in rpgSettings.customFields
-                        rpgSettings.customFields = rpgSettings.customFields || [];
-                        const existingIdx = rpgSettings.customFields.findIndex(f => f.tag?.toUpperCase() === customTag);
-                        const fieldDef = {
-                            tag: customTag,
-                            label: label,
-                            icon: customMod.icon || '📟',
-                            prompt: instruction,
-                            template: sampleTemplate,
-                            enabled: true,
-                            scope: 'chat',
-                        };
-                        if (existingIdx >= 0) {
-                            rpgSettings.customFields[existingIdx] = fieldDef;
-                        } else {
-                            rpgSettings.customFields.push(fieldDef);
-                        }
-
-                        if (Array.isArray(rpgSettings.blockOrder) && !rpgSettings.blockOrder.includes(customTag)) {
-                            rpgSettings.blockOrder.push(customTag);
-                        }
-                        rpgSettings.chatStates[chatId].gameSystems = [...rpgSettings.gameSystems];
-                        rpgSettings.chatStates[chatId].customSyspromptLibrary = [...(rpgSettings.customSyspromptLibrary || [])];
-                        rpgSettings.chatStates[chatId].customFields = [...rpgSettings.customFields];
-                    }
+                    } catch (_) {}
+                    registerCustomGameSystemInSettings(rpgSettings, dossier.worldRules?.customModule, {
+                        chatId,
+                        syncChatSetupCatalogs: syncChatSetupCatalogsFn,
+                    });
+                    syncSavedCartridgePayloadFromLiveSettings(rpgSettings, cartridgeOverrides.id);
                 }
 
             if (dossier.protagonist?.portraitSrc) {
@@ -1049,13 +1376,13 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
         try {
             const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
             if (typeof setCompanionActiveCartridge === 'function' && chatId) {
-                await setCompanionActiveCartridge(chatId, {
-                    cartridgeId: adapter.id,
-                    genre: systemKey,
-                    systemLabel: dossier.meta?.systemLabel || adapter.label,
-                    title: adventureTitle,
-                    dossier: JSON.parse(JSON.stringify(dossier)),
-                });
+                await setCompanionActiveCartridge(
+                    chatId,
+                    buildCompanionActiveCartridgeRecord(adapter, systemKey, dossier, {
+                        title: adventureTitle,
+                        cartridgeOverrides,
+                    }),
+                );
             }
             if (typeof persistPbtaChatState === 'function' && chatId) {
                 await persistPbtaChatState(chatId);
@@ -1155,6 +1482,20 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {},
     );
 
     try {
+        const rpgSyncPrefixSettings = ctx?.extensionSettings?.rpg_tracker;
+        let stateMgrSync = null;
+        try {
+            stateMgrSync = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
+        } catch (_) {}
+        const syncCampaignPrefix = resolveCanonicalCampaignPrefix(chatId, {
+            adventureTitle,
+            rpgSettings: rpgSyncPrefixSettings,
+            stateMgr: stateMgrSync,
+        });
+        if (chatId && syncCampaignPrefix && rpgSyncPrefixSettings) {
+            stampCanonicalCampaignPrefix(chatId, syncCampaignPrefix, rpgSyncPrefixSettings);
+        }
+
         // 1. Inscribe updated dossier into World Info
         onProgress('📜 Inscribing updated dossier into World Info...', 20);
         const dossierMd = serializeDossierToMarkdown(dossier, { includeCyoa: false });
@@ -1164,7 +1505,7 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {},
         onProgress('📚 Updating campaign lorebooks...', 40);
         const sectionNames = await loadMainNpcSectionNames();
         try {
-            await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames);
+            await injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, sectionNames, syncCampaignPrefix);
         } catch (loreErr) {
             console.warn('[PbtA Concierge] Lorebook sync warning:', loreErr);
         }
@@ -1267,33 +1608,19 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {},
                 rpgSettings.currentMemo = adapter.formatInitialMemo(dossier, { location: dossier.theKick?.startingLocation });
             }
 
-            // Register/update Custom HUD Tracker Module in MultiHog Settings if defined
-            const customMod = dossier.worldRules?.customModule;
-            if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
-                const customTag = (customMod.tag || customMod.fieldKey || customMod.label)
-                    .replace(/[^a-zA-Z0-9_]/g, '_')
-                    .toUpperCase();
-                rpgSettings.customFields = rpgSettings.customFields || [];
-                const existingIdx = rpgSettings.customFields.findIndex(f => f.tag?.toUpperCase() === customTag);
-                const fieldDef = {
-                    tag: customTag,
-                    label: customMod.label || customMod.tag || customMod.fieldKey || customTag,
-                    icon: customMod.icon || '📟',
-                    prompt: customMod.instruction || '',
-                    template: customMod.sampleContent || customMod.sample || '',
-                    enabled: true,
-                    scope: 'chat',
-                };
-                if (existingIdx >= 0) {
-                    rpgSettings.customFields[existingIdx] = fieldDef;
-                } else {
-                    rpgSettings.customFields.push(fieldDef);
+            // Register/update Custom HUD Tracker / Game System in MultiHog v3 catalogs if defined
+            let syncChatSetupCatalogsFn = null;
+            try {
+                const setupMod = await import('../SillyTavern-MultihogDnDFramework/src/state/chat-setup.js');
+                if (typeof setupMod.syncChatSetupCatalogs === 'function') {
+                    syncChatSetupCatalogsFn = setupMod.syncChatSetupCatalogs;
                 }
-
-                if (Array.isArray(rpgSettings.blockOrder) && !rpgSettings.blockOrder.includes(customTag)) {
-                    rpgSettings.blockOrder.push(customTag);
-                }
-            }
+            } catch (_) {}
+            registerCustomGameSystemInSettings(rpgSettings, dossier.worldRules?.customModule, {
+                chatId: null,
+                syncChatSetupCatalogs: syncChatSetupCatalogsFn,
+            });
+            syncSavedCartridgePayloadFromLiveSettings(rpgSettings, cartridgeOverrides.id);
 
             if (chatId) {
                 rpgSettings.chatStateProjectionOwner = chatId;
@@ -1319,13 +1646,13 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {},
             try {
                 const { persistPbtaChatState, setCompanionActiveCartridge } = await import('./pbta-ruleset-persistence.js');
                 if (typeof setCompanionActiveCartridge === 'function' && chatId) {
-                    await setCompanionActiveCartridge(chatId, {
-                        cartridgeId: adapter.id,
-                        genre: systemKey,
-                        systemLabel: dossier.meta?.systemLabel || adapter.label,
-                        title: dossier.meta?.title || null,
-                        dossier: JSON.parse(JSON.stringify(dossier)),
-                    });
+                    await setCompanionActiveCartridge(
+                        chatId,
+                        buildCompanionActiveCartridgeRecord(adapter, systemKey, dossier, {
+                            title: adventureTitle,
+                            cartridgeOverrides,
+                        }),
+                    );
                 }
                 if (typeof persistPbtaChatState === 'function' && chatId) {
                     await persistPbtaChatState(chatId);

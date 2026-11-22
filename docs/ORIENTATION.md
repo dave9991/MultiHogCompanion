@@ -56,6 +56,7 @@ Developing this extension requires understanding the interaction across three di
 | **Freeform Attrition Engine (FAE)** | [FAE.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/FAE.md) | `fae-ruleset.js`, `fae-state-sync.js` |
 | **State Tracker HUD & Marker Syntax** | [multihog-rendering-reference.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/multihog-rendering-reference.md) | `extensions/SillyTavern-MultihogDnDFramework/renderer.js`<br>`extensions/SillyTavern-MultihogDnDFramework/memo-processor.js` |
 | **Session Zero Concierge Stages & Contracts** | [docs/concierge/README.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/concierge/README.md) | `concierge-ui.js`, `concierge-prompt.js`, `concierge-parser.js`, `concierge-canon.js`, `concierge-runner.js` |
+| **Concierge to Framework Handoff Contracts** | [docs/handoff/README.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/handoff/README.md) | `concierge-runner.js`, `concierge-lore-distributor.js`, `concierge-canon.js`, `concierge-npc-format.js`, `concierge-pc-format.js` |
 | **Character & Level-Up / Respec Desk (`FEAT-10`)** | [docs/level-up/README.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/level-up/README.md) | `level-up-blueprint.js`, `level-up-scaffold.js`, `level-up-runner.js`, `level-up-stage-renderers.js`, `level-up-ui.js`, `progression-architect-ui.js` |
 
 ---

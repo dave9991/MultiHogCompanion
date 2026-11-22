@@ -13,6 +13,7 @@
  */
 
 import { formatSpeciesWithGender } from './concierge-pc-format.js';
+import { stripResolvedNameTokensInText } from './namerag-hooks.js';
 
 /** Stock section ids → fallback names (mirrors main's DEFAULT_NPC_SECTIONS). */
 const FALLBACK_SECTION_NAMES = {
@@ -74,6 +75,19 @@ function bullets(items) {
     return items.map(i => `- ${i}`).join('\n');
 }
 
+function normalizeMonsterListField(raw, splitArrow = false) {
+    if (Array.isArray(raw)) {
+        return raw.map(v => stripResolvedNameTokensInText(String(v ?? '')).trim()).filter(Boolean);
+    }
+    if (typeof raw === 'string' && raw.trim()) {
+        const parts = splitArrow
+            ? raw.split(/\s*(?:→|->|,|;)\s*/)
+            : splitTopLevelCommas(raw);
+        return parts.map(v => stripResolvedNameTokensInText(String(v ?? '')).trim()).filter(Boolean);
+    }
+    return [];
+}
+
 export { FALLBACK_SECTION_NAMES };
 
 /**
@@ -122,7 +136,9 @@ export function buildNpcEntryContent(npc, names = FALLBACK_SECTION_NAMES) {
         npc.notes ? `Notes: ${npc.notes}` : '',
     ].filter(Boolean).join('\n');
 
-    return { core, full: chronicle ? `${core}\n${chronicle}` : core };
+    const cleanCore = stripResolvedNameTokensInText(core);
+    const cleanFull = chronicle ? stripResolvedNameTokensInText(`${core}\n${chronicle}`) : cleanCore;
+    return { core: cleanCore, full: cleanFull };
 }
 
 /**
@@ -135,6 +151,7 @@ export function buildNpcEntryContent(npc, names = FALLBACK_SECTION_NAMES) {
  * @returns {{ core: string, full: string }}
  */
 export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES, options = {}) {
+    const monsterName = stripResolvedNameTokensInText(String(monster?.name || '')).trim() || 'Adversary';
     const ruleset = (typeof options === 'string' ? options : options?.ruleset)
         || monster?.ruleset
         || ((monster?.threatLevel !== undefined || monster?.threat !== undefined || monster?.instinct || monster?.pressures || monster?.poolsAtRisk) ? 'fae' : (monster?.cr !== undefined || monster?.challenge !== undefined || (monster?.hp?.max && monster?.ac) ? 'dnd5e' : 'pbta'));
@@ -144,24 +161,22 @@ export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES
         const hpCur = Math.max(0, parseInt(monster.hp?.current ?? (typeof monster.hp === 'string' && monster.hp.includes('/') ? monster.hp.split('/')[0] : hpMax), 10));
         const ac = parseInt(monster.ac, 10) || 12;
         const cr = monster.cr || monster.challenge || '1/2';
-        const attacks = Array.isArray(monster.attacks)
-            ? monster.attacks
-            : (monster.actions ? (Array.isArray(monster.actions) ? monster.actions : [monster.actions]) : []);
+        const attacks = normalizeMonsterListField(monster.attacks ?? monster.actions);
         const status = monster.status ? monster.status.trim() : (hpCur < hpMax ? '(-) Wounded' : 'Healthy');
 
         const combatLines = [
-            `${monster.name}: ${hpCur}/${hpMax} HP | AC: ${ac} | CR: ${cr}`,
+            `${monsterName}: ${hpCur}/${hpMax} HP | AC: ${ac} | CR: ${cr}`,
             attacks.length ? `((PILLS)) Attacks: ${attacks.join(', ')}` : '',
             monster.weakness && monster.weakness !== 'Unknown' ? `((PILLS)) Weakness: ${monster.weakness}` : '',
             `Status: ${status}`,
         ].filter(Boolean);
 
-        const core = assembleCore({
+        const core = stripResolvedNameTokensInText(assembleCore({
             sec_background: monster.notes ? `D&D 5e adversary. ${monster.notes}` : 'D&D 5e adversary.',
             sec_strengths: attacks.length ? `\n${bullets(attacks)}` : '',
             sec_flaws: monster.weakness && monster.weakness !== 'Unknown' ? `\n${bullets([monster.weakness])}` : '',
             sec_combat_profile: `\n${combatLines.join('\n')}`,
-        }, names);
+        }, names));
 
         return { core, full: core };
     }
@@ -178,14 +193,14 @@ export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES
             ? monster.poolsAtRisk.join(', ')
             : (monster.pools || 'Body, Mind');
 
-        const pressures = Array.isArray(monster.pressures) ? monster.pressures : (monster.pressures ? splitTopLevelCommas(monster.pressures) : []);
+        const pressures = normalizeMonsterListField(monster.pressures);
         const instinct = monster.instinct ? monster.instinct.trim() : '';
         const weakness = monster.weakness && monster.weakness !== 'Unknown' ? monster.weakness.trim() : '';
-        const barriers = Array.isArray(monster.leverageBarriers) ? monster.leverageBarriers : (monster.leverageBarriers ? splitTopLevelCommas(monster.leverageBarriers) : []);
+        const barriers = normalizeMonsterListField(monster.leverageBarriers);
         const status = monster.status ? monster.status.trim() : (curLayers > 0 ? '(-) Wounded' : 'Healthy');
 
         const combatLines = [
-            `${monster.name}: ${curHp}/${rawLayers} HP | Threat: ${threatLevel} (${threatLabel}) | Pools: ${pools}`,
+            `${monsterName}: ${curHp}/${rawLayers} HP | Threat: ${threatLevel} (${threatLabel}) | Pools: ${pools}`,
             pressures.length ? `((PILLS)) Pressures: ${pressures.join(', ')}` : '',
             instinct ? `Instinct: ${instinct}` : '',
             weakness ? `((PILLS)) Leverage: ${weakness}` : '',
@@ -203,19 +218,19 @@ export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES
             ...(barriers.map(b => `Barrier — ${b}`)),
         ];
 
-        const core = assembleCore({
+        const core = stripResolvedNameTokensInText(assembleCore({
             sec_background: monster.notes ? `FAE threat entity. ${monster.notes}` : 'FAE threat entity.',
             sec_strengths: strengthsList.length ? `\n${bullets(strengthsList)}` : '',
             sec_flaws: flawsList.length ? `\n${bullets(flawsList)}` : '',
             sec_combat_profile: `\n${combatLines.join('\n')}`,
-        }, names);
+        }, names));
 
         return { core, full: core };
     }
 
     // Default: PbtA adversary
-    const attacks = Array.isArray(monster.attacks) ? monster.attacks : [];
-    const doom = Array.isArray(monster.impendingDoom) ? monster.impendingDoom : [];
+    const attacks = normalizeMonsterListField(monster.attacks ?? monster.actions);
+    const doom = normalizeMonsterListField(monster.impendingDoom, true);
     const harmMax = Math.max(1, parseInt(monster.harm?.max ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[1] : monster.harm), 10) || 4);
     const harmCur = Math.max(0, parseInt(monster.currentHarm ?? monster.harm?.current ?? (typeof monster.harm === 'string' && monster.harm.includes('/') ? monster.harm.split('/')[0] : 0), 10) || 0);
     const curHp = Math.max(0, harmMax - harmCur);
@@ -225,26 +240,26 @@ export function buildMonsterEntryContent(monster, names = FALLBACK_SECTION_NAMES
     // "Name: cur/max HP ..." headers, so PbtA adversaries carry a redundant HP token that
     // descends in tandem with Harm — the same workaround the [PARTY] block uses.
     const combatLines = [
-        `${monster.name}: ${curHp}/${harmMax} HP | Harm: ${harmCur}/${harmMax} | Armor: ${parseInt(monster.armor, 10) || 0}`,
+        `${monsterName}: ${curHp}/${harmMax} HP | Harm: ${harmCur}/${harmMax} | Armor: ${parseInt(monster.armor, 10) || 0}`,
         attacks.length ? `((PILLS)) Attacks: ${attacks.join(', ')}` : '',
         monster.weakness && monster.weakness !== 'Unknown' ? `((PILLS)) Weakness: ${monster.weakness}` : '',
         doom.length ? `Countdown: ${doom.join(' → ')}` : '',
         `Status: ${status}`,
     ].filter(Boolean);
 
-    const core = assembleCore({
+    const core = stripResolvedNameTokensInText(assembleCore({
         sec_background: monster.notes ? `PbtA adversary. ${monster.notes}` : 'PbtA adversary.',
         sec_strengths: attacks.length ? `\n${bullets(attacks)}` : '',
         sec_flaws: monster.weakness && monster.weakness !== 'Unknown' ? `\n${bullets([monster.weakness])}` : '',
         sec_combat_profile: `\n${combatLines.join('\n')}`,
-    }, names);
+    }, names));
 
     return { core, full: core };
 }
 
 /** Lorebook trigger keys: full name + first name. Never the role (too generic). */
 export function buildNpcKeys(name) {
-    const clean = String(name || '').trim();
+    const clean = stripResolvedNameTokensInText(String(name || '')).trim();
     const first = clean.split(/\s+/)[0];
     const keys = [clean];
     if (first && first !== clean) keys.push(first);

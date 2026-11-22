@@ -83,6 +83,78 @@ export function parseResolvedNameToken(raw) {
 }
 
 /**
+ * Strips all inline and standalone NameRAG blueprint evolution tokens from a string
+ * (`[NAME: tag, RESOLVED TO: Name]`, `[[NAME: tag, RESOLVED TO: Name]]`,
+ * `[REALNAME: Name, NAME|TAG: tag]`, `[concept: tag]`, and lingering `[[NAME: tag]]`).
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripResolvedNameTokensInText(text) {
+    if (typeof text !== 'string' || !text) return text;
+    if (text.startsWith('data:')) return text;
+
+    let out = text;
+
+    // 1. [NAME: tag, RESOLVED TO: Name] or [[NAME: tag, RESOLVED TO: Name]] (including chained RESOLVED TO)
+    out = out.replace(/\[{1,2}NAME:\s*([^[\]]+?)\]{1,2}/gi, (full, inner) => {
+        if (!/,\s*RESOLVED TO:\s*/i.test(inner)) return full;
+        const segments = inner.split(/,\s*RESOLVED TO:\s*/i).map(s => s.trim()).filter(Boolean);
+        return segments.length >= 2 ? segments[1] : full;
+    });
+
+    // 2. [REALNAME: Name, NAME: tag] or [REALNAME: Name, TAG: tag]
+    out = out.replace(/\[REALNAME:\s*([^[\],]+?),\s*(?:NAME|TAG):\s*[^[\]]+?\]/gi, (_, name) => name.trim());
+
+    // 3. Continuity brief echo suffix: [concept: tag]
+    out = out.replace(/\s*\[concept:\s*[^[\]]+?\]/gi, '');
+
+    // 4. Lingering [[NAME: tag]] or [[NAME]]
+    out = out.replace(/\[\[NAME(?::\s*([^\]]+))?\]\]/gi, (_, tag) => (tag ? tag.trim() : 'Unnamed'));
+
+    return out;
+}
+
+/**
+ * Recursively strips NameRAG blueprint evolution tokens from every string field
+ * in a dossier/object graph (mutating plain objects and arrays in place).
+ * Preserves data URIs and `portraitSrc` fields untouched.
+ *
+ * @template T
+ * @param {T} value
+ * @param {WeakSet<object>} [seen]
+ * @returns {T}
+ */
+export function sanitizeDossierResolvedNameTokens(value, seen = new WeakSet()) {
+    if (typeof value === 'string') {
+        return stripResolvedNameTokensInText(value);
+    }
+    if (!value || typeof value !== 'object') {
+        return value;
+    }
+    if (seen.has(value)) {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        seen.add(value);
+        for (let i = 0; i < value.length; i++) {
+            value[i] = sanitizeDossierResolvedNameTokens(value[i], seen);
+        }
+        return value;
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+        return value;
+    }
+    seen.add(value);
+    for (const key of Object.keys(value)) {
+        if (key === 'portraitSrc') continue;
+        value[key] = sanitizeDossierResolvedNameTokens(value[key], seen);
+    }
+    return value;
+}
+
+/**
  * Normalizes user-entered gender strings into standard NameRAG filters ('M', 'F', 'Dual').
  * @param {string} val
  * @returns {string|undefined}

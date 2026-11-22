@@ -11,6 +11,8 @@
  * reliably locate and patch `Body` and `Worn Equipment` during play.
  */
 
+import { stripResolvedNameTokensInText } from './namerag-hooks.js';
+
 /** Stock section ids → fallback names (mirrors main's DEFAULT_PC_SECTIONS). */
 export const FALLBACK_PC_SECTION_NAMES = {
     sec_species: 'Species',
@@ -286,5 +288,5 @@ export function buildPlayerCardBio(p = {}, names = FALLBACK_PC_SECTION_NAMES, op
         `${flawsLabel}:${flawsVal.trimEnd()}`,
     ];
 
-    return sections.join('\n');
+    return stripResolvedNameTokensInText(sections.join('\n'));
 }

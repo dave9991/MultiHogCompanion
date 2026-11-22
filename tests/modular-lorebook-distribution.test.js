@@ -18,10 +18,17 @@ import {
     buildFactionEntry,
     buildLocationEntry,
     buildStartingQuestEntry,
+    buildWorldRuleEntry,
+    buildWorldSkeletonEntries,
     buildDossierWorldInfoEntry,
     prepareCampaignLorebookDistributions,
     buildMapThreatBrief,
 } from '../concierge-lore-distributor.js';
+import { buildPlayerCardBio } from '../concierge-pc-format.js';
+import { buildMonsterEntryContent } from '../concierge-npc-format.js';
+import { stripResolvedNameTokensInText, sanitizeDossierResolvedNameTokens } from '../namerag-hooks.js';
+import { registerAndActivateWorldInfoBook, prepareSanitizedDossierForFramework } from '../concierge-runner.js';
+import { healAndNormalizeDossier } from '../concierge-parser.js';
 
 console.log('--- Running Modular Lorebook Distribution Test Suite ---');
 
@@ -156,4 +163,115 @@ assert.strictEqual(dist.quests.length, 1, 'Should contain 1 starting emergent qu
 assert.strictEqual(dist.quests[0].name, 'Starting Crisis: Vance: Cold Frost');
 
 console.log('✓ Full campaign distribution properly segments all 4 categories without cross-contamination');
+
+// ── Test 7: HAND-001 Recursive NameRAG Token Stripping ───────────────────────
+console.log('Testing HAND-001 universal NameRAG token stripping...');
+assert.strictEqual(
+    stripResolvedNameTokensInText('Speak with [NAME: gruff guard, RESOLVED TO: Bram] and [REALNAME: Lyra Voss, NAME: spy] by [[NAME: dock_master]].'),
+    'Speak with Bram and Lyra Voss by dock_master.',
+);
+assert.strictEqual(
+    stripResolvedNameTokensInText('Escorted by Mara [concept: hardened guide] through the pass.'),
+    'Escorted by Mara through the pass.',
+);
+
+const pollutedRawDossier = {
+    meta: {
+        title: '[NAME: icy port, RESOLVED TO: Frosthaven] Chronicles',
+        premise: 'Find [NAME: lost heir, RESOLVED TO: Kaelen] in the ruins.',
+        tone: 'Grim noir',
+    },
+    theKick: {
+        startingLocation: '[NAME: inn, RESOLVED TO: The Lantern Inn]',
+        crisis: 'Assassins strike [NAME: patron, RESOLVED TO: Elara] at dawn.',
+        openingPrompt: 'Meet [[NAME: contact_name]] at [NAME: inn, RESOLVED TO: The Lantern Inn].',
+    },
+    protagonist: {
+        name: '[NAME: detective, RESOLVED TO: Silas Thorne]',
+        bio: 'Partnered with [NAME: partner, RESOLVED TO: Rook] [concept: tough].',
+        background: 'Sworn enemy of [NAME: crime boss, RESOLVED TO: Vane].',
+        portraitSrc: 'data:image/png;base64,[NAME: fake, RESOLVED TO: keep]',
+    },
+    npcs: [
+        { name: '[NAME: smith, RESOLVED TO: Torin]', role: 'Ally of [NAME: patron, RESOLVED TO: Elara]', notes: 'Owes [[NAME: debt_holder]] coin.' },
+    ],
+    monsters: [
+        { name: '[NAME: hound, RESOLVED TO: Ash Stalker]', harm: 4, attacks: 'Shadow Bite ([NAME: curse, RESOLVED TO: Decay]), Frost Claws', weakness: 'Silver forged by [NAME: smith, RESOLVED TO: Torin]' },
+    ],
+    factions: [
+        { name: '[NAME: syndicate, RESOLVED TO: Iron Ledger]', agenda: 'Depose [NAME: patron, RESOLVED TO: Elara]' },
+    ],
+    maps: [
+        { site: '[NAME: inn, RESOLVED TO: The Lantern Inn]', briefDescription: 'Owned by [NAME: innkeep, RESOLVED TO: Marta].', entrance: 'Side alley' },
+    ],
+    worldRules: {
+        axioms: [{ title: 'Law of [NAME: oath, RESOLVED TO: Salt]', axiom: 'Only [NAME: smith, RESOLVED TO: Torin] knows the secret.' }],
+    },
+};
+
+const cleanedDossier = await prepareSanitizedDossierForFramework(pollutedRawDossier, {
+    healAndNormalizeDossier,
+    resolvePlaceholders: async (jsonStr) => jsonStr.replace(/\[\[NAME:\s*([^\]]+)\]\]/g, (_, tag) => tag.trim()),
+});
+assert.strictEqual(cleanedDossier.meta.title, 'Frosthaven Chronicles');
+assert.strictEqual(cleanedDossier.meta.premise, 'Find Kaelen in the ruins.');
+assert.strictEqual(cleanedDossier.theKick.startingLocation, 'The Lantern Inn');
+assert.strictEqual(cleanedDossier.theKick.crisis, 'Assassins strike Elara at dawn.');
+assert.strictEqual(cleanedDossier.protagonist.name, 'Silas Thorne');
+assert.strictEqual(cleanedDossier.protagonist.bio, 'Partnered with Rook.');
+assert.strictEqual(cleanedDossier.protagonist.portraitSrc, 'data:image/png;base64,[NAME: fake, RESOLVED TO: keep]', 'Data URI portraitSrc must remain untouched');
+assert.strictEqual(cleanedDossier.npcs[0].role, 'Ally of Elara');
+assert.strictEqual(cleanedDossier.monsters[0].weakness, 'Silver forged by Torin');
+assert.strictEqual(cleanedDossier.factions[0].agenda, 'Depose Elara');
+assert.strictEqual(cleanedDossier.maps[0].briefDescription, 'Owned by Marta.');
+assert.strictEqual(cleanedDossier.worldRules.axioms[0].title, 'Law of Salt');
+
+// Direct formatter defense when unstripped objects are passed directly
+const dirtyPcBio = buildPlayerCardBio({ name: 'Hero', bio: 'Mentored by [NAME: mage, RESOLVED TO: Orin].' });
+assert.ok(!dirtyPcBio.includes('RESOLVED TO'), 'buildPlayerCardBio must strip NameRAG tokens directly');
+assert.ok(dirtyPcBio.includes('Mentored by Orin.'), 'buildPlayerCardBio must preserve resolved name');
+
+const dirtyWorldRule = buildWorldRuleEntry({ title: 'Guild of [NAME: guild, RESOLVED TO: Ember]', axiom: 'Led by [NAME: archmage, RESOLVED TO: Vael].' });
+assert.ok(!dirtyWorldRule.core.includes('RESOLVED TO'), 'buildWorldRuleEntry must strip NameRAG tokens');
+assert.ok(dirtyWorldRule.keys.includes('Guild of Ember'), 'extractCleanKeywords must preserve resolved keyword');
+
+const dirtySkeleton = buildWorldSkeletonEntries(JSON.parse(JSON.stringify(pollutedRawDossier)));
+assert.ok(dirtySkeleton.every(s => !s.comment.includes('RESOLVED TO') && !s.content.includes('RESOLVED TO')), 'World Skeleton entries must be clean of RESOLVED TO tokens');
+console.log('✓ HAND-001 recursive and formatter-level NameRAG token sanitization verified');
+
+// ── Test 8: HAND-003 Bestiary String Attacks/Doom & ST Registry Activation ───
+console.log('Testing HAND-003 Bestiary string normalization and ST World Info activation...');
+const pbtaStrMonster = buildMonsterEntryContent({
+    name: '[NAME: beast, RESOLVED TO: Mire Stalker]',
+    harm: 5,
+    attacks: 'Barbed Tongue (2 Harm, close), Acid Spit (1 Harm, near)',
+    impendingDoom: 'Circles prey → Drags into bog → Consumes whole',
+});
+assert.ok(pbtaStrMonster.core.includes('Mire Stalker: 5/5 HP | Harm: 0/5 | Armor: 0'));
+assert.ok(pbtaStrMonster.core.includes('((PILLS)) Attacks: Barbed Tongue (2 Harm, close), Acid Spit (1 Harm, near)'), 'String attacks must be normalized into Combat Profile');
+assert.ok(pbtaStrMonster.core.includes('- Barbed Tongue (2 Harm, close)'), 'String attacks must populate Strengths bullets');
+assert.ok(pbtaStrMonster.core.includes('Countdown: Circles prey → Drags into bog → Consumes whole'), 'String impendingDoom must be preserved');
+
+const callLog = [];
+await registerAndActivateWorldInfoBook('Frosthaven_Bestiary', { entries: {} }, {
+    ctx: {
+        saveWorldInfo: async (name) => callLog.push(`save:${name}`),
+        updateWorldInfoList: async () => callLog.push('updateList'),
+        executeSlashCommandsWithOptions: async (cmd) => callLog.push(`cmd:${cmd}`),
+    },
+    router: {
+        updateWorldInfoCache: async (name) => callLog.push(`cache:${name}`),
+        rememberCampaignBook: (name) => callLog.push(`remember:${name}`),
+    },
+    activateOnChat: true,
+});
+assert.deepStrictEqual(callLog, [
+    'cache:Frosthaven_Bestiary',
+    'remember:Frosthaven_Bestiary',
+    'save:Frosthaven_Bestiary',
+    'updateList',
+    'cmd:/world state=on silent=true "Frosthaven_Bestiary"',
+]);
+console.log('✓ HAND-003 Bestiary normalization and ST World Info registry/activation verified');
+
 console.log('--- ALL MODULAR LOREBOOK DISTRIBUTION TESTS PASSED CLEANLY! ---');

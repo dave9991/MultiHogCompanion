@@ -19,16 +19,18 @@ import {
     buildMonsterEntryContent,
     buildNpcKeys,
 } from './concierge-npc-format.js';
-import { parseResolvedNameToken } from './namerag-hooks.js';
+import { parseResolvedNameToken, stripResolvedNameTokensInText } from './namerag-hooks.js';
 
 /**
  * Extracts clean, deduplicated search keywords from a title or entity name.
+ * Strips NameRAG evolution tokens first so resolved names become searchable keys.
  * @param {string} text
  * @returns {string[]}
  */
 export function extractCleanKeywords(text) {
     if (!text || typeof text !== 'string') return [];
-    const clean = text.replace(/\[.*?\]/g, '').replace(/[^\w\s'-]/g, ' ').trim();
+    const tokenStripped = stripResolvedNameTokensInText(text);
+    const clean = tokenStripped.replace(/\[.*?\]/g, '').replace(/[^\w\s'-]/g, ' ').trim();
     if (!clean) return [];
 
     const keys = new Set();
@@ -49,10 +51,11 @@ export function extractCleanKeywords(text) {
  * @returns {{ name: string, comment: string, keys: string[], core: string, full: string }}
  */
 export function buildFactionEntry(faction) {
-    const cleanName = (faction?.name || '').trim();
-    const standing = faction?.standing || 'Neutral';
-    const agenda = faction?.agenda || 'Unstated';
-    const notes = faction?.notes ? `Notes: ${faction.notes}` : null;
+    const cleanName = stripResolvedNameTokensInText(faction?.name || '').trim();
+    const standing = stripResolvedNameTokensInText(faction?.standing || 'Neutral').trim() || 'Neutral';
+    const agenda = stripResolvedNameTokensInText(faction?.agenda || 'Unstated').trim() || 'Unstated';
+    const rawNotes = faction?.notes ? stripResolvedNameTokensInText(String(faction.notes)).trim() : '';
+    const notes = rawNotes ? `Notes: ${rawNotes}` : null;
 
     const core = [
         `[CORE]`,
@@ -86,11 +89,13 @@ export function buildFactionEntry(faction) {
  * @returns {{ name: string, comment: string, keys: string[], core: string, full: string }}
  */
 export function buildLocationEntry(mapOrLocation) {
-    const site = (mapOrLocation?.site || mapOrLocation?.name || 'Uncharted Site').trim();
-    const kind = mapOrLocation?.kind || 'INTERIOR';
-    const threat = mapOrLocation?.threat || 'MODERATE';
-    const desc = (mapOrLocation?.briefDescription || mapOrLocation?.prompt || mapOrLocation?.description || 'A notable site in the region.').trim();
-    const entrance = mapOrLocation?.entrance ? `Entrance: ${mapOrLocation.entrance.trim()}` : null;
+    const site = stripResolvedNameTokensInText(mapOrLocation?.site || mapOrLocation?.name || 'Uncharted Site').trim() || 'Uncharted Site';
+    const kind = stripResolvedNameTokensInText(mapOrLocation?.kind || 'INTERIOR').trim() || 'INTERIOR';
+    const threat = stripResolvedNameTokensInText(mapOrLocation?.threat || 'MODERATE').trim() || 'MODERATE';
+    const rawDesc = mapOrLocation?.briefDescription || mapOrLocation?.prompt || mapOrLocation?.description || 'A notable site in the region.';
+    const desc = stripResolvedNameTokensInText(rawDesc).trim() || 'A notable site in the region.';
+    const rawEntrance = mapOrLocation?.entrance ? stripResolvedNameTokensInText(String(mapOrLocation.entrance)).trim() : '';
+    const entrance = rawEntrance ? `Entrance: ${rawEntrance}` : null;
 
     const core = [
         `[CORE]`,
@@ -124,10 +129,10 @@ export function buildLocationEntry(mapOrLocation) {
  * @returns {{ name: string, comment: string, keys: string[], core: string, full: string }|null}
  */
 export function buildStartingQuestEntry(theKick, meta = {}) {
-    const crisis = (theKick?.crisis || theKick?.openingPrompt || '').trim();
+    const crisis = stripResolvedNameTokensInText(theKick?.crisis || theKick?.openingPrompt || '').trim();
     if (!crisis) return null;
 
-    const title = (meta?.title || 'Starting Incident').trim();
+    const title = stripResolvedNameTokensInText(meta?.title || 'Starting Incident').trim() || 'Starting Incident';
     const label = `Starting Crisis: ${title}`;
 
     const core = [
@@ -263,12 +268,16 @@ export function extractWorldRuleKeywords(axiom) {
  */
 export function buildWorldRuleEntry(axiom) {
     if (!axiom || typeof axiom !== 'object') return null;
-    const rawTitle = (axiom.title || '').trim();
-    const category = (axiom.category || 'physics').trim();
-    const lawText = (axiom.axiom || '').trim();
-    const substitutions = Array.isArray(axiom.substitutions) ? axiom.substitutions : [];
-    const negativeConstraints = Array.isArray(axiom.negativeConstraints) ? axiom.negativeConstraints : [];
-    const architecturalNotes = (axiom.architecturalNotes || '').trim();
+    const rawTitle = stripResolvedNameTokensInText(axiom.title || '').trim();
+    const category = stripResolvedNameTokensInText(axiom.category || 'physics').trim();
+    const lawText = stripResolvedNameTokensInText(axiom.axiom || '').trim();
+    const substitutions = (Array.isArray(axiom.substitutions) ? axiom.substitutions : [])
+        .map(s => stripResolvedNameTokensInText(String(s || '')).trim())
+        .filter(Boolean);
+    const negativeConstraints = (Array.isArray(axiom.negativeConstraints) ? axiom.negativeConstraints : [])
+        .map(n => stripResolvedNameTokensInText(String(n || '')).trim())
+        .filter(Boolean);
+    const architecturalNotes = stripResolvedNameTokensInText(axiom.architecturalNotes || '').trim();
 
     if (!rawTitle && !lawText && !substitutions.length && !negativeConstraints.length) return null;
     const cleanTitle = rawTitle || 'World Law';
@@ -294,7 +303,14 @@ export function buildWorldRuleEntry(axiom) {
         `[/CORE]`,
     ].join('\n');
 
-    const keys = extractWorldRuleKeywords(axiom);
+    const keys = extractWorldRuleKeywords({
+        ...axiom,
+        title: rawTitle,
+        category,
+        axiom: lawText,
+        substitutions,
+        negativeConstraints,
+    });
     const label = `World Axiom: ${cleanTitle}`;
 
     return {
@@ -314,16 +330,18 @@ export function buildWorldRuleEntry(axiom) {
  */
 export function buildCustomModuleLoreEntry(customModule) {
     if (!customModule || typeof customModule !== 'object') return null;
-    const rawKey = (customModule.tag || customModule.fieldKey || '').trim();
-    const instruction = (customModule.instruction || customModule.gmInstruction || '').trim();
-    const sample = (customModule.sampleContent || customModule.sample || '').trim();
-    const drivers = Array.isArray(customModule.drivers)
-        ? customModule.drivers.join(', ')
-        : (typeof customModule.drivers === 'string' ? customModule.drivers.trim() : '');
+    const rawKey = stripResolvedNameTokensInText(customModule.tag || customModule.fieldKey || '').trim();
+    const instruction = stripResolvedNameTokensInText(customModule.instruction || customModule.gmInstruction || '').trim();
+    const sample = stripResolvedNameTokensInText(customModule.sampleContent || customModule.sample || '').trim();
+    const drivers = stripResolvedNameTokensInText(
+        Array.isArray(customModule.drivers)
+            ? customModule.drivers.join(', ')
+            : (typeof customModule.drivers === 'string' ? customModule.drivers.trim() : ''),
+    );
 
     if (!rawKey && !instruction) return null;
     const fieldKey = rawKey || 'custom';
-    const label = (customModule.label || fieldKey).trim();
+    const label = stripResolvedNameTokensInText(customModule.label || fieldKey).trim() || fieldKey;
 
     const coreLines = [
         `[CORE]`,
@@ -399,10 +417,10 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
     }
 
     const npcs = (dossier.npcs || []).map(n => {
-        const cleanName = parseResolvedNameToken(n.name).cleanName;
+        const cleanName = stripResolvedNameTokensInText(parseResolvedNameToken(n.name).cleanName).trim();
         return {
             name: cleanName,
-            role: n.role,
+            role: stripResolvedNameTokensInText(n.role || '').trim(),
             friendship: n.friendship ?? 0,
             affection: n.affection ?? 0,
             keys: buildNpcKeys(cleanName),
@@ -411,7 +429,7 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
     }).filter(e => e.name && e.core);
 
     const monsters = (dossier.monsters || []).map(m => {
-        const cleanName = parseResolvedNameToken(m.name).cleanName;
+        const cleanName = stripResolvedNameTokensInText(parseResolvedNameToken(m.name).cleanName).trim();
         return {
             name: cleanName,
             keys: buildNpcKeys(cleanName),
@@ -438,14 +456,15 @@ export function prepareCampaignLorebookDistributions(dossier, sectionNames = nul
     }
 
     if (dossier.theKick?.startingLocation) {
-        const startLocName = dossier.theKick.startingLocation.trim();
+        const startLocName = stripResolvedNameTokensInText(dossier.theKick.startingLocation).trim();
+        const cleanTitle = stripResolvedNameTokensInText(dossier.meta?.title || 'the adventure').trim();
         if (startLocName && !seenLocations.has(startLocName.toLowerCase())) {
             seenLocations.add(startLocName.toLowerCase());
             locationEntries.push(buildLocationEntry({
                 site: startLocName,
                 kind: 'INTERIOR',
                 threat: 'LOW',
-                briefDescription: `Starting location for ${dossier.meta?.title || 'the adventure'}.`,
+                briefDescription: `Starting location for ${cleanTitle || 'the adventure'}.`,
             }));
         }
     }
@@ -499,22 +518,22 @@ export function buildMapThreatBrief(dossier) {
     const items = [];
     for (const m of monsters) {
         if (!m) continue;
-        const cleanName = parseResolvedNameToken(m.name).cleanName.trim();
+        const cleanName = stripResolvedNameTokensInText(parseResolvedNameToken(m.name).cleanName).trim();
         if (!cleanName) continue;
 
         const detailParts = [];
         if (m.notes && String(m.notes).trim()) {
-            detailParts.push(String(m.notes).replace(/\s+/g, ' ').trim().slice(0, 90));
+            detailParts.push(stripResolvedNameTokensInText(String(m.notes)).replace(/\s+/g, ' ').trim().slice(0, 90));
         } else if (Array.isArray(m.attacks) && m.attacks.length) {
-            detailParts.push(String(m.attacks[0]).replace(/\s+/g, ' ').trim().slice(0, 70));
+            detailParts.push(stripResolvedNameTokensInText(String(m.attacks[0])).replace(/\s+/g, ' ').trim().slice(0, 70));
         } else if (typeof m.attacks === 'string' && m.attacks.trim()) {
-            detailParts.push(m.attacks.replace(/\s+/g, ' ').trim().slice(0, 70));
+            detailParts.push(stripResolvedNameTokensInText(m.attacks).replace(/\s+/g, ' ').trim().slice(0, 70));
         } else if (Array.isArray(m.pressures) && m.pressures.length) {
-            detailParts.push(String(m.pressures[0]).replace(/\s+/g, ' ').trim().slice(0, 70));
+            detailParts.push(stripResolvedNameTokensInText(String(m.pressures[0])).replace(/\s+/g, ' ').trim().slice(0, 70));
         }
 
         if (m.weakness && m.weakness !== 'Unknown') {
-            detailParts.push(`weakness: ${String(m.weakness).trim().slice(0, 50)}`);
+            detailParts.push(`weakness: ${stripResolvedNameTokensInText(String(m.weakness)).trim().slice(0, 50)}`);
         }
 
         const itemStr = detailParts.length ? `${cleanName} (${detailParts.join('; ')})` : cleanName;
@@ -546,11 +565,12 @@ export function buildWorldSkeletonEntries(dossier) {
     // Factions -> FAC
     const factions = dossier.factions || [];
     for (const f of factions) {
-        const cleanName = (f.name || '').trim();
+        const cleanName = stripResolvedNameTokensInText(f.name || '').trim();
         if (!cleanName) continue;
-        const standing = f.standing || 'Neutral';
-        const agenda = f.agenda || 'Pursues regional interests';
-        const notes = f.notes ? ` ${f.notes}.` : '';
+        const standing = stripResolvedNameTokensInText(f.standing || 'Neutral').trim() || 'Neutral';
+        const agenda = stripResolvedNameTokensInText(f.agenda || 'Pursues regional interests').trim() || 'Pursues regional interests';
+        const cleanNotes = f.notes ? stripResolvedNameTokensInText(f.notes).trim() : '';
+        const notes = cleanNotes ? ` ${cleanNotes}.` : '';
         const text = `A ${standing.toLowerCase()} faction that ${agenda}.${notes}`;
 
         entries.push({
@@ -580,15 +600,15 @@ export function buildWorldSkeletonEntries(dossier) {
     const mapList = Array.isArray(dossier.maps) ? dossier.maps : [];
     const axioms = Array.isArray(dossier.worldRules?.axioms) ? dossier.worldRules.axioms : [];
     const archNotes = axioms
-        .map(a => a.architecturalNotes ? a.architecturalNotes.trim() : '')
+        .map(a => a.architecturalNotes ? stripResolvedNameTokensInText(a.architecturalNotes).trim() : '')
         .filter(Boolean);
     const archSuffix = archNotes.length > 0 ? ` (Architecture: ${archNotes.join('; ')})` : '';
 
     for (const m of mapList) {
-        const site = (m.site || m.name || '').trim();
+        const site = stripResolvedNameTokensInText(m.site || m.name || '').trim();
         if (!site || seenLocs.has(site.toLowerCase())) continue;
         seenLocs.add(site.toLowerCase());
-        let desc = (m.briefDescription || m.prompt || 'A notable regional territory.').trim();
+        let desc = stripResolvedNameTokensInText(m.briefDescription || m.prompt || 'A notable regional territory.').trim();
         if (archSuffix) desc += archSuffix;
 
         entries.push({
@@ -613,7 +633,7 @@ export function buildWorldSkeletonEntries(dossier) {
         });
     }
     if (dossier.theKick?.startingLocation) {
-        const startLoc = dossier.theKick.startingLocation.trim();
+        const startLoc = stripResolvedNameTokensInText(dossier.theKick.startingLocation).trim();
         if (startLoc && !seenLocs.has(startLoc.toLowerCase())) {
             seenLocs.add(startLoc.toLowerCase());
             let startDesc = 'The primary staging grounds for the impending journey.';
@@ -643,10 +663,10 @@ export function buildWorldSkeletonEntries(dossier) {
 
     // Conflicts -> EVENT
     if (dossier.theKick?.crisis) {
-        const title = (dossier.meta?.title || 'Campaign').trim();
+        const title = stripResolvedNameTokensInText(dossier.meta?.title || 'Campaign').trim() || 'Campaign';
         entries.push({
             comment: `CONFLICT: ${title} Crisis`,
-            content: `[Day 0 Baseline]\n${dossier.theKick.crisis.trim()}`,
+            content: `[Day 0 Baseline]\n${stripResolvedNameTokensInText(dossier.theKick.crisis).trim()}`,
             key: [],
             keysecondary: [],
             constant: false,
@@ -668,12 +688,15 @@ export function buildWorldSkeletonEntries(dossier) {
 
     const monsters = dossier.monsters || [];
     for (const m of monsters) {
-        const mName = (m.name || '').trim();
+        const mName = stripResolvedNameTokensInText(m.name || '').trim();
         if (!mName) continue;
-        const weakness = m.weakness ? ` Vulnerable to ${m.weakness}.` : '';
+        const cleanWeakness = m.weakness ? stripResolvedNameTokensInText(m.weakness).trim() : '';
+        const weakness = cleanWeakness ? ` Vulnerable to ${cleanWeakness}.` : '';
         const doom = Array.isArray(m.impendingDoom) && m.impendingDoom.length
-            ? ` Looming progression: ${m.impendingDoom.join(' → ')}.`
-            : '';
+            ? ` Looming progression: ${m.impendingDoom.map(d => stripResolvedNameTokensInText(String(d)).trim()).filter(Boolean).join(' → ')}.`
+            : (typeof m.impendingDoom === 'string' && m.impendingDoom.trim()
+                ? ` Looming progression: ${stripResolvedNameTokensInText(m.impendingDoom).trim()}.`
+                : '');
         const desc = `Active threat posed by ${mName}.${weakness}${doom}`.trim();
 
         entries.push({

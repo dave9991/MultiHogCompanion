@@ -713,4 +713,86 @@ assert.deepStrictEqual(detailedDiff.added, ['[RULE] Departure Gate']);
 assert.ok(detailedDiff.block.includes('Opening kick unchanged; twists start after leaving.'), 'computeCanonDiff block must include modified content snippet');
 assert.ok(detailedDiff.block.includes('No timeline glitches before leaving Arroyo.'), 'computeCanonDiff block must include added content snippet');
 
+// ── 13. HAND-002: writeStagedCanon Token Stripping, [CORE] Wrapping & Disabled Isolation ──
+console.log('13. Testing HAND-002 writeStagedCanon formatting and disabled isolation...');
+clearStagedCanon();
+setStagedCanonEntries([
+    {
+        id: 'c_active',
+        kind: 'NPC',
+        name: '[NAME: grumpy blacksmith, RESOLVED TO: Torin Anvilson]',
+        comment: '[NPC] [NAME: grumpy blacksmith, RESOLVED TO: Torin Anvilson]',
+        keys: ['[NAME: grumpy blacksmith, RESOLVED TO: Torin Anvilson]', 'Anvilson', '[[NAME: forge_alias]]'],
+        content: 'Forges star-metal for [NAME: silver witch, RESOLVED TO: Elara] [concept: silver witch].',
+        importance: 5,
+        disabled: false,
+    },
+    {
+        id: 'c_out',
+        kind: 'LOCATION',
+        name: 'Distant Citadel',
+        comment: '[LOCATION] Distant Citadel',
+        keys: ['Distant Citadel', 'Citadel'],
+        content: 'Far outside the starting basin.',
+        importance: 1,
+        disabled: true,
+    },
+]);
+
+const handStore = { entries: {} };
+const handDeps = {
+    fetchImpl: async (url, opts) => {
+        if (url.endsWith('/get')) return { ok: true, json: async () => JSON.parse(JSON.stringify(handStore)) };
+        const body = JSON.parse(opts.body);
+        handStore.entries = body.data.entries;
+        return { ok: true };
+    },
+    getHeaders: () => ({}),
+};
+
+const handWrite1 = await writeStagedCanon('handcamp', handDeps);
+assert.strictEqual(handWrite1.written, 2);
+
+const writtenEntries = Object.values(handStore.entries);
+const torinEntry = writtenEntries.find(e => e.comment.includes('Torin Anvilson'));
+const citadelEntry = writtenEntries.find(e => e.comment.includes('Distant Citadel'));
+assert.ok(torinEntry, 'Active canon entry must have stripped comment');
+assert.strictEqual(torinEntry.comment, '[NPC] Torin Anvilson');
+assert.deepStrictEqual(torinEntry.key, ['Torin Anvilson', 'Anvilson', 'forge_alias']);
+assert.strictEqual(
+    torinEntry.content,
+    '[CORE]\nForges star-metal for Elara.\n[/CORE]',
+    'Active canon entry must wrap cleaned content in [CORE]...[/CORE]',
+);
+assert.strictEqual(torinEntry.disable, false);
+assert.strictEqual(torinEntry.vectorized, true);
+
+// In-memory staged object must stay unmutated for Session Zero badge rendering
+assert.ok(
+    getStagedCanonEntries()[0].comment.includes('RESOLVED TO: Torin Anvilson'),
+    'In-memory staged entry comment badge must remain intact during Session Zero',
+);
+
+// Disabled out-of-scope entry must clear keys and vectorized while backing up canonKeys
+assert.ok(citadelEntry, 'Out-of-scope canon entry must be written');
+assert.strictEqual(citadelEntry.disable, true);
+assert.strictEqual(citadelEntry.vectorized, false);
+assert.deepStrictEqual(citadelEntry.key, [], 'Disabled out-of-scope entry must clear key[] so scanAssistantOutputForKeywords skips it');
+assert.deepStrictEqual(citadelEntry.extensions.canonKeys, ['Distant Citadel', 'Citadel']);
+assert.strictEqual(citadelEntry.content, '[CORE]\nFar outside the starting basin.\n[/CORE]');
+
+// Re-enabling the out-of-scope entry restores trigger keys and vectorized flag while keeping appended chronicle lines
+citadelEntry.content = `${citadelEntry.content}\n[Day 3] Scouted from afar.`;
+toggleCanonEntryDisabled('Distant Citadel', false);
+const handWrite2 = await writeStagedCanon('handcamp', handDeps);
+assert.strictEqual(handWrite2.written, 1);
+const citadelReenabled = Object.values(handStore.entries).find(e => e.comment.includes('Distant Citadel'));
+assert.strictEqual(citadelReenabled.disable, false);
+assert.strictEqual(citadelReenabled.vectorized, true);
+assert.deepStrictEqual(citadelReenabled.key, ['Distant Citadel', 'Citadel']);
+assert.ok(
+    citadelReenabled.content.includes('[Day 3] Scouted from afar.'),
+    'Re-writing [CORE] must preserve chronicle lines appended below [/CORE]',
+);
+
 console.log('✅ Concierge Canon test suite passed.');

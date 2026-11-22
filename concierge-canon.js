@@ -12,7 +12,7 @@
  * Pure helpers are exported for unit testing; network/LLM access is injected.
  */
 
-import { resolveDossierNamePlaceholders, parseResolvedNameToken } from './namerag-hooks.js';
+import { resolveDossierNamePlaceholders, parseResolvedNameToken, stripResolvedNameTokensInText } from './namerag-hooks.js';
 
 export const ARCHIVIST_TOKEN_THRESHOLD = 6000;
 export const MIDDLE_IMPORT_TOKEN_THRESHOLD = 300;
@@ -1265,7 +1265,25 @@ export async function stageCanonSource(source, opts = {}) {
 }
 
 /**
+ * Strips NameRAG resolved-token syntax and wraps Canon body text in `[CORE]...[/CORE]`
+ * so upstream's Lorebook Agent protects foundational Canon while allowing chronicles below.
+ *
+ * @param {string} rawContent
+ * @returns {string}
+ */
+export function wrapCanonCoreContent(rawContent) {
+    const cleaned = stripResolvedNameTokensInText(String(rawContent || '')).trim();
+    if (!cleaned) return '';
+    if (/\[CORE\][\s\S]*?\[\/CORE\]/i.test(cleaned)) {
+        return cleaned;
+    }
+    return `[CORE]\n${cleaned}\n[/CORE]`;
+}
+
+/**
  * Write staged Canon entries into `{prefix}_Canon`. Idempotent: entries are matched by comment.
+ * Strips NameRAG evolution tokens without mutating in-memory staged badges, wraps bodies in `[CORE]`,
+ * and isolates disabled out-of-scope entries (`key: []`, `vectorized: false`) while preserving `canonKeys`.
  *
  * @param {string} prefix
  * @param {object} [deps] injectable `{ fetchImpl, getHeaders, afterSave }` for tests
@@ -1293,13 +1311,56 @@ export async function writeStagedCanon(prefix, deps = {}) {
     let skipped = 0;
 
     for (const e of entries) {
-        const eComment = String(e.comment || '').toLowerCase();
-        const existingEntry = Object.values(bookData.entries).find(be => String(be.comment || '').toLowerCase() === eComment);
+        const shouldDisable = Boolean(e.disabled);
+        const rawComment = String(e.comment || '').trim();
+        const cleanComment = stripResolvedNameTokensInText(rawComment).trim() || rawComment;
+        const rawCommentLower = rawComment.toLowerCase();
+        const cleanCommentLower = cleanComment.toLowerCase();
+        const cleanKeys = [...new Set(
+            (Array.isArray(e.keys) ? e.keys : [])
+                .map(k => stripResolvedNameTokensInText(String(k || '')).trim())
+                .filter(Boolean),
+        )];
+        const cleanContent = wrapCanonCoreContent(e.content);
+
+        const existingEntry = Object.values(bookData.entries).find(be => {
+            const c = String(be.comment || '').trim().toLowerCase();
+            return c === cleanCommentLower || c === rawCommentLower;
+        });
 
         if (existingEntry) {
-            const shouldDisable = Boolean(e.disabled);
-            if (Boolean(existingEntry.disable) !== shouldDisable) {
+            const targetKeys = shouldDisable
+                ? []
+                : (cleanKeys.length ? cleanKeys : (Array.isArray(existingEntry.extensions?.canonKeys) ? [...existingEntry.extensions.canonKeys] : []));
+            const targetVectorized = !shouldDisable;
+            const prevKeys = Array.isArray(existingEntry.key) ? existingEntry.key : [];
+            const keysChanged = shouldDisable
+                ? prevKeys.length > 0
+                : (targetKeys.length > 0 && JSON.stringify(prevKeys) !== JSON.stringify(targetKeys));
+            const commentChanged = String(existingEntry.comment || '').trim() !== cleanComment;
+            const existingRawContent = String(existingEntry.content || '');
+            const hasExistingCore = /\[CORE\][\s\S]*?\[\/CORE\]/i.test(existingRawContent);
+            const nextContent = hasExistingCore
+                ? existingRawContent.replace(/\[CORE\][\s\S]*?\[\/CORE\]/i, () => cleanContent)
+                : cleanContent;
+            const contentChanged = existingRawContent !== nextContent;
+            const disableChanged = Boolean(existingEntry.disable) !== shouldDisable;
+            const vectorizedChanged = Boolean(existingEntry.vectorized) !== targetVectorized;
+
+            if (disableChanged || commentChanged || contentChanged || keysChanged || vectorizedChanged) {
                 existingEntry.disable = shouldDisable;
+                existingEntry.comment = cleanComment;
+                existingEntry.content = nextContent;
+                existingEntry.vectorized = targetVectorized;
+                existingEntry.key = targetKeys;
+                existingEntry.extensions = {
+                    ...(existingEntry.extensions || {}),
+                    canon: true,
+                    canonKind: e.kind,
+                    canonImportance: e.importance,
+                    vectorized: targetVectorized,
+                    canonKeys: cleanKeys,
+                };
                 written++;
             } else {
                 skipped++;
@@ -1309,22 +1370,28 @@ export async function writeStagedCanon(prefix, deps = {}) {
 
         bookData.entries[nextUid] = {
             uid: nextUid,
-            key: e.keys,
+            key: shouldDisable ? [] : cleanKeys,
             keysecondary: [],
-            comment: e.comment,
-            content: e.content,
+            comment: cleanComment,
+            content: cleanContent,
             constant: false,
-            vectorized: true,
+            vectorized: !shouldDisable,
             selective: false,
             selectiveLogic: 0,
             addMemo: true,
             order: CANON_ENTRY_ORDER,
             position: 0,
-            disable: Boolean(e.disabled),
+            disable: shouldDisable,
             probability: 100,
             useProbability: false,
             depth: 4,
-            extensions: { canon: true, canonKind: e.kind, canonImportance: e.importance, vectorized: true },
+            extensions: {
+                canon: true,
+                canonKind: e.kind,
+                canonImportance: e.importance,
+                vectorized: !shouldDisable,
+                canonKeys: cleanKeys,
+            },
         };
         nextUid++;
         written++;

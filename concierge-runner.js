@@ -38,6 +38,92 @@ import {
 } from './concierge-pc-format.js';
 import { normalizeGameSystemDrivers } from './game-system-bridge.js';
 import { setPartitionDossier } from './pbta-ruleset-persistence.js';
+import {
+    parseResolvedNameToken,
+    resolveDossierNamePlaceholders,
+    sanitizeDossierResolvedNameTokens,
+} from './namerag-hooks.js';
+
+/**
+ * Registers a newly written or updated World Info book with both Upstream MultiHog's router cache/list
+ * and SillyTavern's in-memory registry + active chat world list so `loadWorldInfo()` and Turn 1 scanning
+ * see it immediately without requiring an F5 reload.
+ *
+ * @param {string} bookName
+ * @param {object} bookData
+ * @param {{ ctx?: any, router?: any, activateOnChat?: boolean }} [options={}]
+ * @returns {Promise<boolean>}
+ */
+export async function registerAndActivateWorldInfoBook(
+    bookName,
+    bookData,
+    { ctx = null, router = null, activateOnChat = true } = {},
+) {
+    if (!bookName) return false;
+    if (typeof router?.updateWorldInfoCache === 'function') {
+        try { await router.updateWorldInfoCache(bookName, bookData); } catch (_) {}
+    }
+    if (typeof router?.rememberCampaignBook === 'function') {
+        try { router.rememberCampaignBook(bookName); } catch (_) {}
+    }
+    if (typeof ctx?.saveWorldInfo === 'function') {
+        try { await ctx.saveWorldInfo(bookName, bookData); } catch (_) {}
+    }
+    if (typeof ctx?.updateWorldInfoList === 'function') {
+        try { await ctx.updateWorldInfoList(); } catch (_) {}
+    }
+    if (activateOnChat && typeof ctx?.executeSlashCommandsWithOptions === 'function') {
+        try {
+            const safeBookName = String(bookName).replace(/"/g, '\\"');
+            await ctx.executeSlashCommandsWithOptions(`/world state=on silent=true "${safeBookName}"`);
+        } catch (_) {}
+    }
+    return true;
+}
+
+/**
+ * Resolves any lingering `[[NAME:...]]` placeholders, runs `healAndNormalizeDossier`,
+ * and recursively strips all NameRAG evolution tokens (`[NAME: ..., RESOLVED TO: ...]`, etc.)
+ * across the entire dossier before handing off to the upstream MultiHog framework.
+ *
+ * @param {object} rawDossier
+ * @param {{ healAndNormalizeDossier: Function, resolvePlaceholders?: Function }} deps
+ * @returns {Promise<object>}
+ */
+export async function prepareSanitizedDossierForFramework(rawDossier, {
+    healAndNormalizeDossier,
+    resolvePlaceholders = resolveDossierNamePlaceholders,
+} = {}) {
+    let sanitizedRawDossier = rawDossier;
+    const rawDossierStr = JSON.stringify(rawDossier || {});
+    if (rawDossierStr.includes('[[NAME') && typeof resolvePlaceholders === 'function') {
+        try {
+            const resolvedStr = await resolvePlaceholders(rawDossierStr, rawDossier);
+            sanitizedRawDossier = JSON.parse(typeof resolvedStr === 'string' ? resolvedStr : resolvedStr.text);
+        } catch (sweepErr) {
+            console.warn('[PbtA Concierge] Pre-handoff placeholder sweep non-fatal error:', sweepErr);
+        }
+    }
+
+    const dossier = healAndNormalizeDossier(sanitizedRawDossier);
+    sanitizeDossierResolvedNameTokens(dossier);
+
+    // Also strip surrounding quotes via parseResolvedNameToken on entity .name fields
+    if (dossier.protagonist?.name) {
+        dossier.protagonist.name = parseResolvedNameToken(dossier.protagonist.name).cleanName;
+    }
+    (dossier.npcs || []).forEach(n => {
+        if (n.name) n.name = parseResolvedNameToken(n.name).cleanName;
+    });
+    (dossier.monsters || []).forEach(m => {
+        if (m.name) m.name = parseResolvedNameToken(m.name).cleanName;
+    });
+    (dossier.factions || []).forEach(f => {
+        if (f.name) f.name = parseResolvedNameToken(f.name).cleanName;
+    });
+
+    return dossier;
+}
 
 /**
  * Send an outgoing user chat message into SillyTavern.
@@ -123,6 +209,8 @@ async function injectDossierIntoWorldInfo(chatId, dossierMarkdown, bookName) {
                 ctx.saveMetadataDebounced();
             }
         }
+
+        await registerAndActivateWorldInfoBook(effectiveBook, bookData, { ctx, activateOnChat: true });
     } catch (err) {
         console.warn('[PbtA Concierge] Could not inject World Info via API directly:', err);
     }
@@ -232,12 +320,7 @@ async function upsertWorldInfoBook(bookName, items = []) {
                 body: JSON.stringify({ name: bookName, data: bookData }),
             });
 
-            if (typeof router.updateWorldInfoCache === 'function') {
-                await router.updateWorldInfoCache(bookName, bookData);
-            }
-            if (typeof router.rememberCampaignBook === 'function') {
-                router.rememberCampaignBook(bookName);
-            }
+            await registerAndActivateWorldInfoBook(bookName, bookData, { ctx, router, activateOnChat: true });
         }
         return assignedMap;
     } catch (err) {
@@ -298,6 +381,7 @@ async function injectDossierEntitiesIntoCampaignLorebooks(chatId, dossier, secti
 async function injectCanonBook(chatId) {
     try {
         if (!getStagedCanonEntries().length) return null;
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
         const stateMgr = await import('../SillyTavern-MultihogDnDFramework/state-manager.js');
         const router = await import('../SillyTavern-MultihogDnDFramework/router.js');
         const prefix = typeof stateMgr.getEffectiveRouterCampaignPrefix === 'function'
@@ -305,8 +389,7 @@ async function injectCanonBook(chatId) {
             : (chatId || '');
         const res = await writeStagedCanon(prefix, {
             afterSave: async (bookName, bookData) => {
-                if (typeof router.updateWorldInfoCache === 'function') await router.updateWorldInfoCache(bookName, bookData);
-                if (typeof router.rememberCampaignBook === 'function') router.rememberCampaignBook(bookName);
+                await registerAndActivateWorldInfoBook(bookName, bookData, { ctx, router, activateOnChat: true });
             },
         });
         if (res?.written) {
@@ -406,12 +489,7 @@ async function injectWorldSkeleton(chatId, dossier) {
                 body: JSON.stringify({ name: skeletonBookName, data: bookData }),
             });
 
-            if (typeof router.updateWorldInfoCache === 'function') {
-                await router.updateWorldInfoCache(skeletonBookName, bookData);
-            }
-            if (typeof router.rememberCampaignBook === 'function') {
-                router.rememberCampaignBook(skeletonBookName);
-            }
+            await registerAndActivateWorldInfoBook(skeletonBookName, bookData, { ctx, router, activateOnChat: true });
         }
     } catch (err) {
         console.warn('[PbtA Concierge] World Skeleton injection encountered non-fatal error:', err);
@@ -433,35 +511,9 @@ export async function launchPbtaCampaign(rawDossier, onProgress = () => {}, opti
     const { healAndNormalizeDossier } = await import('./concierge-parser.js');
     const { applyPbtACartridge, applyFaeCartridge, syncPersonaToChat, uploadImageToPersona, findMatchingPersona } = await import('./index.js');
     const { ensureCleanAdventureChat } = await import('./adventure-chat.js');
-    const { parseResolvedNameToken, resolveDossierNamePlaceholders } = await import('./namerag-hooks.js');
 
-    // Pre-Launch Safety Net: Resolve any lingering [[NAME:...]] tokens before initializing live game
-    let sanitizedRawDossier = rawDossier;
-    const rawDossierStr = JSON.stringify(rawDossier || {});
-    if (rawDossierStr.includes('[[NAME')) {
-        try {
-            const resolvedStr = await resolveDossierNamePlaceholders(rawDossierStr, rawDossier);
-            sanitizedRawDossier = JSON.parse(typeof resolvedStr === 'string' ? resolvedStr : resolvedStr.text);
-        } catch (sweepErr) {
-            console.warn('[PbtA Concierge] Pre-launch placeholder sweep non-fatal error:', sweepErr);
-        }
-    }
-
-    const dossier = healAndNormalizeDossier(sanitizedRawDossier);
-
-    // Strip blueprint evolution tokens ([NAME: tag, RESOLVED TO: Name]) for clean live gameplay
-    if (dossier.protagonist?.name) {
-        dossier.protagonist.name = parseResolvedNameToken(dossier.protagonist.name).cleanName;
-    }
-    (dossier.npcs || []).forEach(n => {
-        if (n.name) n.name = parseResolvedNameToken(n.name).cleanName;
-    });
-    (dossier.monsters || []).forEach(m => {
-        if (m.name) m.name = parseResolvedNameToken(m.name).cleanName;
-    });
-    (dossier.factions || []).forEach(f => {
-        if (f.name) f.name = parseResolvedNameToken(f.name).cleanName;
-    });
+    // Pre-Launch Safety Net: Resolve [[NAME:...]] & strip all NameRAG evolution tokens recursively
+    const dossier = await prepareSanitizedDossierForFramework(rawDossier, { healAndNormalizeDossier });
 
     dossier.meta = dossier.meta || {};
     dossier.meta.conciergeCreated = true;
@@ -1069,21 +1121,8 @@ export async function syncPbtaCampaignUpdates(rawDossier, onProgress = () => {},
     const { formatInitialPbtaMemo } = await import('./pbta-ruleset.js');
     const { forceRenderTrackerView } = await import('./index.js');
     const { normalizePbtaMemo, syncLivePbtaMemoVitality } = await import('./pbta-vitality-sync.js');
-    const { parseResolvedNameToken } = await import('./namerag-hooks.js');
 
-    const dossier = healAndNormalizeDossier(rawDossier);
-    if (dossier.protagonist?.name) {
-        dossier.protagonist.name = parseResolvedNameToken(dossier.protagonist.name).cleanName;
-    }
-    (dossier.npcs || []).forEach(n => {
-        if (n.name) n.name = parseResolvedNameToken(n.name).cleanName;
-    });
-    (dossier.monsters || []).forEach(m => {
-        if (m.name) m.name = parseResolvedNameToken(m.name).cleanName;
-    });
-    (dossier.factions || []).forEach(f => {
-        if (f.name) f.name = parseResolvedNameToken(f.name).cleanName;
-    });
+    const dossier = await prepareSanitizedDossierForFramework(rawDossier, { healAndNormalizeDossier });
     dossier.meta = dossier.meta || {};
     dossier.meta.conciergeCreated = true;
     dossier.meta.isStub = false;

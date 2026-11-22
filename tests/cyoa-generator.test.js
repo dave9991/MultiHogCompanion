@@ -349,4 +349,103 @@ assert.ok(!wiMarkdown.includes('Hack & Slash'), 'World Info must not contain CYO
 assert.ok(wiMarkdown.includes('Aelion'), 'World Info serialization must keep protagonist');
 console.log('✓ World Info dossier serialization cleanly excludes CYOA choices');
 
+// ── 9. CART-011: Per-Chat Cartridge, Custom Genre Spec & Custom maxHarmFate ──
+console.log('9. Testing CART-011 per-chat cartridge overrides, FAE custom pools/heroicTier, and PbtA custom maxHarmFate...');
+
+const companionCartridgeStore = {
+    chat_fae_solar: {
+        cartridgeId: 'fae',
+        genre: 'custom',
+        systemLabel: 'Solar Punk Vaults',
+        customGenreSpec: {
+            label: 'Solar Punk Vaults',
+            pools: [
+                { key: 'bio_charge', label: 'Bio-Charge', max: 8, is_primary: true },
+                { key: 'rad_load', label: 'Rad-Load', max: 6 },
+            ],
+        },
+        config: { heroicTier: true },
+    },
+    chat_pbta_respawn: {
+        cartridgeId: 'pbta',
+        genre: 'custom',
+        systemLabel: 'Cyber Dungeon',
+        stats: ['Nerve', 'Chrome', 'Code', 'Heart'],
+        customGenreSpec: {
+            label: 'Cyber Dungeon',
+            stats: ['Nerve', 'Chrome', 'Code', 'Heart'],
+            maxHarmFate: {
+                rule: 'Neural respawn at Sector Node',
+                statusToken: '(-) Desynced',
+                cyoaStyle: 'respawn',
+            },
+        },
+    },
+};
+
+globalThis.SillyTavern = {
+    getContext: () => ({
+        extensionSettings: {
+            multihog_companion: {
+                companionActiveCartridges: companionCartridgeStore,
+            },
+        },
+    }),
+};
+
+const faeChatRpgSettings = {
+    chatStates: {
+        chat_fae_solar: {
+            faeCampaignDossier: {
+                meta: { ruleset: 'fae', systemKey: 'custom', systemLabel: 'Solar Punk Vaults' },
+                character: { heroicDomain: 'Reactor Master' },
+            },
+        },
+    },
+    cyoaConfig: { playstyle: 'cyoa_5', cyoaEmojis: true },
+};
+
+const faeCustomPrompt = buildCyoaPrompt({
+    narrative: 'Steam vents rupture beside the solar turbine.',
+    memo: '[CHARACTER]\nSol: 6/8 HP | Pool: Bio-Charge (6/8)\n((BAR:amber)) Rad-Load: 1/6\n[/CHARACTER]',
+    isPbta: false,
+    isFae: true,
+    chatId: 'chat_fae_solar',
+    rpgSettings: faeChatRpgSettings,
+});
+assert.ok(faeCustomPrompt.systemPrompt.includes('Solar Punk Vaults'), 'FAE CYOA prompt must resolve customGenreSpec label from per-chat cartridge');
+assert.ok(faeCustomPrompt.systemPrompt.includes('Bio-Charge'), 'FAE CYOA prompt must include primary custom pool');
+assert.ok(faeCustomPrompt.systemPrompt.includes('Rad-Load'), 'FAE CYOA prompt must include hyphenated custom pool');
+assert.ok(faeCustomPrompt.systemPrompt.includes('HEROIC TIER ACTIVE (Reactor Master)'), 'FAE CYOA prompt must reflect per-chat heroicTier and heroicDomain');
+
+const pbtaChatRpgSettings = {
+    chatStates: {},
+    cyoaConfig: { playstyle: 'cyoa_5', cyoaEmojis: true },
+};
+
+const pbtaHealthyCustomPrompt = buildCyoaPrompt({
+    narrative: 'The ICE firewall pulses crimson.',
+    memo: '[CHARACTER]\nZero: 5/5 HP | Harm: 0/5\nStats: Nerve +2, Chrome +1, Code +1, Heart 0\n[/CHARACTER]',
+    isPbta: true,
+    chatId: 'chat_pbta_respawn',
+    rpgSettings: pbtaChatRpgSettings,
+});
+assert.ok(pbtaHealthyCustomPrompt.systemPrompt.includes('Cyber Dungeon'), 'PbtA CYOA prompt must resolve customGenreSpec label from per-chat cartridge');
+assert.ok(pbtaHealthyCustomPrompt.systemPrompt.includes('Nerve, Chrome, Code, Heart'), 'PbtA CYOA prompt must include custom stats array');
+
+const pbtaDownedRespawnPrompt = buildCyoaPrompt({
+    narrative: 'Your deck overloads and your consciousness fractures.',
+    memo: '[CHARACTER]\nZero: 0/5 HP | Harm: 5/5\nStatus: (-) Desynced\n[/CHARACTER]',
+    isPbta: true,
+    chatId: 'chat_pbta_respawn',
+    rpgSettings: pbtaChatRpgSettings,
+});
+assert.ok(pbtaDownedRespawnPrompt.systemPrompt.includes('RELEASE SPIRIT / RESPAWN'), 'Downed PbtA CYOA prompt must honor respawn maxHarmFate style');
+assert.ok(pbtaDownedRespawnPrompt.systemPrompt.includes('Neural respawn at Sector Node'), 'Downed PbtA CYOA prompt must include custom maxHarmFate rule');
+assert.ok(!pbtaDownedRespawnPrompt.systemPrompt.includes('CLING TO LIFE / LAST BREATH'), 'Respawn maxHarmFate must replace default LAST BREATH template');
+
+delete globalThis.SillyTavern;
+
+console.log('✓ CART-011 per-chat cartridge overrides, FAE custom pools/heroicTier, and PbtA custom maxHarmFate verified');
+
 console.log('\n--- All CYOA Choice Generator Engine tests PASSED! 🧭 ---');

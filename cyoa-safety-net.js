@@ -23,7 +23,7 @@ import {
     lockSendButtonUI,
     isProtagonistDowned,
 } from './cyoa-generator.js';
-import { isPbtAActive } from './pbta-ruleset-persistence.js';
+import { isPbtAActive, isFaeActive } from './pbta-ruleset-persistence.js';
 import { isAdventureActive } from './adventure-chat.js';
 
 let _wasGenerationStopped = false;
@@ -33,12 +33,20 @@ let _lastAttemptedSwipeId = -1;
 let _getSettings = () => {
     if (typeof SillyTavern !== 'undefined') {
         const ctx = SillyTavern.getContext?.();
+        if (ctx?.extensionSettings?.multihog_companion) {
+            return ctx.extensionSettings.multihog_companion;
+        }
         if (ctx?.extensionSettings?.MultiHogCompanion) {
             return ctx.extensionSettings.MultiHogCompanion;
         }
     }
-    if (typeof extension_settings !== 'undefined' && extension_settings?.MultiHogCompanion) {
-        return extension_settings.MultiHogCompanion;
+    if (typeof extension_settings !== 'undefined') {
+        if (extension_settings?.multihog_companion) {
+            return extension_settings.multihog_companion;
+        }
+        if (extension_settings?.MultiHogCompanion) {
+            return extension_settings.MultiHogCompanion;
+        }
     }
     return {};
 };
@@ -178,16 +186,18 @@ export function stripCyoaFromOutgoingChat(chat, options = {}) {
 
 /**
  * Checks whether CYOA choices are expected on the current turn.
- * Works for both D&D 5e and PbtA.
+ * Works for D&D 5e, PbtA, and FAE.
  *
  * @param {object} [rpgSettings]
  * @param {boolean} [isPbtaActive=false]
+ * @param {boolean} [isFaeActiveFlag=false]
  * @returns {boolean}
  */
-export function isCyoaExpected(rpgSettings, isPbtaActive = false) {
+export function isCyoaExpected(rpgSettings, isPbtaActive = false, isFaeActiveFlag = false) {
     if (!rpgSettings || rpgSettings.enabled === false) return false;
 
-    if (isPbtaActive) {
+    const faeActive = Boolean(isFaeActiveFlag || (typeof isFaeActive === 'function' ? isFaeActive() : false));
+    if (isPbtaActive || faeActive) {
         const playstyle = rpgSettings.cyoaConfig?.playstyle;
         if (playstyle === 'freeform') return false;
         if (rpgSettings.syspromptModules?.CYOA_mode === false) return false;
@@ -195,6 +205,7 @@ export function isCyoaExpected(rpgSettings, isPbtaActive = false) {
     }
 
     // In D&D 5e (MultiHog Framework):
+    if (rpgSettings.cyoaConfig?.playstyle === 'freeform') return false;
     return rpgSettings.syspromptModules?.CYOA_mode === true;
 }
 
@@ -563,6 +574,7 @@ export async function coordinateCyoaForMessage({
     triggerSource = 'unknown',
     getSettings,
     isPbtaActive,
+    isFaeActive: isFaeActiveFn,
     showToast,
     force = false,
 } = {}) {
@@ -602,8 +614,11 @@ export async function coordinateCyoaForMessage({
 
     const rpgSettings = ctx?.extensionSettings?.rpg_tracker;
     const pbtaActive = typeof isPbtaActive === 'function' ? isPbtaActive() : false;
+    const faeActive = typeof isFaeActiveFn === 'function'
+        ? isFaeActiveFn()
+        : (typeof isFaeActive === 'function' ? isFaeActive() : false);
 
-    if (!force && !isCyoaExpected(rpgSettings, pbtaActive)) return false;
+    if (!force && !isCyoaExpected(rpgSettings, pbtaActive, faeActive)) return false;
 
     // [CATALOG: WRK-08] See WORKAROUNDS.md — Level-Up & Permadeath Pause Protocol Shield
     if (!force && isLevelUpPending(msg.mes)) {
@@ -628,11 +643,11 @@ export async function coordinateCyoaForMessage({
         if (repaired !== msg.mes) {
             await applyRepairedMessage(idx, repaired);
         }
-        const isDowned = isProtagonistDowned(freshMemo, pbtaActive);
+        const isDowned = isProtagonistDowned(freshMemo, pbtaActive, faeActive);
         if (!isDowned) {
             return false;
         }
-        if (/Death Saving Throw|Last Breath|Cling to life|Succumb|whisper a final plea|faint plea/i.test(msg.mes)) {
+        if (/Death Saving Throw|Last Breath|Cling to life|Succumb|whisper a final plea|faint plea|Flee Grace Escape|Pivot to Secondary Pool|Collapse \/ Succumb|Last Stand/i.test(msg.mes)) {
             return false;
         }
     }
@@ -661,7 +676,8 @@ export async function coordinateCyoaForMessage({
         const ok = await generateCyoaChoices({
             messageId: idx,
             narrative: text,
-            isPbta: pbtaActive,
+            isPbta: faeActive ? false : pbtaActive,
+            isFae: faeActive,
             rpgSettings: {
                 ...rpgSettings,
                 cyoaMaxTokens: s?.cyoaMaxTokens || rpgSettings?.cyoaMaxTokens,
@@ -878,15 +894,13 @@ export async function repairOrGenerateChoicesForMessage(optsOrMessageId = {}, ma
  * Registers CYOA slash commands (/cyoagen, /cyoafix, /cyoaretry).
  */
 export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { getSettings, isPbtaActive, showToast } = {}) {
-    if (typeof getSettings === 'function') {
-        _getSettings = getSettings;
-    }
     if (!SlashCommandParser?.addCommandObject || !SlashCommand) return;
+    const cmdGetSettings = typeof getSettings === 'function' ? getSettings : () => _getSettings();
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoagen',
         callback: async () => {
-            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
+            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast, getSettings: cmdGetSettings });
             return ok ? 'Regenerated CYOA choices.' : 'Failed to regenerate CYOA choices.';
         },
         helpString: '<div>Formulates fresh CYOA choices for the latest narrator turn without touching the story prose.</div>',
@@ -895,7 +909,7 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { ge
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoaretry',
         callback: async () => {
-            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
+            const ok = await regenerateCyoaChoicesForMessage({ isPbtaActive, showToast, getSettings: cmdGetSettings });
             return ok ? 'Regenerated CYOA choices.' : 'Failed to regenerate CYOA choices.';
         },
         helpString: '<div>Alias for /cyoagen. Re-rolls CYOA choices for the latest narrator turn.</div>',
@@ -904,7 +918,7 @@ export function registerCyoaSlashCommands(SlashCommandParser, SlashCommand, { ge
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cyoafix',
         callback: async () => {
-            const ok = await repairOrGenerateChoicesForMessage({ isPbtaActive, showToast, getSettings: _getSettings });
+            const ok = await repairOrGenerateChoicesForMessage({ isPbtaActive, showToast, getSettings: cmdGetSettings });
             return ok ? 'Successfully repaired/generated CYOA choices.' : 'Could not repair/generate CYOA choices.';
         },
         helpString: '<div>Converts plain-text numbered choices into buttons, or generates them via choice generator if missing.</div>',

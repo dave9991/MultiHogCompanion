@@ -203,18 +203,12 @@ export async function applyDndSubfooterAlignment(options = {}) {
         label: '<end_of_output_footer>',
         description: 'D&D 5e Status Footer (Subfooter Alignment)',
         enabled: true,
+        scope: 'chat',
+        _chatSetupMember: true,
         content: footerContent,
     };
 
-    // Remove any existing override with this ID or targeting end_of_output_footer with unlocked_base
-    rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary.filter(
-        item => item
-            && item.id !== DND_SUBFOOTER_OVERRIDE_ID
-            && item.id !== DND_DEFT_TOUCH_OVERRIDE_ID
-            && !(item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer')
-    );
-    rpgSettings.customSyspromptLibrary.push(snippet);
-    rpgSettings.customSyspromptLibrary.push({
+    const deftTouchSnippet = {
         id: DND_DEFT_TOUCH_OVERRIDE_ID,
         tag: 'deft_touch_pacing',
         origin: 'custom',
@@ -222,8 +216,29 @@ export async function applyDndSubfooterAlignment(options = {}) {
         description: 'D&D 5e Deft Touch & Narrative-First Pacing',
         enabled: true,
         scope: 'chat',
+        _chatSetupMember: true,
         content: getDndDeftTouchPacingContent(),
-    });
+    };
+
+    const isManagedDndFixEntry = (item) => Boolean(
+        item
+        && (
+            item.id === DND_SUBFOOTER_OVERRIDE_ID
+            || item.id === DND_DEFT_TOUCH_OVERRIDE_ID
+            || (item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer')
+        )
+    );
+
+    // Remove any existing override with this ID or targeting end_of_output_footer with unlocked_base
+    rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary.filter(item => !isManagedDndFixEntry(item));
+    rpgSettings.customSyspromptLibrary.push(snippet, deftTouchSnippet);
+
+    // [CATALOG: WRK-09] Mirror snippets into syspromptSnippetDatabase so upstream saveChatSetup/normalize keeps them
+    if (!Array.isArray(rpgSettings.syspromptSnippetDatabase)) {
+        rpgSettings.syspromptSnippetDatabase = [];
+    }
+    rpgSettings.syspromptSnippetDatabase = rpgSettings.syspromptSnippetDatabase.filter(item => !isManagedDndFixEntry(item));
+    rpgSettings.syspromptSnippetDatabase.push({ ...snippet }, { ...deftTouchSnippet });
 
     // 3. Ensure cyoaConfig with aligned custom prompt
     if (!rpgSettings.cyoaConfig || typeof rpgSettings.cyoaConfig !== 'object') {
@@ -252,14 +267,17 @@ export async function revertDndSubfooterAlignment(options = {}) {
     const rpgSettings = options.rpgSettings || await getMultiHogSettings();
     if (!rpgSettings) return false;
 
-    // 1. Remove the footer and deft-touch pacing overrides
+    // 1. Remove the footer and deft-touch pacing overrides from both library and database
+    const keepNonDndFix = (item) => item
+        && item.id !== DND_SUBFOOTER_OVERRIDE_ID
+        && item.id !== DND_DEFT_TOUCH_OVERRIDE_ID
+        && !(item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer' && item.content?.includes('active subfooters'));
+
     if (Array.isArray(rpgSettings.customSyspromptLibrary)) {
-        rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary.filter(
-            item => item
-                && item.id !== DND_SUBFOOTER_OVERRIDE_ID
-                && item.id !== DND_DEFT_TOUCH_OVERRIDE_ID
-                && !(item.origin === 'unlocked_base' && item.baseTag === 'end_of_output_footer' && item.content?.includes('active subfooters'))
-        );
+        rpgSettings.customSyspromptLibrary = rpgSettings.customSyspromptLibrary.filter(keepNonDndFix);
+    }
+    if (Array.isArray(rpgSettings.syspromptSnippetDatabase)) {
+        rpgSettings.syspromptSnippetDatabase = rpgSettings.syspromptSnippetDatabase.filter(keepNonDndFix);
     }
 
     // 2. Revert cyoaConfig if it holds our subfooter prompt

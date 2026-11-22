@@ -12,9 +12,24 @@
  * 5. Commits choices to chat message, swipes, updates UI, and invokes MultiHog DOM binders.
  */
 
-import { PBTA_GENRES } from './pbta-ruleset.js';
-import { FAE_GENRES } from './fae-ruleset.js';
-import { isFaeActive } from './pbta-ruleset-persistence.js';
+import {
+    PBTA_GENRES,
+    resolveEffectivePbtaGenre,
+    resolveEffectiveMaxHarmFate,
+} from './pbta-ruleset.js';
+import {
+    FAE_GENRES,
+    resolveEffectiveFaeGenre,
+} from './fae-ruleset.js';
+import {
+    isFaeActive,
+    getCompanionActiveCartridge,
+    getPartitionDossier,
+} from './pbta-ruleset-persistence.js';
+import {
+    detectActiveGenre,
+    detectActiveFaeGenre,
+} from './pbta-companion-bridge.js';
 import { stripThinkingContent } from './concierge-connection.js';
 
 let _activeCyoaAbortController = null;
@@ -114,6 +129,60 @@ export function isProtagonistDowned(memoText, isPbta = false, isFae = false) {
     return false;
 }
 
+function resolveCyoaChatOverrides(rpgSettings, chatId = null) {
+    const stCtx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+    const effectiveChatId = chatId
+        || rpgSettings?.chatStateProjectionOwner
+        || stCtx?.getCurrentChatId?.()
+        || stCtx?.chatId
+        || null;
+    const activeCart = effectiveChatId ? getCompanionActiveCartridge(effectiveChatId, rpgSettings) : null;
+    const partState = (effectiveChatId && rpgSettings?.chatStates?.[effectiveChatId]) || null;
+    const dossier = getPartitionDossier(partState) || activeCart?.dossier || null;
+    const customGenreSpec = rpgSettings?.customGenreSpec
+        || dossier?.meta?.customGenreSpec
+        || activeCart?.customGenreSpec
+        || activeCart?.dossier?.meta?.customGenreSpec
+        || null;
+    const statsObj = dossier?.protagonist?.stats || null;
+    const statsList = statsObj && typeof statsObj === 'object'
+        ? Object.keys(statsObj)
+        : (Array.isArray(activeCart?.stats) ? activeCart.stats : []);
+    const poolsObj = dossier?.character?.pools || dossier?.protagonist?.pools || activeCart?.pools || null;
+    const mergedConfig = {
+        ...(activeCart?.config || {}),
+        ...(dossier?.config || {}),
+        ...(rpgSettings?.maxHarmFate ? { maxHarmFate: rpgSettings.maxHarmFate } : {}),
+    };
+    const heroicTier = Boolean(
+        rpgSettings?.heroicTier
+        ?? dossier?.config?.heroicTier
+        ?? dossier?.config?.heroic_tier
+        ?? dossier?.config?.knobs?.heroic_tier
+        ?? activeCart?.config?.heroicTier
+        ?? activeCart?.knobs?.heroic_tier
+        ?? false
+    );
+    const heroicDomain = rpgSettings?.heroicDomain
+        || dossier?.character?.heroicDomain
+        || dossier?.protagonist?.heroicDomain
+        || null;
+    const systemLabel = activeCart?.systemLabel || dossier?.meta?.systemLabel || null;
+    return {
+        chatId: effectiveChatId,
+        activeCart,
+        dossier,
+        genreKey: activeCart?.genre || dossier?.meta?.systemKey || null,
+        systemLabel,
+        customGenreSpec,
+        ...(statsList.length >= 3 ? { stats: statsList } : {}),
+        ...(poolsObj && Object.keys(poolsObj).length > 0 ? { pools: poolsObj } : {}),
+        heroicTier,
+        heroicDomain,
+        config: mergedConfig,
+    };
+}
+
 /**
  * Constructs the prompt for the dedicated choice generator.
  *
@@ -123,11 +192,13 @@ export function isProtagonistDowned(memoText, isPbta = false, isFae = false) {
  * @param {boolean} opts.isPbta Whether PbtA ruleset is active
  * @param {boolean} [opts.isFae=false] Whether FAE ruleset is active
  * @param {object} [opts.rpgSettings] MultiHog settings
+ * @param {string|null} [opts.chatId=null] Optional active chat ID for per-chat cartridge lookup
  * @returns {{ systemPrompt: string, userPrompt: string }}
  */
-export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSettings }) {
+export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSettings, chatId = null }) {
     const effectiveIsFae = isFae || (!isPbta && (isFaeActive?.() || /FAE Knobs:|Positive Tags:|Leverage Barriers/i.test(memo || '')));
     const isDowned = isProtagonistDowned(memo, isPbta, effectiveIsFae);
+    const chatOverrides = resolveCyoaChatOverrides(rpgSettings, chatId);
     const cyoaConfig = rpgSettings?.cyoaConfig || {};
     const playstyle = cyoaConfig.playstyle || 'cyoa_5';
     const choiceCount = playstyle === 'cyoa_3' ? 3 : 5;
@@ -138,21 +209,27 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSet
     let guidelines = '';
 
     if (effectiveIsFae) {
-        const genreKey = rpgSettings?.faeGenre || rpgSettings?.pbtaGenre || 'cosmic_horror';
-        const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+        const genreKey = rpgSettings?.faeGenre
+            || chatOverrides.genreKey
+            || detectActiveFaeGenre({ chatId: chatOverrides.chatId, rpgSettings, currentMemo: memo })
+            || rpgSettings?.pbtaGenre
+            || 'cosmic_horror';
+        const genre = resolveEffectiveFaeGenre(genreKey, chatOverrides) || FAE_GENRES.cosmic_horror;
+        const heroicTier = Boolean(rpgSettings?.heroicTier ?? chatOverrides.heroicTier);
+        const heroicDomain = rpgSettings?.heroicDomain || chatOverrides.heroicDomain || '';
 
-        // Extract active pool names from memo or genre fallback
+        // Extract active pool names from memo or resolved genre/cartridge fallback
         let activePoolNames = [];
         if (typeof memo === 'string') {
             const charBlockMatch = memo.match(/\[CHARACTER\]([\s\S]*?)\[\/CHARACTER\]/i);
             const charText = charBlockMatch ? charBlockMatch[1] : memo;
             // Primary pool from line: Pool: Health (8/8)
-            const primaryPoolMatch = charText.match(/Pool:\s*([A-Za-z0-9&/ -]+?)(?:\s*\(\d+|\s*\||\n|$)/i);
+            const primaryPoolMatch = charText.match(/Pool:\s*([A-Za-z0-9&'\/ -]+?)(?:\s*\(\d+|\s*\||\n|$)/i);
             if (primaryPoolMatch) {
                 activePoolNames.push(primaryPoolMatch[1].trim());
             }
             // Secondary pools from ((BAR<COLOR>)) or legacy ((BAR: color)) Label: ...
-            const barMatches = [...charText.matchAll(/\(\(BAR(?::\s*[a-zA-Z]+|[a-zA-Z]+|\s*-\s*[^)]+)?\)\)\s*([A-Za-z0-9&/ -]+?):/gi)];
+            const barMatches = [...charText.matchAll(/\(\(BAR(?::\s*[a-zA-Z]+|[a-zA-Z]+|\s*-\s*[^)]+)?\)\)\s*([A-Za-z0-9&'\/ -]+?):/gi)];
             for (const m of barMatches) {
                 if (m[1]) activePoolNames.push(m[1].trim());
             }
@@ -174,7 +251,7 @@ export function buildCyoaPrompt({ narrative, memo, isPbta, isFae = false, rpgSet
   ${choiceCount === 5 ? '4. BRACE FOR OVERFLOW / LAST STAND: Absorb the overflow damage and accept a lasting Scar/Debuff.\n  5. COLLAPSE / SUCCUMB: Fall back, play dead, or let darkness take you to avoid immediate lethality.' : ''}`;
         } else {
             guidelines = `Freeform Attrition Engine (FAE) Tactical & Narrative Choices (Style B Format):
-- Generate exactly ${choiceCount} actionable, suspenseful choices tailored to the current scene and fictional stakes.
+- Generate exactly ${choiceCount} actionable, suspenseful choices tailored to the current scene and fictional stakes.${heroicTier ? `\n- HEROIC TIER ACTIVE${heroicDomain ? ` (${heroicDomain})` : ''}: At most 1 high-stakes choice may leverage heroic prowess while naming an active resource pool.` : ''}
 - STYLE B BRACKET RULES:
   * Choices that risk a Resource Pool append a clean bracket at the end of the button:
     - With one or more Positive Tags (trait, gear, companion) or active Advantage: "— [Pool | +Tag1, +Tag2]" (or "— [Pool | +Tag1, +Advantage]"). For companion tags like Companion: Brother Marcus (Cleric), write "+Companion: Brother Marcus" or "+Brother Marcus".
@@ -211,11 +288,48 @@ ${cyoaEmojis ? '- Prefix each choice option with an appropriate thematic emoji.'
 </choices>
 Do NOT include any narrative explanation, commentary, or extra text outside the <choices>...</choices> block.`;
     } else if (isPbta) {
-        const genreKey = rpgSettings?.pbtaGenre || 'fantasy';
-        const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+        const genreKey = rpgSettings?.pbtaGenre
+            || chatOverrides.genreKey
+            || detectActiveGenre({ chatId: chatOverrides.chatId, rpgSettings, currentMemo: memo })
+            || 'fantasy';
+        const genre = resolveEffectivePbtaGenre(genreKey, chatOverrides) || PBTA_GENRES.fantasy;
+        const activeStatsStr = Array.isArray(genre?.stats) && genre.stats.length
+            ? genre.stats.join(', ')
+            : 'Might, Agility, Wits, Heart, Arcana';
+        const fate = resolveEffectiveMaxHarmFate(chatOverrides, genre);
+        const isCustomFate = Boolean(fate && fate.rule && !/^(?:mortal peril|last breath|dying)/i.test(fate.rule.trim()));
 
         if (isDowned) {
-            guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS DOWNED / INCAPACITATED (Max Harm / 0 HP):
+            if (isCustomFate) {
+                const customRule = fate.rule.trim();
+                const statusToken = fate.statusToken?.trim() || '(-) Downed';
+                if (/respawn|graveyard|ghost|mmo|shrine/i.test(customRule) || fate.cyoaStyle === 'respawn') {
+                    guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS DOWNED / MAX HARM (${statusToken}):
+- Strict negative constraint: DO NOT offer standard physical attacks, confident dialogue, or normal combat maneuvers. The protagonist has fallen: ${customRule}.
+- You must generate exactly ${choiceCount} Downed / Respawn crisis choices reflecting their defeated state:
+  1. RELEASE SPIRIT / RESPAWN: Surrender physical vessel and return to the nearest graveyard, soul shrine, or bindstone.
+  2. AWAIT RESURRECTION: Send out a spirit flare, whisper through bond, or call on an ally/healer for a revival.
+  3. DESPERATE SACRIFICE / SPIRIT PULSE: A last-ditch ephemeral activation, trigger item, or parting plea.
+  ${choiceCount === 5 ? '4. SLIP INTO THE SHADOWS / PHANTOM FORM: Drift in ghost form, evaluate defeat, or assess threat logs.\n  5. ALLY INTERVENTION: Signal companions to fall back, secure your remnant, or disengage.' : ''}`;
+                } else if (/burnout|exhaust|faint|pass out|fatigue/i.test(customRule) || fate.cyoaStyle === 'burnout') {
+                    guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS DOWNED / MAX HARM (${statusToken}):
+- Strict negative constraint: DO NOT offer standard active actions, confident banter, or energetic maneuvers. The protagonist has reached complete burnout: ${customRule}.
+- You must generate exactly ${choiceCount} Exhaustion / Burnout crisis choices:
+  1. COLLAPSE / RETREAT TO REST: Surrender to exhaustion, collapse into bed, or retreat to sleep.
+  2. ACCEPT COMFORT / CARE: Allow a friend, companion, or loved one to take over and nurse you.
+  3. RAW CONFESSION / TEARS: Let tears spill out, voice unvarnished vulnerability, or vent overwhelmed feelings.
+  ${choiceCount === 5 ? '4. SLIP INTO SILENCE / WITHDRAW: Shut down outward communication, hide away, or endure the fatigue.\n  5. ALLY INTERVENTION: Look to friends or companions to step in, protect you, or care for you.' : ''}`;
+                } else {
+                    guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS DOWNED / MAX HARM (${statusToken}):
+- Strict negative constraint: DO NOT offer standard physical attacks, normal combat maneuvers, or confident active conversation. The protagonist is downed: ${customRule}.
+- You must generate exactly ${choiceCount} Downed/Crisis choices adapted to (${customRule}):
+  1. SUCCUMB TO THE CRISIS: Accept the immediate fictional consequence of ${customRule}.
+  2. FAINT UTTERANCE / CALL FOR AID: Whisper a final word, reach out to an ally, or signal for help.
+  3. DESPERATE SACRIFICE / GAMBIT: A fading gesture or last-ditch protective effort.
+  ${choiceCount === 5 ? '4. SLIP INTO UNCONSCIOUSNESS: Succumb to the outcome, play dead, or fade out.\n  5. ALLY INTERVENTION: Look to an ally to step in, drag you to cover, or turn the tide.' : ''}`;
+                }
+            } else {
+                guidelines = `CRITICAL MANDATE — THE PROTAGONIST IS DOWNED / INCAPACITATED (Max Harm / 0 HP):
 - Strict negative constraint: DO NOT offer standard physical attacks, normal combat maneuvers, or confident active conversation.
 - The character has collapsed, is mortally wounded, or unconscious.
 - You must generate exactly ${choiceCount} Downed/Crisis survival choices reflecting their helpless state:
@@ -223,10 +337,12 @@ Do NOT include any narrative explanation, commentary, or extra text outside the 
   2. FAINT PLEA / CALL FOR AID: Whisper a final word, reach out to an ally, or signal for help.
   3. DESPERATE SACRIFICE / GAMBIT: A fading gesture or last-ditch protective effort.
   ${choiceCount === 5 ? '4. SLIP INTO DARKNESS: Succumb to blackness, endure unconsciousness, or play dead.\n  5. ALLY INTERVENTION: Look to an ally to step in, drag you to cover, or turn the tide.' : ''}`;
+            }
         } else {
             guidelines = `PbtA Moves & Narrative Choices:
+- Active stats for this ${genre.label} campaign: ${activeStatsStr}.
 - Generate exactly ${choiceCount} choices tailored to the current scene and fictional pacing.
-- At most 1 choice should trigger a dramatic PbtA Move with a stat bonus (e.g. "— [Move (+Stat)]").
+- At most 1 choice should trigger a dramatic PbtA Move with a stat bonus from [${activeStatsStr}] (e.g. "— [Move (+Stat)]").
 - NO D&D MECHANICS: NEVER output target DCs (e.g. "DC 14"), AC, attack rolls, or advantage/disadvantage. In PbtA, moves roll 2d6 + Stat against fixed tiers (10+ / 7–9 / 6-).
 - STANCE & INTENT: Action choices may express a clear tactical stance (e.g. aggressive strike vs. defensive parry, stealthy approach vs. bold charge).
 - SPENDING HOLD: If [CHARACTER] has spendable Hold (e.g. "Hold: X"), at most 1 choice may offer to spend a point: "— [Spend 1 Hold: Tactical Advantage]".
@@ -753,13 +869,16 @@ export async function generateCyoaChoices({ messageId, narrative, isPbta, isFae,
         const freshMemo = rpgSettings?.currentMemo || SillyTavern.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo || '';
 
         // 4. Build prompt
-        const effectiveIsFae = isFae !== undefined ? isFae : isFaeActive?.();
+        const stCtx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        const activeChatId = rpgSettings?.chatStateProjectionOwner || stCtx?.getCurrentChatId?.() || stCtx?.chatId || null;
+        const effectiveIsFae = isFae !== undefined ? isFae : isFaeActive?.(activeChatId, rpgSettings);
         const { systemPrompt, userPrompt } = buildCyoaPrompt({
             narrative,
             memo: freshMemo,
             isPbta: effectiveIsFae ? false : isPbta,
             isFae: effectiveIsFae,
             rpgSettings,
+            chatId: activeChatId,
         });
 
         const messages = [

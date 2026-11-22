@@ -9,6 +9,7 @@
 
 import { PBTA_GENRES, buildPbtACartridge, buildCampaignContextSnippets } from './pbta-ruleset.js';
 import { FAE_GENRES, buildFaeCartridge } from './fae-ruleset.js';
+import { DND_SUBFOOTER_OVERRIDE_ID, getDndAlignedCyoaPrompt } from './dnd-fixes.js';
 import { isAdventureActive } from './adventure-chat.js';
 
 /**
@@ -976,6 +977,7 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
     const factoryModules = {
         ...dndBaseModules,
         ...(factory?.syspromptModules || {}),
+        level_up_protocol: false, // [CATALOG: FEAT-10] Never allow upstream defaults to re-enable narrative-halting level-up pauses
     };
     if (settings.syspromptModules && typeof settings.syspromptModules === 'object') {
         Object.assign(settings.syspromptModules, factoryModules);
@@ -1006,12 +1008,22 @@ export async function cleanseStockDndSettings(s = null, options = {}) {
         delete settings.systemPromptTemplate;
     }
 
-    // 5. Restore cyoaConfig
+    // 5. Restore cyoaConfig (preserving aligned D&D CYOA subfooter contract if footer override is active)
+    const hasAlignedDndFooter = Array.isArray(settings.customSyspromptLibrary)
+        && settings.customSyspromptLibrary.some(p => p && p.id === DND_SUBFOOTER_OVERRIDE_ID && p.enabled !== false);
     if (factory?.cyoaConfig) {
         settings.cyoaConfig = JSON.parse(JSON.stringify(factory.cyoaConfig));
     } else if (settings.cyoaConfig) {
         settings.cyoaConfig.useCustomPrompt = false;
         settings.cyoaConfig.customPromptText = '';
+    }
+    if (hasAlignedDndFooter) {
+        settings.cyoaConfig = settings.cyoaConfig || {};
+        const slotCount = Array.isArray(settings.cyoaConfig.slots) && settings.cyoaConfig.slots.length > 0
+            ? settings.cyoaConfig.slots.length
+            : 5;
+        settings.cyoaConfig.useCustomPrompt = true;
+        settings.cyoaConfig.customPromptText = getDndAlignedCyoaPrompt(slotCount);
     }
 
     // 6. Restore block order and modules
@@ -1303,11 +1315,19 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         }
 
         // Synchronize D&D 5e campaign context (<tone>/<factions>/<world_rules>) per chat
-        const { snippets: targetDndSnippets, customModuleTag } = dndDossier
+        const effectiveDndDossier = dndDossier || (activeCart?.cartridgeId === 'dnd5e' ? activeCart?.dossier : null);
+        const effectiveDndConfig = effectiveDndDossier?.config
+            || (activeCart?.cartridgeId === 'dnd5e' ? activeCart?.config : null)
+            || {};
+        const { snippets: targetDndSnippets, customModuleTag } = effectiveDndDossier
             ? buildCampaignContextSnippets(
                 'dnd5e',
-                { tone: dndDossier.meta?.tone, factions: dndDossier.factions, worldRules: dndDossier.worldRules },
-                dndDossier.config || {},
+                {
+                    tone: effectiveDndDossier.meta?.tone,
+                    factions: effectiveDndDossier.factions,
+                    worldRules: effectiveDndDossier.worldRules,
+                },
+                effectiveDndConfig,
             )
             : { snippets: [], customModuleTag: null };
 
@@ -1363,7 +1383,7 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
                     s.blockOrder.push(customModuleTag);
                 }
             }
-            if (resolvedChatId && (dndDossier || s.chatStates?.[resolvedChatId]?.setup)) {
+            if (resolvedChatId && (effectiveDndDossier || s.chatStates?.[resolvedChatId]?.setup)) {
                 await persistPbtaChatState(resolvedChatId, s);
             }
         }

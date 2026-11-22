@@ -48,6 +48,7 @@ When inspecting upstream behavior, look in these modules:
 
 ### D. Cartridges & System Prompts
 * **Source**: [`game-cartridges.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/game-cartridges.js) & [`game-systems.js`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/SillyTavern-MultihogDnDFramework/game-systems.js)
+* **Companion Cartridge & Live Turn Contracts**: See [`docs/cartridges/README.md`](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/cartridges/README.md) for executable per-engine contract specs (persistence/isolation, PbtA, FAE, D&D 5e Lite, RNG interception, and CYOA choice repair).
 * **Upstream Schema & Behavior**:
   * A **Game Cartridge** (`format: 'multihog-game-cartridge'`, `version: 1`) is a global configuration snapshot stored in `extensionSettings.rpg_tracker.gameCartridges`.
   * Its `payload` bundles keys defined by `CARTRIDGE_PAYLOAD_GROUPS`: `customSyspromptLibrary`, `syspromptModules`, `stockPrompts`, `blockOrder`, `modules`, `cyoaConfig`, `rngQueueD20`, and `diceFunctionTool`.

@@ -14,6 +14,8 @@
 import { ConciergeSystemAdapter } from './concierge-system-base.js';
 import {
     CORE_DND_PROGRESSIONS,
+    XP_LEVEL_THRESHOLDS,
+    MAX_CHARACTER_LEVEL,
     getCanonicalDndProgression,
     formatTraitAsPill,
     classifyFeatureKind,
@@ -22,7 +24,7 @@ import {
 import { deriveHitDieForClass } from './level-up-scaffold.js';
 import { deduplicateFeatures, extractFeatureKey } from './level-up-runner.js';
 import { applyDndSubfooterAlignment } from './dnd-fixes.js';
-import { buildCampaignContextSnippets } from './pbta-ruleset.js';
+import { buildCampaignContextSnippets, formatFactionsMemoBlock } from './pbta-ruleset.js';
 import {
     cleanseStockDndSettings,
     setCompanionActiveCartridge,
@@ -249,6 +251,28 @@ export function normalizeDndInventoryLines(equipmentRaw) {
         result.push('Other Items:', ...otherLines);
     }
     return result;
+}
+
+/**
+ * Formats an optional World Rules / Config Custom HUD Module seed block (`[TAG]...[/TAG]`)
+ * for D&D 5e initial memos and non-destructive live memo synchronization (`CART-012`).
+ *
+ * @param {object|null} dossier
+ * @returns {{ tag: string, block: string }|null}
+ */
+function formatDndCustomModuleSeed(dossier) {
+    const customMod = dossier?.worldRules?.customModule || dossier?.config?.customModule;
+    if (!customMod || customMod.enabled === false) return null;
+    const rawKey = customMod.tag || customMod.fieldKey || customMod.label;
+    if (!rawKey) return null;
+    const tag = String(rawKey).replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
+    if (!tag) return null;
+    const label = customMod.label || rawKey || 'Custom Tracker';
+    const sampleContent = String(customMod.sampleContent || customMod.sample || `${label}: Initialized`).trim();
+    return {
+        tag,
+        block: `[${tag}]\n${sampleContent}\n[/${tag}]`,
+    };
 }
 
 export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
@@ -766,6 +790,10 @@ export class Dnd5eSystemAdapter extends ConciergeSystemAdapter {
         const startLoc = (options.location || dossier.theKick?.startingLocation || dossier.maps?.[0]?.name || dossier.maps?.[0]?.site || 'The Crossroads Tavern').trim();
         const inventoryLines = normalizeDndInventoryLines(p.gear && p.gear.length ? p.gear : p.equipment);
         const statusText = p.status ? p.status.trim() : 'Healthy';
+        const level = Math.max(1, parseInt(p.level, 10) || 1);
+        const clampedLvl = Math.min(level, MAX_CHARACTER_LEVEL);
+        const curXp = XP_LEVEL_THRESHOLDS[clampedLvl - 1] ?? 0;
+        const nextXp = XP_LEVEL_THRESHOLDS[clampedLvl] ?? curXp;
 
         let memo = `[TIME]
 Last Rest: N/A
@@ -785,7 +813,7 @@ Attr: STR ${str} (${formatDndModifierString(str)}), DEX ${dex} (${formatDndModif
 Saves: Fort ${fortStr} | Ref ${refStr} | Will ${willStr}
 Skills: ${skillsLine}
 Traits: ${traitsText}
-HD: ${hitDie} (1/1)
+HD: ${hitDie} (${level}/${level})
 Status: ${statusText}
 [/CHARACTER]
 
@@ -798,20 +826,79 @@ ${abilitiesBlock}
         }
 
         memo += `\n\n[XP]
-Level: 1 | XP: 0/300
+Level: ${level} | XP: ${curXp}/${nextXp}
 [/XP]
 
 [INVENTORY]
 ${inventoryLines.join('\n')}
 [/INVENTORY]`;
 
+        const factionsBlock = formatFactionsMemoBlock(dossier.factions);
+        if (factionsBlock) {
+            memo += `\n\n${factionsBlock}`;
+        }
+
+        const customBlock = formatDndCustomModuleSeed(dossier);
+        if (customBlock) {
+            memo += `\n\n${customBlock.block}`;
+        }
+
         return memo;
     }
 
     mergeLiveMemo(liveMemo, dossier, charName = null) {
-        if (!liveMemo || typeof liveMemo !== 'string') return liveMemo;
-        // Non-destructive update of location or traits if present
-        return liveMemo;
+        if (!liveMemo || typeof liveMemo !== 'string' || !liveMemo.trim()) {
+            return liveMemo;
+        }
+        const p = dossier?.protagonist || {};
+        let updatedMemo = liveMemo;
+
+        // 1. Non-destructively update Traits inside [CHARACTER]
+        if (Array.isArray(p.features) && p.features.length > 0 && /\[CHARACTER\][\s\S]*?\[\/CHARACTER\]/i.test(updatedMemo)) {
+            const traitsText = p.features.map(formatTraitAsPill).filter(Boolean).join(', ');
+            if (traitsText) {
+                updatedMemo = updatedMemo.replace(/(\[CHARACTER\])([\s\S]*?)(\[\/CHARACTER\])/i, (m, open, body, close) => {
+                    if (/^Traits:/im.test(body)) {
+                        return `${open}${body.replace(/^Traits:.*$/im, `Traits: ${traitsText}`)}${close}`;
+                    }
+                    const trimmedBody = body.replace(/\s+$/, '');
+                    return `${open}${trimmedBody}\nTraits: ${traitsText}\n${close}`;
+                });
+            }
+        }
+
+        // 2. Non-destructively update [ABILITIES]
+        if (Array.isArray(p.abilities) && p.abilities.length > 0) {
+            const abilitiesBlock = p.abilities.map(formatTraitAsPill).filter(Boolean).join('\n');
+            if (abilitiesBlock) {
+                if (/\[ABILITIES\][\s\S]*?\[\/ABILITIES\]/i.test(updatedMemo)) {
+                    updatedMemo = updatedMemo.replace(/\[ABILITIES\][\s\S]*?\[\/ABILITIES\]/i, `[ABILITIES]\n${abilitiesBlock}\n[/ABILITIES]`);
+                } else {
+                    updatedMemo = `${updatedMemo.trim()}\n\n[ABILITIES]\n${abilitiesBlock}\n[/ABILITIES]`;
+                }
+            }
+        }
+
+        // 3. Non-destructively update or append [FACTIONS]
+        const factionsBlock = formatFactionsMemoBlock(dossier?.factions);
+        if (factionsBlock) {
+            if (/\[FACTIONS\][\s\S]*?\[\/FACTIONS\]/i.test(updatedMemo)) {
+                updatedMemo = updatedMemo.replace(/\[FACTIONS\][\s\S]*?\[\/FACTIONS\]/i, factionsBlock);
+            } else {
+                updatedMemo = `${updatedMemo.trim()}\n\n${factionsBlock}`;
+            }
+        }
+
+        // 4. Non-destructively seed a newly added Custom HUD Module block if missing from liveMemo
+        const customSeed = formatDndCustomModuleSeed(dossier);
+        if (customSeed) {
+            const tagRegex = new RegExp(`\\[${customSeed.tag}\\][\\s\\S]*?\\[\\/${customSeed.tag}\\]`, 'i');
+            if (!tagRegex.test(updatedMemo)) {
+                updatedMemo = `${updatedMemo.trim()}\n\n${customSeed.block}`;
+            }
+        }
+
+        return updatedMemo;
     }
 
     async installCartridge(systemKey, overrides = {}, options = {}) {

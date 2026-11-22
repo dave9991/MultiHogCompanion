@@ -577,4 +577,50 @@ delete globalThis.SillyTavern;
 delete globalThis._rpgFinalizeCyoaNarratorRender;
 
 console.log('✓ Status footer & choices separation (WRK-08) verified');
+
+// ── 7. CART-010: FAE Expectation & Canonical multihog_companion Settings Key ──
+console.log('7. Testing CART-010 FAE CYOA expectation and multihog_companion settings lookup...');
+
+assert.strictEqual(
+    isCyoaExpected({ enabled: true, cyoaConfig: { playstyle: 'cyoa_5' }, syspromptModules: {} }, false, true),
+    true,
+    'FAE chat with default CYOA playstyle must expect CYOA even without CYOA_mode: true'
+);
+assert.strictEqual(
+    isCyoaExpected({ enabled: true, cyoaConfig: { playstyle: 'freeform' }, syspromptModules: { CYOA_mode: true } }, false, true),
+    false,
+    'FAE chat with playstyle=freeform must not expect CYOA'
+);
+
+const disabledDecoupledChat = [
+    { is_user: false, is_system: false, mes: 'Intro' },
+    { is_user: false, is_system: false, mes: 'The airlock hisses.\n\nWhat do you do?\n1. Seal the bulkhead\n2. Check the gauges' },
+];
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chat: disabledDecoupledChat,
+        extensionSettings: {
+            rpg_tracker: {
+                enabled: true,
+                cyoaConfig: { playstyle: 'cyoa_5' },
+                syspromptModules: { CYOA_mode: true },
+                currentMemo: '[CHARACTER]\nHero: 8/8 HP\n[/CHARACTER]',
+            },
+            multihog_companion: {
+                enableDecoupledCyoa: false,
+            },
+        },
+    }),
+};
+
+const disabledResult = await coordinateCyoaForMessage({
+    triggerSource: 'CHARACTER_MESSAGE_RENDERED',
+    isPbtaActive: () => false,
+    isFaeActive: () => true,
+});
+assert.strictEqual(disabledResult, false, 'coordinateCyoaForMessage must honor enableDecoupledCyoa: false from multihog_companion');
+assert.ok(!disabledDecoupledChat[1].mes.includes('<choices>'), 'Markdown choices must not be auto-repaired when enableDecoupledCyoa is false');
+delete globalThis.SillyTavern;
+
+console.log('✓ CART-010 FAE CYOA expectation and multihog_companion settings lookup verified');
 console.log('--- ALL CYOA SAFETY NET TESTS PASSED CLEANLY! ---');

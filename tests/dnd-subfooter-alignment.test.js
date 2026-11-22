@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
     DND_SUBFOOTER_OVERRIDE_ID,
+    DND_DEFT_TOUCH_OVERRIDE_ID,
     getDndAlignedFooterContent,
     getDndAlignedCyoaPrompt,
     isDndSubfooterAlignmentApplied,
@@ -12,6 +13,10 @@ import {
     buildPbtAFooterContent,
     buildPbtACyoaPrompt,
 } from '../pbta-ruleset.js';
+import {
+    cleanseStockDndSettings,
+    ensureActiveChatRulesetConsistency,
+} from '../pbta-ruleset-persistence.js';
 
 test('D&D 5e & PbtA Unified Subfooter Alignment Protocol', async (t) => {
     await t.test('1. getDndAlignedFooterContent matches contract and contains zero prompt leakage', () => {
@@ -137,6 +142,77 @@ test('D&D 5e & PbtA Unified Subfooter Alignment Protocol', async (t) => {
         assert.ok(
             pbtaCyoa.includes('The <choices> block in (3) is the final subfooter and must immediately follow the status footer in (2)'),
             'PbtA CYOA must define the final subfooter sequence'
+        );
+    });
+
+    await t.test('6. CART-013: Dual-catalog snippet mirroring and cleanseStockDndSettings preservation', async () => {
+        const mockSettings = {
+            customSyspromptLibrary: [{ id: 'pbta_base_override_role', enabled: true, scope: 'chat' }],
+            syspromptSnippetDatabase: [{ id: 'pbta_base_override_role', enabled: true, scope: 'chat' }],
+            syspromptModules: { role: false, combat: false, level_up_protocol: true },
+            cyoaConfig: {
+                useCustomPrompt: false,
+                customPromptText: '',
+                slots: [{}, {}, {}, {}, {}],
+            },
+        };
+
+        await applyDndSubfooterAlignment({ rpgSettings: mockSettings });
+        assert.ok(
+            mockSettings.syspromptSnippetDatabase.some(item => item.id === DND_SUBFOOTER_OVERRIDE_ID && item._chatSetupMember === true),
+            'applyDndSubfooterAlignment must mirror subfooter override into syspromptSnippetDatabase'
+        );
+        assert.ok(
+            mockSettings.syspromptSnippetDatabase.some(item => item.id === DND_DEFT_TOUCH_OVERRIDE_ID && item._chatSetupMember === true),
+            'applyDndSubfooterAlignment must mirror deft-touch snippet into syspromptSnippetDatabase'
+        );
+
+        await cleanseStockDndSettings(mockSettings, { chatId: 'dnd_chat_1' });
+        assert.strictEqual(
+            mockSettings.syspromptModules.level_up_protocol,
+            false,
+            'cleanseStockDndSettings must enforce level_up_protocol=false (FEAT-10)'
+        );
+        assert.strictEqual(
+            mockSettings.cyoaConfig.useCustomPrompt,
+            true,
+            'cleanseStockDndSettings must preserve aligned D&D cyoaConfig when DND_SUBFOOTER_OVERRIDE_ID is active'
+        );
+        assert.ok(
+            mockSettings.cyoaConfig.customPromptText.includes('[SUBFOOTER: INTERACTIVE CHOICES]'),
+            'cleanseStockDndSettings must keep aligned D&D CYOA subfooter text when footer override is active'
+        );
+
+        // ensureActiveChatRulesetConsistency should hydrate D&D campaign snippets from activeCart.dossier fallback
+        const dndCartSettings = {
+            customSyspromptLibrary: [],
+            syspromptSnippetDatabase: [],
+            syspromptModules: {},
+            chatStates: { dnd_chat_cart: {} },
+        };
+        const dndCompanionSettings = {
+            companionActiveCartridges: {
+                dnd_chat_cart: {
+                    cartridgeId: 'dnd5e',
+                    genre: 'dark_fantasy',
+                    dossier: {
+                        meta: { tone: 'Bleak gothic horror' },
+                        factions: [{ name: 'Silver Order', standing: 'Wary', agenda: 'Purge heresy' }],
+                    },
+                    config: {},
+                },
+            },
+        };
+        await ensureActiveChatRulesetConsistency('dnd_chat_cart', dndCartSettings, null, dndCompanionSettings);
+        assert.ok(
+            dndCartSettings.customSyspromptLibrary.some(p => p.id === 'dnd5e_campaign_tone' && p.content.includes('Bleak gothic horror')),
+            'ensureActiveChatRulesetConsistency must hydrate D&D campaign tone from activeCart.dossier fallback'
+        );
+
+        await revertDndSubfooterAlignment({ rpgSettings: mockSettings });
+        assert.ok(
+            !mockSettings.syspromptSnippetDatabase.some(item => item.id === DND_SUBFOOTER_OVERRIDE_ID || item.id === DND_DEFT_TOUCH_OVERRIDE_ID),
+            'revertDndSubfooterAlignment must remove D&D fix snippets from syspromptSnippetDatabase too'
         );
     });
 });

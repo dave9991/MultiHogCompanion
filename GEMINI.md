@@ -13,6 +13,7 @@ Before modifying code, designing features, or debugging async timing:
 * **Upstream MultiHog Framework**: Consult [docs/upstream-multihog.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/upstream-multihog.md) for pointers to upstream design docs, memo loops, and cartridges.
 * **State Tracker HUD & Rendering Reference**: Consult [docs/multihog-rendering-reference.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/multihog-rendering-reference.md) for `((MARKER))` tokens, pill hover-toast rules (`(...)` vs `[...]`), color/gradient syntax, and implicit field highlighting.
 * **Session Zero Concierge Architecture & Stage Contracts**: Consult [docs/concierge/README.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/concierge/README.md) for the 4-stage pipeline, prompt/parser/NameRAG contracts, button gating, N-turn invariants, and active audit tracker.
+* **Ruleset Cartridges & Live Turn Engine Contracts**: Consult [docs/cartridges/README.md](file:///var/home/dlittle/ai-stack/sillytavern-test/extensions/MultiHogCompanion/docs/cartridges/README.md) for PbtA/FAE/D&D 5e cartridge persistence & isolation, RNG/tool interception, post-turn vitality/attrition reconciliation, and the CYOA choice safety net (`CART-001` – `CART-013`).
 
 ---
 

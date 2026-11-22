@@ -450,3 +450,70 @@ test('11. formatDossierForContext and renderDeckMonsterHtml render D&D 5e protag
     assert.ok(monsterHtml.includes('HP: 7/7 | AC: 15 | CR: 1/4'));
     assert.ok(!monsterHtml.includes('Armor: undefined'));
 });
+
+test('12. CART-012: Dnd5eSystemAdapter.formatInitialMemo and mergeLiveMemo handle level scaling, [FACTIONS], and [CUSTOM_TAG]', () => {
+    const dossier = {
+        meta: { title: 'Ravenloft Echoes', ruleset: 'dnd5e', systemKey: 'dark_fantasy' },
+        protagonist: {
+            name: 'Donald',
+            class: 'Fighter',
+            level: 3,
+            hitDie: 'd10',
+            hp: { current: 28, max: 28 },
+            ac: 16,
+            stats: { STR: 16, DEX: 14, CON: 14, INT: 10, WIS: 12, CHA: 8 },
+            features: ['Fighting Style: Dueling (+2 melee damage)'],
+            abilities: ['Second Wind (Heal 1d10+3; 1/1 per short rest)'],
+        },
+        factions: [
+            { name: 'Harper Agents', standing: 'Allied', agenda: 'Contain the crimson mist' },
+        ],
+        worldRules: {
+            customModule: {
+                tag: 'SANITY_CLOCK',
+                label: 'Dread Exposure',
+                sampleContent: 'Dread: 1/6 [Initial Whisper]',
+            },
+        },
+    };
+
+    const memo = dnd5eSystemAdapter.formatInitialMemo(dossier);
+    assert.ok(memo.includes('HD: d10 (3/3)'), 'Initial D&D memo must scale HD with protagonist level');
+    assert.ok(memo.includes('Level: 3 | XP: 900/2700'), 'Initial D&D memo must align [XP] with D&D level thresholds');
+    assert.ok(memo.includes('[FACTIONS]'), 'Initial D&D memo must emit [FACTIONS] when factions exist');
+    assert.ok(memo.includes('((PILLS)) Harper Agents: (+) Allied (Standing)'), 'Initial D&D memo must format faction standing pill');
+    assert.ok(memo.includes('[SANITY_CLOCK]\nDread: 1/6 [Initial Whisper]\n[/SANITY_CLOCK]'), 'Initial D&D memo must seed custom HUD block');
+
+    const activeLiveMemo = `[CHARACTER]
+Donald (Fighter): 11/28 HP
+Combat: BAB: +1 | Ranged (1 attack): +3 | Melee (1 attack): +4 | Base AC: 12 | Total AC: 16
+Traits: Fighting Style (Old)
+HD: d10 (2/3)
+Status: Bloodied
+[/CHARACTER]
+
+[COMBAT]
+Strahd Thrall: 14/22 HP | AC: 15
+[/COMBAT]
+
+[ABILITIES]
+Second Wind (Heal 1d10+3; 0/1 per short rest)
+[/ABILITIES]`;
+
+    const updatedDossier = {
+        ...dossier,
+        protagonist: {
+            ...dossier.protagonist,
+            features: ['Fighting Style: Dueling (+2 melee damage)', 'Darkvision (60ft sight)'],
+            abilities: ['Action Surge (Extra action; 1/1 per short rest)'],
+        },
+    };
+
+    const merged = dnd5eSystemAdapter.mergeLiveMemo(activeLiveMemo, updatedDossier, 'Donald');
+    assert.ok(merged.includes('Donald (Fighter): 11/28 HP'), 'mergeLiveMemo must preserve current runtime HP');
+    assert.ok(merged.includes('Strahd Thrall: 14/22 HP'), 'mergeLiveMemo must preserve active [COMBAT] block');
+    assert.ok(merged.includes('Traits: Fighting Style (Dueling; +2 melee damage), Darkvision (60ft sight)'), 'mergeLiveMemo must update Traits');
+    assert.ok(merged.includes('[ABILITIES]\nAction Surge (Extra action; 1/1 per short rest)\n[/ABILITIES]'), 'mergeLiveMemo must update [ABILITIES]');
+    assert.ok(merged.includes('[FACTIONS]') && merged.includes('Harper Agents'), 'mergeLiveMemo must append [FACTIONS]');
+    assert.ok(merged.includes('[SANITY_CLOCK]\nDread: 1/6 [Initial Whisper]\n[/SANITY_CLOCK]'), 'mergeLiveMemo must seed missing custom HUD module');
+});

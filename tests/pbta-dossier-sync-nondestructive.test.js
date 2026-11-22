@@ -16,6 +16,11 @@ import {
     rescalePbtaHarmLine,
     mergeDossierIntoLiveMemo,
 } from '../pbta-vitality-sync.js';
+import {
+    formatInitialPbtaMemo,
+    buildPbtACombatContent,
+    buildPbtACyoaPrompt,
+} from '../pbta-ruleset.js';
 
 console.log('--- Running Non-Destructive Dossier Sync & Harm Rescaling Tests ---');
 
@@ -140,5 +145,86 @@ assert.ok(merged.includes('Talon (Shadow Ranger): 1/4 HP | Harm: 3/4 | Armor: 1'
 assert.ok(merged.includes('Stats: Cool +2, Hard +2, Sharp +1, Scrap 0, Weird -1'), 'Protagonist stats must reflect dossier update');
 
 console.log('✓ mergeDossierIntoLiveMemo cleanly preserved all active enemies, combat, location, conditions, and rescaled PC harm!');
+
+// ── 4. CART-004: mergeDossierIntoLiveMemo Living World Gear, Factions, Custom Module & Stats ──
+console.log('Testing CART-004 Living World non-destructive merge enhancements...');
+
+const liveMemoWithGearAndModule = `${activeGameplayMemo}
+
+[RAD_LOAD]
+Exposure: 3/6 Rads (Mild Nausea)
+[/RAD_LOAD]`;
+
+const livingWorldDossier = {
+    meta: { title: 'Grimdark Odyssey', systemKey: 'fantasy' },
+    protagonist: {
+        name: 'Talon',
+        playbook: 'Shadow Ranger',
+        stats: { Cool: '+2', Hard: '1', Sharp: '+1', Scrap: '0', Weird: '-1' },
+        gear: ['Runed Longbow (2 Harm, Far, piercing)', 'Silver Quiver (8 arrows)'],
+    },
+    config: { harmMax: 4 },
+    factions: [
+        { name: 'Iron Lanterns', standing: 'Allied', agenda: 'Keep the catacombs lit', notes: 'Provide oil resupply' },
+        { name: 'Gloom Choir', standing: 'Hostile', agenda: 'Extinguish all surface lamps' },
+    ],
+    worldRules: {
+        customModule: {
+            tag: 'RAD_LOAD',
+            label: 'Rad Load',
+            sampleContent: 'Exposure: 0/6 Rads',
+        },
+        // Ensure a new custom module tag would be added if missing; wait - test both existing & new!
+    },
+};
+
+const mergedLw = mergeDossierIntoLiveMemo(liveMemoWithGearAndModule, livingWorldDossier, 'Talon');
+assert.ok(mergedLw.includes('Stats: Cool +2, Hard +1, Sharp +1, Scrap 0, Weird -1'), 'Stats normalization must never emit ++2');
+assert.ok(mergedLw.includes('((PILLS)) Gear: Runed Longbow (2 Harm, Far, piercing), Silver Quiver (8 arrows)'), 'Explicit custom gear updates must apply in Living World sync');
+assert.ok(mergedLw.includes('[FACTIONS]'), 'Factions block must be added during Living World sync');
+assert.ok(mergedLw.includes('((PILLS)) Iron Lanterns: (+) Allied (Standing), Agenda (Keep the catacombs lit), Notes (Provide oil resupply)'));
+assert.ok(mergedLw.includes('((PILLS)) Gloom Choir: (-) Hostile (Standing), Agenda (Extinguish all surface lamps)'));
+assert.ok(mergedLw.includes('Exposure: 3/6 Rads (Mild Nausea)'), 'Existing in-flight custom module state must NEVER be reset');
+
+// Adding a brand-new customModule seeds its initial block when absent
+const mergedNewMod = mergeDossierIntoLiveMemo(activeGameplayMemo, {
+    ...livingWorldDossier,
+    worldRules: {
+        customModule: { tag: 'ASH_LUNG', label: 'Ash-Lung', sampleContent: 'Ash Accumulation: 0/5' },
+    },
+}, 'Talon');
+assert.ok(mergedNewMod.includes('[ASH_LUNG]\nAsh Accumulation: 0/5\n[/ASH_LUNG]'), 'Missing customModule block must be seeded on Living World sync');
+console.log('✓ CART-004 regression tests passed!');
+
+// ── 5. CART-007: formatInitialPbtaMemo & maxHarmFate with customGenreSpec ──────
+console.log('Testing CART-007 initial memo fallbacks and custom maxHarmFate...');
+
+const vaultCustomSpec = {
+    label: 'Vault Survival PbtA',
+    stats: ['Grit', 'Tech', 'Nerve', 'Rad', 'Heart'],
+    statDescriptions: 'Grit, Tech, Nerve, Rad, Heart',
+    moves: [
+        'Jury-Rig Pre-War Tech (+Tech) — coax broken Vault hardware to work',
+        'Hold the Perimeter (+Grit) — trade fire with raiders',
+    ],
+    maxHarmFate: 'Critical Radiation Collapse',
+};
+
+const emptyStatsDossier = {
+    meta: { title: 'Vault 19', ruleset: 'pbta', systemKey: 'custom', customGenreSpec: vaultCustomSpec },
+    protagonist: { name: 'Elena', playbook: 'Vault Engineer', stats: {}, startingMoves: [], harm: { max: 5, current: 0 } },
+    config: { harmMax: 5, pacingXp: 5, maxHarmFate: { rule: 'Mortal Peril (Last Breath / Dying)', statusToken: '(-) Incapacitated', cyoaStyle: 'crisis' } },
+};
+
+const initCustomMemo = formatInitialPbtaMemo(emptyStatsDossier);
+assert.ok(initCustomMemo.includes('Stats: Grit +2, Tech +1, Nerve +1, Rad +0, Heart -1'), 'Empty stats {} resolves from customGenreSpec instead of empty or Fantasy stats');
+assert.ok(initCustomMemo.includes('Jury-Rig Pre-War Tech [+Tech]'), 'Empty startingMoves resolves from customGenreSpec');
+
+const combatCustomFate = buildPbtACombatContent({ config: emptyStatsDossier.config, customGenreSpec: vaultCustomSpec });
+assert.ok(combatCustomFate.includes('Critical Radiation Collapse'), 'buildPbtACombatContent upgrades default rule to customGenreSpec.maxHarmFate');
+
+const cyoaCustomFate = buildPbtACyoaPrompt('custom', { config: emptyStatsDossier.config, customGenreSpec: vaultCustomSpec });
+assert.ok(cyoaCustomFate.includes('Critical Radiation Collapse'), 'buildPbtACyoaPrompt upgrades default rule to customGenreSpec.maxHarmFate');
+console.log('✓ CART-007 regression tests passed!');
 
 console.log('\n--- ALL NON-DESTRUCTIVE DOSSIER SYNC TESTS PASSED CLEANLY! ---');

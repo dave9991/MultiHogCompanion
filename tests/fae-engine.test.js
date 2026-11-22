@@ -1267,4 +1267,39 @@ Heroic Domain: Spellblade [short-range blink and arcane ward-breaking]
         assert.ok(!reconciled.memo.includes('Heroic: ON'), 'Reconciled memo must not contain Heroic: ON');
         assert.ok(!reconciled.memo.includes('Spellblade'), 'Reconciled memo must not contain Spellblade');
     });
+
+    test('8. CART-006: handleOverflow and reconcileFaeMemoAfterTurn resolve capitalized or missing redirect targets cleanly in custom pool geometries', () => {
+        // A. Case-insensitive / label redirect in handleOverflow without throwing
+        const stateCap = createInitialFaeState('cosmic_horror');
+        stateCap.pools.health.current = 0;
+        stateCap.pools.health.on_overflow = 'redirect:Sanity';
+        stateCap.pools.sanity.current = 6;
+        const capOut = handleOverflow(stateCap, 'health', 2);
+        assert.strictEqual(capOut.outcome, 'POOL_STRAIN');
+        assert.strictEqual(stateCap.pools.sanity.current, 4);
+
+        // B. Missing redirect target in 2-pool custom geometry cascades to sibling pool instead of throwing or dropping
+        const twoPoolState = createInitialFaeState('custom', {
+            customGenreSpec: {
+                label: 'Wasteland Survival',
+                pools: [
+                    { label: 'Health', max: 8, overflow: 'scar_and_ko' },
+                    { label: 'Rad-Load', max: 6, zero_debuff: 'Radiation Sickness', overflow: 'redirect:resolve' },
+                ],
+            },
+        });
+        twoPoolState.pools.rad_load.current = 0;
+        twoPoolState.pools.health.current = 8;
+        const fallbackOut = handleOverflow(twoPoolState, 'rad_load', 3);
+        assert.strictEqual(fallbackOut.outcome, 'POOL_STRAIN', 'Missing redirect target falls back to sibling health pool');
+        assert.strictEqual(twoPoolState.pools.health.current, 5, 'Health absorbs the 3 overflow attrition');
+
+        // C. reconcileFaeMemoAfterTurn mirrors sibling fallback when redirect target is missing in custom geometry
+        const prevMemo = formatInitialFaeMemo(twoPoolState);
+        const nextMemo = prevMemo.replace(/Rad-Load:\s*\d+\/6/i, 'Rad-Load: -2/6');
+        const reconciled = reconcileFaeMemoAfterTurn(twoPoolState, nextMemo, 'custom');
+        assert.ok(reconciled.events.some(e => e.startsWith('OVERFLOW_REDIRECT: rad_load')), 'reconcileFaeMemoAfterTurn redirects overflow to sibling pool');
+        assert.strictEqual(reconciled.state.pools.rad_load.current, 0);
+        assert.strictEqual(reconciled.state.pools.health.current, 3, 'Health reduced 5 -> 3 after 2 rad_load overflow');
+    });
 });

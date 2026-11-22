@@ -778,6 +778,93 @@ export function sanitizeFaePositiveTags(tags, maxTags = 5) {
     return sanitized;
 }
 
+const DEFAULT_CUSTOM_POOL_COLORS = ['green', 'purple', 'amber', 'cyan'];
+
+/**
+ * Normalizes custom FAE resource pool definitions (either Ruleset Architect array format
+ * or keyed dictionary format) into a canonical FAE pools dictionary.
+ *
+ * @param {Array<object>|Record<string, object>|null|undefined} rawPools
+ * @param {Record<string, object>} [fallbackPools={}]
+ * @returns {Record<string, object>|null}
+ */
+export function normalizeCustomFaePools(rawPools, fallbackPools = {}) {
+    if (!rawPools || typeof rawPools !== 'object') return null;
+    const entries = Array.isArray(rawPools)
+        ? rawPools.map((item, idx) => [null, item, idx])
+        : Object.entries(rawPools).map(([k, item], idx) => [k, item, idx]);
+
+    if (entries.length === 0) return null;
+
+    const normalized = {};
+    for (const [rawKey, item, idx] of entries) {
+        if (!item || typeof item !== 'object') continue;
+        const label = String(item.label || item.name || rawKey || '').trim();
+        if (!label) continue;
+        if (!Array.isArray(rawPools) && !item.label && !item.name) continue;
+
+        const keySource = item.key || rawKey || label;
+        const key = String(keySource)
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '') || `pool_${idx + 1}`;
+        const fb = fallbackPools?.[key]
+            || (rawKey ? fallbackPools?.[rawKey] : null)
+            || fallbackPools?.[label.toLowerCase()]
+            || {};
+
+        const parsedMax = Number(item.max);
+        const max = (Number.isFinite(parsedMax) && parsedMax > 0) ? Math.round(parsedMax) : (fb.max || 8);
+        const parsedCurrent = Number(item.current);
+        const current = Number.isFinite(parsedCurrent) ? Math.max(0, Math.min(max, Math.round(parsedCurrent))) : max;
+
+        normalized[key] = {
+            key,
+            label,
+            barColor: item.barColor || fb.barColor || DEFAULT_CUSTOM_POOL_COLORS[idx] || 'purple',
+            current,
+            max,
+            recovery: item.recovery || fb.recovery || 'camp_or_sleep',
+            passive_drain: item.passive_drain ? { ...item.passive_drain } : (fb.passive_drain ? { ...fb.passive_drain } : null),
+            strain_flavor: item.strain_flavor || fb.strain_flavor || `${label.toLowerCase()} strain`,
+            zero_debuff: item.zero_debuff || item.zeroDebuff || fb.zero_debuff || `${label} Trauma`,
+            on_overflow: item.on_overflow || item.overflow || fb.on_overflow || 'scar_and_ko',
+        };
+    }
+
+    return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+/**
+ * Resolves the effective FAE genre definition, overlaying any customGenreSpec
+ * produced by the Step 3 Ruleset Architect or custom dossier overrides.
+ *
+ * @param {string} [genreKey='cosmic_horror']
+ * @param {object} [overrides={}]
+ * @returns {object}
+ */
+export function resolveEffectiveFaeGenre(genreKey = 'cosmic_horror', overrides = {}) {
+    const base = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const spec = overrides?.customGenreSpec
+        || overrides?.meta?.customGenreSpec
+        || overrides?.dossier?.meta?.customGenreSpec;
+    const specPools = spec?.pools ? normalizeCustomFaePools(spec.pools, base.pools) : null;
+    if ((!spec || typeof spec !== 'object') && !specPools) {
+        return base;
+    }
+    return {
+        ...base,
+        id: genreKey || base.id,
+        label: spec?.label || overrides?.systemLabel || base.label,
+        pools: specPools || base.pools,
+        archetypes: (Array.isArray(spec?.archetypes) && spec.archetypes.length) ? spec.archetypes : base.archetypes,
+        defaultPositiveTags: (Array.isArray(spec?.defaultPositiveTags) && spec.defaultPositiveTags.length)
+            ? spec.defaultPositiveTags
+            : base.defaultPositiveTags,
+    };
+}
+
 /**
  * Creates a fully cloned, structured FAE game state.
  *
@@ -786,7 +873,7 @@ export function sanitizeFaePositiveTags(tags, maxTags = 5) {
  * @returns {object} Initial FAE state object
  */
 export function createInitialFaeState(genreKey = 'cosmic_horror', overrides = {}) {
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, overrides);
     const clonedPools = {};
     for (const [k, p] of Object.entries(genre.pools)) {
         clonedPools[k] = {
@@ -945,6 +1032,32 @@ export function applyPoolLoss(state, poolName, amount, sourceNote = '', visited 
     };
 }
 
+function resolveRedirectTargetPoolKey(pools, rawTarget, sourcePoolName, visited = new Set()) {
+    if (!pools || typeof pools !== 'object') return null;
+    const trimmed = String(rawTarget || '').trim();
+    if (trimmed) {
+        if (pools[trimmed]) return trimmed;
+        const norm = trimmed
+            .toLowerCase()
+            .replace(/&/g, ' and ')
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        if (norm && pools[norm]) return norm;
+        const byLabel = Object.keys(pools).find(
+            k => String(pools[k]?.label || '').trim().toLowerCase() === trimmed.toLowerCase(),
+        );
+        if (byLabel) return byLabel;
+    }
+    const siblingActive = Object.keys(pools).find(
+        k => k !== sourcePoolName && !visited.has(k) && (pools[k]?.current ?? 0) > 0,
+    );
+    if (siblingActive) return siblingActive;
+    const siblingAny = Object.keys(pools).find(
+        k => k !== sourcePoolName && !visited.has(k),
+    );
+    return siblingAny || null;
+}
+
 /**
  * Handles terminal consequences or cascading redirects when a pool at 0 takes attrition.
  *
@@ -978,19 +1091,36 @@ export function handleOverflow(state, poolName, attrition, sourceNote = '', visi
 
     // 1. Cascading Redirect (e.g., Supplies -> Resolve -> Health)
     if (rule.startsWith('redirect:')) {
-        const targetPool = rule.split(':')[1].trim();
-        const redirectNote = `${sourceNote ? sourceNote + ' ' : ''}[${poolName} at 0 -> Overflow redirected to ${targetPool}!]`;
-        if (visited.has(targetPool)) {
-            return {
-                outcome: 'OVERFLOW_LETHAL',
-                pool: targetPool,
-                attrition,
-                pool_remaining: 0,
-                remaining: 0,
-                directive: `${redirectNote} TERMINAL OVERFLOW: Circular redirect on ${targetPool} terminated.`,
-            };
+        const rawTarget = rule.split(':')[1].trim();
+        const targetPool = resolveRedirectTargetPoolKey(state.pools, rawTarget, poolName, visited);
+        if (targetPool) {
+            const redirectNote = `${sourceNote ? sourceNote + ' ' : ''}[${poolName} at 0 -> Overflow redirected to ${targetPool}!]`;
+            if (visited.has(targetPool)) {
+                return {
+                    outcome: 'OVERFLOW_LETHAL',
+                    pool: targetPool,
+                    attrition,
+                    pool_remaining: 0,
+                    remaining: 0,
+                    directive: `${redirectNote} TERMINAL OVERFLOW: Circular redirect on ${targetPool} terminated.`,
+                };
+            }
+            return applyPoolLoss(state, targetPool, attrition, redirectNote, visited);
         }
-        return applyPoolLoss(state, targetPool, attrition, redirectNote, visited);
+        pool.max = Math.max(1, pool.max - 1);
+        pool.current = 1;
+        return {
+            outcome: 'OVERFLOW_SCAR_AND_KO',
+            pool: poolName,
+            attrition,
+            pool_remaining: 1,
+            remaining: 1,
+            directive: (
+                `${sourceNote ? sourceNote + ' ' : ''}CRITICAL OVERFLOW on ${poolName}! Redirect target '${rawTarget}' unavailable; character is knocked out or forced from the scene. ` +
+                `They wake up later in a safe/new location at 1 ${poolName} (Max reduced to ${pool.max}). ` +
+                `Assign 1 permanent Negative Tag (Scar) reflecting this trauma.`
+            ),
+        };
     }
 
     // 2. Scar and Knock Out
@@ -1606,7 +1736,7 @@ export function buildFaeCombatContent(genreKey = 'cosmic_horror', options = {}) 
         options = genreKey;
         genreKey = options.genreKey || options.genre || 'cosmic_horror';
     }
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, options);
     const isHeroic = Boolean(
         options.heroicTier ??
         options.heroic_tier ??
@@ -1682,15 +1812,16 @@ FAE reminder: 4dF Attrition Engine. Single-pass forward momentum. Threat describ
  * @returns {string} XML footer content
  */
 export function buildFaeFooterContent(genreKey = 'cosmic_horror', options = {}) {
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, options);
     const config = options?.config || options || {};
     const playstyle = config.playstyle || options.playstyle || 'cyoa_5';
     const isFreeform = playstyle === 'freeform';
-    const activePools = (options?.pools && Object.keys(options.pools).length > 0)
+    const rawOverridePools = (options?.pools && Object.keys(options.pools).length > 0)
         ? options.pools
         : (options?.config?.pools && Object.keys(options.config.pools).length > 0)
             ? options.config.pools
-            : genre.pools;
+            : null;
+    const activePools = normalizeCustomFaePools(rawOverridePools, genre.pools) || genre.pools;
     const poolSegments = Object.values(activePools).map(p => `(${p.label}: [current]/[max])`).join(' | ');
 
     let timeFmt = '[HH:MM AM/PM], Day [X]';
@@ -1802,16 +1933,17 @@ Passive upkeep drain (rations at camp, environmental aura) is unmitigated by tag
  * @returns {string} Subfooter prompt instructions
  */
 export function buildFaeCyoaPrompt(genreKey = 'cosmic_horror', overrides = {}) {
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, overrides);
     const config = overrides.config || overrides || {};
     const playstyle = config.playstyle || 'cyoa_5';
     if (playstyle === 'freeform') return '';
 
-    const activePools = (overrides?.pools && Object.keys(overrides.pools).length > 0)
+    const rawOverridePools = (overrides?.pools && Object.keys(overrides.pools).length > 0)
         ? overrides.pools
         : (config?.pools && Object.keys(config.pools).length > 0)
             ? config.pools
-            : genre.pools;
+            : null;
+    const activePools = normalizeCustomFaePools(rawOverridePools, genre.pools) || genre.pools;
     const poolLabels = Object.values(activePools).map(p => p.label).join(', ');
     const primaryPoolLabel = Object.values(activePools)[0]?.label || 'Health';
 
@@ -1858,7 +1990,7 @@ ${exampleButtons}
  * @returns {object} Stock prompts object
  */
 export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {}) {
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, overrides);
     const isHeroic = Boolean(
         overrides?.heroicTier ??
         overrides?.heroic_tier ??
@@ -1868,9 +2000,15 @@ export function buildFaeStockPrompts(genreKey = 'cosmic_horror', overrides = {})
         genre.knobs?.heroic_tier ??
         false
     );
-    const poolKeys = Object.keys(genre.pools);
-    const primary = genre.pools[poolKeys[0]];
-    const secondaryList = poolKeys.slice(1).map(k => genre.pools[k]);
+    const rawOverridePools = (overrides?.pools && Object.keys(overrides.pools).length > 0)
+        ? overrides.pools
+        : (overrides?.config?.pools && Object.keys(overrides.config.pools).length > 0)
+            ? overrides.config.pools
+            : null;
+    const effectivePools = normalizeCustomFaePools(rawOverridePools, genre.pools) || genre.pools;
+    const poolKeys = Object.keys(effectivePools);
+    const primary = effectivePools[poolKeys[0]];
+    const secondaryList = poolKeys.slice(1).map(k => effectivePools[k]);
 
     const secondaryBars = secondaryList.map(p => {
         return `${toMultihogBarMarker(p.barColor)} ${p.label}: ${p.current}/${p.max}`;
@@ -2016,7 +2154,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         overrides = genreKey;
         genreKey = overrides.genreKey || overrides.genre || 'cosmic_horror';
     }
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, overrides);
     const config = overrides.config || overrides || {};
     const playstyle = config.playstyle || overrides.playstyle || 'cyoa_5';
     const isFreeform = playstyle === 'freeform';
@@ -2059,7 +2197,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         {
             id: 'fae_base_override_combat',
             tag: 'combat',
-            content: buildFaeCombatContent(genreKey, { heroicTier: isHeroic }),
+            content: buildFaeCombatContent(genreKey, { ...overrides, heroicTier: isHeroic }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-shield-halved',
@@ -2080,7 +2218,7 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
         {
             id: 'fae_base_override_footer',
             tag: 'end_of_output_footer',
-            content: buildFaeFooterContent(genreKey, { ...config, playstyle, isFreeform, pools: (overrides.pools || config.pools || genre.pools) }),
+            content: buildFaeFooterContent(genreKey, { ...config, customGenreSpec: overrides.customGenreSpec, dossier: overrides.dossier, systemLabel: overrides.systemLabel, playstyle, isFreeform, pools: (overrides.pools || config.pools || genre.pools) }),
             enabled: true,
             scope: 'chat',
             icon: 'fa-shoe-prints',
@@ -2226,8 +2364,8 @@ export function buildFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
  * @param {string} [genreKey='cosmic_horror']
  * @returns {string} Markdown documentation
  */
-export function buildTailoredFaeDocumentation(genreKey = 'cosmic_horror') {
-    const active = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+export function buildTailoredFaeDocumentation(genreKey = 'cosmic_horror', overrides = {}) {
+    const active = resolveEffectiveFaeGenre(genreKey, overrides);
 
     const otherGenresList = Object.entries(FAE_GENRES)
         .filter(([k]) => k !== active.id)
@@ -2313,7 +2451,7 @@ export function buildFaeQuickStartInstructions(genreKey = 'cosmic_horror', charN
         customNotes = options.customNotes || options.notes || '';
         customKnobs = options.customKnobs || options.knobs || null;
     }
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, options);
     const poolKeys = Object.keys(genre.pools);
     const poolsStr = poolKeys.map(k => `${genre.pools[k].label} (${genre.pools[k].current}/${genre.pools[k].max})`).join(', ');
     const archetypesSnippet = genre.archetypes.slice(0, 4).join(', ');

@@ -18,11 +18,16 @@ import fs from 'node:fs';
 import {
     buildPbtACartridge,
     buildCampaignContextSnippets,
+    resolveEffectivePbtaGenre,
 } from '../pbta-ruleset.js';
 import {
     buildFaeCartridge,
+    resolveEffectiveFaeGenre,
 } from '../fae-ruleset.js';
+import { PbtaSystemAdapter } from '../concierge-system-pbta.js';
+import { FaeSystemAdapter } from '../concierge-system-fae.js';
 import { Dnd5eSystemAdapter } from '../concierge-system-dnd5e.js';
+import { syncActiveRulesetRngMode } from '../ruleset-rng-interceptor.js';
 import {
     ensureActiveChatRulesetConsistency,
     doesLiveLibraryMatchCartridge,
@@ -449,4 +454,180 @@ test('7. Switching between Concierge D&D chat (with world_rules) and stock D&D c
     await ensureActiveChatRulesetConsistency(conciergeDndChat, s, null, comp);
     assert.ok(s.customSyspromptLibrary.some(p => p.id === 'dnd5e_campaign_tone'), 'Concierge D&D <tone> restored on switch back');
     assert.ok(s.customSyspromptLibrary.some(p => p.id === 'dnd5e_custom_world_rules'), 'Concierge D&D <world_rules> restored on switch back');
+});
+
+test('8. CART-001: PbtA customGenreSpec survives resolveEffectivePbtaGenre, normalizeProtagonist, hydration, and syncActiveRulesetRngMode', async () => {
+    const customGenreSpec = {
+        label: 'Vault Survival PbtA',
+        stats: ['Grit', 'Tech', 'Nerve', 'Rad', 'Heart'],
+        statDescriptions: 'Grit (wasteland brawl), Tech (pre-war circuitry), Nerve (steady under fire), Rad (mutation & stamina), Heart (hope & settlement morale)',
+        archetypes: ['Vault Security', 'Follower Medic', 'Caravan Guard'],
+        moves: [
+            'Jury-Rig Pre-War Tech (+Tech) — coax broken Vault or RobCo hardware into working briefly',
+            'Hold the Perimeter (+Grit) — trade fire or hold back wasteland raiders',
+        ],
+    };
+
+    // A. resolveEffectivePbtaGenre honors dossier.meta.customGenreSpec
+    const resolved = resolveEffectivePbtaGenre('custom', { dossier: { meta: { customGenreSpec } } });
+    assert.strictEqual(resolved.label, 'Vault Survival PbtA');
+    assert.deepStrictEqual(resolved.stats, customGenreSpec.stats);
+    assert.ok(resolved.moves[0].includes('Jury-Rig Pre-War Tech'));
+
+    // B. PbtaSystemAdapter.normalizeProtagonist uses customGenreSpec stats & moves
+    const adapter = new PbtaSystemAdapter();
+    const proto = { name: 'Elena', stats: {}, startingMoves: [], harm: { max: 5, current: 0 } };
+    const dossier = {
+        meta: { title: 'Vault 19', ruleset: 'pbta', systemKey: 'custom', systemLabel: 'Vault Survival PbtA', customGenreSpec },
+        config: { harmMax: 5, diceFunctionTool: false, playstyle: 'cyoa_5' },
+        protagonist: proto,
+    };
+    adapter.normalizeProtagonist(proto, 'custom', dossier);
+    assert.deepStrictEqual(Object.keys(proto.stats), customGenreSpec.stats);
+    assert.ok(proto.startingMoves[0].includes('Jury-Rig Pre-War Tech'));
+
+    // C. ensureActiveChatRulesetConsistency + syncActiveRulesetRngMode preserve custom moves & stats
+    const prevST = globalThis.SillyTavern;
+    const prevExt = globalThis.extension_settings;
+    try {
+        const chatId = 'chat_pbta_custom_genre';
+        const s = buildDefaultSettings();
+        s.chatStates = { [chatId]: { pbtaCampaignDossier: dossier } };
+        s.chatStateProjectionOwner = chatId;
+        const comp = {
+            companionActiveCartridges: {
+                [chatId]: { cartridgeId: 'pbta', genre: 'custom', systemLabel: 'Vault Survival PbtA', customGenreSpec, config: dossier.config },
+            },
+        };
+        globalThis.extension_settings = { rpg_tracker: s, multihog_companion: comp };
+        globalThis.SillyTavern = {
+            getContext: () => ({
+                chatId,
+                getCurrentChatId: () => chatId,
+                extensionSettings: globalThis.extension_settings,
+            }),
+        };
+
+        const hydrated = await ensureActiveChatRulesetConsistency(chatId, s, null, comp);
+        assert.strictEqual(hydrated, true);
+
+        const roleBeforeTool = s.customSyspromptLibrary.find(p => p.id === 'pbta_base_override_role')?.content || '';
+        assert.ok(roleBeforeTool.includes('Jury-Rig Pre-War Tech (+Tech)'), 'Hydrated PbtA role keeps custom moves');
+        assert.ok(roleBeforeTool.includes('Grit (wasteland brawl)'), 'Hydrated PbtA role keeps custom statDescriptions');
+        assert.ok(!roleBeforeTool.includes('Cast a Spell (+Arcana)'), 'Hydrated PbtA role does not revert to Fantasy moves');
+
+        const expectedCart = buildPbtACartridge('custom', {
+            id: `pbta_${chatId}`,
+            systemLabel: 'Vault Survival PbtA',
+            stats: customGenreSpec.stats,
+            startingMoves: proto.startingMoves,
+            config: dossier.config,
+            customGenreSpec,
+            dossier,
+        });
+        assert.strictEqual(doesLiveLibraryMatchCartridge(s, expectedCart, 'pbta_'), true);
+
+        // Simulate outgoing turn RNG toggle
+        s.diceFunctionTool = true;
+        syncActiveRulesetRngMode(s);
+        const roleAfterRngSync = s.customSyspromptLibrary.find(p => p.id === 'pbta_base_override_role')?.content || '';
+        const rngAfterRngSync = s.customSyspromptLibrary.find(p => p.id === 'pbta_base_override_rng')?.content || '';
+        assert.ok(roleAfterRngSync.includes('Jury-Rig Pre-War Tech (+Tech)'), 'syncActiveRulesetRngMode must preserve custom moves');
+        assert.ok(roleAfterRngSync.includes('Grit (wasteland brawl)'), 'syncActiveRulesetRngMode must preserve custom statDescriptions');
+        assert.ok(rngAfterRngSync.includes('"Jury-Rig Pre-War Tech"'), 'syncActiveRulesetRngMode must inject custom move example into tool prompt');
+    } finally {
+        if (prevST === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = prevST;
+        if (prevExt === undefined) delete globalThis.extension_settings;
+        else globalThis.extension_settings = prevExt;
+    }
+});
+
+test('9. CART-002: FAE customGenreSpec pools & Heroic Tier survive normalization, cartridge build, hydration, and syncActiveRulesetRngMode', async () => {
+    const customFaeSpec = {
+        label: 'Atomic Wasteland',
+        pools: [
+            { label: 'Health', max: 8, zero_debuff: 'Crippled & Bleeding', recovery: 'camp_or_sleep', overflow: 'scar_and_ko' },
+            { label: 'Rad-Load', max: 6, zero_debuff: 'Radiation Sickness', recovery: 'decontamination', overflow: 'lethal' },
+        ],
+        archetypes: ['Vault Dweller', 'Wasteland Medic'],
+    };
+
+    // A. resolveEffectiveFaeGenre converts Ruleset Architect pool array to keyed map
+    const resolvedFae = resolveEffectiveFaeGenre('custom', { dossier: { meta: { customGenreSpec: customFaeSpec } } });
+    assert.strictEqual(resolvedFae.label, 'Atomic Wasteland');
+    assert.strictEqual(resolvedFae.pools.health.max, 8);
+    assert.strictEqual(resolvedFae.pools.rad_load.label, 'Rad-Load');
+    assert.strictEqual(resolvedFae.pools.rad_load.on_overflow, 'lethal');
+
+    // B. FaeSystemAdapter.normalizeProtagonist populates custom pools when protagonist pools are empty
+    const faeAdapter = new FaeSystemAdapter();
+    const faeProto = { name: 'Courier Six', pools: {} };
+    const faeDossier = {
+        meta: { title: 'Mojave', ruleset: 'fae', systemKey: 'custom', systemLabel: 'Atomic Wasteland', customGenreSpec: customFaeSpec },
+        config: { heroicTier: true, diceFunctionTool: false, playstyle: 'cyoa_5', actionTempo: 'gritty_default' },
+        protagonist: faeProto,
+    };
+    faeAdapter.normalizeProtagonist(faeProto, 'custom', faeDossier);
+    assert.ok(faeProto.pools.rad_load, 'normalizeProtagonist must initialize custom FAE Rad-Load pool');
+
+    // C. buildFaeCartridge + ensureActiveChatRulesetConsistency + syncActiveRulesetRngMode preserve custom pools & Heroic Tier on empty memo
+    const prevST = globalThis.SillyTavern;
+    const prevExt = globalThis.extension_settings;
+    try {
+        const chatId = 'chat_fae_custom_heroic';
+        const s = buildDefaultSettings();
+        s.currentMemo = ''; // Empty initial memo before Turn 1
+        s.chatStates = { [chatId]: { faeCampaignDossier: faeDossier } };
+        s.chatStateProjectionOwner = chatId;
+        const comp = {
+            companionActiveCartridges: {
+                [chatId]: { cartridgeId: 'fae', genre: 'custom', systemLabel: 'Atomic Wasteland', customGenreSpec: customFaeSpec, config: faeDossier.config },
+            },
+        };
+        globalThis.extension_settings = { rpg_tracker: s, multihog_companion: comp };
+        globalThis.SillyTavern = {
+            getContext: () => ({
+                chatId,
+                getCurrentChatId: () => chatId,
+                extensionSettings: globalThis.extension_settings,
+            }),
+        };
+
+        await ensureActiveChatRulesetConsistency(chatId, s, null, comp);
+        const footer = s.customSyspromptLibrary.find(p => p.id === 'fae_base_override_footer')?.content || '';
+        assert.ok(footer.includes('(Rad-Load: [current]/[max])'), 'Hydrated FAE footer includes custom Rad-Load pool');
+        assert.ok(s.stockPrompts.character.includes('Rad-Load: 6/6'), 'Hydrated FAE stockPrompts includes custom Rad-Load bar');
+
+        s.diceFunctionTool = true;
+        syncActiveRulesetRngMode(s);
+        const roleAfter = s.customSyspromptLibrary.find(p => p.id === 'fae_base_override_role')?.content || '';
+        assert.ok(roleAfter.includes('HEROIC DOMAINS (PRE-MATH LEVERAGE PERMISSIONS)'), 'syncActiveRulesetRngMode must keep Heroic Domains even when currentMemo is empty');
+    } finally {
+        if (prevST === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = prevST;
+        if (prevExt === undefined) delete globalThis.extension_settings;
+        else globalThis.extension_settings = prevExt;
+    }
+});
+
+test('10. CART-003: doesLiveLibraryMatchCartridge detects missing customModuleTag in blockOrder', () => {
+    const customCart = buildPbtACartridge('fantasy', {
+        worldRules: SAMPLE_WORLD_RULES,
+    });
+    assert.ok(customCart.payload.blockOrder.includes('ASHLUNG'), 'Precondition: cartridge includes customModuleTag ASHLUNG');
+
+    const s = buildDefaultSettings();
+    s.customSyspromptLibrary = customCart.payload.customSyspromptLibrary.map(p => ({ ...p, enabled: true }));
+    Object.assign(s.stockPrompts, customCart.payload.stockPrompts);
+    s.systemPromptTemplate = customCart.payload.systemPromptTemplate;
+    Object.assign(s.cyoaConfig, customCart.payload.cyoaConfig);
+    s.diceFunctionTool = customCart.payload.diceFunctionTool;
+    s.blockOrder = ['COMBAT', 'CHARACTER', 'PARTY', 'INVENTORY', 'ABILITIES', 'TIME']; // Missing ASHLUNG!
+
+    assert.strictEqual(
+        doesLiveLibraryMatchCartridge(s, customCart, 'pbta_'),
+        false,
+        'doesLiveLibraryMatchCartridge must return false when customModuleTag ASHLUNG is missing from s.blockOrder',
+    );
 });

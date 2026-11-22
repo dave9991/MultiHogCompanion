@@ -17,7 +17,13 @@ import {
     mergeDossierIntoLiveFaeMemo,
     formatInitialFaeMemo,
     parseFaeStateFromMemo,
+    reconcileFaeMemoAfterTurn,
 } from '../fae-state-sync.js';
+import {
+    mhcGenerationInterceptor,
+    recordPreTurnFaeMemoBaseline,
+    getPreTurnFaeMemoBaseline,
+} from '../ruleset-rng-interceptor.js';
 import { buildMonsterEntryContent } from '../concierge-npc-format.js';
 import { buildPlayerCardBio } from '../concierge-pc-format.js';
 import { createEmptyDossier, healAndNormalizeDossier } from '../concierge-parser.js';
@@ -269,4 +275,92 @@ Status: Healthy
     assert.ok(merged.includes('Body (9/9)'), 'Body pool must be preserved');
     assert.ok(merged.includes('Resolve: 7/7'), 'Resolve pool must be preserved');
     assert.ok(merged.includes('Trail Supplies: 6/6'), 'Trail Supplies pool must be preserved');
+});
+
+test('7. CART-005: mhcGenerationInterceptor captures pre-turn FAE memo baseline so Stage 1 clamp runs after simulated F5 reload', () => {
+    const prevST = globalThis.SillyTavern;
+    const prevExt = globalThis.extension_settings;
+    try {
+        const chatId = 'chat_fae_reload_baseline';
+        const preTurnMemo = formatInitialFaeMemo('cosmic_horror', { location: 'Miskatonic Vault' })
+            .replace('Health (8/8)', 'Health (8/8)')
+            .replace(/Sanity:\s*8\/8/i, 'Sanity: 3/8');
+        const rpg = {
+            currentMemo: preTurnMemo,
+            chatStates: { [chatId]: { currentMemo: preTurnMemo } },
+        };
+        const comp = {
+            companionActiveCartridges: {
+                [chatId]: { cartridgeId: 'fae', genre: 'cosmic_horror', systemLabel: 'Cosmic Horror' },
+            },
+        };
+        globalThis.extension_settings = { rpg_tracker: rpg, multihog_companion: comp };
+        globalThis.SillyTavern = {
+            getContext: () => ({
+                chatId,
+                getCurrentChatId: () => chatId,
+                extensionSettings: globalThis.extension_settings,
+            }),
+        };
+
+        const chatLog = [{ is_user: true, mes: 'Investigate the monolith\n[RNG_QUEUE]1: d20[/RNG_QUEUE]' }];
+        mhcGenerationInterceptor(chatLog);
+
+        const captured = getPreTurnFaeMemoBaseline(chatId);
+        assert.ok(captured && captured.includes('Sanity: 3/8'), 'mhcGenerationInterceptor must record pre-turn FAE baseline');
+
+        // Simulate upstream State Tracker dropping Sanity from 3/8 to -2/8 on post-reload Turn 1
+        const postTurnMemo = preTurnMemo.replace(/Sanity:\s*3\/8/i, 'Sanity: -2/8');
+        const reconciled = reconcileFaeMemoAfterTurn(getPreTurnFaeMemoBaseline(chatId), postTurnMemo, 'cosmic_horror');
+        assert.strictEqual(reconciled.state.pools.sanity.current, 0, 'Stage 1 clamp fires cleanly using recorded pre-turn baseline');
+        assert.ok(reconciled.events.some(e => e.startsWith('ADDED_ZERO_DEBUFF:')), 'Zero debuff applied on Turn 1 after reload');
+        assert.ok(reconciled.memo.includes('Manic Dissociation'), 'Sanity zero_debuff injected into Scars & Debuffs');
+    } finally {
+        if (prevST === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = prevST;
+        if (prevExt === undefined) delete globalThis.extension_settings;
+        else globalThis.extension_settings = prevExt;
+    }
+});
+
+test('8. CART-009: formatInitialFaeMemo honors dossier.meta.systemKey & customGenreSpec, and mergeDossierIntoLiveFaeMemo seeds new customModule', () => {
+    const customSpec = {
+        label: 'Wasteland Survival',
+        pools: [
+            { label: 'Health', max: 10, zero_debuff: 'Broken', recovery: 'camp_or_sleep', overflow: 'scar_and_ko' },
+            { label: 'Rad-Load', max: 6, zero_debuff: 'Radiation Sickness', recovery: 'decontamination', overflow: 'lethal' },
+        ],
+        archetypes: ['Vault Dweller'],
+    };
+
+    // A. Built-in preset via dossier.meta.systemKey (e.g. osr_dungeon) without genreKey
+    const osrDossier = {
+        meta: { title: 'Sunken Tomb', ruleset: 'fae', systemKey: 'osr_dungeon' },
+        protagonist: { name: 'Bran' },
+        config: { heroicTier: true },
+    };
+    const osrMemo = formatInitialFaeMemo(osrDossier);
+    assert.ok(osrMemo.includes('Resolve:'), 'formatInitialFaeMemo must honor dossier.meta.systemKey = osr_dungeon');
+    assert.ok(osrMemo.includes('Heroic: ON'), 'formatInitialFaeMemo honors osr_dungeon heroic_tier knob');
+
+    // B. Custom Ruleset Architect spec with array pools and no protagonist.pools yet
+    const customDossier = {
+        meta: { title: 'Vault 19', ruleset: 'fae', systemKey: 'custom', customGenreSpec: customSpec },
+        protagonist: { name: 'Courier' },
+        config: { heroicTier: false },
+    };
+    const customMemo = formatInitialFaeMemo(customDossier);
+    assert.ok(customMemo.includes('Courier (Vault Dweller): 10/10 HP | Pool: Health (10/10)'), 'Custom Health max=10 & archetype initialized');
+    assert.ok(customMemo.includes('Rad-Load: 6/6'), 'Custom Rad-Load pool initialized from customGenreSpec');
+
+    // C. mergeDossierIntoLiveFaeMemo seeds new worldRules.customModule without losing in-flight depletion
+    const depletedMemo = customMemo.replace(/Rad-Load:\s*6\/6/i, 'Rad-Load: 2/6');
+    const mergedWithModule = mergeDossierIntoLiveFaeMemo(depletedMemo, {
+        ...customDossier,
+        worldRules: {
+            customModule: { tag: 'GEIGER', label: 'Geiger Alert', sampleContent: 'Click Rate: Elevated' },
+        },
+    });
+    assert.ok(mergedWithModule.includes('Rad-Load: 2/6'), 'In-flight Rad-Load depletion preserved');
+    assert.ok(mergedWithModule.includes('[GEIGER]\nClick Rate: Elevated\n[/GEIGER]'), 'Newly added customModule block seeded in live FAE memo');
 });

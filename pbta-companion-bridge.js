@@ -14,40 +14,76 @@
  *    enabling the Companion to inspect and advise on live stats, playbook moves, and Harm.
  */
 
-import { PBTA_GENRES } from './pbta-ruleset.js';
+import { PBTA_GENRES, resolveEffectivePbtaGenre } from './pbta-ruleset.js';
 import { FAE_GENRES, buildTailoredFaeDocumentation } from './fae-ruleset.js';
 import { isFaeActive, getCompanionActiveCartridge, getPartitionDossier } from './pbta-ruleset-persistence.js';
+import { resolveAuthoritativeChatId } from './history-integrity-guard.js';
 
 let _originalFetch = null;
 let _interceptorActive = false;
 
+function resolveBridgeChatOverrides(customContext = {}) {
+    const s = customContext.rpgSettings
+        || (typeof globalThis !== 'undefined'
+            ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.rpg_tracker
+            : null);
+    const chatId = customContext.chatId
+        || resolveAuthoritativeChatId()
+        || null;
+    const activeCart = getCompanionActiveCartridge(chatId, s);
+    const chatPart = (chatId && s?.chatStates?.[chatId]) ? s.chatStates[chatId] : null;
+    const dossier = getPartitionDossier(chatPart) || activeCart?.dossier || null;
+    return {
+        s,
+        chatId,
+        activeCart,
+        dossier,
+        customGenreSpec: dossier?.meta?.customGenreSpec || activeCart?.customGenreSpec || null,
+        systemLabel: activeCart?.systemLabel || dossier?.meta?.systemLabel || '',
+    };
+}
+
 /**
- * Detects the active PbtA genre from MultiHog settings, memo, or stored preferences.
+ * Detects the active PbtA genre from active chat cartridge/dossier, memo, or stored preferences.
  *
  * @param {object} [customContext] Optional context for testing or direct override
  * @param {string} [customContext.lastGenre]
+ * @param {string} [customContext.genre]
  * @param {string} [customContext.currentMemo]
+ * @param {string} [customContext.chatId]
  * @param {object} [customContext.rpgSettings]
- * @returns {string} Canonical genre key in PBTA_GENRES (e.g. 'fantasy', 'scifi', 'western')
+ * @returns {string} Canonical genre key in PBTA_GENRES or 'custom'
  */
 export function detectActiveGenre(customContext = {}) {
     // 1. Direct explicit genre override
-    if (customContext.lastGenre && PBTA_GENRES[customContext.lastGenre]) {
+    if (customContext.lastGenre && (PBTA_GENRES[customContext.lastGenre] || customContext.lastGenre === 'custom')) {
         return customContext.lastGenre;
     }
+    if (customContext.genre && (PBTA_GENRES[customContext.genre] || customContext.genre === 'custom')) {
+        return customContext.genre;
+    }
 
-    // 2. MultiHog Companion extension settings
-    try {
-        const extSettings = typeof globalThis !== 'undefined'
-            ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.multihog_companion
-            : null;
-        if (extSettings?.lastGenre && PBTA_GENRES[extSettings.lastGenre]) {
-            return extSettings.lastGenre;
+    // 2. Active chat CompanionActiveCartridge or partition dossier
+    // (Skip ambient SillyTavern context lookup when caller explicitly supplied only currentMemo for isolated testing)
+    const shouldCheckChatContext = Boolean(customContext.chatId || customContext.rpgSettings || !customContext.currentMemo);
+    const { s, activeCart, dossier } = shouldCheckChatContext ? resolveBridgeChatOverrides(customContext) : {};
+    if (shouldCheckChatContext) {
+        const cartGenre = activeCart?.genre;
+        if (cartGenre && (PBTA_GENRES[cartGenre] || cartGenre === 'custom')) {
+            return cartGenre;
         }
-    } catch (_) { /* ignore */ }
+        const dossierGenre = dossier?.meta?.systemKey;
+        if (dossierGenre && (PBTA_GENRES[dossierGenre] || dossierGenre === 'custom')) {
+            return dossierGenre;
+        }
+        if (dossier?.meta?.customGenreSpec || activeCart?.customGenreSpec) {
+            return 'custom';
+        }
+    }
 
     // 3. Inspect active state memo content for genre signature stats
     const memo = customContext.currentMemo
+        || s?.currentMemo
         || (typeof globalThis !== 'undefined'
             ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.rpg_tracker?.currentMemo
             : '');
@@ -63,7 +99,17 @@ export function detectActiveGenre(customContext = {}) {
         if (/\b(might|agility|wits|heart|arcana)\b/.test(memoLower)) return 'fantasy';
     }
 
-    // 4. Default fallback
+    // 4. MultiHog Companion extension settings fallback
+    try {
+        const extSettings = typeof globalThis !== 'undefined'
+            ? globalThis.SillyTavern?.getContext?.()?.extensionSettings?.multihog_companion
+            : null;
+        if (extSettings?.lastGenre && PBTA_GENRES[extSettings.lastGenre]) {
+            return extSettings.lastGenre;
+        }
+    } catch (_) { /* ignore */ }
+
+    // 5. Default fallback
     return 'fantasy';
 }
 
@@ -148,24 +194,36 @@ export function detectActiveFaeGenre(customContext = {}) {
  *
  * @param {string} originalManual Content of multihogDnDdoc.md
  * @param {string} [genreKey] Active genre key
+ * @param {object} [overrides={}] Optional cartridge/dossier overrides
  * @returns {string} Augmented documentation string
  */
-export function appendFaeDocsToManual(originalManual, genreKey) {
-    const effectiveGenre = genreKey || detectActiveFaeGenre();
-    const faeSection = buildTailoredFaeDocumentation(effectiveGenre);
+export function appendFaeDocsToManual(originalManual, genreKey, overrides = {}) {
+    const effectiveGenre = genreKey || detectActiveFaeGenre(overrides);
+    const { dossier, customGenreSpec, systemLabel } = (overrides?.customGenreSpec || overrides?.dossier)
+        ? overrides
+        : resolveBridgeChatOverrides(overrides);
+    const effectiveOverrides = {
+        ...(dossier ? { dossier } : {}),
+        ...(customGenreSpec ? { customGenreSpec } : {}),
+        ...(systemLabel ? { systemLabel } : {}),
+        ...(overrides || {}),
+    };
+    const faeSection = buildTailoredFaeDocumentation(effectiveGenre, effectiveOverrides);
     return `${originalManual || ''}\n\n---\n\n${faeSection}`;
 }
 
 /**
  * Generates an authoritative PbtA Narrative Engine guide dynamically tailored
- * to the specified genre.
+ * to the specified genre and custom Ruleset Architect overrides.
  *
- * @param {string} genreKey Key from PBTA_GENRES
+ * @param {string} [genreKey='fantasy'] Key from PBTA_GENRES or 'custom'
+ * @param {object} [overrides={}] Optional overrides (customGenreSpec, dossier, systemLabel)
  * @returns {string} Markdown documentation section
  */
-export function buildTailoredPbtaDocumentation(genreKey = 'fantasy') {
-    const activeKey = PBTA_GENRES[genreKey] ? genreKey : 'fantasy';
-    const active = PBTA_GENRES[activeKey];
+export function buildTailoredPbtaDocumentation(genreKey = 'fantasy', overrides = {}) {
+    const active = resolveEffectivePbtaGenre(genreKey, overrides);
+    const activeKey = PBTA_GENRES[genreKey] ? genreKey : (genreKey === 'custom' ? 'custom' : (active.id || 'fantasy'));
+    const statDescText = active.statDescriptions || (Array.isArray(active.stats) ? active.stats.join(', ') : '');
 
     // Build other genres quick-reference summary
     const otherGenresList = Object.entries(PBTA_GENRES)
@@ -202,7 +260,7 @@ Whenever a player action triggers a Move in the narrative, resolve using **2d6 +
 ## 🎭 2. Active Campaign Genre: ${active.label} ${active.icon}
 
 ### Core Stats (Modifier Array: +2, +1, +1, 0, -1)
-${active.statDescriptions}
+${statDescText}
 
 ### Key Moves & Fictional Triggers
 ${active.moves.map(m => `* **${m}**`).join('\n')}
@@ -237,11 +295,21 @@ ${otherGenresList}
  *
  * @param {string} originalManual Content of multihogDnDdoc.md
  * @param {string} [genreKey] Active genre key
+ * @param {object} [overrides={}] Optional cartridge/dossier overrides
  * @returns {string} Augmented documentation string
  */
-export function appendPbtaDocsToManual(originalManual, genreKey) {
-    const effectiveGenre = genreKey || detectActiveGenre();
-    const pbtaSection = buildTailoredPbtaDocumentation(effectiveGenre);
+export function appendPbtaDocsToManual(originalManual, genreKey, overrides = {}) {
+    const effectiveGenre = genreKey || detectActiveGenre(overrides);
+    const { dossier, customGenreSpec, systemLabel } = (overrides?.customGenreSpec || overrides?.dossier)
+        ? overrides
+        : resolveBridgeChatOverrides(overrides);
+    const effectiveOverrides = {
+        ...(dossier ? { dossier } : {}),
+        ...(customGenreSpec ? { customGenreSpec } : {}),
+        ...(systemLabel ? { systemLabel } : {}),
+        ...(overrides || {}),
+    };
+    const pbtaSection = buildTailoredPbtaDocumentation(effectiveGenre, effectiveOverrides);
     return `${originalManual || ''}\n\n---\n\n${pbtaSection}`;
 }
 

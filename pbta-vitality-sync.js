@@ -23,6 +23,7 @@
 import {
     formatMoveAsPill,
     formatConditionAsPill,
+    formatFactionsMemoBlock,
     normalizePill,
     splitTopLevelPillItems,
 } from './pbta-ruleset.js';
@@ -405,9 +406,12 @@ export function mergeDossierIntoLiveMemo(liveMemo, dossier, charName = null) {
         }
 
         // 3. Update Stats if changed in dossier and inside [CHARACTER]
-        if (insideCharBlock && p.stats && typeof p.stats === 'object' && /^Stats:/i.test(line.trim())) {
+        if (insideCharBlock && p.stats && typeof p.stats === 'object' && Object.keys(p.stats).length > 0 && /^Stats:/i.test(line.trim())) {
             const statsStr = Object.entries(p.stats)
-                .map(([stat, val]) => `${stat} ${Number(val) > 0 ? '+' : ''}${val}`)
+                .map(([stat, val]) => {
+                    const num = parseInt(val, 10) || 0;
+                    return `${stat} ${num > 0 ? `+${num}` : num}`;
+                })
                 .join(', ');
             return `Stats: ${statsStr}`;
         }
@@ -420,7 +424,7 @@ export function mergeDossierIntoLiveMemo(liveMemo, dossier, charName = null) {
             }
         }
 
-        // 5. Update Gear inside [CHARACTER] if current line is stock placeholder or dossier has gear/equipment
+        // 5. Update Gear inside [CHARACTER] when dossier provides explicit custom gear or replaces stock placeholder
         if (insideCharBlock && /^(?:\(\(PILLS\)\)\s*)?Gear:/i.test(line.trim())) {
             const hasCustomGear = Array.isArray(p.gear) && p.gear.length > 0 && !p.gear.every(g => /^(?:Essential adventurer kit|Signature weapon|Basic equipment)/i.test(String(g || '').trim()));
             const rawGear = hasCustomGear
@@ -428,7 +432,7 @@ export function mergeDossierIntoLiveMemo(liveMemo, dossier, charName = null) {
                 : (typeof p.equipment === 'string' && p.equipment.trim())
                     ? splitTopLevelPillItems(p.equipment)
                     : [];
-            if (rawGear.length > 0 && /Essential adventurer kit/i.test(line)) {
+            if (rawGear.length > 0 && (hasCustomGear || /Essential adventurer kit/i.test(line))) {
                 const gearStr = rawGear.map(normalizePill).filter(Boolean).join(', ');
                 if (gearStr) return `((PILLS)) Gear: ${gearStr}`;
             }
@@ -442,7 +446,33 @@ export function mergeDossierIntoLiveMemo(liveMemo, dossier, charName = null) {
         return line;
     });
 
-    return updatedLines.join('\n');
+    let updatedMemo = updatedLines.join('\n');
+
+    // 7. Non-destructively update or append [FACTIONS] if dossier defines factions
+    const factionsBlock = formatFactionsMemoBlock(dossier?.factions);
+    if (factionsBlock) {
+        if (/\[FACTIONS\][\s\S]*?\[\/FACTIONS\]/i.test(updatedMemo)) {
+            updatedMemo = updatedMemo.replace(/\[FACTIONS\][\s\S]*?\[\/FACTIONS\]/i, factionsBlock);
+        } else {
+            updatedMemo = `${updatedMemo.trim()}\n\n${factionsBlock}`;
+        }
+    }
+
+    // 8. Non-destructively seed a newly added Custom HUD Module block if missing from liveMemo
+    const customMod = dossier?.worldRules?.customModule;
+    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+        const rawTag = String(customMod.tag || customMod.fieldKey || customMod.label || 'CUSTOM')
+            .replace(/[^a-zA-Z0-9_]/g, '_')
+            .toUpperCase();
+        const tagRegex = new RegExp(`\\[${rawTag}\\][\\s\\S]*?\\[\\/${rawTag}\\]`, 'i');
+        if (rawTag && !tagRegex.test(updatedMemo)) {
+            const label = customMod.label || customMod.tag || customMod.fieldKey || 'Custom Tracker';
+            const sampleContent = String(customMod.sampleContent || customMod.sample || `${label}: Initialized`).trim();
+            updatedMemo = `${updatedMemo.trim()}\n\n[${rawTag}]\n${sampleContent}\n[/${rawTag}]`;
+        }
+    }
+
+    return updatedMemo;
 }
 
 /**

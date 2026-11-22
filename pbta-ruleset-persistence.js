@@ -898,6 +898,13 @@ export function doesLiveLibraryMatchCartridge(s, cartridge, prefix) {
 
     if (Boolean(s.diceFunctionTool) !== Boolean(cartridge.payload.diceFunctionTool)) return false;
 
+    if (Array.isArray(cartridge.payload.blockOrder) && cartridge.payload.blockOrder.length > 0
+        && Array.isArray(s.blockOrder) && s.blockOrder.length > 0) {
+        if (cartridge.payload.blockOrder.some(tag => !s.blockOrder.includes(tag))) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -1402,6 +1409,13 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
                 ? { action_tempo: faeDossier?.config?.actionTempo || activeCart?.config?.actionTempo }
                 : {}),
         };
+        const effectiveFaeCustomSpec = faeDossier?.meta?.customGenreSpec
+            || activeCart?.customGenreSpec
+            || activeCart?.dossier?.meta?.customGenreSpec
+            || null;
+        const effectiveFaePools = (faeChar.pools && Object.keys(faeChar.pools).length > 0)
+            ? faeChar.pools
+            : (activeCart?.pools && Object.keys(activeCart.pools).length > 0 ? activeCart.pools : null);
         const overrides = faeDossier ? {
             id: `fae_${safeId}`,
             campaignTitle: activeCart?.title || faeDossier.meta?.title,
@@ -1411,7 +1425,7 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
             tone: faeDossier.meta?.tone,
             factions: faeDossier.factions,
             worldRules: faeDossier.worldRules,
-            pools: faeChar.pools,
+            pools: effectiveFaePools || faeChar.pools,
             positive_tags: faeChar.positiveTags,
             negative_tags: faeChar.negativeTags,
             cyoaExamples: (Array.isArray(faeDossier.cyoaExamples) && faeDossier.cyoaExamples.length > 0) ? faeDossier.cyoaExamples : null,
@@ -1430,6 +1444,7 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
             knobs: mergedFaeKnobs,
             diceFunctionTool: resolvedToolMode,
             character: faeChar,
+            customGenreSpec: effectiveFaeCustomSpec,
             dossier: faeDossier,
         } : (activeCart ? {
             id: `fae_${safeId}`,
@@ -1440,6 +1455,8 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
             knobs: mergedFaeKnobs,
             heroicTier: Boolean(mergedFaeConfig.heroicTier ?? mergedFaeConfig.heroic_tier ?? mergedFaeKnobs.heroic_tier ?? false),
             diceFunctionTool: resolvedToolMode,
+            ...(effectiveFaePools ? { pools: effectiveFaePools } : {}),
+            ...(effectiveFaeCustomSpec ? { customGenreSpec: effectiveFaeCustomSpec } : {}),
         } : {
             genreKey,
             config: { diceFunctionTool: resolvedToolMode },
@@ -1475,6 +1492,13 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         ...(pbtaDossier?.config || {}),
         diceFunctionTool: resolvedPbtaToolMode,
     };
+    const effectivePbtaCustomSpec = pbtaDossier?.meta?.customGenreSpec
+        || activeCart?.customGenreSpec
+        || activeCart?.dossier?.meta?.customGenreSpec
+        || null;
+    const effectivePbtaStats = statsList.length >= 3
+        ? statsList
+        : (Array.isArray(activeCart?.stats) && activeCart.stats.length >= 3 ? activeCart.stats : null);
     const overrides = pbtaDossier ? {
         id: `pbta_${safeId}`,
         campaignTitle: activeCart?.title || pbtaDossier.meta?.title,
@@ -1484,11 +1508,12 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         tone: pbtaDossier.meta?.tone,
         factions: pbtaDossier.factions,
         worldRules: pbtaDossier.worldRules,
-        stats: statsList.length >= 3 ? statsList : null,
+        stats: effectivePbtaStats,
         startingMoves: pbtaDossier.protagonist?.startingMoves,
         cyoaExamples: (Array.isArray(pbtaDossier.cyoaExamples) && pbtaDossier.cyoaExamples.length > 0) ? pbtaDossier.cyoaExamples : null,
         config: mergedPbtaConfig,
         diceFunctionTool: resolvedPbtaToolMode,
+        customGenreSpec: effectivePbtaCustomSpec,
         dossier: pbtaDossier,
     } : (activeCart ? {
         id: `pbta_${safeId}`,
@@ -1496,6 +1521,8 @@ export async function ensureActiveChatRulesetConsistency(chatId = null, rpgSetti
         systemLabel: activeCart.systemLabel,
         config: mergedPbtaConfig,
         diceFunctionTool: resolvedPbtaToolMode,
+        ...(effectivePbtaStats ? { stats: effectivePbtaStats } : {}),
+        ...(effectivePbtaCustomSpec ? { customGenreSpec: effectivePbtaCustomSpec } : {}),
     } : {
         config: { diceFunctionTool: resolvedPbtaToolMode },
         diceFunctionTool: resolvedPbtaToolMode,

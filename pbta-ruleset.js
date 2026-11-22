@@ -324,17 +324,81 @@ function resolveGenreStatsState(genre, rawStats) {
  */
 export function resolveEffectivePbtaGenre(genreKey = 'fantasy', overrides = {}) {
     const base = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
-    const spec = overrides?.customGenreSpec || overrides?.meta?.customGenreSpec;
+    const spec = overrides?.customGenreSpec
+        || overrides?.meta?.customGenreSpec
+        || overrides?.dossier?.meta?.customGenreSpec;
     if (!spec || typeof spec !== 'object') return base;
     return {
         ...base,
         id: genreKey || base.id,
         label: spec.label || overrides?.systemLabel || base.label,
-        stats: (Array.isArray(spec.stats) && spec.stats.length >= 4) ? spec.stats : base.stats,
+        stats: (Array.isArray(spec.stats) && spec.stats.length >= 3) ? spec.stats : base.stats,
         statDescriptions: spec.statDescriptions || base.statDescriptions,
         archetypes: (Array.isArray(spec.archetypes) && spec.archetypes.length) ? spec.archetypes : base.archetypes,
         moves: (Array.isArray(spec.moves) && spec.moves.length) ? spec.moves : base.moves,
+        maxHarmFate: spec.maxHarmFate || base.maxHarmFate || null,
     };
+}
+
+/**
+ * Resolves the effective Max Harm fate configuration, overlaying any custom
+ * Ruleset Architect `customGenreSpec.maxHarmFate` when config still holds the default rule.
+ *
+ * @param {object} [overrides={}]
+ * @param {object|null} [genre=null]
+ * @returns {{ rule: string, statusToken?: string, cyoaStyle?: string }|null}
+ */
+export function resolveEffectiveMaxHarmFate(overrides = {}, genre = null) {
+    const rawConfigFate = overrides?.config?.maxHarmFate
+        || overrides?.maxHarmFate
+        || overrides?.dossier?.config?.maxHarmFate
+        || null;
+    const specFate = overrides?.customGenreSpec?.maxHarmFate
+        || overrides?.meta?.customGenreSpec?.maxHarmFate
+        || overrides?.dossier?.meta?.customGenreSpec?.maxHarmFate
+        || genre?.maxHarmFate
+        || null;
+
+    const isDefaultRule = (r) => !r || /^(?:mortal peril|last breath|dying)/i.test(String(r).trim());
+
+    if (typeof rawConfigFate === 'string' && rawConfigFate.trim()) {
+        return {
+            rule: rawConfigFate.trim(),
+            statusToken: '(-) Incapacitated',
+            cyoaStyle: 'crisis',
+        };
+    }
+
+    if (rawConfigFate && typeof rawConfigFate === 'object') {
+        if (!isDefaultRule(rawConfigFate.rule)) {
+            return rawConfigFate;
+        }
+        if (typeof specFate === 'string' && specFate.trim() && !isDefaultRule(specFate)) {
+            return {
+                ...rawConfigFate,
+                rule: specFate.trim(),
+            };
+        }
+        if (specFate && typeof specFate === 'object' && !isDefaultRule(specFate.rule)) {
+            return {
+                ...rawConfigFate,
+                ...specFate,
+            };
+        }
+        return rawConfigFate;
+    }
+
+    if (typeof specFate === 'string' && specFate.trim()) {
+        return {
+            rule: specFate.trim(),
+            statusToken: '(-) Incapacitated',
+            cyoaStyle: 'crisis',
+        };
+    }
+    if (specFate && typeof specFate === 'object') {
+        return specFate;
+    }
+    return null;
 }
 
 /**
@@ -641,17 +705,15 @@ TERMS:
  */
 export function buildPbtACombatContent(harmMaxOrOverrides = 5, overrides = {}) {
     let max = 5;
-    let fate = null;
     if (typeof harmMaxOrOverrides === 'number') {
         max = harmMaxOrOverrides;
-        fate = overrides.config?.maxHarmFate || overrides.maxHarmFate;
     } else if (harmMaxOrOverrides && typeof harmMaxOrOverrides === 'object') {
         max = harmMaxOrOverrides.config?.harmMax || harmMaxOrOverrides.harmMax || 5;
-        fate = harmMaxOrOverrides.config?.maxHarmFate || harmMaxOrOverrides.maxHarmFate;
     }
-    if (!fate && overrides && typeof overrides === 'object') {
-        fate = overrides.config?.maxHarmFate || overrides.maxHarmFate;
-    }
+    const mergedOverrides = (harmMaxOrOverrides && typeof harmMaxOrOverrides === 'object')
+        ? { ...overrides, ...harmMaxOrOverrides }
+        : overrides;
+    const fate = resolveEffectiveMaxHarmFate(mergedOverrides);
     max = Math.max(2, parseInt(max, 10) || 5);
 
     const isCustomFate = Boolean(fate && fate.rule && !/^(?:mortal peril|last breath|dying)/i.test(fate.rule.trim()));
@@ -990,7 +1052,7 @@ You must generate exactly 5 choices following narrative context:
 5. DOWNTIME / ALTERNATIVE: Consulting records, resting, tending gear, regrouping, or pursuing another lead (ZERO moves or dice).
 (CRITICAL EXCEPTION: If {{user}} is downed at Max Harm / 0 HP, ignore the categories above and output 5 Downed/Crisis choices: Cling to life, Faint plea, Desperate fading gambit, Slip into darkness, Rally ally intervention).`;
 
-    const fate = config.maxHarmFate || overrides.maxHarmFate;
+    const fate = resolveEffectiveMaxHarmFate(overrides, genre);
     const isCustomFate = Boolean(fate && fate.rule && !/^(?:mortal peril|last breath|dying)/i.test(fate.rule.trim()));
 
     let downedSection = '';
@@ -1093,7 +1155,7 @@ export function buildPbtAStockPrompts(genreKey = 'fantasy', overrides = {}) {
     const config = overrides.config || overrides || {};
     const harmMax = config.harmMax || overrides.harmMax || 5;
     const pacingXp = config.pacingXp || overrides.pacingXp || 5;
-    const fate = config.maxHarmFate || overrides.maxHarmFate;
+    const fate = resolveEffectiveMaxHarmFate(overrides, genre);
     const isCustomFate = Boolean(fate && fate.statusToken && !/^(-|\(\-\))\s*incapacitated/i.test(fate.statusToken.trim()));
 
     const rawTarget = overrides?.charName || overrides?.character?.name || '';
@@ -1599,8 +1661,8 @@ export function buildPbtACartridge(genreKey = 'fantasy', overrides = {}) {
 /**
  * Builds the Quick Start instructions string passed to MultiHog character creation.
  */
-export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName = '', customNotes = '') {
-    const genre = resolveEffectivePbtaGenre(genreKey);
+export function buildPbtAQuickStartInstructions(genreKey = 'fantasy', charName = '', customNotes = '', overrides = {}) {
+    const genre = resolveEffectivePbtaGenre(genreKey, overrides);
     const moveNames = genre.moves.map(m => m.split('—')[0].replace(/\s*\(\+Attribute\)/, '').trim()).join(', ');
     const archetypesSnippet = genre.archetypes.slice(0, 4).join(', ');
 
@@ -1787,6 +1849,37 @@ export function formatConditionAsPill(item) {
 }
 
 /**
+ * Formats an array of campaign factions into a MultiHog ((PILLS)) `[FACTIONS]` memo block.
+ *
+ * @param {Array<object>} factions
+ * @returns {string} Formatted `[FACTIONS]...[/FACTIONS]` block, or `''` if empty
+ */
+export function formatFactionsMemoBlock(factions) {
+    if (!Array.isArray(factions) || factions.length === 0) return '';
+    const fLines = ['[FACTIONS]'];
+    for (const f of factions) {
+        if (!f || !f.name) continue;
+        const rawStanding = (f.standing || 'Neutral').trim();
+        let standingFormatted = rawStanding;
+        const lower = rawStanding.toLowerCase();
+        if (!rawStanding.startsWith('(+)') && !rawStanding.startsWith('(-)') && !rawStanding.startsWith('(+) ') && !rawStanding.startsWith('(-) ')) {
+            if (lower.includes('ally') || lower.includes('allied') || lower.includes('friend') || lower.includes('sympathetic') || lower.includes('honored')) {
+                standingFormatted = `(+) ${rawStanding}`;
+            } else if (lower.includes('hostile') || lower.includes('rival') || lower.includes('enemy') || lower.includes('hated') || lower.includes('unfriendly')) {
+                standingFormatted = `(-) ${rawStanding}`;
+            }
+        }
+        const pills = [`${standingFormatted} (Standing)`];
+        if (f.agenda) pills.push(`Agenda (${f.agenda.replace(/[()]/g, '').trim()})`);
+        if (f.notes) pills.push(`Notes (${f.notes.replace(/[()]/g, '').trim()})`);
+        fLines.push(`((PILLS)) ${f.name}: ${pills.join(', ')}`);
+    }
+    if (fLines.length <= 1) return '';
+    fLines.push('[/FACTIONS]');
+    return fLines.join('\n');
+}
+
+/**
  * Generates the initial Multihog game state memo ([TIME], [LOCATION], [CHARACTER], [DUNGEON])
  * from a completed PbtA Campaign Dossier.
  *
@@ -1795,6 +1888,8 @@ export function formatConditionAsPill(item) {
  */
 export function formatInitialPbtaMemo(dossier) {
     if (!dossier || typeof dossier !== 'object') return '';
+    const genre = resolveEffectivePbtaGenre(dossier.meta?.systemKey || 'fantasy', { dossier });
+    const hasExplicitGenreContext = Boolean(dossier.meta?.systemKey || dossier.meta?.customGenreSpec);
     const p = dossier.protagonist || {};
     const kick = dossier.theKick || {};
     const charName = (p.name || 'Protagonist').trim();
@@ -1806,9 +1901,20 @@ export function formatInitialPbtaMemo(dossier) {
 
     // Format stats: "Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1"
     let statsStr = '';
-    if (p.stats && typeof p.stats === 'object') {
+    if (p.stats && typeof p.stats === 'object' && Object.keys(p.stats).length > 0) {
         statsStr = Object.entries(p.stats)
-            .map(([stat, val]) => `${stat} ${Number(val) >= 0 ? '+' : ''}${val}`)
+            .map(([stat, val]) => {
+                const num = parseInt(val, 10) || 0;
+                return `${stat} ${num >= 0 ? `+${num}` : num}`;
+            })
+            .join(', ');
+    } else if (hasExplicitGenreContext && Array.isArray(genre.stats) && genre.stats.length >= 3) {
+        const stdMods = [+2, +1, +1, 0, -1];
+        statsStr = genre.stats
+            .map((stat, idx) => {
+                const mod = stdMods[idx] ?? 0;
+                return `${stat} ${mod >= 0 ? `+${mod}` : mod}`;
+            })
             .join(', ');
     } else {
         statsStr = 'Cool +2, Sharp +1, Hard +1, Hot 0, Weird -1';
@@ -1817,7 +1923,9 @@ export function formatInitialPbtaMemo(dossier) {
     // Format moves (comma-separated for pill splitting, with single trailing paren per move)
     const rawMoves = Array.isArray(p.startingMoves) && p.startingMoves.length > 0
         ? p.startingMoves
-        : ['Act Under Fire (+Cool)', 'Read a Tense Situation (+Sharp)'];
+        : (hasExplicitGenreContext && Array.isArray(genre.moves) && genre.moves.length > 0)
+            ? genre.moves.slice(0, 2)
+            : ['Act Under Fire (+Cool)', 'Read a Tense Situation (+Sharp)'];
     const movesStr = rawMoves.map(formatMoveAsPill).filter(Boolean).join(', ');
 
     // Format gear: prefer real p.gear items, else p.equipment, else stock fallback
@@ -1956,32 +2064,9 @@ export function formatInitialPbtaMemo(dossier) {
     }
 
     // 5. If factions exist, add FACTIONS block
-    if (Array.isArray(dossier.factions) && dossier.factions.length > 0) {
-        const fLines = ['[FACTIONS]'];
-        for (const f of dossier.factions) {
-            const rawStanding = (f.standing || 'Neutral').trim();
-            let standingFormatted = rawStanding;
-            const lower = rawStanding.toLowerCase();
-            if (!rawStanding.startsWith('(+)') && !rawStanding.startsWith('(-)') && !rawStanding.startsWith('(+) ') && !rawStanding.startsWith('(-) ')) {
-                if (lower.includes('ally') || lower.includes('allied') || lower.includes('friend') || lower.includes('sympathetic') || lower.includes('honored')) {
-                    standingFormatted = `(+) ${rawStanding}`;
-                } else if (lower.includes('hostile') || lower.includes('rival') || lower.includes('enemy') || lower.includes('hated') || lower.includes('unfriendly')) {
-                    standingFormatted = `(-) ${rawStanding}`;
-                }
-            }
-
-            const pills = [`${standingFormatted} (Standing)`];
-            if (f.agenda) {
-                pills.push(`Agenda (${f.agenda.replace(/[()]/g, '').trim()})`);
-            }
-            if (f.notes) {
-                pills.push(`Notes (${f.notes.replace(/[()]/g, '').trim()})`);
-            }
-
-            fLines.push(`((PILLS)) ${f.name}: ${pills.join(', ')}`);
-        }
-        fLines.push('[/FACTIONS]');
-        blocks.push(fLines.join('\n'));
+    const factionsBlock = formatFactionsMemoBlock(dossier.factions);
+    if (factionsBlock) {
+        blocks.push(factionsBlock);
     }
 
     // 6. If Custom HUD Module exists, add initial custom module block

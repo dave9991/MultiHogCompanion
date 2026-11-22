@@ -56,6 +56,31 @@ function getLocalRpgSettings() {
 }
 
 const _pendingFaeToolResolutionByChat = new Map();
+const _preTurnFaeMemoByChat = new Map();
+
+/**
+ * Records the pre-turn FAE state memo baseline for a chat before generation or after reconciliation.
+ * Ensures post-turn `reconcileFaeMemoAfterTurn()` always retains an authoritative pre-turn baseline
+ * even on the first turn after an F5 browser reload (`CART-005`).
+ *
+ * @param {string|null} chatId
+ * @param {string|null} memo
+ */
+export function recordPreTurnFaeMemoBaseline(chatId, memo) {
+    if (!chatId || typeof memo !== 'string' || !memo.trim()) return;
+    _preTurnFaeMemoByChat.set(chatId, memo);
+}
+
+/**
+ * Retrieves the recorded pre-turn FAE state memo baseline for a chat.
+ *
+ * @param {string|null} chatId
+ * @returns {string|null}
+ */
+export function getPreTurnFaeMemoBaseline(chatId) {
+    if (!chatId) return null;
+    return _preTurnFaeMemoByChat.get(chatId) || null;
+}
 
 /**
  * Retrieves any pending FAE tool resolution recorded during the active turn for `chatId`.
@@ -276,9 +301,19 @@ export function syncActiveRulesetRngMode(rpgSettings = null) {
 
     if (fae) {
         const memo = s.currentMemo || s.chatStates?.[activeChatId]?.currentMemo || '';
+        const activeCart = getCompanionActiveCartridge(activeChatId, s);
+        const faeDossier = getPartitionDossier(s.chatStates?.[activeChatId]) || activeCart?.dossier || null;
         const genreKey = detectActiveFaeGenre({ chatId: activeChatId, rpgSettings: s, currentMemo: memo });
         const faeState = parseFaeStateFromMemo(memo, genreKey);
-        const isHeroic = Boolean(faeState.knobs?.heroic_tier);
+        const isHeroic = Boolean(
+            faeState.knobs?.heroic_tier
+            || faeDossier?.config?.heroicTier
+            || faeDossier?.config?.heroic_tier
+            || faeDossier?.config?.knobs?.heroic_tier
+            || activeCart?.config?.heroicTier
+            || activeCart?.config?.heroic_tier
+            || activeCart?.knobs?.heroic_tier
+        );
         const desiredRng = buildFaeRngContent({ toolMode });
         const desiredRole = buildFaeRoleContent(isFreeform, { heroicTier: isHeroic, toolMode });
 
@@ -293,10 +328,19 @@ export function syncActiveRulesetRngMode(rpgSettings = null) {
             || detectActiveGenre({ currentMemo: memo, rpgSettings: s })
             || 'fantasy';
         const statsList = Object.keys(pbtaDossier?.protagonist?.stats || {});
+        const effectiveStats = statsList.length >= 3
+            ? statsList
+            : (Array.isArray(activeCart?.stats) && activeCart.stats.length >= 3 ? activeCart.stats : []);
         const systemLabel = activeCart?.systemLabel || pbtaDossier?.meta?.systemLabel || null;
+        const customGenreSpec = pbtaDossier?.meta?.customGenreSpec
+            || activeCart?.customGenreSpec
+            || activeCart?.dossier?.meta?.customGenreSpec
+            || null;
         const pbtaOverrides = {
-            ...(statsList.length >= 3 ? { stats: statsList } : {}),
+            ...(effectiveStats.length >= 3 ? { stats: effectiveStats } : {}),
             ...(systemLabel ? { systemLabel } : {}),
+            ...(customGenreSpec ? { customGenreSpec } : {}),
+            ...(pbtaDossier ? { dossier: pbtaDossier } : {}),
         };
         const desiredRng = buildPbtARngContent({ toolMode, genreKey, overrides: pbtaOverrides });
         const desiredRole = buildPbtARoleContent(isFreeform, genreKey, pbtaOverrides);
@@ -414,6 +458,9 @@ export function mhcGenerationInterceptor(chat, _contextSize, _abort, _type) {
         }
 
         const memo = rpgSettings?.currentMemo || rpgSettings?.chatStates?.[activeChatId]?.currentMemo || '';
+        if (activeChatId && memo) {
+            recordPreTurnFaeMemoBaseline(activeChatId, memo);
+        }
         const genreKey = detectActiveFaeGenre({ chatId: activeChatId, rpgSettings, currentMemo: memo });
         const faeState = parseFaeStateFromMemo(memo, genreKey);
         const combatMatch = memo.match(/\[COMBAT\]([\s\S]*?)\[\/COMBAT\]/i);

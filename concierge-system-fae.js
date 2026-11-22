@@ -7,7 +7,7 @@
  */
 
 import { ConciergeSystemAdapter } from './concierge-system-base.js';
-import { FAE_GENRES, TEMPO_WINDOWS, buildFaeCartridge, sanitizeFaePositiveTags } from './fae-ruleset.js';
+import { FAE_GENRES, TEMPO_WINDOWS, buildFaeCartridge, sanitizeFaePositiveTags, resolveEffectiveFaeGenre } from './fae-ruleset.js';
 import { sanitizeHeroicDomain } from './concierge-parser.js';
 import { formatInitialFaeMemo, mergeDossierIntoLiveFaeMemo } from './fae-state-sync.js';
 import { buildMonsterEntryContent } from './concierge-npc-format.js';
@@ -122,7 +122,7 @@ export class FaeSystemAdapter extends ConciergeSystemAdapter {
     }
 
     normalizeProtagonist(protagonist, genreKey, dossier) {
-        const genre = this.getGenre(genreKey);
+        const genre = resolveEffectiveFaeGenre(genreKey, { dossier });
         const isHeroic = Boolean(
             dossier?.config?.heroicTier ??
             dossier?.config?.heroic_tier ??

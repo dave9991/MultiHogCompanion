@@ -279,4 +279,67 @@ assert.ok(charState.conditions.includes('Shaken'), 'Character conditions must be
 assert.strictEqual(charState.xp, 2, 'XP must be extracted');
 
 console.log('✓ extractPbtaCharacterState accurately verifies character stats, moves, harm, and conditions in memo');
+
+// ── 6. CART-008: Per-chat precedence & customGenreSpec documentation bridge ───
+console.log('Testing CART-008 per-chat detectActiveGenre & customGenreSpec docs...');
+{
+    const prevST = globalThis.SillyTavern;
+    const prevExt = globalThis.extension_settings;
+    try {
+        const customGenreSpec = {
+            label: 'Vault Survival PbtA',
+            stats: ['Grit', 'Tech', 'Nerve', 'Rad', 'Heart'],
+            statDescriptions: 'Grit (wasteland grit), Tech (circuitry), Nerve (poise), Rad (resilience), Heart (morale)',
+            archetypes: ['Vault Security', 'Wasteland Medic'],
+            moves: ['Jury-Rig Pre-War Tech (+Tech) — coax broken electronics into working'],
+        };
+        const chatId = 'chat_pbta_bridge_custom';
+        const rpg = {
+            currentMemo: '',
+            chatStates: {
+                [chatId]: {
+                    pbtaCampaignDossier: {
+                        meta: { systemKey: 'custom', systemLabel: 'Vault Survival PbtA', customGenreSpec },
+                    },
+                },
+            },
+        };
+        const comp = {
+            lastGenre: 'fantasy', // Stale global setting that must NOT override active chat cartridge
+            companionActiveCartridges: {
+                [chatId]: { cartridgeId: 'pbta', genre: 'custom', systemLabel: 'Vault Survival PbtA', customGenreSpec },
+            },
+        };
+        globalThis.extension_settings = { rpg_tracker: rpg, multihog_companion: comp };
+        globalThis.SillyTavern = {
+            getContext: () => ({
+                chatId,
+                getCurrentChatId: () => chatId,
+                extensionSettings: globalThis.extension_settings,
+            }),
+        };
+
+        assert.strictEqual(
+            detectActiveGenre({ chatId, rpgSettings: rpg }),
+            'custom',
+            'detectActiveGenre must prioritize active chat CompanionActiveCartridge over stale global lastGenre',
+        );
+
+        const customDoc = buildTailoredPbtaDocumentation('custom', { customGenreSpec });
+        assert.ok(customDoc.includes('Active Campaign Genre: Vault Survival PbtA'), 'Docs include custom genre label');
+        assert.ok(customDoc.includes('Tech (circuitry)'), 'Docs include custom stat descriptions');
+        assert.ok(customDoc.includes('Jury-Rig Pre-War Tech (+Tech)'), 'Docs include custom moves');
+        assert.ok(customDoc.includes('Vault Security, Wasteland Medic'), 'Docs include custom archetypes');
+
+        const augmented = appendPbtaDocsToManual('# Upstream Docs', null, { chatId, rpgSettings: rpg });
+        assert.ok(augmented.includes('Vault Survival PbtA'), 'appendPbtaDocsToManual pulls active chat customGenreSpec');
+    } finally {
+        if (prevST === undefined) delete globalThis.SillyTavern;
+        else globalThis.SillyTavern = prevST;
+        if (prevExt === undefined) delete globalThis.extension_settings;
+        else globalThis.extension_settings = prevExt;
+    }
+}
+console.log('✓ CART-008 regression tests passed!');
+
 console.log('--- ALL PBTA ADVENTURE COMPANION BRIDGE TESTS PASSED CLEANLY! ---');

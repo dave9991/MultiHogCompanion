@@ -17,6 +17,8 @@
 
 import {
     FAE_GENRES,
+    resolveEffectiveFaeGenre,
+    normalizeCustomFaePools,
     createInitialFaeState,
     sanitizeFaePositiveTags,
     toMultihogBarMarker,
@@ -375,7 +377,7 @@ export function parseFaeStateFromMemo(memoText, fallbackGenreKey = 'cosmic_horro
         if (/HP/i.test(line) && line.includes(name)) continue;
 
         // Check for ((BAR...)) or bare pool line: Label: cur/max (...)
-        const barMatch = line.match(/(?:\(\(BAR(?::\s*([a-zA-Z]+)|([a-zA-Z]+)|\s*-\s*([^)]+))?\)\)\s*)?([A-Za-z0-9\s&]+?):\s*([+-]?\d+)\/(\d+)(?:\s*HP)?(?:\s*\(([^)]*)\))?/i);
+        const barMatch = line.match(/(?:\(\(BAR(?::\s*([a-zA-Z]+)|([a-zA-Z]+)|\s*-\s*([^)]+))?\)\)\s*)?([A-Za-z0-9\s&'/-]+?):\s*([+-]?\d+)\/(\d+)(?:\s*HP)?(?:\s*\(([^)]*)\))?/i);
         if (barMatch) {
             const rawLabel = barMatch[4].trim();
             if (/^(?:Pool|Scenes|XP|FAE Knobs|Status|Positive Tags|Scars|Conditions|Stats)/i.test(rawLabel)) {
@@ -650,11 +652,24 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
                     const lossAmount = Math.max(1, Math.abs(nextPool.current));
                     nextPool.current = 0; // Pool stays at 0
 
-                    const rule = nextPool.on_overflow || nextState.knobs?.overflow_default || 'scar_and_ko';
+                    const rule = prevPool?.on_overflow || nextPool.on_overflow || nextState.knobs?.overflow_default || 'scar_and_ko';
 
                     if (rule.startsWith('redirect:')) {
-                        const targetKey = poolLabelToKey(rule.split(':')[1].trim());
-                        const targetPool = nextState.pools[targetKey];
+                        const rawTarget = rule.split(':')[1].trim();
+                        const normTarget = poolLabelToKey(rawTarget);
+                        let targetKey = nextState.pools[rawTarget]
+                            ? rawTarget
+                            : (nextState.pools[normTarget]
+                                ? normTarget
+                                : Object.keys(nextState.pools).find(
+                                    k => String(nextState.pools[k]?.label || '').trim().toLowerCase() === rawTarget.toLowerCase(),
+                                ));
+                        if (!targetKey || targetKey === pKey || !nextState.pools[targetKey]) {
+                            targetKey = Object.keys(nextState.pools).find(
+                                k => k !== pKey && (nextState.pools[k]?.current ?? 0) > 0,
+                            ) || Object.keys(nextState.pools).find(k => k !== pKey) || null;
+                        }
+                        const targetPool = targetKey ? nextState.pools[targetKey] : null;
                         if (targetPool) {
                             events.push(`OVERFLOW_REDIRECT: ${pKey} at 0 redirected ${lossAmount} attrition to ${targetKey}`);
                             if (targetPool.current > 0 && targetPool.current - lossAmount <= 0) {
@@ -672,8 +687,20 @@ export function reconcileFaeMemoAfterTurn(prevMemoOrState, nextMemo, genreKey = 
                                 // Target was also at 0! Cascade to scar_and_ko
                                 targetPool.max = Math.max(1, targetPool.max - 1);
                                 targetPool.current = 1;
+                                const scarName = `Trauma Scar (${targetPool.label} Rupture)`;
+                                if (!nextState.character.negative_tags.includes(scarName)) {
+                                    nextState.character.negative_tags.push(scarName);
+                                }
                                 events.push(`CASCADE_OVERFLOW_SCAR_AND_KO: ${targetKey} max reduced to ${targetPool.max}, set to 1`);
                             }
+                        } else {
+                            nextPool.max = Math.max(1, nextPool.max - 1);
+                            nextPool.current = 1;
+                            const scarName = `Trauma Scar (${nextPool.label} Rupture)`;
+                            if (!nextState.character.negative_tags.includes(scarName)) {
+                                nextState.character.negative_tags.push(scarName);
+                            }
+                            events.push(`OVERFLOW_SCAR_AND_KO: ${pKey} max reduced to ${nextPool.max}, set to 1`);
                         }
                     } else if (rule === 'scar_and_ko') {
                         nextPool.max = Math.max(1, nextPool.max - 1);
@@ -770,7 +797,18 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
         if (faeStateOrGenreKey.pools && faeStateOrGenreKey.character) {
             state = faeStateOrGenreKey;
         } else {
-            const genreKey = faeStateOrGenreKey.genreKey || faeStateOrGenreKey.config?.genre || faeStateOrGenreKey.config?.faeGenre || faeStateOrGenreKey.genre || options.genreKey || 'cosmic_horror';
+            const genreKey = faeStateOrGenreKey.genreKey
+                || faeStateOrGenreKey.meta?.systemKey
+                || faeStateOrGenreKey.config?.genre
+                || faeStateOrGenreKey.config?.faeGenre
+                || faeStateOrGenreKey.genre
+                || options.genreKey
+                || 'cosmic_horror';
+            const effectiveGenre = resolveEffectiveFaeGenre(genreKey, {
+                dossier: faeStateOrGenreKey,
+                ...faeStateOrGenreKey,
+                ...options,
+            });
             const p = faeStateOrGenreKey.protagonist || faeStateOrGenreKey.character || {};
             const isHeroic = Boolean(
                 faeStateOrGenreKey.config?.heroicTier ??
@@ -781,9 +819,15 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
                 faeStateOrGenreKey.config?.knobs?.heroic_tier ??
                 options.heroicTier ??
                 options.heroic_tier ??
-                (FAE_GENRES[genreKey]?.knobs?.heroic_tier ?? false)
+                (effectiveGenre?.knobs?.heroic_tier ?? false)
             );
-            const resolvedDomain = p.heroicDomain || p.heroic_domain || faeStateOrGenreKey.character?.heroic_domain || (isHeroic ? FAE_GENRES[genreKey]?.defaultHeroicDomain : null) || null;
+            const resolvedDomain = p.heroicDomain || p.heroic_domain || faeStateOrGenreKey.character?.heroic_domain || (isHeroic ? effectiveGenre?.defaultHeroicDomain : null) || null;
+            const rawPools = (faeStateOrGenreKey.pools && Object.keys(faeStateOrGenreKey.pools).length > 0)
+                ? faeStateOrGenreKey.pools
+                : (p.pools && Object.keys(p.pools).length > 0)
+                    ? p.pools
+                    : options.pools;
+            const normalizedPools = normalizeCustomFaePools(rawPools, effectiveGenre.pools) || rawPools;
             const charOverrides = {
                 name: p.name || 'Protagonist',
                 archetype: p.archetype || p.playbook,
@@ -796,10 +840,11 @@ export function formatInitialFaeMemo(faeStateOrGenreKey = 'cosmic_horror', optio
             };
             const overrides = {
                 ...faeStateOrGenreKey,
+                dossier: faeStateOrGenreKey,
                 heroic_tier: isHeroic,
                 heroic_domain: resolvedDomain,
                 character: { ...charOverrides, ...(faeStateOrGenreKey.character || {}) },
-                pools: faeStateOrGenreKey.pools || p.pools || options.pools,
+                pools: normalizedPools,
                 knobs: {
                     ...(faeStateOrGenreKey.knobs || faeStateOrGenreKey.config?.knobs || options.knobs || {}),
                     heroic_tier: isHeroic,
@@ -1055,6 +1100,7 @@ export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) 
     }
 
     const genreKey = dossier?.meta?.systemKey || dossier?.config?.faeGenre || 'cosmic_horror';
+    const effectiveGenre = resolveEffectiveFaeGenre(genreKey, { dossier });
     const activeState = parseFaeStateFromMemo(liveMemo, genreKey);
     if (!activeState || !activeState.pools || Object.keys(activeState.pools).length === 0) {
         return formatInitialFaeMemo(dossier, { location: dossier?.theKick?.startingLocation });
@@ -1083,7 +1129,7 @@ export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) 
         dossier?.heroicTier ??
         dossier?.heroic_tier ??
         dossier?.config?.knobs?.heroic_tier ??
-        (FAE_GENRES[genreKey]?.knobs?.heroic_tier ?? false)
+        (effectiveGenre?.knobs?.heroic_tier ?? false)
     );
     nextState.knobs.heroic_tier = isHeroic;
 
@@ -1120,9 +1166,10 @@ export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) 
     }
 
     // Update pool definitions without losing current depletion
-    const dossierPools = (p.pools && Object.keys(p.pools).length > 0)
+    const rawDossierPools = (p.pools && Object.keys(p.pools).length > 0)
         ? p.pools
-        : ((dossier?.pools && Object.keys(dossier.pools).length > 0) ? dossier.pools : (FAE_GENRES[genreKey]?.pools || {}));
+        : ((dossier?.pools && Object.keys(dossier.pools).length > 0) ? dossier.pools : null);
+    const dossierPools = normalizeCustomFaePools(rawDossierPools, effectiveGenre.pools) || effectiveGenre.pools || {};
 
     // If dossier specifies explicit pools, prune any stale pools in activeState that are NOT in the dossier
     const explicitDossierPoolKeys = new Set(Object.keys(dossierPools));
@@ -1228,6 +1275,20 @@ export function mergeDossierIntoLiveFaeMemo(liveMemo, dossier, charName = null) 
             updatedMemo = updatedMemo.replace(/\[FACTIONS\][\s\S]*?\[\/FACTIONS\]/i, factionsBlock);
         } else {
             updatedMemo = `${updatedMemo.trim()}\n\n${factionsBlock}`;
+        }
+    }
+
+    // Non-destructively seed a newly added Custom HUD Module block if missing from liveMemo
+    const customMod = dossier?.worldRules?.customModule;
+    if (customMod && (customMod.tag || customMod.fieldKey || customMod.label)) {
+        const rawTag = String(customMod.tag || customMod.fieldKey || customMod.label || 'CUSTOM')
+            .replace(/[^a-zA-Z0-9_]/g, '_')
+            .toUpperCase();
+        const tagRegex = new RegExp(`\\[${rawTag}\\][\\s\\S]*?\\[\\/${rawTag}\\]`, 'i');
+        if (rawTag && !tagRegex.test(updatedMemo)) {
+            const label = customMod.label || customMod.tag || customMod.fieldKey || 'Custom Tracker';
+            const sampleContent = String(customMod.sampleContent || customMod.sample || `${label}: Initialized`).trim();
+            updatedMemo = `${updatedMemo.trim()}\n\n[${rawTag}]\n${sampleContent}\n[/${rawTag}]`;
         }
     }
 

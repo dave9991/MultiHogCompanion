@@ -35,12 +35,14 @@ try {
 
 import {
     PBTA_GENRES,
+    resolveEffectivePbtaGenre,
     buildPbtACartridge,
     buildPbtAQuickStartInstructions,
 } from './pbta-ruleset.js';
 import {
     FAE_GENRES,
     FAE_CARTRIDGE_ID,
+    resolveEffectiveFaeGenre,
     buildFaeCartridge,
     triggerEventOrRest,
     buildFaeQuickStartInstructions,
@@ -58,6 +60,8 @@ export {
 import {
     getPendingFaeToolResolution,
     clearPendingFaeToolResolution,
+    recordPreTurnFaeMemoBaseline,
+    getPreTurnFaeMemoBaseline,
     buildPbtA2d6Block,
     syncCompanionDiceFunctionTools,
     syncActiveRulesetRngMode,
@@ -407,6 +411,7 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
 
     // If liveMemo belongs to this chat and has [CHARACTER] but DOM IS empty, re-poke and force-render (pure DOM render, no persist)!
     if (isOwnerMatch && hasCharBlock && isDomEmpty) {
+        if (isFaeActive(effectiveChatId)) recordPreTurnFaeMemoBaseline(effectiveChatId, liveMemo);
         return await forceRenderTrackerView(s, effectiveChatId, liveMemo, { persist: false });
     }
 
@@ -417,6 +422,7 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         if (partMemo && /\[CHARACTER\]/i.test(partMemo)) {
             s.currentMemo = partMemo;
             s.chatStateProjectionOwner = cid;
+            if (isFaeActive(cid)) recordPreTurnFaeMemoBaseline(cid, partMemo);
             return await forceRenderTrackerView(s, cid, partMemo, { persist: false });
         }
     }
@@ -472,6 +478,9 @@ export async function hydratePbtaMemoIfNeeded(chatId) {
         setPartitionDossier(s.chatStates[cid], dossier);
     }
 
+    if (dossier?.meta?.ruleset === 'fae' || dossier?.protagonist?.isFae) {
+        recordPreTurnFaeMemoBaseline(effectiveChatId, initialMemo);
+    }
     return await forceRenderTrackerView(s, effectiveChatId, initialMemo, { persist: true });
 }
 
@@ -534,7 +543,7 @@ export async function runSync(reason = '') {
                 const rawMemo = rpgSettings.currentMemo || rpgSettings.chatStates?.[chatId]?.currentMemo || '';
                 if (rawMemo) {
                     const genreKey = detectActiveFaeGenre({ chatId, rpgSettings, currentMemo: rawMemo });
-                    const prevMemo = _lastFaeMemoByChat.get(chatId) || null;
+                    const prevMemo = getPreTurnFaeMemoBaseline(chatId) || _lastFaeMemoByChat.get(chatId) || null;
                     let memoToReconcile = rawMemo;
                     if (reason === 'CHARACTER_MESSAGE_RENDERED') {
                         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
@@ -559,7 +568,9 @@ export async function runSync(reason = '') {
                             if (typeof bridge.refreshRenderedView === 'function') bridge.refreshRenderedView();
                         } catch (_) {}
                     }
-                    _lastFaeMemoByChat.set(chatId, rpgSettings.currentMemo || memoToReconcile);
+                    const latestFaeMemo = rpgSettings.currentMemo || memoToReconcile;
+                    _lastFaeMemoByChat.set(chatId, latestFaeMemo);
+                    recordPreTurnFaeMemoBaseline(chatId, latestFaeMemo);
                     if (reason === 'SETTINGS_UPDATED' && pendingTool) {
                         clearPendingFaeToolResolution(chatId);
                     }
@@ -724,15 +735,27 @@ async function applyRulesetCartridge({
     const activeChatId = getActiveChatId();
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
     const activeDossierSnapshot = overrides.dossier || getPartitionDossier(s.chatStates?.[activeChatId]) || null;
+    const customGenreSpec = overrides.customGenreSpec
+        || overrides.meta?.customGenreSpec
+        || overrides.dossier?.meta?.customGenreSpec
+        || activeDossierSnapshot?.meta?.customGenreSpec
+        || null;
+    const dossierCopy = activeDossierSnapshot ? JSON.parse(JSON.stringify(activeDossierSnapshot)) : null;
+    if (dossierCopy && customGenreSpec) {
+        dossierCopy.meta = { ...(dossierCopy.meta || {}), customGenreSpec: JSON.parse(JSON.stringify(customGenreSpec)) };
+    }
     if (activeChatId) {
         await setCompanionActiveCartridge(activeChatId, {
             cartridgeId,
             genre: genreKey,
             systemLabel: activeLabel,
             title: overrides.campaignTitle || overrides.name || null,
+            ...(customGenreSpec ? { customGenreSpec: JSON.parse(JSON.stringify(customGenreSpec)) } : {}),
+            ...(Array.isArray(overrides.stats) && overrides.stats.length >= 3 ? { stats: [...overrides.stats] } : {}),
+            ...(overrides.pools && Object.keys(overrides.pools).length > 0 ? { pools: JSON.parse(JSON.stringify(overrides.pools)) } : {}),
             ...(overrides.knobs ? { knobs: JSON.parse(JSON.stringify(overrides.knobs)) } : {}),
             ...(overrides.config ? { config: JSON.parse(JSON.stringify(overrides.config)) } : {}),
-            ...(activeDossierSnapshot ? { dossier: JSON.parse(JSON.stringify(activeDossierSnapshot)) } : {}),
+            ...(dossierCopy ? { dossier: dossierCopy } : {}),
         });
     }
     saveSettingsDebounced();
@@ -763,7 +786,7 @@ async function applyRulesetCartridge({
  * @returns {Promise<boolean>}
  */
 export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
-    const genre = PBTA_GENRES[genreKey] || PBTA_GENRES.fantasy;
+    const genre = resolveEffectivePbtaGenre(genreKey, overrides);
     const cartridge = buildPbtACartridge(genreKey, overrides);
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
     return applyRulesetCartridge({
@@ -786,7 +809,7 @@ export async function applyPbtACartridge(genreKey = 'fantasy', overrides = {}) {
  * @returns {Promise<boolean>}
  */
 export async function applyFaeCartridge(genreKey = 'cosmic_horror', overrides = {}) {
-    const genre = FAE_GENRES[genreKey] || FAE_GENRES.cosmic_horror;
+    const genre = resolveEffectiveFaeGenre(genreKey, overrides);
     const cartridge = buildFaeCartridge(genreKey, overrides);
     const activeLabel = overrides.systemLabel || overrides.name || genre.label;
     return applyRulesetCartridge({

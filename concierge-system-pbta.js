@@ -7,7 +7,7 @@
  */
 
 import { ConciergeSystemAdapter } from './concierge-system-base.js';
-import { PBTA_GENRES, formatInitialPbtaMemo } from './pbta-ruleset.js';
+import { PBTA_GENRES, formatInitialPbtaMemo, resolveEffectivePbtaGenre } from './pbta-ruleset.js';
 import { mergeDossierIntoLiveMemo, normalizePbtaMemo, syncLivePbtaMemoVitality } from './pbta-vitality-sync.js';
 import { buildMonsterEntryContent } from './concierge-npc-format.js';
 import { buildPlayerCardBio } from './concierge-pc-format.js';
@@ -85,7 +85,7 @@ export class PbtaSystemAdapter extends ConciergeSystemAdapter {
     }
 
     normalizeProtagonist(protagonist, genreKey, dossier) {
-        const genre = this.getGenre(genreKey);
+        const genre = resolveEffectivePbtaGenre(genreKey, { dossier });
 
         if (!protagonist.stats || typeof protagonist.stats !== 'object' || Object.keys(protagonist.stats).length === 0) {
             const stdMods = [+2, +1, +1, 0, -1];
